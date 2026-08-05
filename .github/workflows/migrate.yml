@@ -3,6 +3,10 @@ name: Run EF Migrations on Azure
 on:
   workflow_dispatch:
 
+# 🚨 ADDED: Allow GitHub Actions to read the private repository
+permissions:
+  contents: read
+
 jobs:
   migrate:
     runs-on: ubuntu-latest
@@ -15,7 +19,6 @@ jobs:
         with:
           dotnet-version: '9.0.x'
 
-      # ✅ ADDED: Restore NuGet packages
       - name: Restore NuGet packages
         run: dotnet restore JobPortal.API/JobPortal.API.csproj
 
