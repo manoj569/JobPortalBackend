@@ -24,6 +24,12 @@ jobs:
       - name: Add dotnet tools to PATH
         run: echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
 
+      - name: Debug connection type
+        env:
+          ConnectionStrings__DefaultConnection: ${{ secrets.AZURE_SQL_CONNECTION }}
+        run: |
+          echo "$ConnectionStrings__DefaultConnection" | grep -o "Server=[^;]*"
+
       - name: Run Migration
         env:
           ConnectionStrings__DefaultConnection: ${{ secrets.AZURE_SQL_CONNECTION }}
