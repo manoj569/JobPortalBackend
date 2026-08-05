@@ -3,6 +3,7 @@ using System.IO.Compression;
 using System.Net;
 using System.Security.Claims;
 using System.Text;
+using Microsoft.Extensions.FileProviders;
 using System.Threading.RateLimiting;
 using JobPortal.API.Health;
 using JobPortal.API.HostedServices;
@@ -261,6 +262,10 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions
     Predicate = registration => registration.Tags.Contains("ready")
 }).AllowAnonymous().DisableRateLimiting();
 app.MapControllers();
+
+// ✅ KILL THE FILE WATCHER: The inotify limit on Render is too low.
+// We manually disable the file watcher to prevent the crash.
+app.Environment.ContentRootFileProvider = new PhysicalFileProvider(app.Environment.ContentRootPath);
 
 app.Run();
 
