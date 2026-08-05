@@ -15,6 +15,10 @@ jobs:
         with:
           dotnet-version: '9.0.x'
 
+      # ✅ ADDED: Restore NuGet packages
+      - name: Restore NuGet packages
+        run: dotnet restore JobPortal.API/JobPortal.API.csproj
+
       - name: Install EF Tool
         run: dotnet tool install --global dotnet-ef
 
