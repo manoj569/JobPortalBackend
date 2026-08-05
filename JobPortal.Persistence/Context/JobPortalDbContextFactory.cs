@@ -7,10 +7,12 @@ public class JobPortalDbContextFactory : IDesignTimeDbContextFactory<JobPortalDb
 {
     public JobPortalDbContext CreateDbContext(string[] args)
     {
-        // This connection string is ONLY used for migrations. 
-        // Replace the values below to match your actual SQL Server connection details.
+        var connStr = Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection")
+            ?? throw new InvalidOperationException(
+                "ConnectionStrings__DefaultConnection environment variable is not set.");
+
         var optionsBuilder = new DbContextOptionsBuilder<JobPortalDbContext>();
-        optionsBuilder.UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=JobPortalDb;Trusted_Connection=True;MultipleActiveResultSets=true;TrustServerCertificate=True");
+        optionsBuilder.UseSqlServer(connStr);
 
         return new JobPortalDbContext(optionsBuilder.Options);
     }
