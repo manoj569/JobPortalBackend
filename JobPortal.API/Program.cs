@@ -79,17 +79,11 @@ builder.Services.AddOutputCache(options =>
 });
 builder.Services.AddHostedService<JobExpiryHostedService>();
 
-var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
 builder.Services.AddCors(options => options.AddPolicy("ConfiguredOrigins", policy =>
 {
-    if (allowedOrigins.Length > 0)
-    {
-        policy.WithOrigins(allowedOrigins)
-              .AllowAnyHeader()
-              .AllowAnyMethod()
-              .AllowCredentials()
-              .SetPreflightMaxAge(TimeSpan.FromHours(1));
-    }
+    policy.AllowAnyOrigin()
+          .AllowAnyHeader()
+          .AllowAnyMethod();
 }));
 
 builder.Services.AddRateLimiter(options =>
