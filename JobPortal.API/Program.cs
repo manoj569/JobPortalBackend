@@ -22,6 +22,7 @@ using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.ResponseCompression;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
@@ -29,6 +30,16 @@ using Serilog;
 
 
 var builder = WebApplication.CreateBuilder(args);
+
+// ✅ FIX: Disable config file reloading immediately after CreateBuilder.
+// On Render free tier, all containers share one Linux kernel and the
+// inotify instance limit (128) is exhausted. File watching is not needed
+// in production — config is read once at startup.
+foreach (var source in builder.Configuration.Sources
+    .OfType<FileConfigurationSource>())
+{
+    source.ReloadOnChange = false;
+}
 
 builder.Environment.EnvironmentName = "Production";
 
@@ -179,9 +190,6 @@ builder.Services.AddSwaggerGen(options =>
 });
 
 // --- JWT / OTP secrets -------------------------------------------------
-// Single source of truth: configuration key "Jwt:Key".
-// On Render, set this via an environment variable named "Jwt__Key"
-// (double underscore = ":" in .NET configuration binding).
 var jwtSettings = builder.Configuration.GetSection("Jwt");
 var signingKey = jwtSettings["Key"]
     ?? throw new InvalidOperationException("JWT signing key is not configured. Set the 'Jwt:Key' configuration value (env var 'Jwt__Key' on Render).");
@@ -202,7 +210,6 @@ if (!builder.Environment.IsDevelopment() &&
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
-        // Uses the same signingKey validated above (from configuration key "Jwt:Key").
         options.TokenValidationParameters = new TokenValidationParameters
         {
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(signingKey)),
@@ -262,10 +269,6 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions
     Predicate = registration => registration.Tags.Contains("ready")
 }).AllowAnonymous().DisableRateLimiting();
 app.MapControllers();
-
-// ✅ KILL THE FILE WATCHER: The inotify limit on Render is too low.
-// We manually disable the file watcher to prevent the crash.
-app.Environment.ContentRootFileProvider = new PhysicalFileProvider(app.Environment.ContentRootPath);
 
 app.Run();
 
