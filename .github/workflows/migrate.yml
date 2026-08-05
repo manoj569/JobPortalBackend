@@ -3,16 +3,20 @@ name: Run EF Migrations on Azure
 on:
   workflow_dispatch:
 
-# 🚨 ADDED: Allow GitHub Actions to read the private repository
 permissions:
   contents: read
+  id-token: write
 
 jobs:
   migrate:
     runs-on: ubuntu-latest
     steps:
+      # ✅ CHANGED: Using v4 which handles private repos better
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v3
