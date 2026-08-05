@@ -3,22 +3,17 @@ name: Run EF Migrations on Azure
 on:
   workflow_dispatch:
 
-permissions:
-  contents: read
-
 jobs:
   migrate:
     runs-on: ubuntu-latest
     steps:
-      # ✅ CHANGED: Using v4 with persist-credentials: false to bypass token errors
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          persist-credentials: false
-          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v3
+        uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '9.0.x'
 
@@ -28,9 +23,12 @@ jobs:
       - name: Install EF Tool
         run: dotnet tool install --global dotnet-ef
 
+      - name: Add dotnet tools to PATH
+        run: echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
+
       - name: Run Migration
         env:
           ConnectionStrings__DefaultConnection: ${{ secrets.AZURE_SQL_CONNECTION }}
         run: |
           cd JobPortal.API
-          dotnet ef database update
+          dotnet ef database update --verbose
