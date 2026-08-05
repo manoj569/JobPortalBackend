@@ -9,16 +9,14 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '9.0.x'
 
-      - name: Restore NuGet packages
-        run: dotnet restore JobPortal.API/JobPortal.API.csproj
+      - name: Restore solution
+        run: dotnet restore
 
       - name: Install EF Tool
         run: dotnet tool install --global dotnet-ef
@@ -29,6 +27,11 @@ jobs:
       - name: Run Migration
         env:
           ConnectionStrings__DefaultConnection: ${{ secrets.AZURE_SQL_CONNECTION }}
+          Jwt__Key: ${{ secrets.JWT_KEY }}
+          Jwt__Issuer: "github-actions"
+          Jwt__Audience: "github-actions"
+          ASPNETCORE_ENVIRONMENT: Development
         run: |
-          cd JobPortal.API
-          dotnet ef database update --verbose
+          dotnet ef database update \
+            --project JobPortal.Persistence \
+            --startup-project JobPortal.API
