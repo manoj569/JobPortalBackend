@@ -1,4 +1,6 @@
 FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
+ENV DOTNET_ENVIRONMENT=Production
+ENV ASPNETCORE_ENVIRONMENT=Production
 WORKDIR /src
 COPY ["JobPortal.API/JobPortal.API.csproj", "JobPortal.API/"]
 COPY ["JobPortal.Application/JobPortal.Application.csproj", "JobPortal.Application/"]
