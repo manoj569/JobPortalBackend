@@ -67,14 +67,26 @@ builder.Services.AddOutputCache(options =>
 });
 builder.Services.AddHostedService<JobExpiryHostedService>();
 
+// ✅ FINAL CORS CONFIGURATION
 var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
 builder.Services.AddCors(options => options.AddPolicy("ConfiguredOrigins", policy =>
 {
+    // If we have specific origins configured, use them.
     if (allowedOrigins.Length > 0)
-        policy.WithOrigins(allowedOrigins).AllowAnyHeader().AllowAnyMethod()
-            .SetPreflightMaxAge(TimeSpan.FromHours(1));
+    {
+        policy.WithOrigins(allowedOrigins)
+              .AllowAnyHeader()
+              .AllowAnyMethod()
+              .AllowCredentials(); // Required for authentication cookies
+    }
+    else
+    {
+        // Fallback: Allow any origin (only recommended for debugging)
+        policy.AllowAnyOrigin()
+              .AllowAnyHeader()
+              .AllowAnyMethod();
+    }
 }));
-
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
