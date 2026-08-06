@@ -3,7 +3,6 @@ using System.IO.Compression;
 using System.Net;
 using System.Security.Claims;
 using System.Text;
-using Microsoft.Extensions.FileProviders;
 using System.Threading.RateLimiting;
 using JobPortal.API.Health;
 using JobPortal.API.HostedServices;
@@ -22,7 +21,6 @@ using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.ResponseCompression;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
@@ -31,22 +29,7 @@ using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
 
-<<<<<<< HEAD
-// ✅ CHANGE: Allow local Development while keeping Production on Render
-builder.Environment.EnvironmentName = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Development";
-=======
-// ✅ FIX: Disable config file reloading immediately after CreateBuilder.
-// On Render free tier, all containers share one Linux kernel and the
-// inotify instance limit (128) is exhausted. File watching is not needed
-// in production — config is read once at startup.
-foreach (var source in builder.Configuration.Sources
-    .OfType<FileConfigurationSource>())
-{
-    source.ReloadOnChange = false;
-}
-
 builder.Environment.EnvironmentName = "Production";
->>>>>>> 6964bd13053f9019617a588d5d3af4f38e60e96b
 
 builder.Host.UseSerilog((context, services, configuration) => configuration
     .ReadFrom.Configuration(context.Configuration)
@@ -84,11 +67,12 @@ builder.Services.AddOutputCache(options =>
 });
 builder.Services.AddHostedService<JobExpiryHostedService>();
 
+var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
 builder.Services.AddCors(options => options.AddPolicy("ConfiguredOrigins", policy =>
 {
-    policy.AllowAnyOrigin()
-          .AllowAnyHeader()
-          .AllowAnyMethod();
+    if (allowedOrigins.Length > 0)
+        policy.WithOrigins(allowedOrigins).AllowAnyHeader().AllowAnyMethod()
+            .SetPreflightMaxAge(TimeSpan.FromHours(1));
 }));
 
 builder.Services.AddRateLimiter(options =>
@@ -194,6 +178,9 @@ builder.Services.AddSwaggerGen(options =>
 });
 
 // --- JWT / OTP secrets -------------------------------------------------
+// Single source of truth: configuration key "Jwt:Key".
+// On Render, set this via an environment variable named "Jwt__Key"
+// (double underscore = ":" in .NET configuration binding).
 var jwtSettings = builder.Configuration.GetSection("Jwt");
 var signingKey = jwtSettings["Key"]
     ?? throw new InvalidOperationException("JWT signing key is not configured. Set the 'Jwt:Key' configuration value (env var 'Jwt__Key' on Render).");
@@ -214,6 +201,7 @@ if (!builder.Environment.IsDevelopment() &&
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
+        // Uses the same signingKey validated above (from configuration key "Jwt:Key").
         options.TokenValidationParameters = new TokenValidationParameters
         {
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(signingKey)),
@@ -226,7 +214,7 @@ builder.Services.AddAuthorization();
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddPersistence(builder.Configuration);
-//builder.Services.AddSingleton<IApplicationShutdown, HostApplicationShutdown>();
+builder.Services.AddSingleton<IApplicationShutdown, HostApplicationShutdown>();
 builder.Services.AddScoped<AdminBootstrapInitializer>();
 
 var app = builder.Build();
