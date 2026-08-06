@@ -214,7 +214,6 @@ builder.Services.AddAuthorization();
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddPersistence(builder.Configuration);
-builder.Services.AddSingleton<IApplicationShutdown, HostApplicationShutdown>();
 builder.Services.AddScoped<AdminBootstrapInitializer>();
 
 var app = builder.Build();
