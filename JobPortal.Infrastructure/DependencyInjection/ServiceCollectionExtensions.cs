@@ -1,4 +1,3 @@
-using System.Net.Http.Headers;
 using JobPortal.Application.Abstractions.Authentication;
 using JobPortal.Application.Abstractions.Candidates;
 using JobPortal.Application.Abstractions.Payments;
@@ -16,20 +15,24 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
         ValidateEmailConfiguration(configuration);
+
         services.AddSingleton<IPasswordHasher, Pbkdf2PasswordHasher>();
         services.AddSingleton<IJwtTokenService, JwtTokenService>();
-        services.AddSingleton<IOneTimePasswordService,
-            HmacOneTimePasswordService>();
-        services.AddHttpClient<ISmsService, Fast2SmsService>(client =>
-        {
-            client.Timeout = TimeSpan.FromSeconds(15);
-            client.DefaultRequestHeaders.Accept.Add(
-                new MediaTypeWithQualityHeaderValue("application/json"));
-        });
+
+        // ✅ REMOVED: SMS and OTP services (Mobile OTP feature is retired)
+        // services.AddSingleton<IOneTimePasswordService, HmacOneTimePasswordService>();
+        // services.AddHttpClient<ISmsService, Fast2SmsService>(client =>
+        // {
+        //     client.Timeout = TimeSpan.FromSeconds(15);
+        //     client.DefaultRequestHeaders.Accept.Add(
+        //         new MediaTypeWithQualityHeaderValue("application/json"));
+        // });
+
         services.AddScoped<IEmailService, SmtpEmailService>();
         services.AddSingleton<IRazorpayGateway, RazorpayGateway>();
         services.AddSingleton<IMembershipPlanProvider, ConfigurationMembershipPlanProvider>();
         services.AddSingleton<IResumeStorage, LocalResumeStorage>();
+
         return services;
     }
 
