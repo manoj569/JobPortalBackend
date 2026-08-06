@@ -31,6 +31,10 @@ using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
 
+<<<<<<< HEAD
+// ✅ CHANGE: Allow local Development while keeping Production on Render
+builder.Environment.EnvironmentName = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Development";
+=======
 // ✅ FIX: Disable config file reloading immediately after CreateBuilder.
 // On Render free tier, all containers share one Linux kernel and the
 // inotify instance limit (128) is exhausted. File watching is not needed
@@ -42,6 +46,7 @@ foreach (var source in builder.Configuration.Sources
 }
 
 builder.Environment.EnvironmentName = "Production";
+>>>>>>> 6964bd13053f9019617a588d5d3af4f38e60e96b
 
 builder.Host.UseSerilog((context, services, configuration) => configuration
     .ReadFrom.Configuration(context.Configuration)
@@ -221,7 +226,7 @@ builder.Services.AddAuthorization();
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddPersistence(builder.Configuration);
-builder.Services.AddSingleton<IApplicationShutdown, HostApplicationShutdown>();
+//builder.Services.AddSingleton<IApplicationShutdown, HostApplicationShutdown>();
 builder.Services.AddScoped<AdminBootstrapInitializer>();
 
 var app = builder.Build();
