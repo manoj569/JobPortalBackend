@@ -17,37 +17,14 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
 {
     [HttpPost("register")]
     [AllowAnonymous]
-    [EnableRateLimiting("RegistrationOtp")]
-    [ProducesResponseType(typeof(RegistrationChallengeResponse), StatusCodes.Status202Accepted)]
+    [ProducesResponseType(typeof(RegistrationChallengeResponse), StatusCodes.Status200OK)]
     public async Task<ActionResult<RegistrationChallengeResponse>> Register(
         RegisterRequest request,
         CancellationToken cancellationToken)
     {
         var response = await authService.RegisterAsync(request, cancellationToken);
-        return Accepted(response);
+        return Ok(response);
     }
-
-    [HttpPost("verify-registration-otp")]
-    [AllowAnonymous]
-    [EnableRateLimiting("OtpVerification")]
-    [ProducesResponseType(typeof(RegistrationResponse), StatusCodes.Status200OK)]
-    public async Task<ActionResult<RegistrationResponse>> VerifyRegistrationOtp(
-        VerifyRegistrationOtpRequest request,
-        CancellationToken cancellationToken) =>
-        Ok(await authService.VerifyRegistrationOtpAsync(
-            request,
-            cancellationToken));
-
-    [HttpPost("resend-registration-otp")]
-    [AllowAnonymous]
-    [EnableRateLimiting("RegistrationOtp")]
-    [ProducesResponseType(typeof(MessageResponse), StatusCodes.Status202Accepted)]
-    public async Task<ActionResult<MessageResponse>> ResendRegistrationOtp(
-        ResendRegistrationOtpRequest request,
-        CancellationToken cancellationToken) =>
-        Accepted(await authService.ResendRegistrationOtpAsync(
-            request,
-            cancellationToken));
 
     [HttpPost("login")]
     [AllowAnonymous]
@@ -55,29 +32,6 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
     [ProducesResponseType(typeof(ApiError), StatusCodes.Status403Forbidden)]
     public async Task<ActionResult<AuthenticationResponse>> Login(LoginRequest request, CancellationToken cancellationToken) =>
         Ok(await authService.LoginAsync(request, HttpContext.Connection.RemoteIpAddress?.ToString(), cancellationToken));
-
-    [HttpPost("request-login-otp")]
-    [AllowAnonymous]
-    [EnableRateLimiting("OtpRequest")]
-    [ProducesResponseType(typeof(MessageResponse), StatusCodes.Status202Accepted)]
-    public async Task<ActionResult<MessageResponse>> RequestLoginOtp(
-        RequestLoginOtpRequest request,
-        CancellationToken cancellationToken) =>
-        Accepted(await authService.RequestLoginOtpAsync(
-            request,
-            cancellationToken));
-
-    [HttpPost("login-with-otp")]
-    [AllowAnonymous]
-    [EnableRateLimiting("OtpVerification")]
-    [ProducesResponseType(typeof(AuthenticationResponse), StatusCodes.Status200OK)]
-    public async Task<ActionResult<AuthenticationResponse>> LoginWithOtp(
-        LoginWithOtpRequest request,
-        CancellationToken cancellationToken) =>
-        Ok(await authService.LoginWithOtpAsync(
-            request,
-            HttpContext.Connection.RemoteIpAddress?.ToString(),
-            cancellationToken));
 
     [HttpPost("refresh")]
     [AllowAnonymous]
@@ -92,9 +46,7 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
     public async Task<ActionResult<MessageResponse>> RequestPasswordReset(
         RequestPasswordResetRequest request,
         CancellationToken cancellationToken) =>
-        Accepted(await authService.RequestPasswordResetAsync(
-            request,
-            cancellationToken));
+        Accepted(await authService.RequestPasswordResetAsync(request, cancellationToken));
 
     [HttpPost("complete-password-reset")]
     [AllowAnonymous]
@@ -103,9 +55,7 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
     public async Task<ActionResult<MessageResponse>> CompletePasswordReset(
         CompletePasswordResetRequest request,
         CancellationToken cancellationToken) =>
-        Ok(await authService.CompletePasswordResetAsync(
-            request,
-            cancellationToken));
+        Ok(await authService.CompletePasswordResetAsync(request, cancellationToken));
 
     [Authorize]
     [HttpPost("change-password")]
