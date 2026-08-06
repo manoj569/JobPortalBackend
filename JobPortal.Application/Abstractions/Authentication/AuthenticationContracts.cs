@@ -1,27 +1,12 @@
 using JobPortal.Application.Features.Authentication;
 using JobPortal.Domain.Entities;
 using JobPortal.Domain.Enums;
-
 namespace JobPortal.Application.Abstractions.Authentication;
-
 public interface IAuthService
 {
-    Task<RegistrationChallengeResponse> RegisterAsync(
+    Task<RegistrationResponse> RegisterAsync(
         RegisterRequest request, CancellationToken cancellationToken = default);
-    Task<RegistrationResponse> VerifyRegistrationOtpAsync(
-        VerifyRegistrationOtpRequest request,
-        CancellationToken cancellationToken = default);
-    Task<MessageResponse> ResendRegistrationOtpAsync(
-        ResendRegistrationOtpRequest request,
-        CancellationToken cancellationToken = default);
     Task<AuthenticationResponse> LoginAsync(LoginRequest request, string? ipAddress, CancellationToken cancellationToken = default);
-    Task<MessageResponse> RequestLoginOtpAsync(
-        RequestLoginOtpRequest request,
-        CancellationToken cancellationToken = default);
-    Task<AuthenticationResponse> LoginWithOtpAsync(
-        LoginWithOtpRequest request,
-        string? ipAddress,
-        CancellationToken cancellationToken = default);
     Task<MessageResponse> RequestPasswordResetAsync(
         RequestPasswordResetRequest request,
         CancellationToken cancellationToken = default);
@@ -32,22 +17,18 @@ public interface IAuthService
     Task ChangePasswordAsync(Guid userId, ChangePasswordRequest request, CancellationToken cancellationToken = default);
     Task LogoutAsync(Guid userId, LogoutRequest request, string? ipAddress, CancellationToken cancellationToken = default);
 }
-
 public interface IPasswordHasher
 {
     string Hash(string password);
     bool Verify(string password, string passwordHash);
 }
-
 public sealed record AccessTokenResult(string Token, DateTime ExpiresAtUtc);
-
 public interface IJwtTokenService
 {
     AccessTokenResult CreateAccessToken(User user);
     string GenerateRefreshToken();
     string HashToken(string token);
 }
-
 public interface IEmailService
 {
     Task<EmailDeliveryResult> SendPasswordResetAsync(
@@ -58,28 +39,4 @@ public interface IEmailService
         User user, string jobTitle, JobApplicationStatus status,
         CancellationToken cancellationToken = default);
 }
-
 public enum EmailDeliveryResult { Sent, Disabled, Failed }
-
-public interface IOneTimePasswordService
-{
-    string Generate();
-    string Hash(string otp);
-    bool Verify(string otp, string expectedHash);
-}
-
-public interface ISmsService
-{
-    Task<SmsDeliveryResult> SendOtpAsync(
-        string normalizedPhoneNumber,
-        string otp,
-        OtpPurpose purpose,
-        CancellationToken cancellationToken = default);
-}
-
-public enum SmsDeliveryResult { Sent, Disabled, Failed, TimedOut }
-
-public interface IApplicationShutdown
-{
-    CancellationToken ApplicationStopping { get; }
-}
