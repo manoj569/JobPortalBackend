@@ -51,8 +51,8 @@ public sealed class AuthService(
         "If an account exists for this email address, a password reset link has been sent.";
 
     public async Task<RegistrationResponse> RegisterAsync(
-        RegisterRequest request,
-        CancellationToken cancellationToken = default)
+     RegisterRequest request,
+     CancellationToken cancellationToken = default)
     {
         request = request with
         {
@@ -72,8 +72,9 @@ public sealed class AuthService(
         if (identityExists)
         {
             LogAuthenticationEvent("send_skipped_existing_user", "skipped");
-            // Same public message either way so we don't leak which identities exist.
-            return new(RegistrationSuccessMessage);
+
+            // ✅ CHANGED: Now throws a clear ConflictException instead of silently returning success
+            throw new ConflictException("An account with this email or phone number already exists.");
         }
 
         var user = new User
