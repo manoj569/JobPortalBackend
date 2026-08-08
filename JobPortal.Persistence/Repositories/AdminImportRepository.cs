@@ -20,10 +20,12 @@ public sealed class AdminImportRepository(JobPortalDbContext context) :
             .ToArrayAsync(cancellationToken);
 
     public async Task<IReadOnlyCollection<Category>> FindCategoriesAsync(
+        IReadOnlyCollection<string> slugs,
         IReadOnlyCollection<string> normalizedNames,
         CancellationToken cancellationToken = default) =>
         await context.Categories.AsNoTracking()
-            .Where(category => normalizedNames.Contains(category.Name.ToUpper()))
+            .Where(category => slugs.Contains(category.Slug) ||
+                normalizedNames.Contains(category.Name.ToUpper()))
             .ToArrayAsync(cancellationToken);
 
     public async Task<IReadOnlyCollection<ExistingJobImportIdentity>> FindJobIdentitiesAsync(

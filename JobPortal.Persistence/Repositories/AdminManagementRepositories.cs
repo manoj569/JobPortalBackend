@@ -32,6 +32,16 @@ public sealed class CompanyManagementRepository(JobPortalDbContext context) : IC
     public Task<Company?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         context.Companies.SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
 
+    public Task<Company?> FindByNameOrSlugAsync(string normalizedName, string slug, CancellationToken cancellationToken = default)
+    {
+#pragma warning disable CA1304, CA1311, CA1862 // EF translates casing to SQL UPPER; comparison overloads are not translatable.
+        var name = normalizedName.ToUpper();
+        var normalizedSlug = slug.ToUpper();
+        return context.Companies.SingleOrDefaultAsync(
+            x => x.Name.ToUpper() == name || x.Slug.ToUpper() == normalizedSlug, cancellationToken);
+#pragma warning restore CA1304, CA1311, CA1862
+    }
+
     public Task<CompanyResponse?> GetResponseAsync(Guid id, CancellationToken cancellationToken = default) =>
         Project(context.Companies.AsNoTracking().IgnoreQueryFilters().Where(x => x.Id == id))
             .SingleOrDefaultAsync(cancellationToken);
@@ -97,6 +107,17 @@ public sealed class CategoryManagementRepository(JobPortalDbContext context) : I
 
     public Task<Category?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         context.Categories.SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
+
+    public Task<Category?> FindByNameOrSlugAsync(string name, string slug, CancellationToken cancellationToken = default)
+    {
+#pragma warning disable CA1304, CA1311, CA1862 // EF translates casing to SQL UPPER; comparison overloads are not translatable.
+        var normalizedName = name.ToUpper();
+        var normalizedSlug = slug.ToUpper();
+        return context.Categories.SingleOrDefaultAsync(
+            x => x.Name.ToUpper() == normalizedName || x.Slug.ToUpper() == normalizedSlug,
+            cancellationToken);
+#pragma warning restore CA1304, CA1311, CA1862
+    }
 
     public Task<CategoryResponse?> GetResponseAsync(Guid id, CancellationToken cancellationToken = default) =>
         Project(context.Categories.AsNoTracking().IgnoreQueryFilters().Where(x => x.Id == id))

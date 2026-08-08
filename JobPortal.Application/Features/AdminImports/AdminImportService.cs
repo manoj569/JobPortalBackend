@@ -17,8 +17,8 @@ public sealed class AdminImportService(
     IUnitOfWork unitOfWork,
     IAuditWriter auditWriter,
     IValidator<CreateCompanyRequest> companyValidator,
-    IValidator<CreateJobRequest> jobValidator,
-    TimeProvider timeProvider) : IAdminImportService
+    TimeProvider timeProvider,
+    IValidator<UpdateRecruiterContactRequest>? recruiterContactValidator = null) : IAdminImportService
 {
     private static readonly string[] CompanyRequiredHeaders =
     [
@@ -28,20 +28,19 @@ public sealed class AdminImportService(
 
     private static readonly string[] CompanyOptionalHeaders = ["companyType"];
 
-    private static readonly string[] JobRequiredHeaders =
-    [
-        "title", "companyName", "categoryName", "description",
-        "applicationUrl", "employmentType", "workplaceType",
-        "experienceLevel", "location", "minSalary", "maxSalary",
-        "currencyCode", "expiresAtUtc", "responsibilities", "requirements",
-        "benefits", "isFeatured"
-    ];
+    private static readonly string[] JobRequiredHeaders = ["title", "companyName", "categoryName"];
 
     private static readonly string[] JobOptionalHeaders =
     [
         "minExperienceYears", "maxExperienceYears", "internshipDurationMonths",
         "isFlexibleDuration", "department", "roleCategory", "educationRequirement",
-        "postedByType"
+        "postedByType", "description", "applicationUrl", "employmentType",
+        "workplaceType", "experienceLevel", "location", "minSalary", "maxSalary",
+        "currencyCode", "expiresAtUtc", "responsibilities", "requirements", "benefits",
+        "isFeatured", "companyWebsiteUrl", "companyLogoUrl", "companyIndustry",
+        "companyLocation", "companyDescription", "companyEmployeeCount", "companyIsVerified",
+        "categoryDescription", "categoryDisplayOrder", "recruiterName", "recruiterRole",
+        "recruiterEmail", "recruiterPhoneNumber", "recruiterContactSharingApproved"
     ];
 
     public async Task<CsvImportResult> PreviewCompaniesAsync(
@@ -100,6 +99,7 @@ public sealed class AdminImportService(
         (await EvaluateJobsAsync(file, cancellationToken)).ToResult();
 
     public async Task<CsvImportResult> CommitJobsAsync(
+        Guid administratorUserId,
         CsvImportFile file,
         CancellationToken cancellationToken = default)
     {
@@ -107,7 +107,10 @@ public sealed class AdminImportService(
         if (evaluation.InvalidRows > 0)
             return evaluation.ToResult();
 
-        var jobs = evaluation.Actions.Select(action => NewDraftJob(action.Request)).ToArray();
+        foreach (var company in evaluation.Actions.Where(x => x.CompanyCreated)
+            .Select(x => x.Company).DistinctBy(x => x.Id))
+            company.OwnerUserId = administratorUserId;
+        var jobs = evaluation.Actions.Select(NewDraftJob).ToArray();
         await imports.AddJobsAsync(jobs, cancellationToken);
         await AppendAuditAsync(
             "jobs",
@@ -118,6 +121,10 @@ public sealed class AdminImportService(
         return evaluation.ToCommittedResult(_ => "Imported");
     }
 
+    public Task<CsvImportResult> CommitJobsAsync(
+        CsvImportFile file, CancellationToken cancellationToken = default) =>
+        CommitJobsAsync(Guid.Empty, file, cancellationToken);
+
     public CsvImportTemplate GetCompaniesTemplate() => Template(
         "companies-template.csv",
         "name,websiteUrl,industry,location,employeeCount,description,isVerified,companyType\r\n" +
@@ -125,8 +132,8 @@ public sealed class AdminImportService(
 
     public CsvImportTemplate GetJobsTemplate() => Template(
         "jobs-template.csv",
-        "title,companyName,categoryName,description,applicationUrl,employmentType,workplaceType,experienceLevel,location,minSalary,maxSalary,currencyCode,expiresAtUtc,responsibilities,requirements,benefits,isFeatured,minExperienceYears,maxExperienceYears,internshipDurationMonths,isFlexibleDuration,department,roleCategory,educationRequirement,postedByType\r\n" +
-        "Example Software Intern,Example Learning Labs,Technology,\"Fictional role for template testing\",https://jobs.example.invalid/apply/example-role,Internship,Hybrid,Entry,Pune,,,INR,,\"Assist with sample projects\",\"Basic programming knowledge\",\"Learning allowance\",false,0,1,3,false,Engineering,Software Development,B.Tech/B.E.,Company\r\n");
+        "title,companyName,categoryName,description,applicationUrl,employmentType,workplaceType,experienceLevel,location,minSalary,maxSalary,currencyCode,expiresAtUtc,responsibilities,requirements,benefits,companyWebsiteUrl,companyLogoUrl,companyIndustry,companyLocation,companyDescription,companyEmployeeCount,companyIsVerified,categoryDescription,categoryDisplayOrder,recruiterName,recruiterRole,recruiterEmail,recruiterPhoneNumber,recruiterContactSharingApproved\r\n" +
+        "Example Software Intern,Example Learning Labs,Technology,\"Fictional role for template testing\",https://jobs.example.invalid/apply/example-role,Internship,Hybrid,Entry,Pune,,,INR,,\"Assist with sample projects\",\"Basic programming knowledge\",\"Learning allowance\",https://example.invalid,,,Pune,\"Fictional company\",120,false,\"Technology roles\",0,Recruiter Name,Talent Partner,recruiter@example.invalid,+91 99999 99999,false\r\n");
 
     private async Task<CompanyEvaluation> EvaluateCompaniesAsync(
         CsvImportFile file,
@@ -183,7 +190,7 @@ public sealed class AdminImportService(
 
             if (errors.Count > 0)
             {
-                results.Add(InvalidRow(row.RowNumber, errors));
+                results.Add(InvalidRow(row.RowNumber, EnrichErrors(row, errors)));
                 continue;
             }
 
@@ -226,18 +233,27 @@ public sealed class AdminImportService(
             .Select(NormalizeName)
             .Distinct(StringComparer.Ordinal)
             .ToArray();
+        var categorySlugs = rows.Select(row => SlugGenerator.Generate(Value(row, "categoryName")))
+            .Where(value => value.Length > 0).Distinct(StringComparer.Ordinal).ToArray();
         var companies = await imports.FindCompaniesAsync(
             companySlugs,
             companyNames,
             cancellationToken);
         var categories = await imports.FindCategoriesAsync(
+            categorySlugs,
             categoryNames,
             cancellationToken);
         var existingJobs = await imports.FindJobIdentitiesAsync(
-            companies.Select(company => company.Id).Distinct().ToArray(),
-            cancellationToken);
+            companies.Select(company => company.Id).Distinct().ToArray(), cancellationToken);
         var duplicateKeys = existingJobs.Select(JobKey)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var resolvedCompanies = companies.GroupBy(company => NormalizeName(company.Name))
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+        var resolvedCategories = categories.GroupBy(category => NormalizeName(category.Name))
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+        var newCompanyIds = new HashSet<Guid>();
+        var newCategoryIds = new HashSet<Guid>();
 
         var actions = new List<JobImportAction>();
         var results = new List<CsvImportRowResult>(rows.Count);
@@ -245,25 +261,24 @@ public sealed class AdminImportService(
         foreach (var row in rows)
         {
             var errors = new List<CsvImportFieldError>();
-            var company = ResolveCompany(
-                companies,
-                Value(row, "companyName"),
-                errors);
-            var category = ResolveCategory(
-                categories,
-                Value(row, "categoryName"),
-                errors);
+            var companyName = Value(row, "companyName");
+            var categoryName = Value(row, "categoryName");
+            var companyPreviouslyResolved = resolvedCompanies.ContainsKey(NormalizeName(companyName));
+            var categoryPreviouslyResolved = resolvedCategories.ContainsKey(NormalizeName(categoryName));
+            var (company, companyCreated) = await ResolveOrCreateCompanyAsync(
+                row, companyName, resolvedCompanies, newCompanyIds, errors, cancellationToken);
+            var (category, categoryCreated) = ResolveOrCreateCategory(
+                row, categoryName, resolvedCategories, newCategoryIds, errors);
             var request = ParseJobRequest(row, company, category, errors);
-            var validation = await jobValidator.ValidateAsync(
-                request,
-                cancellationToken);
-            AddValidationErrors(errors, validation.Errors, JobFieldName);
+            ValidateUnifiedJob(row, request, errors);
             if (request.ExpiresAtUtc.HasValue && request.ExpiresAtUtc <= UtcNow)
-                AddError(errors, "expiresAtUtc", "ExpiresAtUtc must be in the future.");
+                AddError(errors, "expiresAtUtc", "Closing date must be in the future.",
+                    Value(row, "expiresAtUtc"));
+            var recruiterContact = await ParseRecruiterContactAsync(row, errors, cancellationToken);
 
             if (errors.Count > 0)
             {
-                results.Add(InvalidRow(row.RowNumber, errors));
+                results.Add(InvalidRow(row.RowNumber, EnrichErrors(row, errors)));
                 continue;
             }
 
@@ -275,11 +290,115 @@ public sealed class AdminImportService(
                 continue;
             }
 
-            actions.Add(new(row.RowNumber, request));
-            results.Add(Row(row.RowNumber, "Valid"));
+            actions.Add(new(row.RowNumber, request, company!, companyCreated,
+                category!, categoryCreated, recruiterContact));
+            results.Add(new(row.RowNumber, "Valid", Array.Empty<CsvImportFieldError>(),
+                companyCreated && !companyPreviouslyResolved ? "Create" : "Reuse",
+                categoryCreated && !categoryPreviouslyResolved ? "Create" : "Reuse"));
         }
 
         return new(rows.Count, actions, results, duplicates);
+    }
+
+    private async Task<(Company? Value, bool Created)> ResolveOrCreateCompanyAsync(
+        ParsedCsvRow row, string requestedName, Dictionary<string, Company> resolved,
+        HashSet<Guid> createdIds,
+        List<CsvImportFieldError> errors, CancellationToken cancellationToken)
+    {
+        var name = requestedName.Trim();
+        if (name.Length == 0)
+        {
+            AddError(errors, "companyName", "CompanyName is required.", requestedName);
+            return (null, false);
+        }
+        var key = NormalizeName(name);
+        var employeeCount = ParseInt(row, "companyEmployeeCount", errors);
+        var isVerified = ParseOptionalBool(row, "companyIsVerified", errors);
+        ValidateOptionalUrl(row, "companyWebsiteUrl", errors);
+        ValidateOptionalUrl(row, "companyLogoUrl", errors);
+        if (resolved.TryGetValue(key, out var existing))
+            return (existing, createdIds.Contains(existing.Id));
+        var slug = SlugGenerator.Generate(name);
+        existing = resolved.Values.FirstOrDefault(company =>
+            string.Equals(company.Slug, slug, StringComparison.OrdinalIgnoreCase));
+        if (existing is not null)
+        {
+            resolved[key] = existing;
+            return (existing, false);
+        }
+        var company = new Company
+        {
+            Id = Guid.NewGuid(), Name = name, Slug = slug,
+            WebsiteUrl = Optional(row, "companyWebsiteUrl"),
+            LogoUrl = Optional(row, "companyLogoUrl"),
+            Industry = Optional(row, "companyIndustry"),
+            Location = Optional(row, "companyLocation"),
+            Description = Optional(row, "companyDescription"),
+            EmployeeCount = employeeCount, IsVerified = isVerified
+        };
+        var validation = await companyValidator.ValidateAsync(new CreateCompanyRequest(
+            company.Name, company.Slug, company.Description, company.WebsiteUrl,
+            company.LogoUrl, company.Industry, company.Location, company.EmployeeCount,
+            company.IsVerified), cancellationToken);
+        AddValidationErrors(errors, validation.Errors, property => property switch
+        {
+            nameof(CreateCompanyRequest.Name) => "companyName",
+            nameof(CreateCompanyRequest.WebsiteUrl) => "companyWebsiteUrl",
+            nameof(CreateCompanyRequest.LogoUrl) => "companyLogoUrl",
+            nameof(CreateCompanyRequest.Industry) => "companyIndustry",
+            nameof(CreateCompanyRequest.Location) => "companyLocation",
+            nameof(CreateCompanyRequest.Description) => "companyDescription",
+            nameof(CreateCompanyRequest.EmployeeCount) => "companyEmployeeCount",
+            _ => property
+        });
+        if (errors.Count == 0)
+        {
+            resolved[key] = company;
+            createdIds.Add(company.Id);
+        }
+        return (company, true);
+    }
+
+    private static (Category? Value, bool Created) ResolveOrCreateCategory(
+        ParsedCsvRow row, string requestedName, Dictionary<string, Category> resolved,
+        HashSet<Guid> createdIds,
+        List<CsvImportFieldError> errors)
+    {
+        var name = requestedName.Trim();
+        if (name.Length == 0)
+        {
+            AddError(errors, "categoryName", "CategoryName is required.", requestedName);
+            return (null, false);
+        }
+        var key = NormalizeName(name);
+        var displayOrder = ParseInt(row, "categoryDisplayOrder", errors) ?? 0;
+        if (resolved.TryGetValue(key, out var existing))
+            return (existing, createdIds.Contains(existing.Id));
+        var slug = SlugGenerator.Generate(name);
+        existing = resolved.Values.FirstOrDefault(category =>
+            string.Equals(category.Slug, slug, StringComparison.OrdinalIgnoreCase));
+        if (existing is not null)
+        {
+            resolved[key] = existing;
+            return (existing, false);
+        }
+        if (name.Length > 150)
+            AddError(errors, "categoryName", "CategoryName cannot exceed 150 characters.", requestedName);
+        if (displayOrder < 0)
+            AddError(errors, "categoryDisplayOrder", "CategoryDisplayOrder must be zero or greater.",
+                Value(row, "categoryDisplayOrder"));
+        var category = new Category
+        {
+            Id = Guid.NewGuid(), Name = name, Slug = slug,
+            Description = Optional(row, "categoryDescription"), DisplayOrder = displayOrder,
+            ParentCategoryId = null
+        };
+        if (errors.Count == 0)
+        {
+            resolved[key] = category;
+            createdIds.Add(category.Id);
+        }
+        return (category, true);
     }
 
     private static CompanyImportValues ParseCompanyValues(
@@ -332,9 +451,9 @@ public sealed class AdminImportService(
         var minimumSalary = ParseDecimal(row, "minSalary", errors);
         var maximumSalary = ParseDecimal(row, "maxSalary", errors);
         var expiresAtUtc = ParseDateTime(row, "expiresAtUtc", errors);
-        var employmentType = ParseEnum<EmploymentType>(row, "employmentType", errors);
-        var workplaceType = ParseEnum<WorkplaceType>(row, "workplaceType", errors);
-        var experienceLevel = ParseEnum<ExperienceLevel>(row, "experienceLevel", errors);
+        var employmentType = ParseOptionalEnum<EmploymentType>(row, "employmentType", errors) ?? default;
+        var workplaceType = ParseOptionalEnum<WorkplaceType>(row, "workplaceType", errors) ?? default;
+        var experienceLevel = ParseOptionalEnum<ExperienceLevel>(row, "experienceLevel", errors) ?? default;
         var minimumExperienceYears = ParseInt(row, "minExperienceYears", errors);
         var maximumExperienceYears = ParseInt(row, "maxExperienceYears", errors);
         var internshipDurationMonths = ParseInt(
@@ -354,18 +473,18 @@ public sealed class AdminImportService(
             AddError(errors, "isFeatured", "IsFeatured must be true or false.");
 
         return new(
-            Value(row, "title"),
-            Value(row, "description"),
+            Value(row, "title").Trim(),
+            Optional(row, "description") ?? string.Empty,
             company?.Id ?? Guid.Empty,
             category?.Id ?? Guid.Empty,
-            Value(row, "applicationUrl"),
+            Optional(row, "applicationUrl") ?? string.Empty,
             Optional(row, "responsibilities"),
             Optional(row, "requirements"),
             Optional(row, "benefits"),
             Optional(row, "location"),
             minimumSalary,
             maximumSalary,
-            Value(row, "currencyCode"),
+            Optional(row, "currencyCode")?.ToUpperInvariant() ?? "USD",
             employmentType,
             workplaceType,
             experienceLevel,
@@ -378,6 +497,90 @@ public sealed class AdminImportService(
             Optional(row, "roleCategory"),
             Optional(row, "educationRequirement"),
             postedByType);
+    }
+
+    private static void ValidateUnifiedJob(
+        ParsedCsvRow row, CreateJobRequest request, ICollection<CsvImportFieldError> errors)
+    {
+        if (request.Title.Length == 0)
+            AddError(errors, "title", "Job title is required.", Value(row, "title"));
+        else if (request.Title.Length > 250)
+            AddError(errors, "title", "Job title cannot exceed 250 characters.", Value(row, "title"));
+        if (request.Description.Length > 10_000)
+            AddError(errors, "description", "Job description cannot exceed 10000 characters.");
+        if (request.ApplicationUrl.Length > 0 &&
+            (!Uri.TryCreate(request.ApplicationUrl, UriKind.Absolute, out var uri) ||
+             uri.Scheme is not ("http" or "https")))
+            AddError(errors, "applicationUrl", "ApplicationUrl must be an absolute HTTP or HTTPS URL.",
+                Value(row, "applicationUrl"));
+        if (request.MinimumSalary < 0)
+            AddError(errors, "minSalary", "MinimumSalary must be zero or greater.", Value(row, "minSalary"));
+        if (request.MaximumSalary < 0)
+            AddError(errors, "maxSalary", "MaximumSalary must be zero or greater.", Value(row, "maxSalary"));
+        if (request.MinimumSalary.HasValue && request.MaximumSalary.HasValue &&
+            request.MinimumSalary > request.MaximumSalary)
+            AddError(errors, "maxSalary", "Maximum salary must be greater than or equal to minimum salary.",
+                Value(row, "maxSalary"));
+        if (request.MinimumExperienceYears is < 0 or > 60)
+            AddError(errors, "minExperienceYears", "Minimum experience years must be between 0 and 60.",
+                Value(row, "minExperienceYears"));
+        if (request.MaximumExperienceYears is < 0 or > 60)
+            AddError(errors, "maxExperienceYears", "Maximum experience years must be between 0 and 60.",
+                Value(row, "maxExperienceYears"));
+        if (request.MinimumExperienceYears.HasValue && request.MaximumExperienceYears.HasValue &&
+            request.MinimumExperienceYears > request.MaximumExperienceYears)
+            AddError(errors, "maxExperienceYears",
+                "Maximum experience years must be greater than or equal to minimum experience years.",
+                Value(row, "maxExperienceYears"));
+        if (request.InternshipDurationMonths.HasValue &&
+            request.InternshipDurationMonths is not (1 or 2 or 3 or 6))
+            AddError(errors, "internshipDurationMonths",
+                "Internship duration must be 1, 2, 3, or 6 months.",
+                Value(row, "internshipDurationMonths"));
+    }
+
+    private static void ValidateOptionalUrl(
+        ParsedCsvRow row, string field, ICollection<CsvImportFieldError> errors)
+    {
+        var value = Value(row, field);
+        if (value.Length > 0 && (!Uri.TryCreate(value, UriKind.Absolute, out var uri) ||
+            uri.Scheme is not ("http" or "https")))
+            AddError(errors, field, $"{field} must be an absolute HTTP or HTTPS URL.", value);
+    }
+
+    private async Task<JobRecruiterContact?> ParseRecruiterContactAsync(
+        ParsedCsvRow row, ICollection<CsvImportFieldError> errors,
+        CancellationToken cancellationToken)
+    {
+        var name = Optional(row, "recruiterName");
+        var role = Optional(row, "recruiterRole");
+        var email = Optional(row, "recruiterEmail");
+        var phone = Optional(row, "recruiterPhoneNumber");
+        var approvedText = Value(row, "recruiterContactSharingApproved");
+        var approved = ParseOptionalBool(row, "recruiterContactSharingApproved", errors);
+        if (name is null && role is null && email is null && phone is null &&
+            approvedText.Length == 0)
+            return null;
+        var request = new UpdateRecruiterContactRequest(
+            name ?? string.Empty, role ?? string.Empty, email ?? string.Empty, phone, approved);
+        var validator = recruiterContactValidator ??
+            new JobSearchQueryValidator.UpdateRecruiterContactRequestValidator();
+        var validation = await validator.ValidateAsync(request, cancellationToken);
+        AddValidationErrors(errors, validation.Errors, property => property switch
+        {
+            nameof(UpdateRecruiterContactRequest.ContactName) => "recruiterName",
+            nameof(UpdateRecruiterContactRequest.ContactRole) => "recruiterRole",
+            nameof(UpdateRecruiterContactRequest.Email) => "recruiterEmail",
+            nameof(UpdateRecruiterContactRequest.PhoneNumber) => "recruiterPhoneNumber",
+            nameof(UpdateRecruiterContactRequest.IsSharingApproved) => "recruiterContactSharingApproved",
+            _ => property
+        });
+        return new JobRecruiterContact
+        {
+            ContactName = request.ContactName.Trim(), ContactRole = request.ContactRole.Trim(),
+            Email = request.Email.Trim(), PhoneNumber = TextNormalizer.TrimOrNull(request.PhoneNumber),
+            IsSharingApproved = request.IsSharingApproved
+        };
     }
 
     private static Company? ResolveCompany(
@@ -566,8 +769,9 @@ public sealed class AdminImportService(
             company.CompanyType = values.CompanyType;
     }
 
-    private Job NewDraftJob(CreateJobRequest request)
+    private Job NewDraftJob(JobImportAction action)
     {
+        var request = action.Request;
         var id = Guid.NewGuid();
         var job = new Job
         {
@@ -604,6 +808,16 @@ public sealed class AdminImportService(
             request.RoleCategory,
             request.EducationRequirement,
             request.PostedByType));
+        if (action.CompanyCreated)
+            job.Company = action.Company;
+        if (action.CategoryCreated)
+            job.Category = action.Category;
+        if (action.RecruiterContact is not null)
+        {
+            action.RecruiterContact.JobId = job.Id;
+            action.RecruiterContact.Job = job;
+            job.RecruiterContact = action.RecruiterContact;
+        }
         return job;
     }
 
@@ -642,13 +856,25 @@ public sealed class AdminImportService(
     private static void AddError(
         ICollection<CsvImportFieldError> errors,
         string field,
-        string message)
+        string message,
+        string? submittedValue = null)
     {
         if (!errors.Any(error =>
                 string.Equals(error.Field, field, StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(error.Message, message, StringComparison.Ordinal)))
-            errors.Add(new(field, message));
+            errors.Add(new(field, message, submittedValue));
     }
+
+    private static CsvImportFieldError[] EnrichErrors(
+        ParsedCsvRow row, IEnumerable<CsvImportFieldError> errors) =>
+        errors.Select(error => error.SubmittedValue is not null
+            ? error
+            : error with
+            {
+                SubmittedValue = row.Fields.TryGetValue(error.Field, out var value)
+                    ? value
+                    : null
+            }).ToArray();
 
     private static CsvImportRowResult InvalidRow(
         int rowNumber,
@@ -744,7 +970,12 @@ public sealed class AdminImportService(
 
     private sealed record JobImportAction(
         int RowNumber,
-        CreateJobRequest Request);
+        CreateJobRequest Request,
+        Company Company,
+        bool CompanyCreated,
+        Category Category,
+        bool CategoryCreated,
+        JobRecruiterContact? RecruiterContact);
 
     private abstract record ImportEvaluation<TAction>(
         int TotalRows,

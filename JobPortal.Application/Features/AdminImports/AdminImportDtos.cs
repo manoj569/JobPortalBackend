@@ -7,12 +7,15 @@ public sealed record CsvImportFile(
 
 public sealed record CsvImportFieldError(
     string Field,
-    string Message);
+    string Message,
+    string? SubmittedValue = null);
 
 public sealed record CsvImportRowResult(
     int RowNumber,
     string Status,
-    IReadOnlyCollection<CsvImportFieldError> Errors);
+    IReadOnlyCollection<CsvImportFieldError> Errors,
+    string? CompanyResolution = null,
+    string? CategoryResolution = null);
 
 public sealed record CsvImportResult(
     int TotalRows,

@@ -77,9 +77,10 @@ public sealed class AdminImportsController(IAdminImportService imports) :
         [FromForm] CsvUploadForm upload,
         CancellationToken cancellationToken)
     {
+        var administratorUserId = User.GetRequiredUserId();
         var result = await WithFileAsync(
             upload,
-            imports.CommitJobsAsync,
+            (file, token) => imports.CommitJobsAsync(administratorUserId, file, token),
             cancellationToken);
         var response = new ApiResponse<CsvImportResult>(
             result,

@@ -62,7 +62,9 @@ public sealed class PublicJobSearchTests
             Industries: ["Technology"],
             PostedByTypes: [PostedByType.Company],
             FreshnessDays: 7,
-            FeaturedOnly: true);
+            FeaturedOnly: true,
+            CompanyName: "alpha",
+            CategoryName: "engineering");
 
         var searchSql = repository.FilteredJobsQuery(query)
             .Select(PublicJobProjections.Summary)
@@ -71,6 +73,7 @@ public sealed class PublicJobSearchTests
 
         Assert.Contains("JobSkills", searchSql, StringComparison.Ordinal);
         Assert.Contains("PublishedAtUtc", searchSql, StringComparison.Ordinal);
+        Assert.Contains("LOWER", searchSql, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("GROUP BY", facetSql, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -154,6 +157,8 @@ public sealed class PublicJobSearchTests
             (new(EducationRequirements: ["B.Tech/B.E."]), [fixture.Featured.Id]),
             (new(CompanyTypes: [CompanyType.Consultant]), [fixture.Latest.Id]),
             (new(CompanyIds: [fixture.Beta.Id]), [fixture.Latest.Id]),
+            (new(CompanyId: fixture.Alpha.Id), [fixture.Featured.Id, fixture.Flexible.Id]),
+            (new(CategoryId: fixture.Engineering.Id), [fixture.Featured.Id]),
             (new(Industries: ["Consulting"]), [fixture.Latest.Id]),
             (new(PostedByTypes: [PostedByType.Consultant]), [fixture.Latest.Id]),
             (new(FreshnessDays: 1), [fixture.Latest.Id]),
@@ -166,6 +171,46 @@ public sealed class PublicJobSearchTests
             Assert.Equal(expected.Length, count);
             Assert.Equal(expected.Order(), items.Select(item => item.Id).Order());
         }
+    }
+
+    [Fact]
+    public async Task CompanyAndCategoryNamesSupportTrimmedCaseInsensitivePartialFiltering()
+    {
+        await using var fixture = await SearchFixture.CreateAsync();
+        var cases = new (PublicJobQuery Query, Guid[] Expected)[]
+        {
+            (new(CompanyName: "Alpha"), [fixture.Featured.Id, fixture.Flexible.Id]),
+            (new(CategoryName: "Engineering"), [fixture.Featured.Id]),
+            (new(CompanyName: "alpha", CategoryName: "engineer"), [fixture.Featured.Id]),
+            (new(CompanyName: "  ALPHA  "), [fixture.Featured.Id, fixture.Flexible.Id]),
+            (new(CompanyName: "   ", CategoryName: "  engineering "), [fixture.Featured.Id]),
+            (new(CompanyName: "missing"), [])
+        };
+
+        foreach (var (query, expected) in cases)
+        {
+            var (items, count) = await fixture.Repository.SearchAsync(query);
+            Assert.Equal(expected.Length, count);
+            Assert.Equal(expected.Order(), items.Select(item => item.Id).Order());
+        }
+    }
+
+    [Fact]
+    public async Task NameFiltersStillEnforcePublicVisibilityRules()
+    {
+        await using var fixture = await SearchFixture.CreateAsync();
+        fixture.Context.Jobs.AddRange(
+            fixture.Copy("hidden-alpha", JobStatus.Published, isHidden: true),
+            fixture.Copy("draft-alpha", JobStatus.Draft));
+        await fixture.Context.SaveChangesAsync();
+
+        var (items, count) = await fixture.Repository.SearchAsync(
+            new PublicJobQuery(CompanyName: "alpha"));
+
+        Assert.Equal(2, count);
+        Assert.Equal(
+            new[] { fixture.Featured.Id, fixture.Flexible.Id }.Order(),
+            items.Select(item => item.Id).Order());
     }
 
     [Fact]
@@ -234,6 +279,12 @@ public sealed class PublicJobSearchTests
             option.Value == "Operations" && option.Count == 1);
         Assert.Equal(new DecimalRangeFacet(300, 500, 1), options.SalaryRange);
         Assert.Equal(new IntegerRangeFacet(0, 2, 1), options.ExperienceRange);
+
+        var nameFilteredOptions = await fixture.Repository.GetFilterOptionsAsync(
+            new PublicJobQuery(CompanyName: " alpha ", CategoryName: "sales"));
+        Assert.Equal(
+            new[] { ("Delhi", 1) },
+            nameFilteredOptions.Locations.Select(option => (option.Value, option.Count)));
     }
 
     [Fact]
@@ -247,6 +298,8 @@ public sealed class PublicJobSearchTests
             MaxExperienceYears: 10,
             InternshipDurationMonths: [4],
             FreshnessDays: 2,
+            CompanyName: new string('c', 251),
+            CategoryName: new string('c', 251),
             WorkModes: [(WorkplaceType)999],
             Locations: Enumerable.Range(0, 26).Select(index => $"Location {index}").ToArray());
 
@@ -260,6 +313,8 @@ public sealed class PublicJobSearchTests
         result.ShouldHaveValidationErrorFor(x => x.FreshnessDays);
         result.ShouldHaveValidationErrorFor(x => x.WorkModes);
         result.ShouldHaveValidationErrorFor(x => x.Locations);
+        result.ShouldHaveValidationErrorFor(x => x.CompanyName);
+        result.ShouldHaveValidationErrorFor(x => x.CategoryName);
     }
 
     private sealed class SearchFixture : IAsyncDisposable

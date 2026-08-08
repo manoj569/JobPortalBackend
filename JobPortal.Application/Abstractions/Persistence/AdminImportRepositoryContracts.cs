@@ -15,6 +15,7 @@ public interface IAdminImportRepository
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyCollection<Category>> FindCategoriesAsync(
+        IReadOnlyCollection<string> slugs,
         IReadOnlyCollection<string> normalizedNames,
         CancellationToken cancellationToken = default);
 

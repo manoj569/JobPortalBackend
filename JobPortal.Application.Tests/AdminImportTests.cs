@@ -185,8 +185,6 @@ public sealed class AdminImportTests
 
         var invalid = Assert.Single(result.Rows);
         Assert.Equal(2, invalid.RowNumber);
-        Assert.Contains(invalid.Errors, error => error.Field == "companyName");
-        Assert.Contains(invalid.Errors, error => error.Field == "categoryName");
         Assert.Contains(invalid.Errors, error => error.Field == "applicationUrl");
         Assert.Contains(invalid.Errors, error => error.Field == "maxSalary");
         Assert.Contains(invalid.Errors, error => error.Field == "employmentType");
@@ -238,6 +236,61 @@ public sealed class AdminImportTests
     }
 
     [Fact]
+    public async Task UnifiedJobCsvCreatesAndReusesRelationsAndImportsOptionalRecruiterContact()
+    {
+        var fixture = CreateFixture();
+        var rows = string.Join("\r\n",
+            UnifiedJobRow("Role One", " New Company ", " New Category ",
+                recruiterName: "Jane Recruiter", recruiterRole: "Talent Partner",
+                recruiterEmail: "jane@example.test", recruiterPhone: "+91 99999 99999",
+                sharingApproved: "true"),
+            UnifiedJobRow("Role Two", "new company", "new category"));
+
+        var preview = await fixture.Service.PreviewJobsAsync(
+            File("jobs.csv", UnifiedJobHeader + "\r\n" + rows));
+        var committed = await fixture.Service.CommitJobsAsync(
+            Guid.NewGuid(), File("jobs.csv", UnifiedJobHeader + "\r\n" + rows));
+
+        Assert.Equal(2, preview.ValidRows);
+        Assert.Equal("Create", preview.Rows.First().CompanyResolution);
+        Assert.Equal("Reuse", preview.Rows.Last().CompanyResolution);
+        Assert.Equal(2, committed.ImportedRows);
+        Assert.Equal(2, fixture.Repository.AddedJobs.Count);
+        Assert.Same(fixture.Repository.AddedJobs[0].Company, fixture.Repository.AddedJobs[1].Company);
+        Assert.Same(fixture.Repository.AddedJobs[0].Category, fixture.Repository.AddedJobs[1].Category);
+        var contact = Assert.IsType<JobRecruiterContact>(fixture.Repository.AddedJobs[0].RecruiterContact);
+        Assert.Equal("jane@example.test", contact.Email);
+        Assert.True(contact.IsSharingApproved);
+        Assert.Null(fixture.Repository.AddedJobs[1].RecruiterContact);
+        Assert.Null(fixture.Repository.AddedJobs[1].Location);
+        Assert.Null(fixture.Repository.AddedJobs[1].MinimumSalary);
+        Assert.Null(fixture.Repository.AddedJobs[1].MaximumSalary);
+        Assert.Null(fixture.Repository.AddedJobs[1].ExpiresAtUtc);
+        Assert.Null(fixture.Repository.AddedJobs[1].Responsibilities);
+        Assert.Equal(JobStatus.Draft, fixture.Repository.AddedJobs[0].Status);
+    }
+
+    [Fact]
+    public async Task UnifiedJobCsvRejectsInvalidRecruiterAndLeavesNoAggregateChanges()
+    {
+        var fixture = CreateFixture();
+        var row = UnifiedJobRow("Role", "Rollback Company", "Rollback Category",
+            recruiterName: "Recruiter", recruiterRole: "Role",
+            recruiterEmail: "not-an-email", recruiterPhone: "invalid",
+            sharingApproved: "true");
+
+        var result = await fixture.Service.CommitJobsAsync(Guid.NewGuid(),
+            File("jobs.csv", UnifiedJobHeader + "\r\n" + row));
+
+        var invalid = Assert.Single(result.Rows);
+        Assert.Contains(invalid.Errors, error => error.Field == "recruiterEmail" &&
+            error.SubmittedValue == "not-an-email");
+        Assert.Empty(fixture.Repository.AddedJobs);
+        Assert.Equal(0, fixture.UnitOfWork.SaveCount);
+        Assert.Empty(fixture.Audit.Events);
+    }
+
+    [Fact]
     public async Task OptionalSearchFieldsAreImportedWithoutBreakingLegacyCsv()
     {
         var fixture = CreateFixtureWithReferences();
@@ -251,7 +304,7 @@ public sealed class AdminImportTests
             "Filtered Intern,Example Company,Technology,Description,https://jobs.example.invalid/filtered,Internship,Hybrid,Entry,Pune,100,200,INR,,Responsibilities,Requirements,Benefits,true,0,2,3,false,Engineering,Software Development,B.Tech/B.E.,Company";
 
         var jobResult = await fixture.Service.CommitJobsAsync(
-            File("jobs.csv", JobTemplateHeader + "\r\n" + row));
+            File("jobs.csv", LegacyExtendedJobHeader + "\r\n" + row));
 
         Assert.Equal(1, companyResult.ImportedRows);
         Assert.Equal(CompanyType.Startup, Assert.Single(fixture.Repository.AddedCompanies).CompanyType);
@@ -278,7 +331,7 @@ public sealed class AdminImportTests
             "Invalid Intern,Example Company,Technology,Description,https://jobs.example.invalid/invalid,Internship,Hybrid,Entry,Pune,,,INR,,Responsibilities,Requirements,Benefits,false,5,2,4,false,Engineering,Software Development,Graduate,Unknown";
 
         var result = await fixture.Service.CommitJobsAsync(
-            File("jobs.csv", JobTemplateHeader + "\r\n" + row));
+            File("jobs.csv", LegacyExtendedJobHeader + "\r\n" + row));
 
         Assert.Equal(1, result.InvalidRows);
         var errors = Assert.Single(result.Rows).Errors;
@@ -355,7 +408,6 @@ public sealed class AdminImportTests
             unitOfWork,
             audit,
             new CreateCompanyRequestValidator(),
-            new CreateJobRequestValidator(),
             new FixedTimeProvider(Now));
         return new(service, repository, unitOfWork, audit);
     }
@@ -398,6 +450,16 @@ public sealed class AdminImportTests
     private static string ValidJobRow(string title, string applicationUrl) =>
         $"{title},Example Company,Technology,Description,{applicationUrl},FullTime,Remote,Mid,Pune,,,INR,,Responsibilities,Requirements,Benefits,false";
 
+    private static string UnifiedJobRow(string title, string company, string category,
+        string recruiterName = "", string recruiterRole = "", string recruiterEmail = "",
+        string recruiterPhone = "", string sharingApproved = "") => string.Join(',', new[]
+        {
+            title, company, category, "", "", "", "", "", "", "", "", "", "", "", "", "",
+            "https://company.example.invalid", "", "Technology", "Pune", "Company description", "42", "true",
+            "Category description", "3", recruiterName, recruiterRole, recruiterEmail,
+            recruiterPhone, sharingApproved
+        });
+
     private const string CompanyHeader =
         "name,websiteUrl,industry,location,employeeCount,description,isVerified";
 
@@ -406,7 +468,12 @@ public sealed class AdminImportTests
 
     private const string CompanyTemplateHeader = CompanyHeader + ",companyType";
 
-    private const string JobTemplateHeader = JobHeader +
+    private const string JobTemplateHeader =
+        "title,companyName,categoryName,description,applicationUrl,employmentType,workplaceType,experienceLevel,location,minSalary,maxSalary,currencyCode,expiresAtUtc,responsibilities,requirements,benefits,companyWebsiteUrl,companyLogoUrl,companyIndustry,companyLocation,companyDescription,companyEmployeeCount,companyIsVerified,categoryDescription,categoryDisplayOrder,recruiterName,recruiterRole,recruiterEmail,recruiterPhoneNumber,recruiterContactSharingApproved";
+
+    private const string UnifiedJobHeader = JobTemplateHeader;
+
+    private const string LegacyExtendedJobHeader = JobHeader +
         ",minExperienceYears,maxExperienceYears,internshipDurationMonths,isFlexibleDuration,department,roleCategory,educationRequirement,postedByType";
 
     private sealed record Fixture(
@@ -430,6 +497,7 @@ public sealed class AdminImportTests
             Task.FromResult<IReadOnlyCollection<Company>>(Companies);
 
         public Task<IReadOnlyCollection<Category>> FindCategoriesAsync(
+            IReadOnlyCollection<string> slugs,
             IReadOnlyCollection<string> normalizedNames,
             CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyCollection<Category>>(Categories);

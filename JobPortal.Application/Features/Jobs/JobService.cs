@@ -5,6 +5,7 @@ using JobPortal.Application.Abstractions.Auditing;
 using JobPortal.Application.Abstractions.Jobs;
 using JobPortal.Application.Abstractions.Persistence;
 using JobPortal.Application.Common.Exceptions;
+using JobPortal.Application.Common.Text;
 using JobPortal.Domain.Entities;
 using JobPortal.Domain.Enums;
 using JobPortal.Shared.Models;
@@ -19,8 +20,152 @@ public sealed class JobService(
     IValidator<UpdateJobRequest> updateValidator,
     IValidator<UpdateRecruiterContactRequest> recruiterContactValidator,
     IValidator<JobSearchQuery> searchValidator,
-    TimeProvider timeProvider) : IJobService
+    TimeProvider timeProvider,
+    ICompanyManagementRepository? companies = null,
+    ICategoryManagementRepository? categories = null) : IJobService
 {
+    public async Task<ComposeJobResponse> ComposeAsync(Guid administratorUserId, ComposeJobRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (request.Job is null || string.IsNullOrWhiteSpace(request.Job.Title))
+            throw new BadRequestException("Job title is required.", "validation_error");
+        if (request.Job.Title.Trim().Length > 250)
+            throw new BadRequestException("Job title cannot exceed 250 characters.", "validation_error");
+        ValidateRelation(request.Company?.ExistingId, request.Company?.New, "company");
+        ValidateRelation(request.Category?.ExistingId, request.Category?.New, "category");
+        if (request.Company is null || (!request.Company.ExistingId.HasValue && request.Company.New is null))
+            throw new BadRequestException("A company is required by the current job schema.", "validation_error");
+        if (request.Category is null || (!request.Category.ExistingId.HasValue && request.Category.New is null))
+            throw new BadRequestException("A category is required by the current job schema.", "validation_error");
+        if (request.Job.MinimumSalary < 0 || request.Job.MaximumSalary < 0 ||
+            request.Job.MinimumSalary > request.Job.MaximumSalary)
+            throw new BadRequestException("Maximum salary must be greater than or equal to minimum salary.", "validation_error");
+        if (request.Job.ExpiresAtUtc.HasValue && request.Job.ExpiresAtUtc <= UtcNow)
+            throw new BadRequestException("Closing date must be in the future.", "validation_error");
+        if (request.Job.ApplicationUrl is { Length: > 0 } url &&
+            (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https")))
+            throw new BadRequestException("ApplicationUrl must be an absolute HTTP or HTTPS URL.", "validation_error");
+        var recruiterRequest = ToRecruiterContactRequest(request.RecruiterContact);
+        if (recruiterRequest is not null)
+            await recruiterContactValidator.ValidateAndThrowAsync(recruiterRequest, cancellationToken);
+
+        var (company, companyCreated) = await ResolveCompanyAsync(administratorUserId, request.Company, cancellationToken);
+        var (category, categoryCreated) = await ResolveCategoryAsync(request.Category, cancellationToken);
+        var id = Guid.NewGuid();
+        var job = new Job
+        {
+            Id = id,
+            ReferenceNumber = $"JOB-{UtcNow:yyyyMMdd}-{id.ToString("N")[..8].ToUpperInvariant()}",
+            Title = request.Job.Title.Trim(),
+            Slug = $"{SlugGenerator.Generate(request.Job.Title, 240)}-{id.ToString("N")[..8]}",
+            Description = TextNormalizer.TrimOrNull(request.Job.Description) ?? string.Empty,
+            ApplicationUrl = TextNormalizer.TrimOrNull(request.Job.ApplicationUrl) ?? string.Empty,
+            EmploymentType = request.Job.EmploymentType ?? default,
+            WorkplaceType = request.Job.WorkplaceType ?? default,
+            ExperienceLevel = request.Job.ExperienceLevel ?? default,
+            Location = TextNormalizer.TrimOrNull(request.Job.Location),
+            MinimumSalary = request.Job.MinimumSalary,
+            MaximumSalary = request.Job.MaximumSalary,
+            CurrencyCode = TextNormalizer.TrimOrNull(request.Job.CurrencyCode)?.ToUpperInvariant() ?? "USD",
+            ExpiresAtUtc = request.Job.ExpiresAtUtc,
+            Responsibilities = TextNormalizer.TrimOrNull(request.Job.Responsibilities),
+            Requirements = TextNormalizer.TrimOrNull(request.Job.Requirements),
+            Benefits = TextNormalizer.TrimOrNull(request.Job.Benefits),
+            Company = company!,
+            CompanyId = company!.Id,
+            Category = category!,
+            CategoryId = category!.Id,
+            Status = JobStatus.Draft
+        };
+        if (recruiterRequest is not null)
+        {
+            job.RecruiterContact = new JobRecruiterContact
+            {
+                JobId = job.Id,
+                ContactName = recruiterRequest.ContactName.Trim(),
+                ContactRole = recruiterRequest.ContactRole.Trim(),
+                Email = recruiterRequest.Email.Trim(),
+                PhoneNumber = TextNormalizer.TrimOrNull(recruiterRequest.PhoneNumber),
+                IsSharingApproved = recruiterRequest.IsSharingApproved
+            };
+        }
+        await jobs.AddAsync(job, cancellationToken);
+        if (companyCreated) await auditWriter.AppendAsync(new(AuditAction.Create, "Company", company!.Id.ToString()), cancellationToken);
+        if (categoryCreated) await auditWriter.AppendAsync(new(AuditAction.Create, "Category", category!.Id.ToString()), cancellationToken);
+        await auditWriter.AppendAsync(new(AuditAction.Create, "Job", job.Id.ToString(),
+            new Dictionary<string, string?>
+            {
+                ["status"] = JobStatus.Draft.ToString(),
+                ["recruiterContactCreated"] = (job.RecruiterContact is not null).ToString()
+            }), cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+        return new(job.Id, job.Slug, job.Status,
+            company is null ? null : new(company.Id, company.Name, companyCreated),
+            category is null ? null : new(category.Id, category.Name, categoryCreated),
+            job.RecruiterContact is not null);
+    }
+
+    private static UpdateRecruiterContactRequest? ToRecruiterContactRequest(
+        ComposeRecruiterContactRequest? value)
+    {
+        if (value is null || (string.IsNullOrWhiteSpace(value.Name) &&
+            string.IsNullOrWhiteSpace(value.Role) && string.IsNullOrWhiteSpace(value.Email) &&
+            string.IsNullOrWhiteSpace(value.PhoneNumber) && !value.SharingApproved))
+            return null;
+        return new(value.Name ?? string.Empty, value.Role ?? string.Empty,
+            value.Email ?? string.Empty, value.PhoneNumber, value.SharingApproved);
+    }
+
+    private static void ValidateRelation<T>(Guid? existingId, T? inline, string relation) where T : class
+    {
+        if (existingId.HasValue && inline is not null)
+            throw new BadRequestException($"Provide either an existing {relation} ID or a new {relation}, not both.", "validation_error");
+        if (existingId == Guid.Empty)
+            throw new BadRequestException($"Existing {relation} ID cannot be empty.", "validation_error");
+    }
+
+    private async Task<(Company?, bool)> ResolveCompanyAsync(Guid actorId,
+        ComposeRelationRequest<CreateInlineCompanyRequest>? relation, CancellationToken cancellationToken)
+    {
+        if (relation?.ExistingId is Guid id)
+            return (await companies!.GetByIdAsync(id, cancellationToken) ??
+                throw new BadRequestException($"Company '{id}' does not exist.", "invalid_company"), false);
+        if (relation?.New is not { } value) return (null, false);
+        var name = value.Name?.Trim();
+        if (string.IsNullOrWhiteSpace(name)) throw new BadRequestException("Company name is required.", "validation_error");
+        var slug = TextNormalizer.TrimOrNull(value.Slug) ?? SlugGenerator.Generate(name);
+        var normalized = name;
+        var existing = await companies!.FindByNameOrSlugAsync(normalized, slug, cancellationToken);
+        if (existing is not null) return (existing, false);
+        var company = new Company { Id = Guid.NewGuid(), Name = name, Slug = slug,
+            Description = TextNormalizer.TrimOrNull(value.Description), WebsiteUrl = TextNormalizer.TrimOrNull(value.WebsiteUrl),
+            LogoUrl = TextNormalizer.TrimOrNull(value.LogoUrl), Industry = TextNormalizer.TrimOrNull(value.Industry),
+            Location = TextNormalizer.TrimOrNull(value.Location), EmployeeCount = value.EmployeeCount,
+            IsVerified = value.IsVerified, OwnerUserId = actorId };
+        await companies!.AddAsync(company, cancellationToken);
+        return (company, true);
+    }
+
+    private async Task<(Category?, bool)> ResolveCategoryAsync(
+        ComposeRelationRequest<CreateInlineCategoryRequest>? relation, CancellationToken cancellationToken)
+    {
+        if (relation?.ExistingId is Guid id)
+            return (await categories!.GetByIdAsync(id, cancellationToken) ??
+                throw new BadRequestException($"Category '{id}' does not exist.", "invalid_category"), false);
+        if (relation?.New is not { } value) return (null, false);
+        var name = value.Name?.Trim();
+        if (string.IsNullOrWhiteSpace(name)) throw new BadRequestException("Category name is required.", "validation_error");
+        var slug = TextNormalizer.TrimOrNull(value.Slug) ?? SlugGenerator.Generate(name);
+        var existing = await categories!.FindByNameOrSlugAsync(name, slug, cancellationToken);
+        if (existing is not null) return (existing, false);
+        if (value.ParentCategoryId.HasValue && !await categories!.ExistsAsync(value.ParentCategoryId.Value, cancellationToken))
+            throw new BadRequestException($"Parent category '{value.ParentCategoryId}' does not exist.", "invalid_category");
+        var category = new Category { Id = Guid.NewGuid(), Name = name, Slug = slug,
+            Description = TextNormalizer.TrimOrNull(value.Description), DisplayOrder = value.DisplayOrder,
+            ParentCategoryId = value.ParentCategoryId };
+        await categories!.AddAsync(category, cancellationToken);
+        return (category, true);
+    }
     public async Task<JobResponse> CreateAsync(CreateJobRequest request, CancellationToken cancellationToken = default)
     {
         await createValidator.ValidateAndThrowAsync(request, cancellationToken);

@@ -14,6 +14,8 @@ public sealed class PublicJobQueryValidator : AbstractValidator<PublicJobQuery>
         RuleFor(x => x.Search).MaximumLength(250);
         RuleFor(x => x.Keyword).MaximumLength(250);
         RuleFor(x => x.Location).MaximumLength(250);
+        RuleFor(x => x.CompanyName).MaximumLength(250);
+        RuleFor(x => x.CategoryName).MaximumLength(250);
         RuleFor(x => x.MinimumSalary).InclusiveBetween(0, 1_000_000_000);
         RuleFor(x => x.MaximumSalary).InclusiveBetween(0, 1_000_000_000);
         RuleFor(x => x.MaximumSalary).GreaterThanOrEqualTo(x => x.MinimumSalary)

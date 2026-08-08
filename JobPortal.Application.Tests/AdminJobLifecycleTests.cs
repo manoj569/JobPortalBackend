@@ -1,6 +1,7 @@
 using JobPortal.Application.Abstractions.Persistence;
 using JobPortal.Application.Common.Exceptions;
 using JobPortal.Application.Features.AdminApplications;
+using JobPortal.Application.Features.AdminManagement;
 using JobPortal.Application.Features.Candidates;
 using JobPortal.Application.Features.Dashboard;
 using JobPortal.Application.Features.Jobs;
@@ -152,6 +153,32 @@ public sealed class AdminJobLifecycleTests
         Assert.Equal(25, response.TotalCount);
     }
 
+    [Fact]
+    public async Task ComposeSavesOptionalRecruiterContactWithTheDraftAggregate()
+    {
+        var company = new Company { Id = Guid.NewGuid(), Name = "Acme", Slug = "acme" };
+        var category = new Category { Id = Guid.NewGuid(), Name = "Engineering", Slug = "engineering" };
+        var jobs = new JobRepositoryFake();
+        var unitOfWork = new UnitOfWorkFake();
+        var service = new JobService(jobs, unitOfWork, new AuditWriterTestDouble(),
+            new CreateJobRequestValidator(), new UpdateJobRequestValidator(),
+            new UpdateRecruiterContactRequestValidator(), new JobSearchQueryValidator(),
+            new FixedTimeProvider(Now), new CompanyManagementRepositoryFake(company),
+            new CategoryManagementRepositoryFake(category));
+
+        var response = await service.ComposeAsync(Guid.NewGuid(), new(
+            new("Platform Engineer"), new(ExistingId: company.Id),
+            new(ExistingId: category.Id),
+            new("Jane", "Talent Partner", "jane@example.test", "+91 99999 99999", true)));
+
+        Assert.True(response.RecruiterContactCreated);
+        var job = Assert.IsType<Job>(jobs.AddedJob);
+        Assert.Equal(JobStatus.Draft, job.Status);
+        Assert.Equal("jane@example.test", job.RecruiterContact?.Email);
+        Assert.True(job.RecruiterContact?.IsSharingApproved);
+        Assert.Equal(1, unitOfWork.SaveCount);
+    }
+
     private static Fixture CreateFixture(JobStatus status = JobStatus.Draft)
     {
         var company = new Company
@@ -228,6 +255,7 @@ new JobSearchQueryValidator(),
     private sealed class JobRepositoryFake : IJobRepository
     {
         public Job? Job { get; init; }
+        public Job? AddedJob { get; private set; }
         public bool CompanyExists { get; set; } = true;
         public bool CategoryExists { get; set; } = true;
         public IReadOnlyCollection<Job> SearchItems { get; set; } = [];
@@ -261,8 +289,11 @@ new JobSearchQueryValidator(),
             Task.FromResult(0);
 
         public Task AddAsync(
-            Job job, CancellationToken cancellationToken = default) =>
-            Task.CompletedTask;
+            Job job, CancellationToken cancellationToken = default)
+        {
+            AddedJob = job;
+            return Task.CompletedTask;
+        }
 
         public void Update(Job job)
         {
@@ -277,9 +308,41 @@ new JobSearchQueryValidator(),
 
     private sealed class UnitOfWorkFake : IUnitOfWork
     {
+        public int SaveCount { get; private set; }
         public Task<int> SaveChangesAsync(
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(1);
+            CancellationToken cancellationToken = default)
+        {
+            SaveCount++;
+            return Task.FromResult(1);
+        }
+    }
+
+    private sealed class CompanyManagementRepositoryFake(Company company) : ICompanyManagementRepository
+    {
+        public Task<Company?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+            Task.FromResult<Company?>(id == company.Id ? company : null);
+        public Task<(IReadOnlyCollection<CompanyResponse> Items, int TotalCount)> SearchAsync(CompanySearchQuery query, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<CompanyResponse?> GetResponseAsync(Guid id, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<bool> SlugExistsAsync(string slug, Guid? excludingId = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<bool> HasJobsAsync(Guid id, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task AddAsync(Company value, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public void Remove(Company value) => throw new NotSupportedException();
+        public Task<IReadOnlyCollection<AdminOptionResponse>> GetOptionsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    }
+
+    private sealed class CategoryManagementRepositoryFake(Category category) : ICategoryManagementRepository
+    {
+        public Task<Category?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+            Task.FromResult<Category?>(id == category.Id ? category : null);
+        public Task<(IReadOnlyCollection<CategoryResponse> Items, int TotalCount)> SearchAsync(CategorySearchQuery query, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<CategoryResponse?> GetResponseAsync(Guid id, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<bool> SlugExistsAsync(string slug, Guid? excludingId = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<bool> ExistsAsync(Guid id, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<bool> IsDescendantAsync(Guid categoryId, Guid possibleDescendantId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<bool> HasChildrenOrJobsAsync(Guid id, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task AddAsync(Category value, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public void Remove(Category value) => throw new NotSupportedException();
+        public Task<IReadOnlyCollection<AdminOptionResponse>> GetOptionsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 
     private sealed class FixedTimeProvider(DateTime utcNow) : TimeProvider

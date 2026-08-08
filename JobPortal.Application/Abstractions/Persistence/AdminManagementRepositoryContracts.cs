@@ -7,6 +7,8 @@ public interface ICompanyManagementRepository
 {
     Task<(IReadOnlyCollection<CompanyResponse> Items, int TotalCount)> SearchAsync(CompanySearchQuery query, CancellationToken cancellationToken = default);
     Task<Company?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<Company?> FindByNameOrSlugAsync(string normalizedName, string slug, CancellationToken cancellationToken = default) =>
+        Task.FromResult<Company?>(null);
     Task<CompanyResponse?> GetResponseAsync(Guid id, CancellationToken cancellationToken = default);
     Task<bool> SlugExistsAsync(string slug, Guid? excludingId = null, CancellationToken cancellationToken = default);
     Task<bool> HasJobsAsync(Guid id, CancellationToken cancellationToken = default);
@@ -19,6 +21,8 @@ public interface ICategoryManagementRepository
 {
     Task<(IReadOnlyCollection<CategoryResponse> Items, int TotalCount)> SearchAsync(CategorySearchQuery query, CancellationToken cancellationToken = default);
     Task<Category?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<Category?> FindByNameOrSlugAsync(string name, string slug, CancellationToken cancellationToken = default) =>
+        Task.FromResult<Category?>(null);
     Task<CategoryResponse?> GetResponseAsync(Guid id, CancellationToken cancellationToken = default);
     Task<bool> SlugExistsAsync(string slug, Guid? excludingId = null, CancellationToken cancellationToken = default);
     Task<bool> ExistsAsync(Guid id, CancellationToken cancellationToken = default);

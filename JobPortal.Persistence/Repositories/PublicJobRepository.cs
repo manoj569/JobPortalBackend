@@ -320,6 +320,14 @@ public sealed class PublicJobRepository(
 
         if (query.CategoryId.HasValue)
             source = source.Where(job => job.CategoryId == query.CategoryId.Value);
+#pragma warning disable CA1304, CA1311, CA1862 // Parameterless casing is translated by EF; comparison overloads are not.
+        var categoryName = FirstValue(query.CategoryName);
+        if (categoryName is not null)
+        {
+            var normalizedCategoryName = categoryName.ToLower();
+            source = source.Where(job =>
+                job.Category.Name.ToLower().Contains(normalizedCategoryName));
+        }
         if (query.ExperienceLevel.HasValue)
             source = source.Where(job => job.ExperienceLevel == query.ExperienceLevel.Value);
 
@@ -330,7 +338,15 @@ public sealed class PublicJobRepository(
                 source = source.Where(job => job.CompanyId == query.CompanyId.Value);
             if (companyIds.Length > 0)
                 source = source.Where(job => companyIds.Contains(job.CompanyId));
+            var companyName = FirstValue(query.CompanyName);
+            if (companyName is not null)
+            {
+                var normalizedCompanyName = companyName.ToLower();
+                source = source.Where(job =>
+                    job.Company.Name.ToLower().Contains(normalizedCompanyName));
+            }
         }
+#pragma warning restore CA1304, CA1311, CA1862
 
         if (excluded != FacetDimension.Location)
         {

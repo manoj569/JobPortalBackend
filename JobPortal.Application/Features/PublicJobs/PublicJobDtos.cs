@@ -37,7 +37,9 @@ public sealed record PublicJobQuery(
     PostedByType[]? PostedByTypes = null,
     int? FreshnessDays = null,
     bool? FeaturedOnly = null,
-    int? Page = null)
+    int? Page = null,
+    string? CompanyName = null,
+    string? CategoryName = null)
 {
     public int EffectivePageNumber => Page ?? PageNumber;
 }

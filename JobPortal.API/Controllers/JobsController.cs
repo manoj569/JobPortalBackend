@@ -1,5 +1,6 @@
 using JobPortal.Application.Abstractions.Jobs;
 using JobPortal.Application.Features.Jobs;
+using JobPortal.API.Extensions;
 using JobPortal.Shared.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -37,6 +38,17 @@ public sealed class JobsController(
         await InvalidatePublicJobsAsync(cancellationToken);
         return CreatedAtAction(nameof(GetById), new { id = job.Id },
             new ApiResponse<JobResponse>(job, "Job created successfully."));
+    }
+
+    [HttpPost("compose")]
+    [ProducesResponseType(typeof(ApiResponse<ComposeJobResponse>), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(ApiError), StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<ApiResponse<ComposeJobResponse>>> Compose(
+        [FromBody] ComposeJobRequest request, CancellationToken cancellationToken)
+    {
+        var result = await jobService.ComposeAsync(User.GetRequiredUserId(), request, cancellationToken);
+        return StatusCode(StatusCodes.Status201Created,
+            new ApiResponse<ComposeJobResponse>(result, "Draft job composed successfully."));
     }
 
     [HttpPut("{id:guid}")]

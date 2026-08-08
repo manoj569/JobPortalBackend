@@ -18,6 +18,7 @@ public interface IAdminImportService
         CancellationToken cancellationToken = default);
 
     Task<CsvImportResult> CommitJobsAsync(
+        Guid administratorUserId,
         CsvImportFile file,
         CancellationToken cancellationToken = default);
 

@@ -6,6 +6,7 @@ namespace JobPortal.Application.Abstractions.Jobs;
 public interface IJobService
 {
     Task<JobResponse> CreateAsync(CreateJobRequest request, CancellationToken cancellationToken = default);
+    Task<ComposeJobResponse> ComposeAsync(Guid administratorUserId, ComposeJobRequest request, CancellationToken cancellationToken = default);
     Task<JobResponse> UpdateAsync(Guid id, UpdateJobRequest request, CancellationToken cancellationToken = default);
     Task SoftDeleteAsync(Guid id, CancellationToken cancellationToken = default);
     Task DeletePermanentlyAsync(Guid id, CancellationToken cancellationToken = default);
