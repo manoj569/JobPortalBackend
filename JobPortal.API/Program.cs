@@ -29,7 +29,15 @@ using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Environment.EnvironmentName = "Production";
+// Allow local development to see Swagger, but keep Production on Render
+if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("RENDER")))
+{
+    builder.Environment.EnvironmentName = "Development";
+}
+else
+{
+    builder.Environment.EnvironmentName = "Production";
+}
 
 builder.Host.UseSerilog((context, services, configuration) => configuration
     .ReadFrom.Configuration(context.Configuration)
@@ -68,11 +76,21 @@ builder.Services.AddOutputCache(options =>
 builder.Services.AddHostedService<JobExpiryHostedService>();
 
 // ✅ FINAL CORS CONFIGURATION
-var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
+var allowedOrigins = (builder.Configuration
+    .GetSection("Cors:AllowedOrigins")
+    .Get<string[]>() ?? [])
+    .Concat([
+        "http://localhost:5173",
+        "http://localhost:4173",
+        "https://*.vercel.app"
+    ])
+    .Distinct(StringComparer.OrdinalIgnoreCase)
+    .ToArray();
 
 builder.Services.AddCors(options => options.AddPolicy("ConfiguredOrigins", policy =>
 {
     policy.WithOrigins(allowedOrigins)
+          .SetIsOriginAllowedToAllowWildcardSubdomains()
           .AllowAnyHeader()
           .AllowAnyMethod()
           .AllowCredentials();
