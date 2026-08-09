@@ -20,7 +20,13 @@ public sealed record ExternalJobCandidate(string SourceJobId, string Title, stri
     string? EmploymentType = null, DateTime? PublishedAtUtc = null);
 public sealed record JobDiscoveryRunSummary(Guid Id, string Trigger, string Status, DateTime StartedAtUtc,
     DateTime? CompletedAtUtc, int CandidateCount, int DuplicateCount, int ImportedCount, string? ErrorSummary);
-public sealed record JobDiscoveryRunDetails(JobDiscoveryRunSummary Run, IReadOnlyCollection<JobDiscoveryItem> Items);
+public sealed record JobDiscoveryItemResponse(Guid Id, string Provider, string SourceJobId, string Title,
+    string CompanyName, string CategoryName, string ApplicationUrl, string? Location, string? Description,
+    string? EmploymentType, DateTime? PublishedAtUtc, string Status, string? DuplicateReason,
+    Guid? ExistingJobId, Guid? ImportedJobId, DateTime CreatedAtUtc);
+public sealed record JobDiscoveryRunDetailsResponse(Guid Id, string Trigger, string Status,
+    DateTime StartedAtUtc, DateTime? CompletedAtUtc, int CandidateCount, int DuplicateCount,
+    int ImportedCount, string? ErrorSummary, IReadOnlyCollection<JobDiscoveryItemResponse> Items);
 public sealed record JobDiscoveryCommitRequest(IReadOnlyCollection<Guid> ItemIds);
 public sealed record JobDiscoveryCommitResult(int Selected, CsvImportResult Import);
 
@@ -34,8 +40,9 @@ public interface IExternalJobSourceProvider
 public interface IJobDiscoveryRepository
 {
     Task AddAsync(JobDiscoveryRun run, CancellationToken cancellationToken);
-    Task<JobDiscoveryRun?> GetAsync(Guid id, bool tracking, CancellationToken cancellationToken);
-    Task<IReadOnlyCollection<JobDiscoveryRun>> ListAsync(int take, CancellationToken cancellationToken);
+    Task<JobDiscoveryRun?> GetForUpdateAsync(Guid id, CancellationToken cancellationToken);
+    Task<JobDiscoveryRunDetailsResponse?> GetDetailsAsync(Guid id, CancellationToken cancellationToken);
+    Task<IReadOnlyCollection<JobDiscoveryRunSummary>> ListAsync(int take, CancellationToken cancellationToken);
     Task<(Guid? JobId, string? Reason)> FindDuplicateAsync(string provider, ExternalJobCandidate candidate, DateTime cutoffUtc, CancellationToken cancellationToken);
 }
 
@@ -43,7 +50,7 @@ public interface IJobDiscoveryService
 {
     Task<JobDiscoveryRunSummary> RunAsync(string trigger, JobDiscoveryCriteria? criteria, CancellationToken ct);
     Task<IReadOnlyCollection<JobDiscoveryRunSummary>> ListAsync(int take, CancellationToken ct);
-    Task<JobDiscoveryRunDetails?> GetAsync(Guid id, CancellationToken ct);
+    Task<JobDiscoveryRunDetailsResponse?> GetAsync(Guid id, CancellationToken ct);
     Task<CsvImportResult> PreviewAsync(Guid runId, IReadOnlyCollection<Guid> itemIds, CancellationToken ct);
     Task<JobDiscoveryCommitResult> CommitAsync(Guid administratorId, Guid runId, IReadOnlyCollection<Guid> itemIds, CancellationToken ct);
 }

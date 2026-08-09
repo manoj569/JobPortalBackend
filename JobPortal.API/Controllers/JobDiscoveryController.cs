@@ -17,8 +17,8 @@ public sealed class JobDiscoveryController(IJobDiscoveryService service) : Contr
     public async Task<ApiResponse<IReadOnlyCollection<JobDiscoveryRunSummary>>> Runs([FromQuery] int take = 25, CancellationToken ct = default) =>
         new(await service.ListAsync(take, ct));
     [HttpGet("runs/{runId:guid}")]
-    public async Task<ActionResult<ApiResponse<JobDiscoveryRunDetails>>> Details(Guid runId, CancellationToken ct) =>
-        await service.GetAsync(runId, ct) is { } run ? Ok(new ApiResponse<JobDiscoveryRunDetails>(run)) : NotFound();
+    public async Task<ActionResult<ApiResponse<JobDiscoveryRunDetailsResponse>>> Details(Guid runId, CancellationToken ct) =>
+        await service.GetAsync(runId, ct) is { } run ? Ok(new ApiResponse<JobDiscoveryRunDetailsResponse>(run)) : NotFound();
     [HttpPost("runs/{runId:guid}/preview")]
     public async Task<ApiResponse<CsvImportResult>> Preview(Guid runId, [FromBody] JobDiscoveryCommitRequest request, CancellationToken ct) =>
         new(await service.PreviewAsync(runId, request.ItemIds, ct));

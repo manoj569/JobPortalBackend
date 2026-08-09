@@ -60,25 +60,22 @@ public sealed class JobDiscoveryService(IJobDiscoveryRepository repository, IUni
         return Map(run);
     }
 
-    public async Task<IReadOnlyCollection<JobDiscoveryRunSummary>> ListAsync(int take, CancellationToken ct) =>
-        (await repository.ListAsync(Math.Clamp(take, 1, 100), ct)).Select(Map).ToArray();
+    public Task<IReadOnlyCollection<JobDiscoveryRunSummary>> ListAsync(int take, CancellationToken ct) =>
+        repository.ListAsync(Math.Clamp(take, 1, 100), ct);
 
-    public async Task<JobDiscoveryRunDetails?> GetAsync(Guid id, CancellationToken ct)
-    {
-        var run = await repository.GetAsync(id, false, ct);
-        return run is null ? null : new(Map(run), run.Items.ToArray());
-    }
+    public Task<JobDiscoveryRunDetailsResponse?> GetAsync(Guid id, CancellationToken ct) =>
+        repository.GetDetailsAsync(id, ct);
 
     public async Task<CsvImportResult> PreviewAsync(Guid runId, IReadOnlyCollection<Guid> itemIds, CancellationToken ct)
     {
-        var run = await RequireRun(runId, false, ct);
+        var run = await repository.GetDetailsAsync(runId, ct) ?? throw new KeyNotFoundException("Discovery run was not found.");
         await using var file = Csv(run.Items.Where(x => itemIds.Contains(x.Id) && x.Status == "Candidate"));
         return await imports.PreviewJobsAsync(new("job-discovery.csv", file.Length, file), ct);
     }
 
     public async Task<JobDiscoveryCommitResult> CommitAsync(Guid administratorId, Guid runId, IReadOnlyCollection<Guid> itemIds, CancellationToken ct)
     {
-        var run = await RequireRun(runId, true, ct);
+        var run = await RequireRun(runId, ct);
         var selected = run.Items.Where(x => itemIds.Contains(x.Id) && x.Status == "Candidate").ToArray();
         await using var file = Csv(selected);
         var result = await imports.CommitJobsAsync(administratorId, new("job-discovery.csv", file.Length, file), ct);
@@ -91,13 +88,20 @@ public sealed class JobDiscoveryService(IJobDiscoveryRepository repository, IUni
         return new(selected.Length, result);
     }
 
-    private async Task<JobDiscoveryRun> RequireRun(Guid id, bool tracking, CancellationToken ct) =>
-        await repository.GetAsync(id, tracking, ct) ?? throw new KeyNotFoundException("Discovery run was not found.");
+    private async Task<JobDiscoveryRun> RequireRun(Guid id, CancellationToken ct) =>
+        await repository.GetForUpdateAsync(id, ct) ?? throw new KeyNotFoundException("Discovery run was not found.");
     private static JobDiscoveryRunSummary Map(JobDiscoveryRun x) => new(x.Id, x.Trigger, x.Status, x.StartedAtUtc, x.CompletedAtUtc, x.CandidateCount, x.DuplicateCount, x.ImportedCount, x.ErrorSummary);
     private static string? Null(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     private static JobDiscoveryCriteria[] BuildSearches(JobDiscoveryOptions o) =>
         (from q in o.Queries.DefaultIfEmpty("") from l in o.Locations.DefaultIfEmpty("") select new JobDiscoveryCriteria(q, l, o.DefaultCountry)).ToArray();
     private static MemoryStream Csv(IEnumerable<JobDiscoveryItem> items)
+    {
+        static string E(string? value) => $"\"{(value ?? "").Replace("\"", "\"\"")}\"";
+        var text = new StringBuilder("title,companyName,categoryName,description,applicationUrl,employmentType,location\r\n");
+        foreach (var x in items) text.AppendJoin(',', E(x.Title), E(x.CompanyName), E(x.CategoryName), E(x.Description), E(x.ApplicationUrl), E(x.EmploymentType), E(x.Location)).Append("\r\n");
+        return new MemoryStream(Encoding.UTF8.GetBytes(text.ToString()));
+    }
+    private static MemoryStream Csv(IEnumerable<JobDiscoveryItemResponse> items)
     {
         static string E(string? value) => $"\"{(value ?? "").Replace("\"", "\"\"")}\"";
         var text = new StringBuilder("title,companyName,categoryName,description,applicationUrl,employmentType,location\r\n");
