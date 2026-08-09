@@ -19,6 +19,7 @@ using JobPortal.Application.Features.Authentication;
 using JobPortal.Application.Features.Candidates;
 using JobPortal.Application.Features.Dashboard;
 using JobPortal.Application.Features.Jobs;
+using JobPortal.Application.Features.JobDiscovery;
 using JobPortal.Application.Features.Memberships;
 using JobPortal.Application.Features.Payments;
 using JobPortal.Application.Features.PublicJobs;
@@ -45,6 +46,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IAdminDashboardService, AdminDashboardService>();
         services.AddScoped<IAdminApplicationService, AdminApplicationService>();
         services.AddScoped<IAdminImportService, AdminImportService>();
+        services.AddScoped<IJobDiscoveryService, JobDiscoveryService>();
         services.AddScoped<ICompanyManagementService, CompanyManagementService>();
         services.AddScoped<ICategoryManagementService, CategoryManagementService>();
         return services;

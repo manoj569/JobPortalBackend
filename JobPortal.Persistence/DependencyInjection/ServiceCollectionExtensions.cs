@@ -26,6 +26,7 @@ public static class ServiceCollectionExtensions
             }), poolSize: 128);
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IAdminImportRepository, AdminImportRepository>();
+        services.AddScoped<JobPortal.Application.Features.JobDiscovery.IJobDiscoveryRepository, JobDiscoveryRepository>();
         services.AddScoped<IAuditLogRepository, AuditLogRepository>();
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
         services.AddScoped<IAuthenticationChallengeRepository,

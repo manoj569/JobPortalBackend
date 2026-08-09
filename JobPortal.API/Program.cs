@@ -11,6 +11,7 @@ using JobPortal.API.Services;
 using JobPortal.API.Startup;
 using JobPortal.API.Swagger;
 using JobPortal.Application;
+using JobPortal.Application.Features.JobDiscovery;
 using JobPortal.Application.Abstractions.Auditing;
 using JobPortal.Application.Abstractions.Authentication;
 using JobPortal.Infrastructure;
@@ -74,6 +75,8 @@ builder.Services.AddOutputCache(options =>
         .Tag("public-jobs"));
 });
 builder.Services.AddHostedService<JobExpiryHostedService>();
+builder.Services.Configure<JobDiscoveryOptions>(builder.Configuration.GetSection(JobDiscoveryOptions.SectionName));
+builder.Services.AddHostedService<JobDiscoveryHostedService>();
 
 // ✅ FINAL CORS CONFIGURATION
 var allowedOrigins = (builder.Configuration

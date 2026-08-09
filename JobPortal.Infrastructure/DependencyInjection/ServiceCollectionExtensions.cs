@@ -5,6 +5,7 @@ using JobPortal.Infrastructure.Authentication;
 using JobPortal.Infrastructure.Payments;
 using JobPortal.Infrastructure.Services;
 using JobPortal.Infrastructure.Storage;
+using JobPortal.Application.Features.JobDiscovery;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -34,6 +35,12 @@ public static class ServiceCollectionExtensions
             client.Timeout = TimeSpan.FromSeconds(10);
         });
         services.AddScoped<IEmailService, BrevoEmailService>();
+        services.AddHttpClient(AdzunaJobSourceProvider.HttpClientName, client =>
+        {
+            client.BaseAddress = new Uri("https://api.adzuna.com/");
+            client.Timeout = TimeSpan.FromSeconds(10);
+        });
+        services.AddScoped<IExternalJobSourceProvider, AdzunaJobSourceProvider>();
         services.AddSingleton<IRazorpayGateway, RazorpayGateway>();
         services.AddSingleton<IMembershipPlanProvider, ConfigurationMembershipPlanProvider>();
         services.AddSingleton<IResumeStorage, LocalResumeStorage>();

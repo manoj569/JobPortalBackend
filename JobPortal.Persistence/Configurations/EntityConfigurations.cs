@@ -3,6 +3,8 @@ using JobPortal.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
+#pragma warning disable CA1725
+
 namespace JobPortal.Persistence.Configurations;
 
 internal static class EntityTypeBuilderExtensions
@@ -363,6 +365,31 @@ public sealed class JobApplicationStatusHistoryConfiguration :
             .HasForeignKey(x => x.ApplicationId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(x => x.ActorUser).WithMany()
             .HasForeignKey(x => x.ActorUserId).OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public sealed class JobDiscoveryRunConfiguration : IEntityTypeConfiguration<JobDiscoveryRun>
+{
+    public void Configure(EntityTypeBuilder<JobDiscoveryRun> b)
+    {
+        b.ToTable("JobDiscoveryRuns"); b.ConfigureBaseEntity();
+        b.Property(x => x.Trigger).HasMaxLength(32).IsRequired(); b.Property(x => x.Status).HasMaxLength(32).IsRequired();
+        b.Property(x => x.ErrorSummary).HasMaxLength(2000); b.HasIndex(x => x.StartedAtUtc);
+    }
+}
+
+public sealed class JobDiscoveryItemConfiguration : IEntityTypeConfiguration<JobDiscoveryItem>
+{
+    public void Configure(EntityTypeBuilder<JobDiscoveryItem> b)
+    {
+        b.ToTable("JobDiscoveryItems"); b.ConfigureBaseEntity();
+        b.Property(x => x.Provider).HasMaxLength(64).IsRequired(); b.Property(x => x.SourceJobId).HasMaxLength(256).IsRequired();
+        b.Property(x => x.Title).HasMaxLength(300).IsRequired(); b.Property(x => x.CompanyName).HasMaxLength(200).IsRequired();
+        b.Property(x => x.CategoryName).HasMaxLength(200).IsRequired(); b.Property(x => x.ApplicationUrl).HasMaxLength(2048).IsRequired();
+        b.Property(x => x.Location).HasMaxLength(300); b.Property(x => x.EmploymentType).HasMaxLength(50);
+        b.Property(x => x.Status).HasMaxLength(32).IsRequired(); b.Property(x => x.DuplicateReason).HasMaxLength(64);
+        b.HasIndex(x => new { x.Provider, x.SourceJobId }).IsUnique().HasFilter("[IsDeleted] = 0");
+        b.HasIndex(x => x.RunId); b.HasOne(x => x.Run).WithMany(x => x.Items).HasForeignKey(x => x.RunId).OnDelete(DeleteBehavior.Cascade);
     }
 }
 

@@ -18,6 +18,8 @@ public sealed class JobPortalDbContext(DbContextOptions<JobPortalDbContext> opti
     public DbSet<Company> Companies => Set<Company>();
     public DbSet<Category> Categories => Set<Category>();
     public DbSet<Job> Jobs => Set<Job>();
+    public DbSet<JobDiscoveryRun> JobDiscoveryRuns => Set<JobDiscoveryRun>();
+    public DbSet<JobDiscoveryItem> JobDiscoveryItems => Set<JobDiscoveryItem>();
     public DbSet<JobRecruiterContact> JobRecruiterContacts => Set<JobRecruiterContact>();
     public DbSet<Skill> Skills => Set<Skill>();
     public DbSet<JobSkill> JobSkills => Set<JobSkill>();
