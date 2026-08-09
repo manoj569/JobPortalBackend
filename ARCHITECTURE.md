@@ -328,6 +328,15 @@ required and treats the new columns as optional, preserving existing files while
 templates include the richer schema. All imported jobs still start as visible, unfeatured,
 unpublished Draft records.
 
+## Daily job discovery deployment
+
+Daily discovery persists review data in `JobDiscoveryRuns` and `JobDiscoveryItems`. Schema migration
+`20260809150000_AddJobDiscovery` creates both tables, their foreign key, and the run/source lookup
+indexes. Render starts the API but does not automatically execute EF Core migrations. Before enabling
+`JobDiscovery:Enabled` in production, run the idempotent SQL Server script
+`JobPortal.Persistence/Migrations/ApplyJobDiscoveryProduction.sql` against the production Azure SQL
+database and confirm the migration ID appears in `__EFMigrationsHistory`.
+
 ## Scaling guidance
 
 - API instances are stateless and can scale horizontally.

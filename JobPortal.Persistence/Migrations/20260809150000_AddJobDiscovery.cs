@@ -1,8 +1,12 @@
 using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using JobPortal.Persistence.Context;
 
 #nullable disable
 namespace JobPortal.Persistence.Migrations;
 
+[DbContext(typeof(JobPortalDbContext))]
+[Migration("20260809150000_AddJobDiscovery")]
 public partial class AddJobDiscovery : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)

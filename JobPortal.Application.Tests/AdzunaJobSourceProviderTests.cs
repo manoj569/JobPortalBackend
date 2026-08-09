@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Net.Http.Headers;
 using JobPortal.Application.Features.JobDiscovery;
 using JobPortal.Infrastructure.Services;
 using Microsoft.Extensions.Configuration;
@@ -43,7 +44,9 @@ public sealed class AdzunaJobSourceProviderTests
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             RequestUri = request.RequestUri?.ToString();
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") });
+            var content = new StringContent(json, Encoding.UTF8, "application/json");
+            content.Headers.ContentType = new MediaTypeHeaderValue("application/json") { CharSet = "utf8" };
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
         }
     }
 }

@@ -1,4 +1,4 @@
-using System.Net.Http.Json;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using JobPortal.Application.Features.JobDiscovery;
 using Microsoft.Extensions.Configuration;
@@ -9,6 +9,10 @@ namespace JobPortal.Infrastructure.Services;
 
 public sealed class AdzunaJobSourceProvider(IHttpClientFactory clients, IConfiguration configuration) : IExternalJobSourceProvider
 {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        PropertyNameCaseInsensitive = true
+    };
     public const string HttpClientName = "AdzunaJobDiscovery";
     public string Name => "Adzuna";
     public bool IsConfigured => !string.IsNullOrWhiteSpace(configuration["JobDiscovery:Adzuna:AppId"]) &&
@@ -21,12 +25,17 @@ public sealed class AdzunaJobSourceProvider(IHttpClientFactory clients, IConfigu
         var uri = $"v1/api/jobs/{Uri.EscapeDataString(country)}/search/1?app_id={Uri.EscapeDataString(configuration["JobDiscovery:Adzuna:AppId"]!)}&app_key={Uri.EscapeDataString(configuration["JobDiscovery:Adzuna:ApiKey"]!)}&results_per_page=50&what={Uri.EscapeDataString(criteria.Query?.Trim() ?? "")}&where={Uri.EscapeDataString(criteria.Location?.Trim() ?? "")}";
         using var response = await clients.CreateClient(HttpClientName).GetAsync(uri, ct);
         response.EnsureSuccessStatusCode();
-        var payload = await response.Content.ReadFromJsonAsync<Response>(cancellationToken: ct);
-        return payload?.Results.Select(x => new ExternalJobCandidate(x.Id ?? "", x.Title ?? "", x.Company?.DisplayName ?? "",
+        var contentType = response.Content.Headers.ContentType;
+        if (contentType is not null && string.Equals(contentType.CharSet, "utf8", StringComparison.OrdinalIgnoreCase))
+            contentType.CharSet = null;
+        var json = await response.Content.ReadAsStringAsync(ct);
+        var payload = JsonSerializer.Deserialize<Response>(json, JsonOptions)
+            ?? throw new JsonException("Adzuna returned an empty JSON response.");
+        return payload.Results?.Select(x => new ExternalJobCandidate(x.Id ?? "", x.Title ?? "", x.Company?.DisplayName ?? "",
             x.Category?.Label ?? "Other", x.RedirectUrl ?? "", x.Location?.DisplayName, x.Description, x.ContractType, x.Created)).ToArray() ?? [];
     }
 
-    private sealed record Response([property: JsonPropertyName("results")] Result[] Results);
+    private sealed record Response([property: JsonPropertyName("results")] Result[]? Results);
     private sealed record Result([property: JsonPropertyName("id")] string? Id, [property: JsonPropertyName("title")] string? Title,
         [property: JsonPropertyName("description")] string? Description, [property: JsonPropertyName("redirect_url")] string? RedirectUrl,
         [property: JsonPropertyName("created")] DateTime? Created, [property: JsonPropertyName("contract_type")] string? ContractType,
