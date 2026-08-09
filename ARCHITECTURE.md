@@ -282,8 +282,11 @@ still enforces its stricter 15-second timeout.
 `GET /api/legal/terms-of-use` and `GET /api/legal/privacy-policy` anonymously return application-
 owned versioned, effective-dated plain-text content. The accepted legal version is stored for new
 registrations. Application-status messages and password-reset links use `IEmailService` and direct
-SMTP. Password-reset links are built from `Email:PasswordResetUrl` with URL-encoded email and token
-parameters; production must override this value through `Email__PasswordResetUrl`. Brevo SMTP
+SMTP. Password-reset links are built from `AppUrls:FrontendBaseUrl` plus `/reset-password`, with
+URL-encoded email and token parameters. Render production configuration uses
+`AppUrls__FrontendBaseUrl`, `Email__FromName`, `Email__FromAddress`, `Email__Enabled`, `Email__Smtp__Host`,
+`Email__Smtp__Port`, `Email__Smtp__EnableSsl`, `Email__Smtp__Username`, and
+`Email__Smtp__Password`. Brevo SMTP
 credentials and the sender address remain server-side configuration only. A durable transactional
 outbox should be considered before scaling production email delivery.
 

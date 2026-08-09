@@ -6,6 +6,10 @@ namespace JobPortal.Application.Abstractions.Persistence;
 public interface IUserRepository
 {
     Task<User?> GetByNormalizedEmailAsync(string normalizedEmail, CancellationToken cancellationToken = default);
+    Task<User?> GetByPasswordResetTokenHashAsync(
+        string tokenHash,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<User?>(null);
     Task<User?> GetByNormalizedPhoneAsync(
         string normalizedPhoneNumber,
         CancellationToken cancellationToken = default);

@@ -267,18 +267,8 @@ public sealed class AuthenticationTests
         fixture.Users.Items.Add(user);
         await fixture.Service.RequestPasswordResetAsync(new(user.Email));
         var rawToken = fixture.Email.LastRawToken!;
-        var mismatch = await new CompletePasswordResetRequestValidator()
-            .ValidateAsync(new CompletePasswordResetRequest(
-                user.Email,
-                rawToken,
-                "newpass",
-                "different"));
-        Assert.Contains(
-            mismatch.Errors,
-            error => error.PropertyName == "ConfirmPassword");
-
         var completed = await fixture.Service.CompletePasswordResetAsync(
-            new("  USER@EXAMPLE.COM ", rawToken, "newpass", "newpass"));
+            new(rawToken, "newpass"));
 
         Assert.Equal(
             "Password changed successfully. Please log in.",
@@ -293,7 +283,7 @@ public sealed class AuthenticationTests
         Assert.DoesNotContain("newpass", completionAudit, StringComparison.Ordinal);
         await Assert.ThrowsAsync<BadRequestException>(() =>
             fixture.Service.CompletePasswordResetAsync(
-                new(user.Email, rawToken, "again12", "again12")));
+                new(rawToken, "again12")));
     }
 
     [Fact]
@@ -305,7 +295,7 @@ public sealed class AuthenticationTests
         await invalid.Service.RequestPasswordResetAsync(new(invalidUser.Email));
         await Assert.ThrowsAsync<BadRequestException>(() =>
             invalid.Service.CompletePasswordResetAsync(
-                new(invalidUser.Email, "wrong-token", "newpass", "newpass")));
+                new("wrong-token", "newpass")));
 
         var expired = CreateFixture();
         var expiredUser = NewUser();
@@ -315,9 +305,7 @@ public sealed class AuthenticationTests
         await Assert.ThrowsAsync<BadRequestException>(() =>
             expired.Service.CompletePasswordResetAsync(
                 new(
-                    expiredUser.Email,
                     expired.Email.LastRawToken!,
-                    "newpass",
                     "newpass")));
 
         var inactive = CreateFixture();
@@ -492,6 +480,12 @@ public sealed class AuthenticationTests
             CancellationToken cancellationToken = default) =>
             Task.FromResult(Items.SingleOrDefault(
                 user => user.NormalizedEmail == normalizedEmail));
+
+        public Task<User?> GetByPasswordResetTokenHashAsync(
+            string tokenHash,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(Items.SingleOrDefault(
+                user => user.PasswordResetTokenHash == tokenHash));
 
         public Task<User?> GetByNormalizedPhoneAsync(
             string normalizedPhoneNumber,

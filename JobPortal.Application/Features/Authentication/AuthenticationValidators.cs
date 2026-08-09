@@ -106,15 +106,8 @@ public sealed class CompletePasswordResetRequestValidator :
 {
     public CompletePasswordResetRequestValidator()
     {
-        RuleFor(x => x.Email)
-            .NotEmpty()
-            .MaximumLength(256)
-            .EmailAddress();
         RuleFor(x => x.Token).NotEmpty().MaximumLength(512);
         RuleFor(x => x.NewPassword).SetValidator(new PasswordValidator());
-        RuleFor(x => x.ConfirmPassword)
-            .Equal(x => x.NewPassword)
-            .WithMessage("ConfirmPassword must match NewPassword.");
     }
 }
 

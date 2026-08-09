@@ -12,6 +12,13 @@ public sealed class UserRepository(JobPortalDbContext context) : IUserRepository
     public Task<User?> GetByNormalizedEmailAsync(string normalizedEmail, CancellationToken cancellationToken = default) =>
         context.Users.Include(x => x.Role).SingleOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken);
 
+    public Task<User?> GetByPasswordResetTokenHashAsync(
+        string tokenHash,
+        CancellationToken cancellationToken = default) =>
+        context.Users.Include(x => x.Role).SingleOrDefaultAsync(
+            x => x.PasswordResetTokenHash == tokenHash,
+            cancellationToken);
+
     public Task<User?> GetByNormalizedPhoneAsync(
         string normalizedPhoneNumber,
         CancellationToken cancellationToken = default) =>

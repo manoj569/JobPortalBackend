@@ -1,48 +1,51 @@
 using System.Net;
 using System.Net.Mail;
+using System.Diagnostics;
+using System.Text;
 using JobPortal.Application.Abstractions.Authentication;
 using JobPortal.Domain.Entities;
 using JobPortal.Domain.Enums;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.AspNetCore.Http;
 
 namespace JobPortal.Infrastructure.Services;
 
 public sealed class SmtpEmailService(
     IConfiguration configuration,
-    ILogger<SmtpEmailService> logger) : IEmailService
+    ILogger<SmtpEmailService> logger,
+    IHttpContextAccessor? httpContextAccessor = null) : IEmailService
 {
-    private static readonly Action<ILogger, Exception?> DeliveryDisabled =
-        LoggerMessage.Define(
+    private static readonly Action<ILogger, string, Exception?> DeliveryDisabled =
+        LoggerMessage.Define<string>(
             LogLevel.Warning,
             new EventId(1001, nameof(DeliveryDisabled)),
-            "Transactional email delivery is disabled.");
+            "Transactional email delivery is disabled; correlation ID {CorrelationId}.");
 
-    private static readonly Action<ILogger, string, Exception?> DeliveryFailed =
-        LoggerMessage.Define<string>(
+    private static readonly Action<ILogger, string, string, Exception?> DeliveryFailed =
+        LoggerMessage.Define<string, string>(
             LogLevel.Error,
             new EventId(1002, nameof(DeliveryFailed)),
-            "Transactional email delivery failed for message type {MessageType}.");
+            "Transactional email delivery failed for message type {MessageType}; correlation ID {CorrelationId}.");
 
-    private static readonly Action<ILogger, Exception?> PasswordResetUrlInvalid =
-        LoggerMessage.Define(
+    private static readonly Action<ILogger, string, Exception?> PasswordResetUrlInvalid =
+        LoggerMessage.Define<string>(
             LogLevel.Error,
             new EventId(1003, nameof(PasswordResetUrlInvalid)),
-            "Password reset email delivery failed because the configured reset URL is invalid.");
+            "Password reset email delivery failed because AppUrls:FrontendBaseUrl is invalid; correlation ID {CorrelationId}.");
 
     public Task<EmailDeliveryResult> SendPasswordResetAsync(
         User user,
         string rawToken,
         CancellationToken cancellationToken = default)
     {
-        var configuredUrl = configuration["Email:PasswordResetUrl"];
+        var configuredUrl = configuration["AppUrls:FrontendBaseUrl"];
         var resetUrl = BuildPasswordResetUrl(
             configuredUrl,
-            user.Email,
             rawToken);
         if (resetUrl is null)
         {
-            PasswordResetUrlInvalid(logger, null);
+            PasswordResetUrlInvalid(logger, CorrelationId, null);
             return Task.FromResult(EmailDeliveryResult.Failed);
         }
 
@@ -62,7 +65,6 @@ public sealed class SmtpEmailService(
 
     internal static Uri? BuildPasswordResetUrl(
         string? configuredUrl,
-        string email,
         string rawToken)
     {
         if (!Uri.TryCreate(configuredUrl, UriKind.Absolute, out var resetUrl) ||
@@ -70,13 +72,12 @@ public sealed class SmtpEmailService(
                 resetUrl.Scheme != Uri.UriSchemeHttps))
             return null;
 
-        var resetUrlBuilder = new UriBuilder(resetUrl);
-        var existingQuery = resetUrlBuilder.Query.TrimStart('?');
-        var resetParameters =
-            $"email={Uri.EscapeDataString(email)}&token={Uri.EscapeDataString(rawToken)}";
-        resetUrlBuilder.Query = string.IsNullOrEmpty(existingQuery)
-            ? resetParameters
-            : $"{existingQuery}&{resetParameters}";
+        var resetUrlBuilder = new UriBuilder(resetUrl)
+        {
+            Path = $"{resetUrl.AbsolutePath.TrimEnd('/')}/reset-password",
+            Fragment = string.Empty
+        };
+        resetUrlBuilder.Query = $"token={Uri.EscapeDataString(rawToken)}";
         return resetUrlBuilder.Uri;
     }
 
@@ -115,7 +116,7 @@ public sealed class SmtpEmailService(
     {
         if (!configuration.GetValue("Email:Enabled", false))
         {
-            DeliveryDisabled(logger, null);
+            DeliveryDisabled(logger, CorrelationId, null);
             return EmailDeliveryResult.Disabled;
         }
 
@@ -131,9 +132,15 @@ public sealed class SmtpEmailService(
                     configuration["Email:Smtp:Password"])
             };
 
-            using var message = new MailMessage(
+            var fromName = configuration["Email:FromName"]!
+                .Replace('\r', ' ')
+                .Replace('\n', ' ')
+                .Trim();
+            var sender = new MailAddress(
                 configuration["Email:FromAddress"]!,
-                recipient)
+                fromName,
+                Encoding.UTF8);
+            using var message = new MailMessage(sender, new MailAddress(recipient))
             {
                 Subject = subject,
                 Body = body,
@@ -149,9 +156,14 @@ public sealed class SmtpEmailService(
         }
         catch (Exception exception)
         {
-            DeliveryFailed(logger, messageType, exception);
+            DeliveryFailed(logger, messageType, CorrelationId, exception);
             return EmailDeliveryResult.Failed;
         }
     }
+
+    private string CorrelationId =>
+        httpContextAccessor?.HttpContext?.TraceIdentifier ??
+        Activity.Current?.TraceId.ToString() ??
+        "unavailable";
 
 }

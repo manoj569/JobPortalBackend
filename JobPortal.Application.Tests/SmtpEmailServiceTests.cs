@@ -12,34 +12,31 @@ public sealed class SmtpEmailServiceTests
     [Fact]
     public void PasswordResetUrlAllowsOnlyAbsoluteHttpAndEncodesParameters()
     {
-        const string email = "candidate+reset@example.com";
         const string token = "token/with+reserved=characters";
 
         var result = SmtpEmailService.BuildPasswordResetUrl(
-            "https://careers.example.test/reset?source=portal#reset",
-            email,
+            "https://careerharbor.in",
             token);
 
         Assert.NotNull(result);
+        Assert.Equal(
+            "https://careerharbor.in/reset-password?token=token%2Fwith%2Breserved%3Dcharacters",
+            result.AbsoluteUri);
         Assert.Equal("https", result.Scheme);
-        Assert.Equal("careers.example.test", result.Host);
-        Assert.Contains("source=portal", result.Query, StringComparison.Ordinal);
-        Assert.Contains(
-            "email=candidate%2Breset%40example.com",
-            result.Query,
-            StringComparison.Ordinal);
+        Assert.Equal("careerharbor.in", result.Host);
+        Assert.Equal("/reset-password", result.AbsolutePath);
+        Assert.DoesNotContain("localhost", result.AbsoluteUri, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("email=", result.Query, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(
             "token=token%2Fwith%2Breserved%3Dcharacters",
             result.Query,
             StringComparison.Ordinal);
-        Assert.Equal("#reset", result.Fragment);
+        Assert.Equal(string.Empty, result.Fragment);
         Assert.Null(SmtpEmailService.BuildPasswordResetUrl(
             "javascript:alert(1)",
-            email,
             token));
         Assert.Null(SmtpEmailService.BuildPasswordResetUrl(
             "/relative/reset",
-            email,
             token));
     }
 
@@ -48,12 +45,12 @@ public sealed class SmtpEmailServiceTests
     {
         const string token = "raw-password-reset-token";
         const string email = "candidate@example.com";
-        const string resetUrl = "http://localhost:5173/reset-password";
+        const string resetUrl = "http://localhost:5173";
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Email:Enabled"] = bool.FalseString,
-                ["Email:PasswordResetUrl"] = resetUrl
+                ["AppUrls:FrontendBaseUrl"] = resetUrl
             })
             .Build();
         var logger = new CollectingLogger<SmtpEmailService>();

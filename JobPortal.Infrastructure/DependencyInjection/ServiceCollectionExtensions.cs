@@ -42,7 +42,8 @@ public static class ServiceCollectionExtensions
         string[] requiredKeys =
         [
             "Email:FromAddress",
-            "Email:PasswordResetUrl",
+            "Email:FromName",
+            "AppUrls:FrontendBaseUrl",
             "Email:Smtp:Host", "Email:Smtp:Username", "Email:Smtp:Password"
         ];
         var missing = requiredKeys.Where(key => string.IsNullOrWhiteSpace(configuration[key])).ToArray();
@@ -51,11 +52,11 @@ public static class ServiceCollectionExtensions
                 $"Email delivery is enabled but required configuration is missing: {string.Join(", ", missing)}.");
         if (configuration.GetValue<int>("Email:Smtp:Port") is <= 0 or > 65535)
             throw new InvalidOperationException("Email:Smtp:Port must be between 1 and 65535.");
-        var passwordResetUrl = configuration["Email:PasswordResetUrl"];
-        if (!Uri.TryCreate(passwordResetUrl, UriKind.Absolute, out var parsedResetUrl) ||
+        var frontendBaseUrl = configuration["AppUrls:FrontendBaseUrl"];
+        if (!Uri.TryCreate(frontendBaseUrl, UriKind.Absolute, out var parsedResetUrl) ||
             (parsedResetUrl.Scheme != Uri.UriSchemeHttp &&
                 parsedResetUrl.Scheme != Uri.UriSchemeHttps))
             throw new InvalidOperationException(
-                "Email:PasswordResetUrl must be an absolute HTTP or HTTPS URL.");
+                "AppUrls:FrontendBaseUrl must be an absolute HTTP or HTTPS URL.");
     }
 }

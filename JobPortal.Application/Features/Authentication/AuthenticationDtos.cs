@@ -37,10 +37,8 @@ public sealed record RequestPasswordResetRequest(string Email);
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record CompletePasswordResetRequest(
-    string Email,
     string Token,
-    string NewPassword,
-    string ConfirmPassword);
+    string NewPassword);
 
 public sealed record MessageResponse(string Message);
 

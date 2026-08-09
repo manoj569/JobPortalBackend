@@ -188,16 +188,18 @@ public sealed class AuthService(
         CompletePasswordResetRequest request,
         CancellationToken cancellationToken = default)
     {
-        request = request with { Email = request.Email?.Trim() ?? string.Empty };
         await completeResetValidator.ValidateAndThrowAsync(request, cancellationToken);
-        var user = await users.GetByNormalizedEmailAsync(
-            NormalizeEmail(request.Email),
+        var tokenHash = HashPasswordResetToken(request.Token);
+        var user = await users.GetByPasswordResetTokenHashAsync(
+            tokenHash,
             cancellationToken);
         if (user is not { Status: UserStatus.Active } ||
             string.IsNullOrWhiteSpace(user.PasswordResetTokenHash) ||
             user.PasswordResetTokenExpiresAtUtc is null ||
             user.PasswordResetTokenExpiresAtUtc <= UtcNow ||
-            !VerifyPasswordResetToken(request.Token, user.PasswordResetTokenHash))
+            !CryptographicOperations.FixedTimeEquals(
+                Convert.FromHexString(tokenHash),
+                Convert.FromHexString(user.PasswordResetTokenHash)))
             throw InvalidPasswordReset();
 
         user.PasswordHash = passwordHasher.Hash(request.NewPassword);

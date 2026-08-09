@@ -50,6 +50,9 @@ public sealed class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(x => x.ResumeFileName).HasMaxLength(255);
         builder.Property(x => x.ResumeContentType).HasMaxLength(100);
         builder.Property(x => x.PasswordResetTokenHash).HasMaxLength(64);
+        builder.HasIndex(x => x.PasswordResetTokenHash)
+            .IsUnique()
+            .HasFilter("[PasswordResetTokenHash] IS NOT NULL AND [IsDeleted] = 0");
         builder.Property(x => x.EmailVerificationTokenHash).HasMaxLength(64);
         builder.HasIndex(x => x.NormalizedEmail).IsUnique().HasFilter("[IsDeleted] = 0");
         builder.HasIndex(x => x.NormalizedPhoneNumber).IsUnique()

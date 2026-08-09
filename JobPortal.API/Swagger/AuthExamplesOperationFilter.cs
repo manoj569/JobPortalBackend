@@ -22,10 +22,8 @@ public sealed class AuthExamplesOperationFilter : IOperationFilter
             "LoginWithOtp" =>
                 Object(("phoneNumber", "9876543210"), ("otp", "000000")),
             "CompletePasswordReset" => Object(
-                ("email", "user@example.com"),
                 ("token", "Password reset token from the email link"),
-                ("newPassword", "abc123"),
-                ("confirmPassword", "abc123")),
+                ("newPassword", "abc123")),
             "Refresh" or "Logout" => Object(("refreshToken", "Base64 refresh token")),
             "ChangePassword" => Object(("currentPassword", "abc123"), ("newPassword", "newpass")),
             "CreateOrder" => new OpenApiObject(),

@@ -1588,6 +1588,10 @@ namespace JobPortal.Persistence.Migrations
                         .IsUnique()
                         .HasFilter("[NormalizedPhoneNumber] IS NOT NULL AND [IsDeleted] = 0");
 
+                    b.HasIndex("PasswordResetTokenHash")
+                        .IsUnique()
+                        .HasFilter("[PasswordResetTokenHash] IS NOT NULL AND [IsDeleted] = 0");
+
                     b.HasIndex("RoleId");
 
                     b.HasIndex("Status", "IsDeleted");
