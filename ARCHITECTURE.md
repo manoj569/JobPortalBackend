@@ -284,10 +284,9 @@ owned versioned, effective-dated plain-text content. The accepted legal version 
 registrations. Application-status messages and password-reset links use `IEmailService` and direct
 SMTP. Password-reset links are built from `AppUrls:FrontendBaseUrl` plus `/reset-password`, with
 URL-encoded email and token parameters. Render production configuration uses
-`AppUrls__FrontendBaseUrl`, `Email__FromName`, `Email__FromAddress`, `Email__Enabled`, `Email__Smtp__Host`,
-`Email__Smtp__Port`, `Email__Smtp__EnableSsl`, `Email__Smtp__Username`, and
-`Email__Smtp__Password`. Brevo SMTP
-credentials and the sender address remain server-side configuration only. A durable transactional
+`AppUrls__FrontendBaseUrl`, `Email__FromName`, `Email__FromAddress`, `Email__Enabled`, and
+`Email__Brevo__ApiKey`. Transactional delivery uses Brevo's HTTPS API through a named HTTP client
+with a 10-second timeout. The API key and sender address remain server-side configuration only. A durable transactional
 outbox should be considered before scaling production email delivery.
 
 ## Razorpay Test Mode payments

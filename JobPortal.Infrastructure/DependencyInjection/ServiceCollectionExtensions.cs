@@ -28,7 +28,12 @@ public static class ServiceCollectionExtensions
         //         new MediaTypeWithQualityHeaderValue("application/json"));
         // });
 
-        services.AddScoped<IEmailService, SmtpEmailService>();
+        services.AddHttpClient(BrevoEmailService.HttpClientName, client =>
+        {
+            client.BaseAddress = new Uri("https://api.brevo.com/");
+            client.Timeout = TimeSpan.FromSeconds(10);
+        });
+        services.AddScoped<IEmailService, BrevoEmailService>();
         services.AddSingleton<IRazorpayGateway, RazorpayGateway>();
         services.AddSingleton<IMembershipPlanProvider, ConfigurationMembershipPlanProvider>();
         services.AddSingleton<IResumeStorage, LocalResumeStorage>();
@@ -44,14 +49,12 @@ public static class ServiceCollectionExtensions
             "Email:FromAddress",
             "Email:FromName",
             "AppUrls:FrontendBaseUrl",
-            "Email:Smtp:Host", "Email:Smtp:Username", "Email:Smtp:Password"
+            "Email:Brevo:ApiKey"
         ];
         var missing = requiredKeys.Where(key => string.IsNullOrWhiteSpace(configuration[key])).ToArray();
         if (missing.Length > 0)
             throw new InvalidOperationException(
                 $"Email delivery is enabled but required configuration is missing: {string.Join(", ", missing)}.");
-        if (configuration.GetValue<int>("Email:Smtp:Port") is <= 0 or > 65535)
-            throw new InvalidOperationException("Email:Smtp:Port must be between 1 and 65535.");
         var frontendBaseUrl = configuration["AppUrls:FrontendBaseUrl"];
         if (!Uri.TryCreate(frontendBaseUrl, UriKind.Absolute, out var parsedResetUrl) ||
             (parsedResetUrl.Scheme != Uri.UriSchemeHttp &&
