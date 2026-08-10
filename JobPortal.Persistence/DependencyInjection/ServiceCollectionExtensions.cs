@@ -15,14 +15,15 @@ public static class ServiceCollectionExtensions
             ?? throw new InvalidOperationException("Connection string 'DefaultConnection' is not configured.");
 
         services.AddDbContextPool<JobPortalDbContext>(options =>
-            options.UseSqlServer(connectionString, sqlServer =>
+            options.UseNpgsql(connectionString, npgsql =>
             {
-                sqlServer.CommandTimeout(30);
-                sqlServer.MaxBatchSize(100);
-                sqlServer.EnableRetryOnFailure(
-                    maxRetryCount: 3,
-                    maxRetryDelay: TimeSpan.FromSeconds(5),
-                    errorNumbersToAdd: null);
+                npgsql.CommandTimeout(30);
+                npgsql.MaxBatchSize(100);
+                npgsql.MigrationsAssembly("JobPortal.Persistence.Postgres");
+                npgsql.EnableRetryOnFailure(
+                    3,
+                    TimeSpan.FromSeconds(5),
+                    null);
             }), poolSize: 128);
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IAdminImportRepository, AdminImportRepository>();

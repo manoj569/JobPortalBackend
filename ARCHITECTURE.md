@@ -39,10 +39,20 @@ References must continue to point inward. Domain code must not reference EF Core
 - Read-only queries use `AsNoTracking` and project to response DTOs in SQL.
 - Sorting fields are allow-listed; user input is never interpolated into SQL.
 - Soft-delete query filters are enabled for all `BaseEntity` types.
-- Payment and membership transitions use SQL Server row-version concurrency tokens.
-- SQL retry is limited to transient failures; command timeout is 30 seconds.
+- Payment, membership, and application-quota transitions use PostgreSQL `xmin` concurrency tokens.
+- PostgreSQL retry is limited to transient failures; command timeout is 30 seconds.
 - The DbContext is pooled. Scoped services must never retain entity or DbContext references beyond a request.
 - Migrations are the only supported schema-change mechanism.
+
+### PostgreSQL / Neon schema
+
+The runtime provider is Npgsql. PostgreSQL migrations are intentionally isolated in
+`JobPortal.Persistence.Postgres`; the existing SQL Server migrations and production
+scripts remain historical artifacts for the Azure SQL deployment and must not be used
+against Neon. For a new empty PostgreSQL database, set
+`ConnectionStrings__DefaultConnection` locally and run the PostgreSQL migration project
+with the API as startup project. Applying a migration is an explicit operator action;
+the application does not apply migrations automatically at startup.
 
 ## Security boundaries
 
