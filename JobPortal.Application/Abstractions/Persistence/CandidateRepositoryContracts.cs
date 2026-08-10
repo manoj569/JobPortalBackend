@@ -7,6 +7,9 @@ namespace JobPortal.Application.Abstractions.Persistence;
 public interface ICandidateRepository
 {
     Task<User?> GetCandidateAsync(Guid userId, CancellationToken cancellationToken = default);
+    Task<CandidateResumeProfile?> GetResumeProfileAsync(Guid userId, bool tracking, CancellationToken cancellationToken = default);
+    Task AddResumeProfileAsync(CandidateResumeProfile profile, CancellationToken cancellationToken = default);
+    Task<IReadOnlyCollection<RecommendationJobCandidate>> GetRecommendationCandidatesAsync(CancellationToken cancellationToken = default);
     Task<CandidateJob?> GetAvailableJobAsync(Guid jobId, CancellationToken cancellationToken = default);
     Task<CandidateRecruiterContact?> GetApprovedRecruiterContactForAvailableJobAsync(
     Guid jobId,
@@ -30,6 +33,12 @@ public interface ICandidateRepository
 }
 
 public sealed record CandidateJob(Guid Id, string Title, string Slug, string CompanyName);
+public sealed record RecommendationJobCandidate(Guid Id, string ReferenceNumber, string Title, string Slug,
+    string Description, string? Requirements, string? Responsibilities, Guid CompanyId,
+    string CompanyName, string CompanySlug, string? CompanyLogoUrl, string? CompanyIndustry,
+    Guid CategoryId, string CategoryName, string? Location, EmploymentType EmploymentType,
+    WorkplaceType WorkplaceType, ExperienceLevel ExperienceLevel, bool IsFeatured,
+    DateTime PublishedAtUtc, DateTime? ExpiresAtUtc);
 public sealed record CandidateRecruiterContact(
     Guid JobId,
     string JobTitle,

@@ -17,6 +17,29 @@ public sealed class CandidateRepository(
             x.RoleId == SystemRoleIds.Candidate &&
             x.Status == UserStatus.Active, cancellationToken);
 
+    public async Task<CandidateResumeProfile?> GetResumeProfileAsync(Guid userId, bool tracking, CancellationToken cancellationToken = default)
+    {
+        var query = context.CandidateResumeProfiles.Where(x => x.UserId == userId);
+        return await (tracking ? query : query.AsNoTracking()).SingleOrDefaultAsync(cancellationToken);
+    }
+
+    public Task AddResumeProfileAsync(CandidateResumeProfile profile, CancellationToken cancellationToken = default) =>
+        context.CandidateResumeProfiles.AddAsync(profile, cancellationToken).AsTask();
+
+    public async Task<IReadOnlyCollection<RecommendationJobCandidate>> GetRecommendationCandidatesAsync(CancellationToken cancellationToken = default)
+    {
+        var now = timeProvider.GetUtcNow().UtcDateTime;
+        return await context.Jobs.AsNoTracking().Where(x => x.Status == JobStatus.Published &&
+                !x.IsHidden && !x.IsDeleted && x.PublishedAtUtc.HasValue &&
+                (!x.ExpiresAtUtc.HasValue || x.ExpiresAtUtc > now))
+            .OrderByDescending(x => x.PublishedAtUtc).Take(2000)
+            .Select(x => new RecommendationJobCandidate(x.Id, x.ReferenceNumber, x.Title, x.Slug,
+                x.Description, x.Requirements, x.Responsibilities, x.CompanyId, x.Company.Name,
+                x.Company.Slug, x.Company.LogoUrl, x.Company.Industry, x.CategoryId, x.Category.Name,
+                x.Location, x.EmploymentType, x.WorkplaceType, x.ExperienceLevel, x.IsFeatured,
+                x.PublishedAtUtc!.Value, x.ExpiresAtUtc)).ToArrayAsync(cancellationToken);
+    }
+
     public Task<CandidateJob?> GetAvailableJobAsync(Guid jobId, CancellationToken cancellationToken = default)
     {
         var now = timeProvider.GetUtcNow().UtcDateTime;

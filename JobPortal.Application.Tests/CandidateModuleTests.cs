@@ -635,6 +635,8 @@ public sealed class CandidateModuleTests
         public Guid? ListedForUserId { get; private set; }
         public JobApplicationQuery? LastQuery { get; private set; }
         public List<ApplicationQuotaUsage> AddedQuotaUsages { get; } = [];
+        public CandidateResumeProfile? ResumeProfile { get; set; }
+        public IReadOnlyCollection<RecommendationJobCandidate> RecommendationJobs { get; set; } = [];
 
         public Task<User?> GetCandidateAsync(Guid userId, CancellationToken cancellationToken = default) =>
             Task.FromResult(
@@ -645,6 +647,15 @@ public sealed class CandidateModuleTests
                     : null);
         public Task<CandidateJob?> GetAvailableJobAsync(Guid jobId, CancellationToken cancellationToken = default) =>
             Task.FromResult(AvailableJob?.Id == jobId ? AvailableJob : null);
+        public Task<CandidateResumeProfile?> GetResumeProfileAsync(Guid userId, bool tracking, CancellationToken cancellationToken = default) =>
+            Task.FromResult(ResumeProfile?.UserId == userId ? ResumeProfile : null);
+        public Task AddResumeProfileAsync(CandidateResumeProfile profile, CancellationToken cancellationToken = default)
+        {
+            ResumeProfile = profile;
+            return Task.CompletedTask;
+        }
+        public Task<IReadOnlyCollection<RecommendationJobCandidate>> GetRecommendationCandidatesAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(RecommendationJobs);
         public Task<CandidateRecruiterContact?> GetApprovedRecruiterContactForAvailableJobAsync(
     Guid jobId,
     CancellationToken cancellationToken = default) =>

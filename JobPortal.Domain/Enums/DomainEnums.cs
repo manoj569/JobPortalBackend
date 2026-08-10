@@ -15,6 +15,7 @@ public enum PaymentStatus
 }
 public enum PaymentProvider { Unknown = 0, Stripe, Razorpay, PayPal, BankTransfer }
 public enum JobStatus { Draft = 1, Published, Paused, Closed, Expired, Archived }
+public enum ResumeExtractionStatus { NotStarted = 0, Processing, Ready, Failed }
 public enum EmploymentType { FullTime = 1, PartTime, Contract, Internship, Freelance, Temporary }
 public enum WorkplaceType { OnSite = 1, Remote, Hybrid }
 public enum ExperienceLevel { Entry = 1, Junior, Mid, Senior, Lead, Executive }

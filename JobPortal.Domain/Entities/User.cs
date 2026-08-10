@@ -38,6 +38,7 @@ public sealed class User : BaseEntity
     public string? ResumeContentType { get; set; }
     public long? ResumeSizeBytes { get; set; }
     public DateTime? ResumeUploadedAtUtc { get; set; }
+    public CandidateResumeProfile? ResumeProfile { get; set; }
     public UserStatus Status { get; set; } = UserStatus.Pending;
     public bool EmailConfirmed { get; set; }
     public DateTime? LastLoginAtUtc { get; set; }

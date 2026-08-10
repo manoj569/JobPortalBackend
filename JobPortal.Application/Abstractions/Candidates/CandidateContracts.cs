@@ -12,6 +12,8 @@ public interface ICandidateService
     Task<ResumeResponse> UploadResumeAsync(Guid userId, ResumeUpload upload, CancellationToken cancellationToken = default);
     Task<ResumeDownload> DownloadResumeAsync(Guid userId, CancellationToken cancellationToken = default);
     Task DeleteResumeAsync(Guid userId, CancellationToken cancellationToken = default);
+    Task<ResumeStatusResponse> GetResumeStatusAsync(Guid userId, CancellationToken cancellationToken = default);
+    Task<RecommendedJobsResponse> GetRecommendedJobsAsync(Guid userId, CandidatePageQuery query, CancellationToken cancellationToken = default);
     Task<RecruiterContactResponse> GetRecruiterContactAsync(
     Guid userId,
     Guid jobId,
@@ -26,6 +28,11 @@ public interface ICandidateService
     Task<PagedResponse<JobApplicationResponse>> GetApplicationsAsync(Guid userId, JobApplicationQuery query, CancellationToken cancellationToken = default);
     Task<JobApplicationResponse> GetApplicationAsync(Guid userId, Guid applicationId, CancellationToken cancellationToken = default);
     Task<JobApplicationResponse> WithdrawAsync(Guid userId, Guid applicationId, CancellationToken cancellationToken = default);
+}
+
+public interface IResumeTextExtractor
+{
+    Task<string> ExtractAsync(Stream content, string extension, CancellationToken cancellationToken = default);
 }
 
 public interface IResumeStorage

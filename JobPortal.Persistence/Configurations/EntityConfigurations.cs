@@ -65,6 +65,24 @@ public sealed class UserConfiguration : IEntityTypeConfiguration<User>
     }
 }
 
+public sealed class CandidateResumeProfileConfiguration : IEntityTypeConfiguration<CandidateResumeProfile>
+{
+    public void Configure(EntityTypeBuilder<CandidateResumeProfile> builder)
+    {
+        builder.ToTable("CandidateResumeProfiles");
+        builder.ConfigureBaseEntity();
+        builder.Property(x => x.SkillsJson).HasColumnType("nvarchar(4000)").IsRequired();
+        builder.Property(x => x.RoleKeywordsJson).HasColumnType("nvarchar(2000)").IsRequired();
+        builder.Property(x => x.EducationKeywordsJson).HasColumnType("nvarchar(2000)").IsRequired();
+        builder.Property(x => x.LocationsJson).HasColumnType("nvarchar(2000)").IsRequired();
+        builder.Property(x => x.YearsOfExperience).HasPrecision(4, 1);
+        builder.Property(x => x.ExtractionError).HasMaxLength(1000);
+        builder.HasIndex(x => x.UserId).IsUnique().HasFilter("[IsDeleted] = 0");
+        builder.HasIndex(x => new { x.ExtractionStatus, x.ExtractedAtUtc });
+        builder.HasOne(x => x.User).WithOne(x => x.ResumeProfile).HasForeignKey<CandidateResumeProfile>(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
 public sealed class RoleConfiguration : IEntityTypeConfiguration<Role>
 {
     public void Configure(EntityTypeBuilder<Role> builder)

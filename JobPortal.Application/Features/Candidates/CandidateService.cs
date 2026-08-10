@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using FluentValidation;
 using JobPortal.Application.Abstractions.Auditing;
 using JobPortal.Application.Abstractions.Candidates;
@@ -9,6 +10,9 @@ using JobPortal.Application.Features.Dashboard;
 using JobPortal.Domain.Entities;
 using JobPortal.Domain.Enums;
 using JobPortal.Shared.Models;
+using Microsoft.Extensions.Logging;
+
+#pragma warning disable CA1848
 
 namespace JobPortal.Application.Features.Candidates;
 
@@ -23,7 +27,9 @@ public sealed class CandidateService(
     IValidator<CandidatePageQuery> pageValidator,
     IValidator<JobApplicationQuery> applicationQueryValidator,
     IValidator<CreateJobApplicationRequest> applicationValidator,
-    TimeProvider timeProvider) : ICandidateService
+    TimeProvider timeProvider,
+    IResumeTextExtractor? resumeTextExtractor = null,
+    ILogger<CandidateService>? logger = null) : ICandidateService
 {
     private const long MaximumResumeBytes = 5 * 1024 * 1024;
     private const int FreeMonthlyApplicationLimit = 10;
@@ -117,6 +123,30 @@ public sealed class CandidateService(
         user.ResumeContentType = upload.ContentType;
         user.ResumeSizeBytes = content.Length;
         user.ResumeUploadedAtUtc = UtcNow;
+        var profile = await candidates.GetResumeProfileAsync(userId, true, cancellationToken);
+        if (profile is null)
+        {
+            profile = new CandidateResumeProfile { UserId = userId };
+            await candidates.AddResumeProfileAsync(profile, cancellationToken);
+        }
+        profile.ExtractionStatus = ResumeExtractionStatus.Processing;
+        profile.ExtractionError = null;
+        profile.ExtractedAtUtc = null;
+        if (resumeTextExtractor is not null)
+        {
+            try
+            {
+                content.Position = 0;
+                ApplyExtractedProfile(profile, await resumeTextExtractor.ExtractAsync(content, extension, cancellationToken));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                profile.ExtractionStatus = ResumeExtractionStatus.Failed;
+                profile.ExtractionError = "Resume text extraction failed.";
+                profile.ExtractedAtUtc = UtcNow;
+                logger?.LogWarning(ex, "Resume extraction failed for candidate {CandidateId}", userId);
+            }
+        }
         await auditWriter.AppendAsync(new(
             AuditAction.Upload,
             "Resume",
@@ -130,7 +160,8 @@ public sealed class CandidateService(
             new(userId, "Candidate")), cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
         await DeleteIfUnreferencedAsync(oldKey, cancellationToken);
-        return MapResume(user)!;
+        return new ResumeResponse(user.ResumeFileName, user.ResumeContentType, user.ResumeSizeBytes.Value,
+            user.ResumeUploadedAtUtc.Value, profile.ExtractionStatus);
     }
 
     public async Task<ResumeDownload> DownloadResumeAsync(Guid userId, CancellationToken cancellationToken = default)
@@ -153,6 +184,13 @@ public sealed class CandidateService(
         user.ResumeContentType = null;
         user.ResumeSizeBytes = null;
         user.ResumeUploadedAtUtc = null;
+        var profile = await candidates.GetResumeProfileAsync(userId, true, cancellationToken);
+        if (profile is not null)
+        {
+            profile.ExtractionStatus = ResumeExtractionStatus.NotStarted;
+            profile.SkillsJson = profile.RoleKeywordsJson = profile.EducationKeywordsJson = profile.LocationsJson = "[]";
+            profile.YearsOfExperience = null; profile.ExtractedAtUtc = null; profile.ExtractionError = null;
+        }
         await auditWriter.AppendAsync(new(
             AuditAction.Delete,
             "Resume",
@@ -160,6 +198,37 @@ public sealed class CandidateService(
             Actor: new(userId, "Candidate")), cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
         await DeleteIfUnreferencedAsync(storageKey, cancellationToken);
+    }
+
+    public async Task<ResumeStatusResponse> GetResumeStatusAsync(Guid userId, CancellationToken cancellationToken = default)
+    {
+        var user = await RequiredCandidateAsync(userId, cancellationToken);
+        if (user.ResumeStorageKey is null) return new(false, ResumeExtractionStatus.NotStarted, null, "Upload a resume to enable personalized job recommendations.");
+        var profile = await candidates.GetResumeProfileAsync(userId, false, cancellationToken);
+        var status = profile?.ExtractionStatus ?? ResumeExtractionStatus.NotStarted;
+        return new(true, status, profile?.ExtractedAtUtc, StatusMessage(status));
+    }
+
+    public async Task<RecommendedJobsResponse> GetRecommendedJobsAsync(Guid userId, CandidatePageQuery query, CancellationToken cancellationToken = default)
+    {
+        await RequiredCandidateAsync(userId, cancellationToken);
+        await pageValidator.ValidateAndThrowAsync(query, cancellationToken);
+        var profile = await candidates.GetResumeProfileAsync(userId, false, cancellationToken);
+        if (profile?.ExtractionStatus != ResumeExtractionStatus.Ready)
+        {
+            var status = profile?.ExtractionStatus ?? ResumeExtractionStatus.NotStarted;
+            return new(status, StatusMessage(status), [], query.PageNumber, query.PageSize, 0);
+        }
+        var skills = Deserialize<string>(profile.SkillsJson).ToArray();
+        var roles = Deserialize<string>(profile.RoleKeywordsJson).ToArray();
+        var education = Deserialize<string>(profile.EducationKeywordsJson).ToArray();
+        var locations = Deserialize<string>(profile.LocationsJson).ToArray();
+        var scored = (await candidates.GetRecommendationCandidatesAsync(cancellationToken))
+            .Select(job => Score(job, skills, roles, education, locations)).Where(x => x.MatchScore > 0)
+            .OrderByDescending(x => x.MatchScore).ThenByDescending(x => x.PublishedAtUtc).ThenBy(x => x.Id).ToArray();
+        return new(ResumeExtractionStatus.Ready, "Personalized recommendations based on your resume.",
+            scored.Skip((query.PageNumber - 1) * query.PageSize).Take(query.PageSize).ToArray(),
+            query.PageNumber, query.PageSize, scored.Length);
     }
 
     public async Task<PagedResponse<CandidateSavedJobResponse>> GetSavedJobsAsync(
@@ -498,6 +567,60 @@ public sealed class CandidateService(
         JsonSerializer.Serialize(values.Select(x => x.Trim()).Distinct(StringComparer.OrdinalIgnoreCase));
     private static T[] Deserialize<T>(string json) =>
         string.IsNullOrWhiteSpace(json) ? [] : JsonSerializer.Deserialize<T[]>(json) ?? [];
+    private void ApplyExtractedProfile(CandidateResumeProfile profile, string text)
+    {
+        var normalized = " " + Normalize(text) + " ";
+        string[] skillVocabulary = ["c#", ".net", "asp.net", "sql", "javascript", "typescript", "react", "angular", "python", "java", "azure", "aws", "docker", "kubernetes", "git", "html", "css", "machine learning", "data analysis", "excel", "power bi"];
+        string[] roleVocabulary = ["software engineer", "software developer", "backend developer", "frontend developer", "full stack developer", "data analyst", "data scientist", "product manager", "business analyst", "devops engineer", "quality assurance", "accountant", "recruiter"];
+        string[] educationVocabulary = ["bachelor", "b.tech", "b.e", "master", "m.tech", "mba", "bca", "mca", "computer science", "engineering", "diploma"];
+        string[] locationVocabulary = ["bengaluru", "bangalore", "pune", "mumbai", "delhi", "new delhi", "hyderabad", "chennai", "kolkata", "gurugram", "gurgaon", "noida", "ahmedabad", "remote"];
+        profile.SkillsJson = BoundedMatches(normalized, skillVocabulary, 50, 100);
+        profile.RoleKeywordsJson = BoundedMatches(normalized, roleVocabulary, 20, 100);
+        profile.EducationKeywordsJson = BoundedMatches(normalized, educationVocabulary, 20, 100);
+        profile.LocationsJson = BoundedMatches(normalized, locationVocabulary, 20, 100);
+        var experience = Regex.Match(normalized, @"\b(?<years>\d{1,2}(?:\.\d)?)\+?\s+years?\s+(?:of\s+)?experience\b",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
+        profile.YearsOfExperience = experience.Success && decimal.TryParse(experience.Groups["years"].Value,
+            System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var years) && years is >= 0 and <= 50 ? years : null;
+        profile.ExtractionStatus = ResumeExtractionStatus.Ready;
+        profile.ExtractionError = null;
+        profile.ExtractedAtUtc = UtcNow;
+    }
+
+    private static string BoundedMatches(string text, IEnumerable<string> vocabulary, int count, int length) =>
+        JsonSerializer.Serialize(vocabulary.Where(x => text.Contains(" " + Normalize(x) + " ", StringComparison.Ordinal))
+            .Distinct(StringComparer.OrdinalIgnoreCase).Take(count).Select(x => x[..Math.Min(x.Length, length)]));
+    private static string Normalize(string value) => string.Join(' ', new string(value.ToLowerInvariant()
+        .Select(c => char.IsLetterOrDigit(c) || c is '#' or '+' or '.' ? c : ' ').ToArray())
+        .Split(' ', StringSplitOptions.RemoveEmptyEntries));
+    private static string StatusMessage(ResumeExtractionStatus status) => status switch
+    {
+        ResumeExtractionStatus.Ready => "Your resume is ready for personalized job recommendations.",
+        ResumeExtractionStatus.Processing => "Your resume is being processed for recommendations.",
+        ResumeExtractionStatus.Failed => "Your resume was saved, but recommendations are not available yet.",
+        _ => "Upload a resume to enable personalized job recommendations."
+    };
+    internal static RecommendedJobResponse Score(RecommendationJobCandidate job, string[] skills, string[] roles,
+        string[] education, string[] locations)
+    {
+        var title = Normalize(job.Title); var category = Normalize(job.CategoryName);
+        var body = Normalize(string.Join(' ', job.Description, job.Requirements, job.Responsibilities, job.CompanyIndustry));
+        var matchedSkills = skills.Where(x => (" " + title + " " + body + " ").Contains(" " + Normalize(x) + " ", StringComparison.Ordinal)).Take(5).ToArray();
+        var matchedRoles = roles.Where(x => (" " + title + " " + category + " ").Contains(Normalize(x), StringComparison.Ordinal)).Take(3).ToArray();
+        var matchedEducation = education.Where(x => body.Contains(Normalize(x), StringComparison.Ordinal)).Take(2).ToArray();
+        var matchedLocations = locations.Where(x => Normalize(job.Location ?? "").Contains(Normalize(x), StringComparison.Ordinal)).Take(2).ToArray();
+        var score = Math.Min(100, matchedSkills.Length * 12 + (matchedRoles.Length > 0 ? 25 : 0) +
+            (matchedEducation.Length > 0 ? 5 : 0) + (matchedLocations.Length > 0 ? 10 : 0));
+        var reasons = new List<string>(3);
+        if (matchedSkills.Length > 0) reasons.Add("Matches skills: " + string.Join(", ", matchedSkills));
+        if (matchedRoles.Length > 0) reasons.Add("Matches your " + matchedRoles[0] + " profile");
+        if (matchedLocations.Length > 0) reasons.Add("Matches your preferred location: " + matchedLocations[0]);
+        if (reasons.Count < 3 && matchedEducation.Length > 0) reasons.Add("Matches education: " + string.Join(", ", matchedEducation));
+        return new(job.Id, job.ReferenceNumber, job.Title, job.Slug, job.CompanyId, job.CompanyName,
+            job.CompanySlug, job.CompanyLogoUrl, job.CategoryId, job.CategoryName, job.Location,
+            job.EmploymentType, job.WorkplaceType, job.ExperienceLevel, job.IsFeatured,
+            job.PublishedAtUtc, job.ExpiresAtUtc, score, reasons.Take(3).ToArray());
+    }
     private async Task DeleteIfUnreferencedAsync(string? storageKey, CancellationToken cancellationToken)
     {
         if (storageKey is not null &&

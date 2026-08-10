@@ -38,8 +38,22 @@ public sealed record UpdateCandidateOnboardingRequest(
     int? GraduationYear,
     decimal? YearsOfExperience);
 public sealed record ResumeUpload(Stream Content, long Length, string FileName, string ContentType);
-public sealed record ResumeResponse(string FileName, string ContentType, long SizeBytes, DateTime UploadedAtUtc);
+public sealed record ResumeResponse(string FileName, string ContentType, long SizeBytes, DateTime UploadedAtUtc,
+    ResumeExtractionStatus ExtractionStatus = ResumeExtractionStatus.NotStarted);
 public sealed record ResumeDownload(Stream Content, string FileName, string ContentType);
+public sealed record ResumeStatusResponse(bool HasResume, ResumeExtractionStatus ExtractionStatus,
+    DateTime? ExtractedAtUtc, string Message);
+public sealed record RecommendedJobResponse(Guid Id, string ReferenceNumber, string Title, string Slug,
+    Guid CompanyId, string CompanyName, string CompanySlug, string? CompanyLogoUrl,
+    Guid CategoryId, string CategoryName, string? Location, EmploymentType EmploymentType,
+    WorkplaceType WorkplaceType, ExperienceLevel ExperienceLevel, bool IsFeatured,
+    DateTime PublishedAtUtc, DateTime? ExpiresAtUtc, int MatchScore,
+    IReadOnlyCollection<string> MatchReasons);
+public sealed record RecommendedJobsResponse(ResumeExtractionStatus ExtractionStatus, string Message,
+    IReadOnlyCollection<RecommendedJobResponse> Items, int PageNumber, int PageSize, int TotalCount)
+{
+    public int TotalPages => (int)Math.Ceiling(TotalCount / (double)PageSize);
+}
 public sealed record CandidatePageQuery(int PageNumber = 1, int PageSize = 20);
 public sealed record CandidateSavedJobResponse(Guid SavedJobId, DateTime SavedAtUtc, Guid JobId, string Title, string Slug, string CompanyName);
 public sealed record CreateJobApplicationRequest(string? CoverLetter);

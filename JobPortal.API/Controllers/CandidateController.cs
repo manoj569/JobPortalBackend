@@ -55,8 +55,22 @@ public sealed class CandidateController(ICandidateService candidates) : Controll
         await using var stream = file.OpenReadStream();
         var result = await candidates.UploadResumeAsync(User.GetRequiredUserId(),
             new ResumeUpload(stream, file.Length, file.FileName, file.ContentType), cancellationToken);
-        return Ok(new ApiResponse<ResumeResponse>(result, "Resume uploaded successfully."));
+        var message = result.ExtractionStatus == JobPortal.Domain.Enums.ResumeExtractionStatus.Failed
+            ? "Your resume was saved, but recommendations are not available yet."
+            : "Resume uploaded successfully.";
+        return Ok(new ApiResponse<ResumeResponse>(result, message));
     }
+
+    [HttpGet("resume/status")]
+    public async Task<ActionResult<ApiResponse<ResumeStatusResponse>>> ResumeStatus(CancellationToken cancellationToken) =>
+        Ok(new ApiResponse<ResumeStatusResponse>(await candidates.GetResumeStatusAsync(
+            User.GetRequiredUserId(), cancellationToken)));
+
+    [HttpGet("jobs/recommended")]
+    public async Task<ActionResult<ApiResponse<RecommendedJobsResponse>>> RecommendedJobs(
+        [FromQuery] CandidatePageQuery query, CancellationToken cancellationToken) =>
+        Ok(new ApiResponse<RecommendedJobsResponse>(await candidates.GetRecommendedJobsAsync(
+            User.GetRequiredUserId(), query, cancellationToken)));
 
     [HttpGet("resume")]
     public async Task<IActionResult> DownloadResume(CancellationToken cancellationToken)

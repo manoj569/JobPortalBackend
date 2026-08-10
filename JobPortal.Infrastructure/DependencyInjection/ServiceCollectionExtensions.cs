@@ -44,6 +44,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IRazorpayGateway, RazorpayGateway>();
         services.AddSingleton<IMembershipPlanProvider, ConfigurationMembershipPlanProvider>();
         services.AddSingleton<IResumeStorage, LocalResumeStorage>();
+        services.AddSingleton<IResumeTextExtractor, ResumeTextExtractor>();
 
         return services;
     }
