@@ -72,6 +72,12 @@ public sealed class CandidateController(ICandidateService candidates) : Controll
         Ok(new ApiResponse<RecommendedJobsResponse>(await candidates.GetRecommendedJobsAsync(
             User.GetRequiredUserId(), query, cancellationToken)));
 
+    [HttpGet("jobs")]
+    public async Task<ActionResult<ApiResponse<CandidateBrowseJobsResponse>>> BrowseJobs(
+        [FromQuery] CandidatePageQuery query, CancellationToken cancellationToken) =>
+        Ok(new ApiResponse<CandidateBrowseJobsResponse>(await candidates.GetBrowseJobsAsync(
+            User.GetRequiredUserId(), query, cancellationToken)));
+
     [HttpGet("resume")]
     public async Task<IActionResult> DownloadResume(CancellationToken cancellationToken)
     {
@@ -128,6 +134,13 @@ public sealed class CandidateController(ICandidateService candidates) : Controll
         return StatusCode(StatusCodes.Status201Created,
             new ApiResponse<JobApplicationResponse>(result, "Application submitted successfully."));
     }
+
+    [HttpPost("jobs/{jobId:guid}/apply")]
+    [ProducesResponseType(typeof(ApiResponse<ApplyJobResponse>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<ApiResponse<ApplyJobResponse>>> ApplyJob(
+        Guid jobId, CreateJobApplicationRequest request, CancellationToken cancellationToken) =>
+        Ok(new ApiResponse<ApplyJobResponse>(await candidates.ApplyJobAsync(
+            User.GetRequiredUserId(), jobId, request, cancellationToken)));
 
     [HttpGet("applications")]
     public async Task<ActionResult<ApiResponse<PagedResponse<JobApplicationResponse>>>> Applications(

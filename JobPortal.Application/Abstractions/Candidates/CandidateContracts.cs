@@ -14,6 +14,7 @@ public interface ICandidateService
     Task DeleteResumeAsync(Guid userId, CancellationToken cancellationToken = default);
     Task<ResumeStatusResponse> GetResumeStatusAsync(Guid userId, CancellationToken cancellationToken = default);
     Task<RecommendedJobsResponse> GetRecommendedJobsAsync(Guid userId, CandidatePageQuery query, CancellationToken cancellationToken = default);
+    Task<CandidateBrowseJobsResponse> GetBrowseJobsAsync(Guid userId, CandidatePageQuery query, CancellationToken cancellationToken = default);
     Task<RecruiterContactResponse> GetRecruiterContactAsync(
     Guid userId,
     Guid jobId,
@@ -25,6 +26,7 @@ public interface ICandidateService
     Task SaveJobAsync(Guid userId, Guid jobId, CancellationToken cancellationToken = default);
     Task RemoveSavedJobAsync(Guid userId, Guid jobId, CancellationToken cancellationToken = default);
     Task<JobApplicationResponse> ApplyAsync(Guid userId, Guid jobId, CreateJobApplicationRequest request, CancellationToken cancellationToken = default);
+    Task<ApplyJobResponse> ApplyJobAsync(Guid userId, Guid jobId, CreateJobApplicationRequest request, CancellationToken cancellationToken = default);
     Task<PagedResponse<JobApplicationResponse>> GetApplicationsAsync(Guid userId, JobApplicationQuery query, CancellationToken cancellationToken = default);
     Task<JobApplicationResponse> GetApplicationAsync(Guid userId, Guid applicationId, CancellationToken cancellationToken = default);
     Task<JobApplicationResponse> WithdrawAsync(Guid userId, Guid applicationId, CancellationToken cancellationToken = default);

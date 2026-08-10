@@ -223,12 +223,24 @@ public sealed class CandidateService(
         var roles = Deserialize<string>(profile.RoleKeywordsJson).ToArray();
         var education = Deserialize<string>(profile.EducationKeywordsJson).ToArray();
         var locations = Deserialize<string>(profile.LocationsJson).ToArray();
-        var scored = (await candidates.GetRecommendationCandidatesAsync(cancellationToken))
+        var scored = (await candidates.GetRecommendationCandidatesAsync(userId, cancellationToken))
             .Select(job => Score(job, skills, roles, education, locations)).Where(x => x.MatchScore > 0)
             .OrderByDescending(x => x.MatchScore).ThenByDescending(x => x.PublishedAtUtc).ThenBy(x => x.Id).ToArray();
         return new(ResumeExtractionStatus.Ready, "Personalized recommendations based on your resume.",
             scored.Skip((query.PageNumber - 1) * query.PageSize).Take(query.PageSize).ToArray(),
             query.PageNumber, query.PageSize, scored.Length);
+    }
+
+    public async Task<CandidateBrowseJobsResponse> GetBrowseJobsAsync(Guid userId, CandidatePageQuery query, CancellationToken cancellationToken = default)
+    {
+        await RequiredCandidateAsync(userId, cancellationToken);
+        await pageValidator.ValidateAndThrowAsync(query, cancellationToken);
+        var result = await candidates.GetCandidateBrowseJobsAsync(userId, query, cancellationToken);
+        return new(result.Items.Select(x => new CandidateBrowseJobResponse(x.Id, x.ReferenceNumber, x.Title,
+            x.Slug, x.CompanyId, x.CompanyName, x.CompanySlug, x.CompanyLogoUrl, x.CategoryId,
+            x.CategoryName, x.Location, x.EmploymentType, x.WorkplaceType, x.ExperienceLevel,
+            x.IsFeatured, x.PublishedAtUtc, x.ExpiresAtUtc)).ToArray(), query.PageNumber,
+            query.PageSize, result.TotalCount);
     }
 
     public async Task<PagedResponse<CandidateSavedJobResponse>> GetSavedJobsAsync(
@@ -360,12 +372,14 @@ public sealed class CandidateService(
     {
         await applicationValidator.ValidateAndThrowAsync(request, cancellationToken);
         var user = await RequiredCandidateAsync(userId, cancellationToken);
+        var existing = await candidates.GetApplicationByJobAsync(userId, jobId, cancellationToken);
+        if (existing is not null)
+            return MapApplication(existing, new CandidateJob(existing.JobId, existing.Job.Title,
+                existing.Job.Slug, existing.Job.Company.Name, existing.Job.ApplicationUrl));
         var job = await candidates.GetAvailableJobAsync(jobId, cancellationToken)
             ?? throw new NotFoundException("Job was not found.");
-        if (await candidates.HasApplicationAsync(userId, jobId, cancellationToken))
-        {
-            throw new ConflictException("You have already applied to this job.");
-        }
+        if (request.ApplicationMethod == ApplicationMethod.External && string.IsNullOrWhiteSpace(job.ApplicationUrl))
+            throw new BadRequestException("This job does not support external applications.", "invalid_application_method");
 
         var nowUtc = timeProvider.GetUtcNow().UtcDateTime;
         var hasPremiumMembership = await candidates.HasActiveMembershipAsync(userId, cancellationToken);
@@ -405,7 +419,9 @@ public sealed class CandidateService(
         {
             UserId = userId,
             JobId = jobId,
-            Status = JobApplicationStatus.Submitted,
+            Status = request.ApplicationMethod == ApplicationMethod.External
+                ? JobApplicationStatus.ExternalApplicationStarted : JobApplicationStatus.Submitted,
+            ApplicationMethod = request.ApplicationMethod,
             CoverLetter = TextNormalizer.TrimOrNull(request.CoverLetter),
             ResumeStorageKey = user.ResumeStorageKey,
             ResumeFileName = user.ResumeFileName,
@@ -421,6 +437,12 @@ public sealed class CandidateService(
             ChangedAtUtc = UtcNow
         });
         await candidates.AddApplicationAsync(application, cancellationToken);
+        await CreateNotificationAsync(userId,
+            request.ApplicationMethod == ApplicationMethod.External ? "External application started" : "Application submitted",
+            request.ApplicationMethod == ApplicationMethod.External
+                ? $"We saved {job.Title} in your Applied jobs. Complete the employer application on their website."
+                : $"Your application for {job.Title} has been submitted.",
+            NotificationType.Application, "/dashboard/applied-jobs", cancellationToken);
         await auditWriter.AppendAsync(new(
             AuditAction.Submit,
             "JobApplication",
@@ -433,6 +455,14 @@ public sealed class CandidateService(
             new(userId, "Candidate")), cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
         return MapApplication(application, job);
+    }
+
+    public async Task<ApplyJobResponse> ApplyJobAsync(Guid userId, Guid jobId,
+        CreateJobApplicationRequest request, CancellationToken cancellationToken = default)
+    {
+        var application = await ApplyAsync(userId, jobId, request, cancellationToken);
+        return new(application.Id, application.JobId, application.Status,
+            application.ApplicationMethod, application.SubmittedAtUtc);
     }
 
     public async Task<PagedResponse<JobApplicationResponse>> GetApplicationsAsync(
@@ -451,7 +481,7 @@ public sealed class CandidateService(
         var application = await candidates.GetApplicationAsync(userId, applicationId, cancellationToken)
             ?? throw new NotFoundException("Application was not found.");
         return MapApplication(application,
-            new CandidateJob(application.JobId, application.Job.Title, application.Job.Slug, application.Job.Company.Name));
+            new CandidateJob(application.JobId, application.Job.Title, application.Job.Slug, application.Job.Company.Name, application.Job.ApplicationUrl));
     }
 
     public async Task<JobApplicationResponse> WithdrawAsync(
@@ -485,7 +515,7 @@ public sealed class CandidateService(
             new(userId, "Candidate")), cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
         return MapApplication(application,
-            new CandidateJob(application.JobId, application.Job.Title, application.Job.Slug, application.Job.Company.Name));
+            new CandidateJob(application.JobId, application.Job.Title, application.Job.Slug, application.Job.Company.Name, application.Job.ApplicationUrl));
     }
 
     private async Task<User> RequiredCandidateAsync(Guid userId, CancellationToken cancellationToken) =>
@@ -562,7 +592,7 @@ public sealed class CandidateService(
     private static JobApplicationResponse MapApplication(JobApplication application, CandidateJob job) => new(
         application.Id, application.JobId, job.Title, job.Slug, job.CompanyName,
         application.Status, application.CoverLetter, application.ResumeFileName,
-        application.SubmittedAtUtc, application.WithdrawnAtUtc);
+        application.SubmittedAtUtc, application.WithdrawnAtUtc, application.ApplicationMethod);
     private static string SerializeStrings(IEnumerable<string> values) =>
         JsonSerializer.Serialize(values.Select(x => x.Trim()).Distinct(StringComparer.OrdinalIgnoreCase));
     private static T[] Deserialize<T>(string json) =>

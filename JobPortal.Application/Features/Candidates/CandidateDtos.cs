@@ -54,15 +54,33 @@ public sealed record RecommendedJobsResponse(ResumeExtractionStatus ExtractionSt
 {
     public int TotalPages => (int)Math.Ceiling(TotalCount / (double)PageSize);
 }
+public sealed record CandidateBrowseJobResponse(Guid Id, string ReferenceNumber, string Title, string Slug,
+    Guid CompanyId, string CompanyName, string CompanySlug, string? CompanyLogoUrl,
+    Guid CategoryId, string CategoryName, string? Location, EmploymentType EmploymentType,
+    WorkplaceType WorkMode, ExperienceLevel ExperienceLevel, bool IsFeatured,
+    DateTime PublishedAtUtc, DateTime? ClosingDate);
+public sealed record CandidateBrowseJobsResponse(IReadOnlyCollection<CandidateBrowseJobResponse> Items,
+    int PageNumber, int PageSize, int TotalCount)
+{
+    public int TotalPages => (int)Math.Ceiling(TotalCount / (double)PageSize);
+}
 public sealed record CandidatePageQuery(int PageNumber = 1, int PageSize = 20);
 public sealed record CandidateSavedJobResponse(Guid SavedJobId, DateTime SavedAtUtc, Guid JobId, string Title, string Slug, string CompanyName);
-public sealed record CreateJobApplicationRequest(string? CoverLetter);
+public sealed record CreateJobApplicationRequest(string? CoverLetter = null,
+    ApplicationMethod ApplicationMethod = ApplicationMethod.Portal);
+public sealed record ApplyJobResponse(Guid ApplicationId, Guid JobId,
+    JobApplicationStatus ApplicationStatus, ApplicationMethod ApplicationMethod, DateTime AppliedAtUtc);
 public sealed record JobApplicationQuery(
     int PageNumber = 1, int PageSize = 20, JobApplicationStatus? Status = null);
 public sealed record JobApplicationResponse(
     Guid Id, Guid JobId, string JobTitle, string JobSlug, string CompanyName,
     JobApplicationStatus Status, string? CoverLetter, string? ResumeFileName,
-    DateTime SubmittedAtUtc, DateTime? WithdrawnAtUtc);
+    DateTime SubmittedAtUtc, DateTime? WithdrawnAtUtc,
+    ApplicationMethod ApplicationMethod = ApplicationMethod.Portal,
+    string? CategoryName = null, string? Location = null,
+    EmploymentType? EmploymentType = null, WorkplaceType? WorkMode = null,
+    ExperienceLevel? ExperienceLevel = null, string? ApplicationUrl = null,
+    DateTime? ClosingDate = null);
 public sealed record RecruiterContactResponse(
     Guid JobId,
     string JobTitle,

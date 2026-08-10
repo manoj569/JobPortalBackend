@@ -132,6 +132,9 @@ public sealed class JobApplicationQueryValidator : AbstractValidator<JobApplicat
 
 public sealed class CreateJobApplicationRequestValidator : AbstractValidator<CreateJobApplicationRequest>
 {
-    public CreateJobApplicationRequestValidator() =>
+    public CreateJobApplicationRequestValidator()
+    {
         RuleFor(x => x.CoverLetter).MaximumLength(5000);
+        RuleFor(x => x.ApplicationMethod).IsInEnum();
+    }
 }

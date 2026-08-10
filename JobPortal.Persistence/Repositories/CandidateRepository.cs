@@ -26,18 +26,38 @@ public sealed class CandidateRepository(
     public Task AddResumeProfileAsync(CandidateResumeProfile profile, CancellationToken cancellationToken = default) =>
         context.CandidateResumeProfiles.AddAsync(profile, cancellationToken).AsTask();
 
-    public async Task<IReadOnlyCollection<RecommendationJobCandidate>> GetRecommendationCandidatesAsync(CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyCollection<RecommendationJobCandidate>> GetRecommendationCandidatesAsync(Guid userId, CancellationToken cancellationToken = default)
     {
         var now = timeProvider.GetUtcNow().UtcDateTime;
         return await context.Jobs.AsNoTracking().Where(x => x.Status == JobStatus.Published &&
                 !x.IsHidden && !x.IsDeleted && x.PublishedAtUtc.HasValue &&
-                (!x.ExpiresAtUtc.HasValue || x.ExpiresAtUtc > now))
+                (!x.ExpiresAtUtc.HasValue || x.ExpiresAtUtc > now) &&
+                !x.Applications.Any(a => a.UserId == userId && !a.IsDeleted))
             .OrderByDescending(x => x.PublishedAtUtc).Take(2000)
             .Select(x => new RecommendationJobCandidate(x.Id, x.ReferenceNumber, x.Title, x.Slug,
                 x.Description, x.Requirements, x.Responsibilities, x.CompanyId, x.Company.Name,
                 x.Company.Slug, x.Company.LogoUrl, x.Company.Industry, x.CategoryId, x.Category.Name,
                 x.Location, x.EmploymentType, x.WorkplaceType, x.ExperienceLevel, x.IsFeatured,
                 x.PublishedAtUtc!.Value, x.ExpiresAtUtc)).ToArrayAsync(cancellationToken);
+    }
+
+    public async Task<(IReadOnlyCollection<RecommendationJobCandidate> Items, int TotalCount)> GetCandidateBrowseJobsAsync(
+        Guid userId, CandidatePageQuery query, CancellationToken cancellationToken = default)
+    {
+        var now = timeProvider.GetUtcNow().UtcDateTime;
+        var source = context.Jobs.AsNoTracking().Where(x => x.Status == JobStatus.Published &&
+            !x.IsHidden && !x.IsDeleted && x.PublishedAtUtc.HasValue &&
+            (!x.ExpiresAtUtc.HasValue || x.ExpiresAtUtc > now) &&
+            !x.Applications.Any(a => a.UserId == userId && !a.IsDeleted));
+        var count = await source.CountAsync(cancellationToken);
+        var items = await source.OrderByDescending(x => x.PublishedAtUtc).ThenBy(x => x.Id)
+            .Skip((query.PageNumber - 1) * query.PageSize).Take(query.PageSize)
+            .Select(x => new RecommendationJobCandidate(x.Id, x.ReferenceNumber, x.Title, x.Slug,
+                x.Description, x.Requirements, x.Responsibilities, x.CompanyId, x.Company.Name,
+                x.Company.Slug, x.Company.LogoUrl, x.Company.Industry, x.CategoryId, x.Category.Name,
+                x.Location, x.EmploymentType, x.WorkplaceType, x.ExperienceLevel, x.IsFeatured,
+                x.PublishedAtUtc!.Value, x.ExpiresAtUtc)).ToArrayAsync(cancellationToken);
+        return (items, count);
     }
 
     public Task<CandidateJob?> GetAvailableJobAsync(Guid jobId, CancellationToken cancellationToken = default)
@@ -47,7 +67,7 @@ public sealed class CandidateRepository(
                 x.Status == JobStatus.Published && !x.IsHidden && !x.IsDeleted &&
                 x.PublishedAtUtc.HasValue &&
                 (!x.ExpiresAtUtc.HasValue || x.ExpiresAtUtc > now))
-            .Select(x => new CandidateJob(x.Id, x.Title, x.Slug, x.Company.Name))
+            .Select(x => new CandidateJob(x.Id, x.Title, x.Slug, x.Company.Name, x.ApplicationUrl))
             .SingleOrDefaultAsync(cancellationToken);
     }
     public Task<CandidateRecruiterContact?> GetApprovedRecruiterContactForAvailableJobAsync(
@@ -100,6 +120,10 @@ public sealed class CandidateRepository(
         Guid userId, Guid jobId, CancellationToken cancellationToken = default) =>
         context.JobApplications.IgnoreQueryFilters()
             .AnyAsync(x => x.UserId == userId && x.JobId == jobId, cancellationToken);
+    public Task<JobApplication?> GetApplicationByJobAsync(
+        Guid userId, Guid jobId, CancellationToken cancellationToken = default) =>
+        context.JobApplications.Include(x => x.Job).ThenInclude(x => x.Company)
+            .SingleOrDefaultAsync(x => x.UserId == userId && x.JobId == jobId, cancellationToken);
     public Task<ApplicationQuotaUsage?> GetQuotaUsageAsync(
     Guid userId,
     ApplicationQuotaPeriod period,
@@ -129,7 +153,9 @@ public sealed class CandidateRepository(
             .Skip((query.PageNumber - 1) * query.PageSize).Take(query.PageSize)
             .Select(x => new JobApplicationResponse(
                 x.Id, x.JobId, x.Job.Title, x.Job.Slug, x.Job.Company.Name, x.Status,
-                x.CoverLetter, x.ResumeFileName, x.SubmittedAtUtc, x.WithdrawnAtUtc))
+                x.CoverLetter, x.ResumeFileName, x.SubmittedAtUtc, x.WithdrawnAtUtc,
+                x.ApplicationMethod, x.Job.Category.Name, x.Job.Location, x.Job.EmploymentType,
+                x.Job.WorkplaceType, x.Job.ExperienceLevel, x.Job.ApplicationUrl, x.Job.ExpiresAtUtc))
             .ToArrayAsync(cancellationToken);
         return (items, count);
     }

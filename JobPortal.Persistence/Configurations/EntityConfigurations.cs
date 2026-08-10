@@ -360,7 +360,7 @@ public sealed class JobApplicationConfiguration : IEntityTypeConfiguration<JobAp
         builder.Property(x => x.ResumeStorageKey).HasMaxLength(255);
         builder.Property(x => x.ResumeFileName).HasMaxLength(255);
         builder.Property(x => x.ResumeContentType).HasMaxLength(100);
-        builder.HasIndex(x => new { x.UserId, x.JobId }).IsUnique();
+        builder.HasIndex(x => new { x.UserId, x.JobId }).IsUnique().HasFilter("[IsDeleted] = 0");
         builder.HasIndex(x => new { x.UserId, x.Status, x.SubmittedAtUtc });
         builder.HasOne(x => x.User).WithMany(x => x.JobApplications)
             .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);

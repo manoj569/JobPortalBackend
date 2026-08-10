@@ -9,7 +9,8 @@ public interface ICandidateRepository
     Task<User?> GetCandidateAsync(Guid userId, CancellationToken cancellationToken = default);
     Task<CandidateResumeProfile?> GetResumeProfileAsync(Guid userId, bool tracking, CancellationToken cancellationToken = default);
     Task AddResumeProfileAsync(CandidateResumeProfile profile, CancellationToken cancellationToken = default);
-    Task<IReadOnlyCollection<RecommendationJobCandidate>> GetRecommendationCandidatesAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyCollection<RecommendationJobCandidate>> GetRecommendationCandidatesAsync(Guid userId, CancellationToken cancellationToken = default);
+    Task<(IReadOnlyCollection<RecommendationJobCandidate> Items, int TotalCount)> GetCandidateBrowseJobsAsync(Guid userId, CandidatePageQuery query, CancellationToken cancellationToken = default);
     Task<CandidateJob?> GetAvailableJobAsync(Guid jobId, CancellationToken cancellationToken = default);
     Task<CandidateRecruiterContact?> GetApprovedRecruiterContactForAvailableJobAsync(
     Guid jobId,
@@ -18,6 +19,7 @@ public interface ICandidateRepository
     Task<bool> IsResumeReferencedAsync(string storageKey, CancellationToken cancellationToken = default);
     Task<JobApplication?> GetApplicationAsync(Guid userId, Guid applicationId, CancellationToken cancellationToken = default);
     Task<bool> HasApplicationAsync(Guid userId, Guid jobId, CancellationToken cancellationToken = default);
+    Task<JobApplication?> GetApplicationByJobAsync(Guid userId, Guid jobId, CancellationToken cancellationToken = default);
     Task<ApplicationQuotaUsage?> GetQuotaUsageAsync(
     Guid userId,
     ApplicationQuotaPeriod period,
@@ -32,7 +34,7 @@ public interface ICandidateRepository
         Guid userId, JobApplicationQuery query, CancellationToken cancellationToken = default);
 }
 
-public sealed record CandidateJob(Guid Id, string Title, string Slug, string CompanyName);
+public sealed record CandidateJob(Guid Id, string Title, string Slug, string CompanyName, string? ApplicationUrl = null);
 public sealed record RecommendationJobCandidate(Guid Id, string ReferenceNumber, string Title, string Slug,
     string Description, string? Requirements, string? Responsibilities, Guid CompanyId,
     string CompanyName, string CompanySlug, string? CompanyLogoUrl, string? CompanyIndustry,

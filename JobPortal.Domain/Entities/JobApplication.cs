@@ -6,6 +6,7 @@ namespace JobPortal.Domain.Entities;
 public sealed class JobApplication : BaseEntity
 {
     public JobApplicationStatus Status { get; set; } = JobApplicationStatus.Submitted;
+    public ApplicationMethod ApplicationMethod { get; set; } = ApplicationMethod.Portal;
     public string? CoverLetter { get; set; }
     public string? ResumeStorageKey { get; set; }
     public string? ResumeFileName { get; set; }

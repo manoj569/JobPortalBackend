@@ -440,14 +440,15 @@ public sealed class CandidateModuleTests
     }
 
     [Fact]
-    public async Task DuplicateApplicationIsRejected()
+    public async Task DuplicateApplicationReturnsExistingApplication()
     {
         var fixture = CreateFixture();
-        fixture.Repository.HasPriorApplication = true;
+        fixture.Repository.ExistingApplication = fixture.CreateApplication(JobApplicationStatus.Submitted);
 
-        await Assert.ThrowsAsync<ConflictException>(() =>
-            fixture.Service.ApplyAsync(fixture.Candidate.Id, fixture.Job.Id, new("Interested")));
+        var response = await fixture.Service.ApplyAsync(fixture.Candidate.Id, fixture.Job.Id, new("Interested"));
+        Assert.Equal(fixture.Repository.ExistingApplication.Id, response.Id);
         Assert.Empty(fixture.Repository.AddedApplications);
+        Assert.Empty(fixture.Dashboard.Notifications);
     }
 
     [Fact]
@@ -560,6 +561,66 @@ public sealed class CandidateModuleTests
         Assert.Equal(10, fixture.Repository.LastQuery.PageSize);
     }
 
+    [Fact]
+    public async Task PortalApplyCreatesApplicationAndNotificationAndRetryIsIdempotent()
+    {
+        var fixture = CreateFixture();
+        var first = await fixture.Service.ApplyJobAsync(fixture.Candidate.Id, fixture.Job.Id,
+            new(ApplicationMethod: ApplicationMethod.Portal));
+        var created = Assert.Single(fixture.Repository.AddedApplications);
+        created.Job = fixture.Job;
+        fixture.Repository.ExistingApplication = created;
+        var second = await fixture.Service.ApplyJobAsync(fixture.Candidate.Id, fixture.Job.Id,
+            new(ApplicationMethod: ApplicationMethod.Portal));
+
+        Assert.Equal(first.ApplicationId, second.ApplicationId);
+        Assert.Equal(JobApplicationStatus.Submitted, first.ApplicationStatus);
+        Assert.Equal(ApplicationMethod.Portal, first.ApplicationMethod);
+        var notification = Assert.Single(fixture.Dashboard.Notifications);
+        Assert.Equal("Application submitted", notification.Title);
+    }
+
+    [Fact]
+    public async Task ExternalApplyRecordsIntentWithoutClaimingEmployerSubmission()
+    {
+        var fixture = CreateFixture();
+        fixture.Repository.AvailableJob = fixture.Repository.AvailableJob! with
+        {
+            ApplicationUrl = "https://employer.example/apply"
+        };
+
+        var response = await fixture.Service.ApplyJobAsync(fixture.Candidate.Id, fixture.Job.Id,
+            new(ApplicationMethod: ApplicationMethod.External));
+
+        Assert.Equal(JobApplicationStatus.ExternalApplicationStarted, response.ApplicationStatus);
+        Assert.Equal(ApplicationMethod.External, response.ApplicationMethod);
+        Assert.Equal("External application started", Assert.Single(fixture.Dashboard.Notifications).Title);
+    }
+
+    [Fact]
+    public async Task AppliedJobsAreExcludedFromCandidateBrowseAndRecommendations()
+    {
+        var fixture = CreateFixture();
+        var candidateJob = new RecommendationJobCandidate(fixture.Job.Id, "JOB-1", "C# Engineer",
+            fixture.Job.Slug, "C# SQL", null, null, fixture.Job.CompanyId, fixture.Job.Company.Name,
+            fixture.Job.Company.Slug, null, "Technology", Guid.NewGuid(), "Engineering", "Pune",
+            EmploymentType.FullTime, WorkplaceType.Hybrid, ExperienceLevel.Mid, false, Now, null);
+        fixture.Repository.RecommendationJobs = [candidateJob];
+        fixture.Repository.AppliedJobIds.Add(fixture.Job.Id);
+        fixture.Repository.ResumeProfile = new CandidateResumeProfile
+        {
+            UserId = fixture.Candidate.Id,
+            ExtractionStatus = ResumeExtractionStatus.Ready,
+            SkillsJson = "[\"c#\"]"
+        };
+
+        var browse = await fixture.Service.GetBrowseJobsAsync(fixture.Candidate.Id, new());
+        var recommended = await fixture.Service.GetRecommendedJobsAsync(fixture.Candidate.Id, new());
+
+        Assert.Empty(browse.Items);
+        Assert.Empty(recommended.Items);
+    }
+
     private static Fixture CreateFixture(DateTime? nowUtc = null)
     {
         var candidate = new User
@@ -637,6 +698,8 @@ public sealed class CandidateModuleTests
         public List<ApplicationQuotaUsage> AddedQuotaUsages { get; } = [];
         public CandidateResumeProfile? ResumeProfile { get; set; }
         public IReadOnlyCollection<RecommendationJobCandidate> RecommendationJobs { get; set; } = [];
+        public HashSet<Guid> AppliedJobIds { get; } = [];
+        public JobApplication? ExistingApplication { get; set; }
 
         public Task<User?> GetCandidateAsync(Guid userId, CancellationToken cancellationToken = default) =>
             Task.FromResult(
@@ -654,8 +717,11 @@ public sealed class CandidateModuleTests
             ResumeProfile = profile;
             return Task.CompletedTask;
         }
-        public Task<IReadOnlyCollection<RecommendationJobCandidate>> GetRecommendationCandidatesAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult(RecommendationJobs);
+        public Task<IReadOnlyCollection<RecommendationJobCandidate>> GetRecommendationCandidatesAsync(Guid userId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyCollection<RecommendationJobCandidate>>(RecommendationJobs.Where(x => !AppliedJobIds.Contains(x.Id)).ToArray());
+        public Task<(IReadOnlyCollection<RecommendationJobCandidate> Items, int TotalCount)> GetCandidateBrowseJobsAsync(
+            Guid userId, CandidatePageQuery query, CancellationToken cancellationToken = default) =>
+            Task.FromResult(((IReadOnlyCollection<RecommendationJobCandidate>)RecommendationJobs.Where(x => !AppliedJobIds.Contains(x.Id)).ToArray(), RecommendationJobs.Count(x => !AppliedJobIds.Contains(x.Id))));
         public Task<CandidateRecruiterContact?> GetApprovedRecruiterContactForAvailableJobAsync(
     Guid jobId,
     CancellationToken cancellationToken = default) =>
@@ -675,6 +741,8 @@ public sealed class CandidateModuleTests
         public Task<bool> HasApplicationAsync(
             Guid userId, Guid jobId, CancellationToken cancellationToken = default) =>
             Task.FromResult(HasPriorApplication);
+        public Task<JobApplication?> GetApplicationByJobAsync(Guid userId, Guid jobId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(ExistingApplication?.UserId == userId && ExistingApplication.JobId == jobId ? ExistingApplication : null);
         public Task<ApplicationQuotaUsage?> GetQuotaUsageAsync(
     Guid userId,
     ApplicationQuotaPeriod period,
@@ -713,6 +781,7 @@ public sealed class CandidateModuleTests
         public bool JobAvailable { get; set; } = true;
         public bool AlreadySaved { get; set; }
         public List<SavedJob> Added { get; } = [];
+        public List<Notification> Notifications { get; } = [];
         public Task<User?> GetUserAsync(Guid userId, CancellationToken cancellationToken = default) =>
             Task.FromResult<User?>(null);
         public Task<(IReadOnlyCollection<SavedJobResponse> Items, int TotalCount)> GetSavedJobsAsync(
@@ -748,7 +817,7 @@ public sealed class CandidateModuleTests
         // 👇 ADD THIS MISSING METHOD IMPLEMENTATION
         public Task AddNotificationAsync(Notification notification, CancellationToken cancellationToken = default)
         {
-            // For unit tests, we just need it to succeed. We don't need to save it anywhere.
+            Notifications.Add(notification);
             return Task.CompletedTask;
         }
     }

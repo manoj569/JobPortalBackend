@@ -75,7 +75,8 @@ public enum ApplicationQuotaPeriod
     PremiumDaily = 2
 }
 public enum SettingScope { Global = 1, User, Company }
-public enum JobApplicationStatus { Submitted = 1, Reviewed, Shortlisted, Rejected, Withdrawn }
+public enum JobApplicationStatus { Submitted = 1, Reviewed, Shortlisted, Rejected, Withdrawn, ExternalApplicationStarted }
+public enum ApplicationMethod { Portal = 1, External }
 public enum CareerStage { Student = 1, Fresher, Experienced }
 public enum DesiredOpportunity { Internship = 1, FresherJob, ExperiencedJob }
 public enum WorkPreference { Remote = 1, Hybrid, OnSite }
