@@ -20,10 +20,10 @@ public sealed class PendingRegistrationConfiguration :
         builder.Property(x => x.TermsAndPrivacyVersion).HasMaxLength(32).IsRequired();
         builder.HasIndex(x => x.NormalizedEmail)
             .IsUnique()
-            .HasFilter("[ClosedAtUtc] IS NULL AND [IsDeleted] = 0");
+            .HasFilter("\"ClosedAtUtc\" IS NULL AND \"IsDeleted\" = FALSE");
         builder.HasIndex(x => x.NormalizedPhoneNumber)
             .IsUnique()
-            .HasFilter("[ClosedAtUtc] IS NULL AND [IsDeleted] = 0");
+            .HasFilter("\"ClosedAtUtc\" IS NULL AND \"IsDeleted\" = FALSE");
         builder.HasIndex(x => new { x.ExpiresAtUtc, x.ClosedAtUtc });
         builder.HasOne(x => x.CompletedUser)
             .WithMany()
@@ -43,10 +43,10 @@ public sealed class OtpChallengeConfiguration :
             {
                 table.HasCheckConstraint(
                     "CK_OtpChallenges_FailedAttemptCount",
-                    "[FailedAttemptCount] BETWEEN 0 AND 5");
+                    "\"FailedAttemptCount\" BETWEEN 0 AND 5");
                 table.HasCheckConstraint(
                     "CK_OtpChallenges_SendCount",
-                    "[SendCount] >= 1");
+                    "\"SendCount\" >= 1");
             });
         builder.ConfigureBaseEntity();
         builder.Property(x => x.NormalizedPhoneNumber).HasMaxLength(13).IsRequired();
@@ -61,7 +61,7 @@ public sealed class OtpChallengeConfiguration :
         builder.HasIndex(x => new { x.Purpose, x.LastSentAtUtc });
         builder.HasIndex(x => x.PendingRegistrationId)
             .IsUnique()
-            .HasFilter("[PendingRegistrationId] IS NOT NULL AND [IsDeleted] = 0");
+            .HasFilter("\"PendingRegistrationId\" IS NOT NULL AND \"IsDeleted\" = FALSE");
         builder.HasOne(x => x.User)
             .WithMany(x => x.OtpChallenges)
             .HasForeignKey(x => x.UserId)

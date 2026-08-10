@@ -12,7 +12,8 @@ public class JobPortalDbContextFactory : IDesignTimeDbContextFactory<JobPortalDb
                 "ConnectionStrings__DefaultConnection environment variable is not set.");
 
         var optionsBuilder = new DbContextOptionsBuilder<JobPortalDbContext>();
-        optionsBuilder.UseSqlServer(connStr);
+        optionsBuilder.UseNpgsql(connStr, npgsql =>
+            npgsql.MigrationsAssembly("JobPortal.Persistence.Postgres"));
 
         return new JobPortalDbContext(optionsBuilder.Options);
     }

@@ -39,12 +39,12 @@ public sealed class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(x => x.Location).HasMaxLength(250);
         builder.Property(x => x.LinkedInUrl).HasMaxLength(2048);
         builder.Property(x => x.PortfolioUrl).HasMaxLength(2048);
-        builder.Property(x => x.SkillsJson).HasColumnType("nvarchar(max)").HasDefaultValue("[]").IsRequired();
-        builder.Property(x => x.EducationJson).HasColumnType("nvarchar(max)").HasDefaultValue("[]").IsRequired();
-        builder.Property(x => x.ExperienceJson).HasColumnType("nvarchar(max)").HasDefaultValue("[]").IsRequired();
-        builder.Property(x => x.PreferredJobTypesJson).HasColumnType("nvarchar(max)").HasDefaultValue("[]").IsRequired();
-        builder.Property(x => x.DesiredOpportunitiesJson).HasColumnType("nvarchar(max)").HasDefaultValue("[]").IsRequired();
-        builder.Property(x => x.WorkPreferencesJson).HasColumnType("nvarchar(max)").HasDefaultValue("[]").IsRequired();
+        builder.Property(x => x.SkillsJson).HasColumnType("text").HasDefaultValue("[]").IsRequired();
+        builder.Property(x => x.EducationJson).HasColumnType("text").HasDefaultValue("[]").IsRequired();
+        builder.Property(x => x.ExperienceJson).HasColumnType("text").HasDefaultValue("[]").IsRequired();
+        builder.Property(x => x.PreferredJobTypesJson).HasColumnType("text").HasDefaultValue("[]").IsRequired();
+        builder.Property(x => x.DesiredOpportunitiesJson).HasColumnType("text").HasDefaultValue("[]").IsRequired();
+        builder.Property(x => x.WorkPreferencesJson).HasColumnType("text").HasDefaultValue("[]").IsRequired();
         builder.Property(x => x.College).HasMaxLength(200);
         builder.Property(x => x.Degree).HasMaxLength(200);
         builder.Property(x => x.YearsOfExperience).HasPrecision(4, 1);
@@ -54,11 +54,11 @@ public sealed class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(x => x.PasswordResetTokenHash).HasMaxLength(64);
         builder.HasIndex(x => x.PasswordResetTokenHash)
             .IsUnique()
-            .HasFilter("[PasswordResetTokenHash] IS NOT NULL AND [IsDeleted] = 0");
+            .HasFilter("\"PasswordResetTokenHash\" IS NOT NULL AND \"IsDeleted\" = FALSE");
         builder.Property(x => x.EmailVerificationTokenHash).HasMaxLength(64);
-        builder.HasIndex(x => x.NormalizedEmail).IsUnique().HasFilter("[IsDeleted] = 0");
+        builder.HasIndex(x => x.NormalizedEmail).IsUnique().HasFilter("\"IsDeleted\" = FALSE");
         builder.HasIndex(x => x.NormalizedPhoneNumber).IsUnique()
-            .HasFilter("[NormalizedPhoneNumber] IS NOT NULL AND [IsDeleted] = 0");
+            .HasFilter("\"NormalizedPhoneNumber\" IS NOT NULL AND \"IsDeleted\" = FALSE");
         builder.HasIndex(x => new { x.Status, x.IsDeleted });
         builder.HasIndex(x => x.CreatedAtUtc);
         builder.HasOne(x => x.Role).WithMany(x => x.Users).HasForeignKey(x => x.RoleId).OnDelete(DeleteBehavior.Restrict);
@@ -71,13 +71,13 @@ public sealed class CandidateResumeProfileConfiguration : IEntityTypeConfigurati
     {
         builder.ToTable("CandidateResumeProfiles");
         builder.ConfigureBaseEntity();
-        builder.Property(x => x.SkillsJson).HasColumnType("nvarchar(4000)").IsRequired();
-        builder.Property(x => x.RoleKeywordsJson).HasColumnType("nvarchar(2000)").IsRequired();
-        builder.Property(x => x.EducationKeywordsJson).HasColumnType("nvarchar(2000)").IsRequired();
-        builder.Property(x => x.LocationsJson).HasColumnType("nvarchar(2000)").IsRequired();
+        builder.Property(x => x.SkillsJson).HasColumnType("varchar(4000)").IsRequired();
+        builder.Property(x => x.RoleKeywordsJson).HasColumnType("varchar(2000)").IsRequired();
+        builder.Property(x => x.EducationKeywordsJson).HasColumnType("varchar(2000)").IsRequired();
+        builder.Property(x => x.LocationsJson).HasColumnType("varchar(2000)").IsRequired();
         builder.Property(x => x.YearsOfExperience).HasPrecision(4, 1);
         builder.Property(x => x.ExtractionError).HasMaxLength(1000);
-        builder.HasIndex(x => x.UserId).IsUnique().HasFilter("[IsDeleted] = 0");
+        builder.HasIndex(x => x.UserId).IsUnique().HasFilter("\"IsDeleted\" = FALSE");
         builder.HasIndex(x => new { x.ExtractionStatus, x.ExtractedAtUtc });
         builder.HasOne(x => x.User).WithOne(x => x.ResumeProfile).HasForeignKey<CandidateResumeProfile>(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
     }
@@ -92,7 +92,7 @@ public sealed class RoleConfiguration : IEntityTypeConfiguration<Role>
         builder.Property(x => x.Name).HasMaxLength(100).IsRequired();
         builder.Property(x => x.NormalizedName).HasMaxLength(100).IsRequired();
         builder.Property(x => x.Description).HasMaxLength(1000);
-        builder.HasIndex(x => x.NormalizedName).IsUnique().HasFilter("[IsDeleted] = 0");
+        builder.HasIndex(x => x.NormalizedName).IsUnique().HasFilter("\"IsDeleted\" = FALSE");
         builder.HasData(
             new Role { Id = SystemRoleIds.Administrator, Name = "Administrator", NormalizedName = "ADMINISTRATOR", Description = "System administrator", CreatedAtUtc = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc) },
             new Role { Id = SystemRoleIds.Employer, Name = "Employer", NormalizedName = "EMPLOYER", Description = "Company employer", CreatedAtUtc = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc) },
@@ -110,7 +110,7 @@ public sealed class RefreshTokenConfiguration : IEntityTypeConfiguration<Refresh
         builder.Property(x => x.ReplacedByToken).HasMaxLength(512);
         builder.Property(x => x.CreatedByIp).HasMaxLength(45);
         builder.Property(x => x.RevokedByIp).HasMaxLength(45);
-        builder.HasIndex(x => x.Token).IsUnique().HasFilter("[IsDeleted] = 0");
+        builder.HasIndex(x => x.Token).IsUnique().HasFilter("\"IsDeleted\" = FALSE");
         builder.HasIndex(x => new { x.UserId, x.ExpiresAtUtc });
         builder.HasOne(x => x.User).WithMany(x => x.RefreshTokens).HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
     }
@@ -130,7 +130,7 @@ public sealed class CompanyConfiguration : IEntityTypeConfiguration<Company>
         builder.Property(x => x.Industry).HasMaxLength(150);
         builder.Property(x => x.Location).HasMaxLength(250);
         builder.HasIndex(x => new { x.CompanyType, x.Industry });
-        builder.HasIndex(x => x.Slug).IsUnique().HasFilter("[IsDeleted] = 0");
+        builder.HasIndex(x => x.Slug).IsUnique().HasFilter("\"IsDeleted\" = FALSE");
         builder.HasIndex(x => x.OwnerUserId);
         builder.HasOne(x => x.OwnerUser).WithMany(x => x.OwnedCompanies).HasForeignKey(x => x.OwnerUserId).OnDelete(DeleteBehavior.Restrict);
     }
@@ -145,7 +145,7 @@ public sealed class CategoryConfiguration : IEntityTypeConfiguration<Category>
         builder.Property(x => x.Name).HasMaxLength(150).IsRequired();
         builder.Property(x => x.Slug).HasMaxLength(170).IsRequired();
         builder.Property(x => x.Description).HasMaxLength(1000);
-        builder.HasIndex(x => x.Slug).IsUnique().HasFilter("[IsDeleted] = 0");
+        builder.HasIndex(x => x.Slug).IsUnique().HasFilter("\"IsDeleted\" = FALSE");
         builder.HasIndex(x => new { x.ParentCategoryId, x.DisplayOrder });
         builder.HasOne(x => x.ParentCategory).WithMany(x => x.Children).HasForeignKey(x => x.ParentCategoryId).OnDelete(DeleteBehavior.Restrict);
     }
@@ -157,9 +157,9 @@ public sealed class JobConfiguration : IEntityTypeConfiguration<Job>
     {
         builder.ToTable("Jobs", table =>
         {
-            table.HasCheckConstraint("CK_Jobs_SalaryRange", "[MinimumSalary] IS NULL OR [MaximumSalary] IS NULL OR [MinimumSalary] <= [MaximumSalary]");
-            table.HasCheckConstraint("CK_Jobs_ExperienceRange", "[MinimumExperienceYears] IS NULL OR [MaximumExperienceYears] IS NULL OR [MinimumExperienceYears] <= [MaximumExperienceYears]");
-            table.HasCheckConstraint("CK_Jobs_InternshipDuration", "[InternshipDurationMonths] IS NULL OR [InternshipDurationMonths] IN (1, 2, 3, 6)");
+            table.HasCheckConstraint("CK_Jobs_SalaryRange", "\"MinimumSalary\" IS NULL OR \"MaximumSalary\" IS NULL OR \"MinimumSalary\" <= \"MaximumSalary\"");
+            table.HasCheckConstraint("CK_Jobs_ExperienceRange", "\"MinimumExperienceYears\" IS NULL OR \"MaximumExperienceYears\" IS NULL OR \"MinimumExperienceYears\" <= \"MaximumExperienceYears\"");
+            table.HasCheckConstraint("CK_Jobs_InternshipDuration", "\"InternshipDurationMonths\" IS NULL OR \"InternshipDurationMonths\" IN (1, 2, 3, 6)");
         });
         builder.ConfigureBaseEntity();
         builder.Property(x => x.ReferenceNumber).HasMaxLength(50).IsRequired();
@@ -177,8 +177,8 @@ public sealed class JobConfiguration : IEntityTypeConfiguration<Job>
         builder.Property(x => x.Department).HasMaxLength(150);
         builder.Property(x => x.RoleCategory).HasMaxLength(150);
         builder.Property(x => x.EducationRequirement).HasMaxLength(200);
-        builder.HasIndex(x => x.ReferenceNumber).IsUnique().HasFilter("[IsDeleted] = 0");
-        builder.HasIndex(x => x.Slug).IsUnique().HasFilter("[IsDeleted] = 0");
+        builder.HasIndex(x => x.ReferenceNumber).IsUnique().HasFilter("\"IsDeleted\" = FALSE");
+        builder.HasIndex(x => x.Slug).IsUnique().HasFilter("\"IsDeleted\" = FALSE");
         builder.HasIndex(x => new { x.CompanyId, x.Status, x.PublishedAtUtc });
         builder.HasIndex(x => new { x.CategoryId, x.Status });
         builder.HasIndex(x => new { x.Status, x.IsFeatured, x.IsHidden, x.PublishedAtUtc });
@@ -219,7 +219,7 @@ public sealed class JobRecruiterContactConfiguration
 
         builder.HasIndex(x => x.JobId)
             .IsUnique()
-            .HasFilter("[IsDeleted] = 0");
+            .HasFilter("\"IsDeleted\" = FALSE");
 
         builder.HasOne(x => x.Job)
             .WithOne(x => x.RecruiterContact)
@@ -237,7 +237,7 @@ public sealed class SkillConfiguration : IEntityTypeConfiguration<Skill>
         builder.Property(x => x.Name).HasMaxLength(150).IsRequired();
         builder.Property(x => x.NormalizedName).HasMaxLength(150).IsRequired();
         builder.Property(x => x.Description).HasMaxLength(1000);
-        builder.HasIndex(x => x.NormalizedName).IsUnique().HasFilter("[IsDeleted] = 0");
+        builder.HasIndex(x => x.NormalizedName).IsUnique().HasFilter("\"IsDeleted\" = FALSE");
     }
 }
 
@@ -245,9 +245,9 @@ public sealed class JobSkillConfiguration : IEntityTypeConfiguration<JobSkill>
 {
     public void Configure(EntityTypeBuilder<JobSkill> builder)
     {
-        builder.ToTable("JobSkills", table => table.HasCheckConstraint("CK_JobSkills_ProficiencyLevel", "[ProficiencyLevel] BETWEEN 1 AND 5"));
+        builder.ToTable("JobSkills", table => table.HasCheckConstraint("CK_JobSkills_ProficiencyLevel", "\"ProficiencyLevel\" BETWEEN 1 AND 5"));
         builder.ConfigureBaseEntity();
-        builder.HasIndex(x => new { x.JobId, x.SkillId }).IsUnique().HasFilter("[IsDeleted] = 0");
+        builder.HasIndex(x => new { x.JobId, x.SkillId }).IsUnique().HasFilter("\"IsDeleted\" = FALSE");
         builder.HasOne(x => x.Job).WithMany(x => x.JobSkills).HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(x => x.Skill).WithMany(x => x.JobSkills).HasForeignKey(x => x.SkillId).OnDelete(DeleteBehavior.Restrict);
     }
@@ -260,8 +260,9 @@ public sealed class MembershipConfiguration : IEntityTypeConfiguration<Membershi
         builder.ToTable("Memberships");
         builder.ConfigureBaseEntity();
         builder.Property(x => x.PlanName).HasMaxLength(100).IsRequired();
-        builder.Property(x => x.RowVersion).IsRowVersion();
-        builder.HasIndex(x => x.UserId).IsUnique().HasFilter("[IsDeleted] = 0");
+        builder.Ignore(x => x.RowVersion);
+        builder.Property<uint>("xmin").HasColumnName("xmin").IsRowVersion();
+        builder.HasIndex(x => x.UserId).IsUnique().HasFilter("\"IsDeleted\" = FALSE");
         builder.HasIndex(x => new { x.Status, x.EndsAtUtc });
         builder.HasOne(x => x.User).WithMany(x => x.Memberships).HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
     }
@@ -271,17 +272,18 @@ public sealed class PaymentConfiguration : IEntityTypeConfiguration<Payment>
 {
     public void Configure(EntityTypeBuilder<Payment> builder)
     {
-        builder.ToTable("Payments", table => table.HasCheckConstraint("CK_Payments_Amount", "[Amount] >= 0"));
+        builder.ToTable("Payments", table => table.HasCheckConstraint("CK_Payments_Amount", "\"Amount\" >= 0"));
         builder.ConfigureBaseEntity();
         builder.Property(x => x.Amount).HasPrecision(18, 2);
-        builder.Property(x => x.RowVersion).IsRowVersion();
-        builder.Property(x => x.CurrencyCode).HasMaxLength(3).IsFixedLength().IsRequired();
+        builder.Ignore(x => x.RowVersion);
+        builder.Property<uint>("xmin").HasColumnName("xmin").IsRowVersion();
+        builder.Property(x => x.CurrencyCode).HasMaxLength(3).IsRequired();
         builder.Property(x => x.TransactionReference).HasMaxLength(100);
         builder.Property(x => x.ProviderPaymentId).HasMaxLength(200);
         builder.Property(x => x.ProviderOrderId).HasMaxLength(200);
         builder.Property(x => x.ProviderReceipt).HasMaxLength(100);
-        builder.HasIndex(x => x.ProviderPaymentId).IsUnique().HasFilter("[ProviderPaymentId] IS NOT NULL");
-        builder.HasIndex(x => x.ProviderOrderId).IsUnique().HasFilter("[ProviderOrderId] IS NOT NULL");
+        builder.HasIndex(x => x.ProviderPaymentId).IsUnique().HasFilter("\"ProviderPaymentId\" IS NOT NULL");
+        builder.HasIndex(x => x.ProviderOrderId).IsUnique().HasFilter("\"ProviderOrderId\" IS NOT NULL");
         builder.HasIndex(x => new { x.UserId, x.Status, x.CreatedAtUtc });
         builder.HasIndex(x => new { x.Status, x.PaidAtUtc, x.CurrencyCode });
         builder.HasIndex(x => new { x.Status, x.UserId });
@@ -317,7 +319,7 @@ public sealed class PaymentHistoryConfiguration : IEntityTypeConfiguration<Payme
         builder.Property(x => x.Reason).HasMaxLength(1000);
         builder.HasIndex(x => new { x.PaymentId, x.OccurredAtUtc });
         builder.HasIndex(x => new { x.UserId, x.OccurredAtUtc });
-        builder.HasIndex(x => x.ProviderEventId).IsUnique().HasFilter("[ProviderEventId] IS NOT NULL");
+        builder.HasIndex(x => x.ProviderEventId).IsUnique().HasFilter("\"ProviderEventId\" IS NOT NULL");
         builder.HasOne(x => x.Payment).WithMany(x => x.History).HasForeignKey(x => x.PaymentId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
     }
@@ -329,7 +331,7 @@ public sealed class SavedJobConfiguration : IEntityTypeConfiguration<SavedJob>
     {
         builder.ToTable("SavedJobs");
         builder.ConfigureBaseEntity();
-        builder.HasIndex(x => new { x.UserId, x.JobId }).IsUnique().HasFilter("[IsDeleted] = 0");
+        builder.HasIndex(x => new { x.UserId, x.JobId }).IsUnique().HasFilter("\"IsDeleted\" = FALSE");
         builder.HasIndex(x => new { x.UserId, x.CreatedAtUtc });
         builder.HasOne(x => x.User).WithMany(x => x.SavedJobs).HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(x => x.Job).WithMany(x => x.SavedByUsers).HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Restrict);
@@ -360,7 +362,7 @@ public sealed class JobApplicationConfiguration : IEntityTypeConfiguration<JobAp
         builder.Property(x => x.ResumeStorageKey).HasMaxLength(255);
         builder.Property(x => x.ResumeFileName).HasMaxLength(255);
         builder.Property(x => x.ResumeContentType).HasMaxLength(100);
-        builder.HasIndex(x => new { x.UserId, x.JobId }).IsUnique().HasFilter("[IsDeleted] = 0");
+        builder.HasIndex(x => new { x.UserId, x.JobId }).IsUnique().HasFilter("\"IsDeleted\" = FALSE");
         builder.HasIndex(x => new { x.UserId, x.Status, x.SubmittedAtUtc });
         builder.HasOne(x => x.User).WithMany(x => x.JobApplications)
             .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
@@ -406,7 +408,7 @@ public sealed class JobDiscoveryItemConfiguration : IEntityTypeConfiguration<Job
         b.Property(x => x.CategoryName).HasMaxLength(200).IsRequired(); b.Property(x => x.ApplicationUrl).HasMaxLength(2048).IsRequired();
         b.Property(x => x.Location).HasMaxLength(300); b.Property(x => x.EmploymentType).HasMaxLength(50);
         b.Property(x => x.Status).HasMaxLength(32).IsRequired(); b.Property(x => x.DuplicateReason).HasMaxLength(64);
-        b.HasIndex(x => new { x.Provider, x.SourceJobId }).IsUnique().HasFilter("[IsDeleted] = 0");
+        b.HasIndex(x => new { x.Provider, x.SourceJobId }).IsUnique().HasFilter("\"IsDeleted\" = FALSE");
         b.HasIndex(x => x.RunId); b.HasOne(x => x.Run).WithMany(x => x.Items).HasForeignKey(x => x.RunId).OnDelete(DeleteBehavior.Cascade);
     }
 }
@@ -439,7 +441,7 @@ public sealed class AuditLogConfiguration : IEntityTypeConfiguration<AuditLog>
         builder.ConfigureBaseEntity();
         builder.Property(x => x.EntityName).HasMaxLength(200).IsRequired();
         builder.Property(x => x.EntityId).HasMaxLength(64).IsRequired();
-        builder.Property(x => x.ChangesJson).HasColumnType("nvarchar(max)");
+        builder.Property(x => x.ChangesJson).HasColumnType("text");
         builder.Property(x => x.ActorRole).HasMaxLength(50);
         builder.Property(x => x.CorrelationId).HasMaxLength(64);
         builder.Property(x => x.IpAddress).HasMaxLength(45);
@@ -460,10 +462,10 @@ public sealed class SettingConfiguration : IEntityTypeConfiguration<Setting>
         builder.ToTable("Settings");
         builder.ConfigureBaseEntity();
         builder.Property(x => x.Key).HasMaxLength(200).IsRequired();
-        builder.Property(x => x.Value).HasColumnType("nvarchar(max)").IsRequired();
+        builder.Property(x => x.Value).HasColumnType("text").IsRequired();
         builder.Property(x => x.Description).HasMaxLength(1000);
-        builder.HasIndex(x => new { x.Scope, x.Key }).IsUnique().HasFilter("[UserId] IS NULL AND [IsDeleted] = 0");
-        builder.HasIndex(x => new { x.Scope, x.UserId, x.Key }).IsUnique().HasFilter("[UserId] IS NOT NULL AND [IsDeleted] = 0");
+        builder.HasIndex(x => new { x.Scope, x.Key }).IsUnique().HasFilter("\"UserId\" IS NULL AND \"IsDeleted\" = FALSE");
+        builder.HasIndex(x => new { x.Scope, x.UserId, x.Key }).IsUnique().HasFilter("\"UserId\" IS NOT NULL AND \"IsDeleted\" = FALSE");
         builder.HasOne(x => x.User).WithMany(x => x.Settings).HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
     }
     public sealed class ApplicationQuotaUsageConfiguration
@@ -475,7 +477,7 @@ public sealed class SettingConfiguration : IEntityTypeConfiguration<Setting>
                 "ApplicationQuotaUsages",
                 table => table.HasCheckConstraint(
                     "CK_ApplicationQuotaUsages_UsedApplications",
-                    "[UsedApplications] >= 0"));
+                    "\"UsedApplications\" >= 0"));
 
             builder.ConfigureBaseEntity();
 
@@ -487,11 +489,12 @@ public sealed class SettingConfiguration : IEntityTypeConfiguration<Setting>
 
             builder.Property(x => x.UsedApplications).IsRequired();
 
-            builder.Property(x => x.RowVersion).IsRowVersion();
+            builder.Ignore(x => x.RowVersion);
+            builder.Property<uint>("xmin").HasColumnName("xmin").IsRowVersion();
 
             builder.HasIndex(x => new { x.UserId, x.Period, x.PeriodStartsAtUtc })
                 .IsUnique()
-                .HasFilter("[IsDeleted] = 0");
+                .HasFilter("\"IsDeleted\" = FALSE");
 
             builder.HasOne(x => x.User)
                 .WithMany()

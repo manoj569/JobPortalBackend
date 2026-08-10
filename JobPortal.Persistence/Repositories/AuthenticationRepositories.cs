@@ -4,6 +4,7 @@ using JobPortal.Domain.Entities;
 using JobPortal.Domain.Enums;
 using JobPortal.Persistence.Context;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace JobPortal.Persistence.Repositories;
 
@@ -148,8 +149,7 @@ public sealed class UnitOfWork(JobPortalDbContext context) : IUnitOfWork
             return await context.SaveChangesAsync(cancellationToken);
         }
         catch (DbUpdateException exception)
-            when (exception.InnerException is Microsoft.Data.SqlClient.SqlException
-            { Number: 2601 or 2627 })
+            when (exception.InnerException is PostgresException { SqlState: "23505" })
         {
             throw new UniqueConstraintException(
                 "A database uniqueness constraint was violated.", exception);
