@@ -14,6 +14,22 @@ public sealed record UpdateCandidateProfileRequest(
     IReadOnlyCollection<string> Education, IReadOnlyCollection<string> Experience,
     string? LinkedInUrl, string? PortfolioUrl, IReadOnlyCollection<EmploymentType> PreferredJobTypes);
 
+public sealed record CandidateAboutResponse(string? ResumeHeadline, string? ProfileSummary);
+public sealed record UpdateCandidateAboutRequest(string? ResumeHeadline, string? ProfileSummary);
+public sealed record CandidateSkillResponse(
+    Guid Id, string Name, CandidateSkillProficiency? Proficiency,
+    decimal? YearsOfExperience, DateTime CreatedAtUtc, DateTime? UpdatedAtUtc);
+public sealed record UpsertCandidateSkillRequest(
+    string Name, CandidateSkillProficiency? Proficiency = null,
+    decimal? YearsOfExperience = null);
+public sealed record ProfileSectionCompletionResponse(
+    string Section, int Weight, bool IsCompleted);
+public sealed record CandidateProfileCompletionResponse(
+    int CompletionPercentage,
+    IReadOnlyCollection<string> CompletedSections,
+    IReadOnlyCollection<string> MissingSections,
+    IReadOnlyCollection<ProfileSectionCompletionResponse> Sections);
+
 public sealed record CandidateOnboardingResponse(
     CareerStage? CareerStage,
     IReadOnlyCollection<DesiredOpportunity> DesiredOpportunities,

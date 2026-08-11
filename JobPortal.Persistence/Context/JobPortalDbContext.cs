@@ -8,6 +8,7 @@ public sealed class JobPortalDbContext(DbContextOptions<JobPortalDbContext> opti
 {
     public DbSet<User> Users => Set<User>();
     public DbSet<CandidateResumeProfile> CandidateResumeProfiles => Set<CandidateResumeProfile>();
+    public DbSet<CandidateSkill> CandidateSkills => Set<CandidateSkill>();
     public DbSet<Role> Roles => Set<Role>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<PendingRegistration> PendingRegistrations => Set<PendingRegistration>();

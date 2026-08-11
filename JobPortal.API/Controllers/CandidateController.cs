@@ -24,6 +24,53 @@ public sealed class CandidateController(ICandidateService candidates) : Controll
         Ok(new ApiResponse<CandidateProfileResponse>(
             await candidates.UpdateProfileAsync(User.GetRequiredUserId(), request, cancellationToken)));
 
+    [HttpPut("profile/about")]
+    public async Task<ActionResult<ApiResponse<CandidateAboutResponse>>> UpdateAbout(
+        UpdateCandidateAboutRequest request, CancellationToken cancellationToken) =>
+        Ok(new ApiResponse<CandidateAboutResponse>(await candidates.UpdateAboutAsync(
+            User.GetRequiredUserId(), request, cancellationToken),
+            "Candidate profile updated successfully."));
+
+    [HttpGet("profile/skills")]
+    public async Task<ActionResult<ApiResponse<IReadOnlyCollection<CandidateSkillResponse>>>> Skills(
+        CancellationToken cancellationToken) =>
+        Ok(new ApiResponse<IReadOnlyCollection<CandidateSkillResponse>>(
+            await candidates.GetSkillsAsync(User.GetRequiredUserId(), cancellationToken)));
+
+    [HttpPost("profile/skills")]
+    public async Task<ActionResult<ApiResponse<CandidateSkillResponse>>> AddSkill(
+        UpsertCandidateSkillRequest request, CancellationToken cancellationToken)
+    {
+        var result = await candidates.AddSkillAsync(
+            User.GetRequiredUserId(), request, cancellationToken);
+        return StatusCode(StatusCodes.Status201Created,
+            new ApiResponse<CandidateSkillResponse>(result, "Skill added successfully."));
+    }
+
+    [HttpPut("profile/skills/{skillId:guid}")]
+    public async Task<ActionResult<ApiResponse<CandidateSkillResponse>>> UpdateSkill(
+        Guid skillId, UpsertCandidateSkillRequest request,
+        CancellationToken cancellationToken) =>
+        Ok(new ApiResponse<CandidateSkillResponse>(await candidates.UpdateSkillAsync(
+            User.GetRequiredUserId(), skillId, request, cancellationToken),
+            "Skill updated successfully."));
+
+    [HttpDelete("profile/skills/{skillId:guid}")]
+    public async Task<IActionResult> DeleteSkill(
+        Guid skillId, CancellationToken cancellationToken)
+    {
+        await candidates.DeleteSkillAsync(
+            User.GetRequiredUserId(), skillId, cancellationToken);
+        return NoContent();
+    }
+
+    [HttpGet("profile/completion")]
+    public async Task<ActionResult<ApiResponse<CandidateProfileCompletionResponse>>> ProfileCompletion(
+        CancellationToken cancellationToken) =>
+        Ok(new ApiResponse<CandidateProfileCompletionResponse>(
+            await candidates.GetProfileCompletionAsync(
+                User.GetRequiredUserId(), cancellationToken)));
+
     [HttpGet("onboarding")]
     [ProducesResponseType(
         typeof(ApiResponse<CandidateOnboardingResponse>),

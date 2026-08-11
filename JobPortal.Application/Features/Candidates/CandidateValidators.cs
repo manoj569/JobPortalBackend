@@ -7,8 +7,8 @@ public sealed class UpdateCandidateProfileRequestValidator : AbstractValidator<U
 {
     public UpdateCandidateProfileRequestValidator()
     {
-        RuleFor(x => x.Headline).MaximumLength(250);
-        RuleFor(x => x.Bio).MaximumLength(4000);
+        RuleFor(x => x.Headline).MaximumLength(180);
+        RuleFor(x => x.Bio).MaximumLength(2000);
         RuleFor(x => x.Location).MaximumLength(250);
         RuleFor(x => x.LinkedInUrl).MaximumLength(2048).Must(OptionalUrl);
         RuleFor(x => x.PortfolioUrl).MaximumLength(2048).Must(OptionalUrl);
@@ -136,5 +136,33 @@ public sealed class CreateJobApplicationRequestValidator : AbstractValidator<Cre
     {
         RuleFor(x => x.CoverLetter).MaximumLength(5000);
         RuleFor(x => x.ApplicationMethod).IsInEnum();
+    }
+}
+
+public sealed class UpdateCandidateAboutRequestValidator : AbstractValidator<UpdateCandidateAboutRequest>
+{
+    public UpdateCandidateAboutRequestValidator()
+    {
+        RuleFor(x => x.ResumeHeadline).MaximumLength(180).Must(BeSafeOptionalText);
+        RuleFor(x => x.ProfileSummary).MaximumLength(2000).Must(BeSafeOptionalText);
+    }
+
+    private static bool BeSafeOptionalText(string? value) =>
+        string.IsNullOrWhiteSpace(value) || !value.Any(char.IsControl);
+}
+
+public sealed class UpsertCandidateSkillRequestValidator : AbstractValidator<UpsertCandidateSkillRequest>
+{
+    public UpsertCandidateSkillRequestValidator()
+    {
+        RuleFor(x => x.Name)
+            .Cascade(CascadeMode.Stop)
+            .NotEmpty()
+            .MaximumLength(100)
+            .Must(value => !value.Any(char.IsControl))
+            .WithMessage("Skill name contains invalid characters.");
+        RuleFor(x => x.Proficiency).IsInEnum().When(x => x.Proficiency.HasValue);
+        RuleFor(x => x.YearsOfExperience).InclusiveBetween(0, 50)
+            .When(x => x.YearsOfExperience.HasValue);
     }
 }
