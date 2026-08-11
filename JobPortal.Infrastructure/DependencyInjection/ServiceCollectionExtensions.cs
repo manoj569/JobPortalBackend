@@ -21,14 +21,6 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IJwtTokenService, JwtTokenService>();
 
         // ✅ REMOVED: SMS and OTP services (Mobile OTP feature is retired)
-        // services.AddSingleton<IOneTimePasswordService, HmacOneTimePasswordService>();
-        // services.AddHttpClient<ISmsService, Fast2SmsService>(client =>
-        // {
-        //     client.Timeout = TimeSpan.FromSeconds(15);
-        //     client.DefaultRequestHeaders.Accept.Add(
-        //         new MediaTypeWithQualityHeaderValue("application/json"));
-        // });
-
         services.AddHttpClient(BrevoEmailService.HttpClientName, client =>
         {
             client.BaseAddress = new Uri("https://api.brevo.com/");
