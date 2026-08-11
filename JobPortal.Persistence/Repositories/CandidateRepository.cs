@@ -17,6 +17,31 @@ public sealed class CandidateRepository(
             x.RoleId == SystemRoleIds.Candidate &&
             x.Status == UserStatus.Active, cancellationToken);
 
+    public async Task<IReadOnlyCollection<CandidateSkill>> GetSkillsAsync(
+        Guid userId, CancellationToken cancellationToken = default) =>
+        await context.CandidateSkills.AsNoTracking()
+            .Where(x => x.UserId == userId)
+            .OrderBy(x => x.Name).ThenBy(x => x.Id)
+            .ToArrayAsync(cancellationToken);
+
+    public Task<CandidateSkill?> GetSkillAsync(
+        Guid userId, Guid skillId, CancellationToken cancellationToken = default) =>
+        context.CandidateSkills.SingleOrDefaultAsync(
+            x => x.Id == skillId && x.UserId == userId, cancellationToken);
+
+    public Task<bool> SkillNameExistsAsync(
+        Guid userId, string normalizedName, Guid? excludingSkillId,
+        CancellationToken cancellationToken = default) =>
+        context.CandidateSkills.AnyAsync(x => x.UserId == userId &&
+            x.NormalizedName == normalizedName &&
+            (!excludingSkillId.HasValue || x.Id != excludingSkillId.Value), cancellationToken);
+
+    public Task AddSkillAsync(
+        CandidateSkill skill, CancellationToken cancellationToken = default) =>
+        context.CandidateSkills.AddAsync(skill, cancellationToken).AsTask();
+
+    public void RemoveSkill(CandidateSkill skill) => context.CandidateSkills.Remove(skill);
+
     public async Task<CandidateResumeProfile?> GetResumeProfileAsync(Guid userId, bool tracking, CancellationToken cancellationToken = default)
     {
         var query = context.CandidateResumeProfiles.Where(x => x.UserId == userId);

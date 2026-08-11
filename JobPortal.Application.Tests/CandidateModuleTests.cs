@@ -25,10 +25,107 @@ public sealed class CandidateModuleTests
     public async Task ProfileRequiresOwnedActiveCandidate()
     {
         var fixture = CreateFixture();
-        fixture.Repository.Candidate = null;
 
         await Assert.ThrowsAsync<UnauthorizedException>(
             () => fixture.Service.GetProfileAsync(Guid.NewGuid()));
+    }
+
+    [Fact]
+    public async Task CandidateCanRetrieveOwnProfile()
+    {
+        var fixture = CreateFixture();
+
+        var profile = await fixture.Service.GetProfileAsync(fixture.Candidate.Id);
+
+        Assert.Equal(fixture.Candidate.Id, profile.Id);
+        Assert.Equal(fixture.Candidate.Email, profile.Email);
+        Assert.DoesNotContain("CandidateSkills", JsonSerializer.Serialize(profile, WebJson));
+    }
+
+    [Fact]
+    public async Task AboutFieldsAreTrimmedAndValidated()
+    {
+        var fixture = CreateFixture();
+
+        var result = await fixture.Service.UpdateAboutAsync(fixture.Candidate.Id,
+            new("  Backend Engineer  ", "  Builds secure services.  "));
+
+        Assert.Equal("Backend Engineer", result.ResumeHeadline);
+        Assert.Equal("Builds secure services.", result.ProfileSummary);
+        await Assert.ThrowsAsync<FluentValidation.ValidationException>(() =>
+            fixture.Service.UpdateAboutAsync(fixture.Candidate.Id,
+                new(new string('x', 181), null)));
+    }
+
+    [Fact]
+    public async Task SkillCrudNormalizesAndRejectsCaseInsensitiveDuplicate()
+    {
+        var fixture = CreateFixture();
+        var created = await fixture.Service.AddSkillAsync(fixture.Candidate.Id,
+            new("  C#  ", CandidateSkillProficiency.Advanced, 4));
+
+        Assert.Equal("C#", created.Name);
+        await Assert.ThrowsAsync<ConflictException>(() => fixture.Service.AddSkillAsync(
+            fixture.Candidate.Id, new("c#")));
+
+        var updated = await fixture.Service.UpdateSkillAsync(fixture.Candidate.Id,
+            created.Id, new("ASP.NET Core", CandidateSkillProficiency.Expert, 5));
+        Assert.Equal("ASP.NET Core", updated.Name);
+        Assert.Single(await fixture.Service.GetSkillsAsync(fixture.Candidate.Id));
+
+        await fixture.Service.DeleteSkillAsync(fixture.Candidate.Id, created.Id);
+        Assert.Empty(await fixture.Service.GetSkillsAsync(fixture.Candidate.Id));
+    }
+
+    [Fact]
+    public async Task CandidateCannotDeleteAnotherCandidatesSkill()
+    {
+        var fixture = CreateFixture();
+        fixture.Repository.Skills.Add(new CandidateSkill
+        {
+            UserId = Guid.NewGuid(), Name = "SQL", NormalizedName = "SQL"
+        });
+
+        await Assert.ThrowsAsync<NotFoundException>(() => fixture.Service.DeleteSkillAsync(
+            fixture.Candidate.Id, fixture.Repository.Skills[0].Id));
+    }
+
+    [Fact]
+    public async Task CompletionUsesExistingResumeAndCareerPreferencesDeterministically()
+    {
+        var fixture = CreateFixture();
+        fixture.Candidate.Headline = "Engineer";
+        fixture.Candidate.Bio = "Secure backend specialist";
+        fixture.Candidate.ResumeStorageKey = "resume.pdf";
+        fixture.Candidate.CareerStage = CareerStage.Experienced;
+        fixture.Candidate.Location = "Pune";
+        fixture.Candidate.DesiredOpportunitiesJson = "[3]";
+        fixture.Candidate.WorkPreferencesJson = "[1]";
+        fixture.Candidate.OnboardingCompletedAtUtc = Now;
+        fixture.Repository.Skills.Add(new CandidateSkill
+        {
+            UserId = fixture.Candidate.Id, Name = "C#", NormalizedName = "C#"
+        });
+
+        var result = await fixture.Service.GetProfileCompletionAsync(fixture.Candidate.Id);
+
+        Assert.Equal(100, result.CompletionPercentage);
+        Assert.Empty(result.MissingSections);
+        Assert.Equal(6, result.CompletedSections.Count);
+        Assert.DoesNotContain("User", JsonSerializer.Serialize(result, WebJson));
+    }
+
+    [Fact]
+    public async Task IncompleteProfileReturnsStableMissingSections()
+    {
+        var fixture = CreateFixture();
+
+        var result = await fixture.Service.GetProfileCompletionAsync(fixture.Candidate.Id);
+
+        Assert.Equal(15, result.CompletionPercentage);
+        Assert.Equal(
+            ["resumeHeadline", "profileSummary", "skills", "resume", "careerPreferences"],
+            result.MissingSections);
     }
 
     [Fact]
@@ -656,6 +753,8 @@ public sealed class CandidateModuleTests
         var service = new CandidateService(
             repository, dashboard, storage, unitOfWork, audit,
             new UpdateCandidateProfileRequestValidator(),
+            new UpdateCandidateAboutRequestValidator(),
+            new UpsertCandidateSkillRequestValidator(),
             new UpdateCandidateOnboardingRequestValidator(timeProvider),
             new CandidatePageQueryValidator(),
             new JobApplicationQueryValidator(), new CreateJobApplicationRequestValidator(),
@@ -700,6 +799,7 @@ public sealed class CandidateModuleTests
         public IReadOnlyCollection<RecommendationJobCandidate> RecommendationJobs { get; set; } = [];
         public HashSet<Guid> AppliedJobIds { get; } = [];
         public JobApplication? ExistingApplication { get; set; }
+        public List<CandidateSkill> Skills { get; } = [];
 
         public Task<User?> GetCandidateAsync(Guid userId, CancellationToken cancellationToken = default) =>
             Task.FromResult(
@@ -708,6 +808,27 @@ public sealed class CandidateModuleTests
                 Candidate.Status == UserStatus.Active
                     ? Candidate
                     : null);
+        public Task<IReadOnlyCollection<CandidateSkill>> GetSkillsAsync(
+            Guid userId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyCollection<CandidateSkill>>(
+                Skills.Where(x => x.UserId == userId && !x.IsDeleted).ToArray());
+        public Task<CandidateSkill?> GetSkillAsync(
+            Guid userId, Guid skillId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Skills.SingleOrDefault(x => x.UserId == userId &&
+                x.Id == skillId && !x.IsDeleted));
+        public Task<bool> SkillNameExistsAsync(
+            Guid userId, string normalizedName, Guid? excludingSkillId,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(Skills.Any(x => x.UserId == userId && !x.IsDeleted &&
+                x.NormalizedName == normalizedName &&
+                (!excludingSkillId.HasValue || x.Id != excludingSkillId.Value)));
+        public Task AddSkillAsync(
+            CandidateSkill skill, CancellationToken cancellationToken = default)
+        {
+            Skills.Add(skill);
+            return Task.CompletedTask;
+        }
+        public void RemoveSkill(CandidateSkill skill) => skill.IsDeleted = true;
         public Task<CandidateJob?> GetAvailableJobAsync(Guid jobId, CancellationToken cancellationToken = default) =>
             Task.FromResult(AvailableJob?.Id == jobId ? AvailableJob : null);
         public Task<CandidateResumeProfile?> GetResumeProfileAsync(Guid userId, bool tracking, CancellationToken cancellationToken = default) =>

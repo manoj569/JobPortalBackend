@@ -23,6 +23,8 @@ public sealed class CandidateService(
     IUnitOfWork unitOfWork,
     IAuditWriter auditWriter,
     IValidator<UpdateCandidateProfileRequest> profileValidator,
+    IValidator<UpdateCandidateAboutRequest> aboutValidator,
+    IValidator<UpsertCandidateSkillRequest> skillValidator,
     IValidator<UpdateCandidateOnboardingRequest> onboardingValidator,
     IValidator<CandidatePageQuery> pageValidator,
     IValidator<JobApplicationQuery> applicationQueryValidator,
@@ -69,6 +71,108 @@ public sealed class CandidateService(
             Actor: new(userId, "Candidate")), cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
         return MapProfile(user);
+    }
+
+    public async Task<CandidateAboutResponse> UpdateAboutAsync(
+        Guid userId, UpdateCandidateAboutRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        await aboutValidator.ValidateAndThrowAsync(request, cancellationToken);
+        var user = await RequiredCandidateAsync(userId, cancellationToken);
+        user.Headline = TextNormalizer.TrimOrNull(request.ResumeHeadline);
+        user.Bio = TextNormalizer.TrimOrNull(request.ProfileSummary);
+        await auditWriter.AppendAsync(new(AuditAction.Update, "CandidateProfileAbout",
+            user.Id.ToString(), Actor: new(userId, "Candidate")), cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+        return new(user.Headline, user.Bio);
+    }
+
+    public async Task<IReadOnlyCollection<CandidateSkillResponse>> GetSkillsAsync(
+        Guid userId, CancellationToken cancellationToken = default)
+    {
+        await RequiredCandidateAsync(userId, cancellationToken);
+        return (await candidates.GetSkillsAsync(userId, cancellationToken))
+            .Select(MapSkill).ToArray();
+    }
+
+    public async Task<CandidateSkillResponse> AddSkillAsync(
+        Guid userId, UpsertCandidateSkillRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        await skillValidator.ValidateAndThrowAsync(request, cancellationToken);
+        await RequiredCandidateAsync(userId, cancellationToken);
+        var name = request.Name.Trim();
+        var normalizedName = NormalizeSkillName(name);
+        if (await candidates.SkillNameExistsAsync(userId, normalizedName, null, cancellationToken))
+            throw new ConflictException("This skill already exists in your profile.");
+        var skill = new CandidateSkill
+        {
+            UserId = userId,
+            Name = name,
+            NormalizedName = normalizedName,
+            Proficiency = request.Proficiency,
+            YearsOfExperience = request.YearsOfExperience
+        };
+        await candidates.AddSkillAsync(skill, cancellationToken);
+        await auditWriter.AppendAsync(new(AuditAction.Create, "CandidateSkill",
+            skill.Id.ToString(), Actor: new(userId, "Candidate")), cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+        return MapSkill(skill);
+    }
+
+    public async Task<CandidateSkillResponse> UpdateSkillAsync(
+        Guid userId, Guid skillId, UpsertCandidateSkillRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        await skillValidator.ValidateAndThrowAsync(request, cancellationToken);
+        await RequiredCandidateAsync(userId, cancellationToken);
+        var skill = await candidates.GetSkillAsync(userId, skillId, cancellationToken)
+            ?? throw new NotFoundException("Skill was not found.");
+        var name = request.Name.Trim();
+        var normalizedName = NormalizeSkillName(name);
+        if (await candidates.SkillNameExistsAsync(userId, normalizedName, skillId, cancellationToken))
+            throw new ConflictException("This skill already exists in your profile.");
+        skill.Name = name;
+        skill.NormalizedName = normalizedName;
+        skill.Proficiency = request.Proficiency;
+        skill.YearsOfExperience = request.YearsOfExperience;
+        await auditWriter.AppendAsync(new(AuditAction.Update, "CandidateSkill",
+            skill.Id.ToString(), Actor: new(userId, "Candidate")), cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+        return MapSkill(skill);
+    }
+
+    public async Task DeleteSkillAsync(
+        Guid userId, Guid skillId, CancellationToken cancellationToken = default)
+    {
+        await RequiredCandidateAsync(userId, cancellationToken);
+        var skill = await candidates.GetSkillAsync(userId, skillId, cancellationToken)
+            ?? throw new NotFoundException("Skill was not found.");
+        candidates.RemoveSkill(skill);
+        await auditWriter.AppendAsync(new(AuditAction.Delete, "CandidateSkill",
+            skill.Id.ToString(), Actor: new(userId, "Candidate")), cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<CandidateProfileCompletionResponse> GetProfileCompletionAsync(
+        Guid userId, CancellationToken cancellationToken = default)
+    {
+        var user = await RequiredCandidateAsync(userId, cancellationToken);
+        var hasSkills = (await candidates.GetSkillsAsync(userId, cancellationToken)).Count > 0 ||
+            Deserialize<string>(user.SkillsJson).Length > 0;
+        var sections = new[]
+        {
+            Section("basicDetails", 15, !string.IsNullOrWhiteSpace(user.FirstName) &&
+                !string.IsNullOrWhiteSpace(user.LastName) && user.EmailConfirmed),
+            Section("resumeHeadline", 10, !string.IsNullOrWhiteSpace(user.Headline)),
+            Section("profileSummary", 15, !string.IsNullOrWhiteSpace(user.Bio)),
+            Section("skills", 20, hasSkills),
+            Section("resume", 20, !string.IsNullOrWhiteSpace(user.ResumeStorageKey)),
+            Section("careerPreferences", 20, CareerPreferencesComplete(user))
+        };
+        return new(sections.Where(x => x.IsCompleted).Sum(x => x.Weight),
+            sections.Where(x => x.IsCompleted).Select(x => x.Section).ToArray(),
+            sections.Where(x => !x.IsCompleted).Select(x => x.Section).ToArray(), sections);
     }
 
     public async Task<CandidateOnboardingResponse> GetOnboardingAsync(
@@ -738,6 +842,25 @@ public sealed class CandidateService(
 
         await dashboard.AddNotificationAsync(notification, cancellationToken);
     }
+
+    private static string NormalizeSkillName(string value) =>
+        value.Trim().ToUpperInvariant();
+
+    private static CandidateSkillResponse MapSkill(CandidateSkill skill) =>
+        new(skill.Id, skill.Name, skill.Proficiency, skill.YearsOfExperience,
+            skill.CreatedAtUtc, skill.UpdatedAtUtc);
+
+    private static ProfileSectionCompletionResponse Section(
+        string section, int weight, bool completed) =>
+        new(section, weight, completed);
+
+    private static bool CareerPreferencesComplete(User user) =>
+        user.OnboardingCompletedAtUtc.HasValue &&
+        user.CareerStage.HasValue &&
+        !string.IsNullOrWhiteSpace(user.Location) &&
+        Deserialize<DesiredOpportunity>(user.DesiredOpportunitiesJson).Length > 0 &&
+        Deserialize<WorkPreference>(user.WorkPreferencesJson).Length > 0;
+
     private sealed record ApplicationQuotaWindow(
         ApplicationQuotaPeriod Period,
         DateTime StartsAtUtc,

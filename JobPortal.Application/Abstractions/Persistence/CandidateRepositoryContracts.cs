@@ -7,6 +7,11 @@ namespace JobPortal.Application.Abstractions.Persistence;
 public interface ICandidateRepository
 {
     Task<User?> GetCandidateAsync(Guid userId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyCollection<CandidateSkill>> GetSkillsAsync(Guid userId, CancellationToken cancellationToken = default);
+    Task<CandidateSkill?> GetSkillAsync(Guid userId, Guid skillId, CancellationToken cancellationToken = default);
+    Task<bool> SkillNameExistsAsync(Guid userId, string normalizedName, Guid? excludingSkillId, CancellationToken cancellationToken = default);
+    Task AddSkillAsync(CandidateSkill skill, CancellationToken cancellationToken = default);
+    void RemoveSkill(CandidateSkill skill);
     Task<CandidateResumeProfile?> GetResumeProfileAsync(Guid userId, bool tracking, CancellationToken cancellationToken = default);
     Task AddResumeProfileAsync(CandidateResumeProfile profile, CancellationToken cancellationToken = default);
     Task<IReadOnlyCollection<RecommendationJobCandidate>> GetRecommendationCandidatesAsync(Guid userId, CancellationToken cancellationToken = default);
