@@ -12,14 +12,6 @@ public sealed class AdminDashboardRepository(JobPortalDbContext context) : IAdmi
         DateTime utcNow, CancellationToken cancellationToken = default)
     {
         var monthStart = new DateTime(utcNow.Year, utcNow.Month, 1, 0, 0, 0, DateTimeKind.Utc);
-        //var revenue = await context.Payments.AsNoTracking()
-        //    .Where(x => x.Status == PaymentStatus.Paid)
-        //    .GroupBy(x => x.CurrencyCode)
-        //    .Select(group => new RevenueTotal(
-        //        group.Key, group.Sum(x => x.Amount),
-        //        group.Where(x => x.PaidAtUtc >= monthStart).Sum(x => x.Amount)))
-        //    .OrderBy(x => x.CurrencyCode)
-        //    .ToArrayAsync(cancellationToken);
         var revenueRows = await context.Payments.AsNoTracking()
     .Where(x => x.Status == PaymentStatus.Paid)
     .GroupBy(x => x.CurrencyCode)
@@ -129,15 +121,6 @@ public sealed class AdminDashboardRepository(JobPortalDbContext context) : IAdmi
             x.CreatedAtUtc >= fromUtc && x.CreatedAtUtc < toUtc).Select(x => x.CreatedAtUtc),
             interval, cancellationToken);
 
-    //public async Task<IReadOnlyCollection<DistributionChartPoint>> GetCategoryDistributionAsync(
-    //    int limit, DateTime utcNow, CancellationToken cancellationToken = default) =>
-    //    await context.Categories.AsNoTracking()
-    //        .Select(x => new DistributionChartPoint(x.Id, x.Name,
-    //            x.Jobs.Count(job => job.Status == JobStatus.Published && !job.IsHidden &&
-    //                job.PublishedAtUtc.HasValue &&
-    //                job.ExpiresAtUtc.HasValue && job.ExpiresAtUtc > utcNow)))
-    //        .OrderByDescending(x => x.Value).ThenBy(x => x.Label).Take(limit)
-    //        .ToArrayAsync(cancellationToken);
     public async Task<IReadOnlyCollection<DistributionChartPoint>> GetCategoryDistributionAsync(
     int limit, DateTime utcNow, CancellationToken cancellationToken = default)
     {
