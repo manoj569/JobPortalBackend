@@ -40,6 +40,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IAdminDashboardRepository, AdminDashboardRepository>();
         services.AddScoped<IAdminApplicationRepository, AdminApplicationRepository>();
         services.AddScoped<ICandidateRepository, CandidateRepository>();
+        services.AddScoped<ICandidatePortfolioRepository, CandidatePortfolioRepository>();
         services.AddScoped<ICompanyManagementRepository, CompanyManagementRepository>();
         services.AddScoped<ICategoryManagementRepository, CategoryManagementRepository>();
         services.AddScoped<IUnitOfWork, UnitOfWork>();

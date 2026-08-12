@@ -10,6 +10,7 @@ using JobPortal.Application.Abstractions.Dashboard;
 using JobPortal.Application.Abstractions.Jobs;
 using JobPortal.Application.Abstractions.Memberships;
 using JobPortal.Application.Abstractions.Payments;
+using JobPortal.Application.Abstractions.Portfolios;
 using JobPortal.Application.Features.AdminApplications;
 using JobPortal.Application.Features.AdminDashboard;
 using JobPortal.Application.Features.AdminImports;
@@ -22,6 +23,7 @@ using JobPortal.Application.Features.Jobs;
 using JobPortal.Application.Features.JobDiscovery;
 using JobPortal.Application.Features.Memberships;
 using JobPortal.Application.Features.Payments;
+using JobPortal.Application.Features.Portfolios;
 using JobPortal.Application.Features.PublicJobs;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -37,6 +39,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IAuditLogService, AuditLogService>();
         services.AddScoped<AdminBootstrapService>();
         services.AddScoped<ICandidateService, CandidateService>();
+        services.AddScoped<ICandidatePortfolioService, CandidatePortfolioService>();
         services.AddScoped<IJobService, JobService>();
         services.AddScoped<IJobExpiryService, JobExpiryService>();
         services.AddScoped<IPublicJobService, PublicJobService>();

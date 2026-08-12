@@ -40,6 +40,13 @@ public sealed class User : BaseEntity
     public DateTime? ResumeUploadedAtUtc { get; set; }
     public CandidateResumeProfile? ResumeProfile { get; set; }
     public ICollection<CandidateSkill> CandidateSkills { get; set; } = new List<CandidateSkill>();
+    public CandidatePortfolio? CandidatePortfolio { get; set; }
+    public ICollection<CandidateExperience> CandidateExperiences { get; set; } = [];
+    public ICollection<CandidateEducation> CandidateEducation { get; set; } = [];
+    public ICollection<CandidateProject> CandidateProjects { get; set; } = [];
+    public ICollection<CandidateCertification> CandidateCertifications { get; set; } = [];
+    public ICollection<CandidateProfessionalLink> CandidateProfessionalLinks { get; set; } = [];
+    public ICollection<PortfolioCustomSection> PortfolioCustomSections { get; set; } = [];
     public UserStatus Status { get; set; } = UserStatus.Pending;
     public bool EmailConfirmed { get; set; }
     public DateTime? LastLoginAtUtc { get; set; }
