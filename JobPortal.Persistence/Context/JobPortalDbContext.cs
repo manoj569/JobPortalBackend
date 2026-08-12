@@ -9,6 +9,15 @@ public sealed class JobPortalDbContext(DbContextOptions<JobPortalDbContext> opti
     public DbSet<User> Users => Set<User>();
     public DbSet<CandidateResumeProfile> CandidateResumeProfiles => Set<CandidateResumeProfile>();
     public DbSet<CandidateSkill> CandidateSkills => Set<CandidateSkill>();
+    public DbSet<CandidatePortfolio> CandidatePortfolios => Set<CandidatePortfolio>();
+    public DbSet<PortfolioSectionSetting> PortfolioSectionSettings => Set<PortfolioSectionSetting>();
+    public DbSet<CandidateExperience> CandidateExperiences => Set<CandidateExperience>();
+    public DbSet<CandidateEducation> CandidateEducation => Set<CandidateEducation>();
+    public DbSet<CandidateProject> CandidateProjects => Set<CandidateProject>();
+    public DbSet<CandidateCertification> CandidateCertifications => Set<CandidateCertification>();
+    public DbSet<CandidateProfessionalLink> CandidateProfessionalLinks => Set<CandidateProfessionalLink>();
+    public DbSet<PortfolioCustomSection> PortfolioCustomSections => Set<PortfolioCustomSection>();
+    public DbSet<PortfolioCustomItem> PortfolioCustomItems => Set<PortfolioCustomItem>();
     public DbSet<Role> Roles => Set<Role>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<PendingRegistration> PendingRegistrations => Set<PendingRegistration>();

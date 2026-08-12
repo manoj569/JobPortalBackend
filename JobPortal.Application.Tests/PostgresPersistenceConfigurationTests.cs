@@ -23,6 +23,28 @@ public sealed class PostgresPersistenceConfigurationTests
             resetTokenIndex.GetFilter());
     }
 
+    [Fact]
+    public void PortfolioModelEnforcesActiveOwnershipAndSlugUniqueness()
+    {
+        using var context = CreateContext();
+        var portfolio = context.Model.FindEntityType(typeof(CandidatePortfolio))
+            ?? throw new InvalidOperationException("Portfolio metadata was not found.");
+        var indexes = portfolio.GetIndexes().ToArray();
+        var owner = Assert.Single(indexes, x => x.Properties.Select(y => y.Name)
+            .SequenceEqual([nameof(CandidatePortfolio.UserId)]));
+        var slug = Assert.Single(indexes, x => x.Properties.Select(y => y.Name)
+            .SequenceEqual([nameof(CandidatePortfolio.NormalizedSlug)]));
+        Assert.True(owner.IsUnique);
+        Assert.True(slug.IsUnique);
+        Assert.Equal("\"IsDeleted\" = FALSE", owner.GetFilter());
+        Assert.Equal("\"IsDeleted\" = FALSE", slug.GetFilter());
+
+        var experience = context.Model.FindEntityType(typeof(CandidateExperience))!;
+        var relationship = Assert.Single(experience.GetForeignKeys(), x =>
+            x.PrincipalEntityType.ClrType == typeof(User));
+        Assert.Equal(nameof(CandidateExperience.UserId), Assert.Single(relationship.Properties).Name);
+    }
+
     [Theory]
     [InlineData(typeof(Membership))]
     [InlineData(typeof(Payment))]
