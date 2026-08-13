@@ -111,6 +111,19 @@ public sealed class CompletePasswordResetRequestValidator :
     }
 }
 
+public sealed class GoogleAuthenticationRequestValidator :
+    AbstractValidator<GoogleAuthenticationRequest>
+{
+    public GoogleAuthenticationRequestValidator()
+    {
+        RuleFor(x => x.Credential).NotEmpty().MaximumLength(8192);
+        RuleFor(x => x.Intent).IsInEnum();
+        RuleFor(x => x.AcceptTerms).Equal(true)
+            .When(x => x.Intent == GoogleAuthenticationIntent.Register)
+            .WithMessage("Terms and Privacy consent is required for registration.");
+    }
+}
+
 public sealed class RefreshTokenRequestValidator : AbstractValidator<RefreshTokenRequest>
 {
     public RefreshTokenRequestValidator() =>

@@ -45,6 +45,24 @@ public sealed class PostgresPersistenceConfigurationTests
         Assert.Equal(nameof(CandidateExperience.UserId), Assert.Single(relationship.Properties).Name);
     }
 
+    [Fact]
+    public void ExternalLoginModelUsesPostgresActiveUniqueIndexes()
+    {
+        using var context = CreateContext();
+        var externalLogin = context.Model.FindEntityType(typeof(UserExternalLogin))!;
+        var indexes = externalLogin.GetIndexes().ToArray();
+        var providerSubject = Assert.Single(indexes, x => x.Properties.Select(y => y.Name)
+            .SequenceEqual([nameof(UserExternalLogin.Provider), nameof(UserExternalLogin.ProviderSubject)]));
+        var userProvider = Assert.Single(indexes, x => x.Properties.Select(y => y.Name)
+            .SequenceEqual([nameof(UserExternalLogin.UserId), nameof(UserExternalLogin.Provider)]));
+        Assert.True(providerSubject.IsUnique);
+        Assert.True(userProvider.IsUnique);
+        Assert.Equal("\"IsDeleted\" = FALSE", providerSubject.GetFilter());
+        Assert.Equal("\"IsDeleted\" = FALSE", userProvider.GetFilter());
+        Assert.True(context.Model.FindEntityType(typeof(User))!
+            .FindProperty(nameof(User.PasswordHash))!.IsNullable);
+    }
+
     [Theory]
     [InlineData(typeof(Membership))]
     [InlineData(typeof(Payment))]

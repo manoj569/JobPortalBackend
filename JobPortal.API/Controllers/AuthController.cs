@@ -13,7 +13,9 @@ namespace JobPortal.API.Controllers;
 [Route("api/auth")]
 [Produces("application/json")]
 [EnableRateLimiting("Authentication")]
-public sealed class AuthController(IAuthService authService) : ControllerBase
+public sealed class AuthController(
+    IAuthService authService,
+    IGoogleAuthenticationService googleAuthentication) : ControllerBase
 {
     [HttpPost("register")]
     [AllowAnonymous]
@@ -32,6 +34,15 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
     [ProducesResponseType(typeof(ApiError), StatusCodes.Status403Forbidden)]
     public async Task<ActionResult<AuthenticationResponse>> Login(LoginRequest request, CancellationToken cancellationToken) =>
         Ok(await authService.LoginAsync(request, HttpContext.Connection.RemoteIpAddress?.ToString(), cancellationToken));
+
+    [HttpPost("google")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(AuthenticationResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<AuthenticationResponse>> Google(
+        GoogleAuthenticationRequest request,
+        CancellationToken cancellationToken) =>
+        Ok(await googleAuthentication.AuthenticateAsync(
+            request, HttpContext.Connection.RemoteIpAddress?.ToString(), cancellationToken));
 
     [HttpPost("refresh")]
     [AllowAnonymous]

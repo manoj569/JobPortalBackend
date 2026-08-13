@@ -219,6 +219,25 @@ public sealed class AuthenticationTests
     }
 
     [Fact]
+    public async Task GoogleOnlyUserCannotUsePasswordLoginOrReset()
+    {
+        var fixture = CreateFixture();
+        var user = NewUser();
+        user.PasswordHash = null;
+        fixture.Users.Items.Add(user);
+
+        await Assert.ThrowsAsync<UnauthorizedException>(() =>
+            fixture.Service.LoginAsync(new(user.Email, "abc123"), null));
+        var response = await fixture.Service.RequestPasswordResetAsync(new(user.Email));
+
+        Assert.Equal(
+            "If an account exists for this email address, a password reset link has been sent.",
+            response.Message);
+        Assert.Equal(0, fixture.Email.SendCount);
+        Assert.Null(user.PasswordResetTokenHash);
+    }
+
+    [Fact]
     public async Task PasswordResetRequestIsPrivacySafeAndPersistsHashBeforeEmail()
     {
         var invalidEmail = await new RequestPasswordResetRequestValidator()
@@ -273,7 +292,7 @@ public sealed class AuthenticationTests
         Assert.Equal(
             "Password changed successfully. Please log in.",
             completed.Message);
-        Assert.True(fixture.Passwords.Verify("newpass", user.PasswordHash));
+        Assert.True(fixture.Passwords.Verify("newpass", user.PasswordHash!));
         Assert.Null(user.PasswordResetTokenHash);
         Assert.Null(user.PasswordResetTokenExpiresAtUtc);
         Assert.True(fixture.RefreshTokens.RevokedForUser);
@@ -356,7 +375,7 @@ public sealed class AuthenticationTests
             user.Id,
             new("abc123", "newpass"));
 
-        Assert.True(fixture.Passwords.Verify("newpass", user.PasswordHash));
+        Assert.True(fixture.Passwords.Verify("newpass", user.PasswordHash!));
         Assert.True(fixture.RefreshTokens.RevokedForUser);
     }
 

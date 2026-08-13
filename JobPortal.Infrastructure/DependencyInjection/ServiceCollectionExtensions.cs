@@ -8,6 +8,7 @@ using JobPortal.Infrastructure.Storage;
 using JobPortal.Application.Features.JobDiscovery;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using JobPortal.Application.Features.Authentication;
 
 namespace JobPortal.Infrastructure;
 
@@ -16,9 +17,13 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
         ValidateEmailConfiguration(configuration);
+        ValidateGoogleConfiguration(configuration);
 
         services.AddSingleton<IPasswordHasher, Pbkdf2PasswordHasher>();
         services.AddSingleton<IJwtTokenService, JwtTokenService>();
+        services.Configure<GoogleAuthenticationOptions>(
+            configuration.GetSection(GoogleAuthenticationOptions.SectionName));
+        services.AddSingleton<IGoogleCredentialValidator, GoogleCredentialValidator>();
 
         // ✅ REMOVED: SMS and OTP services (Mobile OTP feature is retired)
         services.AddHttpClient(BrevoEmailService.HttpClientName, client =>
@@ -39,6 +44,17 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IResumeTextExtractor, ResumeTextExtractor>();
 
         return services;
+    }
+
+    private static void ValidateGoogleConfiguration(IConfiguration configuration)
+    {
+        var section = configuration.GetSection(GoogleAuthenticationOptions.SectionName);
+        if (!section.GetValue("Enabled", false)) return;
+        var clientId = section["ClientId"]?.Trim();
+        if (string.IsNullOrWhiteSpace(clientId) || clientId.Length > 512 ||
+            !clientId.EndsWith(".apps.googleusercontent.com", StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                "Authentication:Google:ClientId must contain a valid Google Web Client ID when Google authentication is enabled.");
     }
 
     private static void ValidateEmailConfiguration(IConfiguration configuration)
