@@ -90,14 +90,26 @@ var allowedOrigins = (builder.Configuration
     .Distinct(StringComparer.OrdinalIgnoreCase)
     .ToArray();
 
-builder.Services.AddCors(options => options.AddPolicy("ConfiguredOrigins", policy =>
+var googleCodeOrigins = builder.Configuration
+    .GetSection("Authentication:Google:AllowedCodeOrigins")
+    .Get<string[]>() ?? [];
+builder.Services.AddCors(options =>
 {
-    policy.WithOrigins(allowedOrigins)
+    options.AddDefaultPolicy(policy => policy.WithOrigins(allowedOrigins)
           .SetIsOriginAllowedToAllowWildcardSubdomains()
           .AllowAnyHeader()
           .AllowAnyMethod()
-          .AllowCredentials();
-}));
+          .AllowCredentials());
+    options.AddPolicy("GoogleCodeOrigins", policy =>
+    {
+        if (googleCodeOrigins.Length > 0)
+            policy.WithOrigins(googleCodeOrigins);
+        else
+            policy.SetIsOriginAllowed(_ => false);
+        policy.WithMethods("POST")
+            .WithHeaders("Content-Type", "X-CareerHarbor-Google-Code-Flow");
+    });
+});
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -120,6 +132,16 @@ builder.Services.AddRateLimiter(options =>
             _ => new FixedWindowRateLimiterOptions
             {
                 PermitLimit = 10,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                AutoReplenishment = true
+            }));
+    options.AddPolicy("GoogleCodeAuthentication", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 5,
                 Window = TimeSpan.FromMinutes(1),
                 QueueLimit = 0,
                 AutoReplenishment = true
@@ -269,7 +291,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
-app.UseCors("ConfiguredOrigins");
+app.UseCors();
 app.UseAuthentication();
 app.UseRateLimiter();
 app.UseAuthorization();

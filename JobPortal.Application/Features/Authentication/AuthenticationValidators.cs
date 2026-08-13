@@ -124,6 +124,19 @@ public sealed class GoogleAuthenticationRequestValidator :
     }
 }
 
+public sealed class GoogleAuthorizationCodeRequestValidator :
+    AbstractValidator<GoogleAuthorizationCodeRequest>
+{
+    public GoogleAuthorizationCodeRequestValidator()
+    {
+        RuleFor(x => x.Code).NotEmpty().MaximumLength(8192);
+        RuleFor(x => x.Intent).IsInEnum();
+        RuleFor(x => x.AcceptTerms).Equal(false)
+            .When(x => x.Intent == GoogleAuthenticationIntent.Login)
+            .WithMessage("Terms acceptance must be false for login.");
+    }
+}
+
 public sealed class RefreshTokenRequestValidator : AbstractValidator<RefreshTokenRequest>
 {
     public RefreshTokenRequestValidator() =>

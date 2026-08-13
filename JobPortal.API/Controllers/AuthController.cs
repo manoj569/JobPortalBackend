@@ -4,6 +4,7 @@ using JobPortal.Application.Common.Exceptions;
 using JobPortal.Application.Features.Authentication;
 using JobPortal.Shared.Models;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 
@@ -38,11 +39,28 @@ public sealed class AuthController(
     [HttpPost("google")]
     [AllowAnonymous]
     [ProducesResponseType(typeof(AuthenticationResponse), StatusCodes.Status200OK)]
+    // Retained during rollout while existing clients still submit GIS ID tokens.
     public async Task<ActionResult<AuthenticationResponse>> Google(
         GoogleAuthenticationRequest request,
         CancellationToken cancellationToken) =>
         Ok(await googleAuthentication.AuthenticateAsync(
             request, HttpContext.Connection.RemoteIpAddress?.ToString(), cancellationToken));
+
+    [HttpPost("google/code")]
+    [AllowAnonymous]
+    [EnableCors("GoogleCodeOrigins")]
+    [EnableRateLimiting("GoogleCodeAuthentication")]
+    [ProducesResponseType(typeof(ApiResponse<AuthenticationResponse>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<ApiResponse<AuthenticationResponse>>> GoogleCode(
+        GoogleAuthorizationCodeRequest request,
+        CancellationToken cancellationToken) =>
+        Ok(new ApiResponse<AuthenticationResponse>(
+            await googleAuthentication.AuthenticateCodeAsync(
+                request,
+                Request.Headers.Origin.ToString(),
+                Request.Headers["X-CareerHarbor-Google-Code-Flow"].ToString(),
+                HttpContext.Connection.RemoteIpAddress?.ToString(),
+                cancellationToken)));
 
     [HttpPost("refresh")]
     [AllowAnonymous]

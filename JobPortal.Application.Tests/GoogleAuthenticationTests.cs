@@ -52,6 +52,79 @@ public sealed class GoogleAuthenticationTests
     }
 
     [Fact]
+    public async Task AuthorizationCodeLoginUsesSharedLinkedAccountFlow()
+    {
+        var fixture = CreateFixture();
+        var user = Candidate();
+        fixture.Users.Items.Add(user);
+        fixture.ExternalLogins.Items.Add(Link(user));
+
+        var response = await fixture.Service.AuthenticateCodeAsync(
+            new("one-time-code", GoogleAuthenticationIntent.Login),
+            "https://careerharbor.in", "1", "127.0.0.1");
+
+        Assert.Equal(user.Id, response.User.Id);
+        Assert.Single(fixture.RefreshTokens.Items);
+    }
+
+    [Fact]
+    public async Task AuthorizationCodeRegisterCreatesCandidateAndIsIdempotent()
+    {
+        var fixture = CreateFixture();
+        var request = new GoogleAuthorizationCodeRequest(
+            "one-time-code", GoogleAuthenticationIntent.Register, true);
+
+        var first = await fixture.Service.AuthenticateCodeAsync(
+            request, "https://www.careerharbor.in", "1", null);
+        var second = await fixture.Service.AuthenticateCodeAsync(
+            request, "https://www.careerharbor.in", "1", null);
+
+        Assert.Equal(first.User.Id, second.User.Id);
+        Assert.Single(fixture.Users.Items);
+        Assert.Single(fixture.ExternalLogins.Items);
+    }
+
+    [Fact]
+    public async Task AuthorizationCodeFlowEnforcesTermsOriginHeaderAndSafeProviderErrors()
+    {
+        var fixture = CreateFixture();
+        var register = new GoogleAuthorizationCodeRequest(
+            "one-time-code", GoogleAuthenticationIntent.Register);
+        Assert.Equal("terms_acceptance_required", (await Assert.ThrowsAsync<AuthenticationFlowException>(() =>
+            fixture.Service.AuthenticateCodeAsync(register, "https://careerharbor.in", "1", null))).Code);
+
+        var login = new GoogleAuthorizationCodeRequest(
+            "one-time-code", GoogleAuthenticationIntent.Login);
+        Assert.Equal("google_origin_not_allowed", (await Assert.ThrowsAsync<AuthenticationFlowException>(() =>
+            fixture.Service.AuthenticateCodeAsync(login, null, "1", null))).Code);
+        Assert.Equal("google_origin_not_allowed", (await Assert.ThrowsAsync<AuthenticationFlowException>(() =>
+            fixture.Service.AuthenticateCodeAsync(login, "https://evil.example", "1", null))).Code);
+        Assert.Equal("invalid_google_code_request", (await Assert.ThrowsAsync<AuthenticationFlowException>(() =>
+            fixture.Service.AuthenticateCodeAsync(login, "http://localhost:5173", null, null))).Code);
+
+        fixture.CodeExchanger.Exception = new GoogleAuthorizationCodeException(
+            GoogleAuthorizationCodeFailure.Invalid);
+        Assert.Equal("invalid_google_authorization_code", (await Assert.ThrowsAsync<AuthenticationFlowException>(() =>
+            fixture.Service.AuthenticateCodeAsync(login, "http://localhost:5173", "1", null))).Code);
+        fixture.CodeExchanger.Exception = new GoogleAuthorizationCodeException(
+            GoogleAuthorizationCodeFailure.Unavailable);
+        Assert.Equal("google_authentication_unavailable", (await Assert.ThrowsAsync<AuthenticationFlowException>(() =>
+            fixture.Service.AuthenticateCodeAsync(login, "https://careerharbor.in", "1", null))).Code);
+        Assert.DoesNotContain(fixture.Logger.Messages,
+            message => message.Contains("one-time-code", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void AuthorizationCodeRequestRejectsUnknownProperties()
+    {
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        Assert.NotNull(JsonSerializer.Deserialize<GoogleAuthorizationCodeRequest>(
+            """{"code":"opaque","intent":"Login","acceptTerms":false}""", options));
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<GoogleAuthorizationCodeRequest>(
+            """{"code":"opaque","intent":"Login","acceptTerms":false,"redirectUri":"https://evil.example"}""", options));
+    }
+
+    [Fact]
     public async Task RegisterRequiresTermsAndCredentialIsBounded()
     {
         var validator = new GoogleAuthenticationRequestValidator();
@@ -166,7 +239,7 @@ public sealed class GoogleAuthenticationTests
     }
 
     [Fact]
-    public void GoogleConfigurationIsOptionalButEnabledProviderRequiresWebClientId()
+    public void GoogleConfigurationIsOptionalButEnabledProviderRequiresCompleteSafeCodeConfiguration()
     {
         var disabled = new ConfigurationBuilder().AddInMemoryCollection(
             new Dictionary<string, string?> { ["Authentication:Google:Enabled"] = "false" }).Build();
@@ -178,6 +251,30 @@ public sealed class GoogleAuthenticationTests
         Assert.Throws<InvalidOperationException>(() =>
             JobPortal.Infrastructure.ServiceCollectionExtensions.AddInfrastructure(
                 new ServiceCollection(), enabledWithoutId));
+
+        var valid = new ConfigurationBuilder().AddInMemoryCollection(
+            new Dictionary<string, string?>
+            {
+                ["Authentication:Google:Enabled"] = "true",
+                ["Authentication:Google:ClientId"] = "test.apps.googleusercontent.com",
+                ["Authentication:Google:ClientSecret"] = "secret",
+                ["Authentication:Google:AllowedCodeOrigins:0"] = "https://careerharbor.in",
+                ["Authentication:Google:AllowedCodeOrigins:1"] = "http://localhost:5173"
+            }).Build();
+        _ = JobPortal.Infrastructure.ServiceCollectionExtensions.AddInfrastructure(
+            new ServiceCollection(), valid);
+
+        var insecureOrigin = new ConfigurationBuilder().AddInMemoryCollection(
+            new Dictionary<string, string?>
+            {
+                ["Authentication:Google:Enabled"] = "true",
+                ["Authentication:Google:ClientId"] = "test.apps.googleusercontent.com",
+                ["Authentication:Google:ClientSecret"] = "secret",
+                ["Authentication:Google:AllowedCodeOrigins:0"] = "http://careerharbor.in/path"
+            }).Build();
+        Assert.Throws<InvalidOperationException>(() =>
+            JobPortal.Infrastructure.ServiceCollectionExtensions.AddInfrastructure(
+                new ServiceCollection(), insecureOrigin));
     }
 
     [Theory]
@@ -231,6 +328,9 @@ public sealed class GoogleAuthenticationTests
           {"credential":"token","intent":"Login","acceptTerms":false,"role":"Administrator"}
           """;
         Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<GoogleAuthenticationRequest>(json, options));
+
+        var codeMethod = typeof(AuthController).GetMethod(nameof(AuthController.GoogleCode))!;
+        Assert.NotNull(codeMethod.GetCustomAttributes(typeof(AllowAnonymousAttribute), true).SingleOrDefault());
     }
 
     private static Fixture CreateFixture(bool enabled = true)
@@ -240,14 +340,21 @@ public sealed class GoogleAuthenticationTests
         var refresh = new RefreshTokenRepositoryFake(users);
         var unit = new UnitOfWorkFake();
         var google = new GoogleValidatorFake { Identity = ValidIdentity };
+        var codeExchanger = new GoogleCodeExchangerFake { Identity = ValidIdentity };
         var logger = new TestLogger<GoogleAuthenticationService>();
         var service = new GoogleAuthenticationService(users, external, refresh, unit,
-            new JwtTokenServiceFake(), google, new AuditWriterTestDouble(),
+            new JwtTokenServiceFake(), google, codeExchanger, new AuditWriterTestDouble(),
             new GoogleAuthenticationRequestValidator(),
+            new GoogleAuthorizationCodeRequestValidator(),
             Options.Create(new GoogleAuthenticationOptions
-            { Enabled = enabled, ClientId = "test.apps.googleusercontent.com" }),
+            {
+                Enabled = enabled,
+                ClientId = "test.apps.googleusercontent.com",
+                ClientSecret = "test-secret",
+                AllowedCodeOrigins = ["https://careerharbor.in", "https://www.careerharbor.in", "http://localhost:5173"]
+            }),
             new FixedTimeProvider(), logger);
-        return new(service, users, external, refresh, unit, google, logger);
+        return new(service, users, external, refresh, unit, google, codeExchanger, logger);
     }
 
     private static User Candidate(Guid? roleId = null, string roleName = "Candidate") => new()
@@ -263,7 +370,8 @@ public sealed class GoogleAuthenticationTests
 
     private sealed record Fixture(GoogleAuthenticationService Service, UserRepositoryFake Users,
         ExternalLoginRepositoryFake ExternalLogins, RefreshTokenRepositoryFake RefreshTokens,
-        UnitOfWorkFake UnitOfWork, GoogleValidatorFake Google, TestLogger<GoogleAuthenticationService> Logger);
+        UnitOfWorkFake UnitOfWork, GoogleValidatorFake Google,
+        GoogleCodeExchangerFake CodeExchanger, TestLogger<GoogleAuthenticationService> Logger);
 
     private sealed class UserRepositoryFake : IUserRepository
     {
@@ -300,6 +408,13 @@ public sealed class GoogleAuthenticationTests
     {
         public ValidatedGoogleIdentity Identity { get; set; } = ValidIdentity; public Exception? Exception { get; set; }
         public Task<ValidatedGoogleIdentity> ValidateAsync(string credential, CancellationToken ct = default) => Exception is null ? Task.FromResult(Identity) : Task.FromException<ValidatedGoogleIdentity>(Exception);
+    }
+    private sealed class GoogleCodeExchangerFake : IGoogleAuthorizationCodeExchanger
+    {
+        public ValidatedGoogleIdentity Identity { get; set; } = ValidIdentity;
+        public Exception? Exception { get; set; }
+        public Task<ValidatedGoogleIdentity> ExchangeAsync(string code, string redirectUri, CancellationToken ct = default) =>
+            Exception is null ? Task.FromResult(Identity) : Task.FromException<ValidatedGoogleIdentity>(Exception);
     }
     private sealed class JwtTokenServiceFake : IJwtTokenService
     {

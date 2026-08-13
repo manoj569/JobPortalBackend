@@ -24,6 +24,12 @@ public static class ServiceCollectionExtensions
         services.Configure<GoogleAuthenticationOptions>(
             configuration.GetSection(GoogleAuthenticationOptions.SectionName));
         services.AddSingleton<IGoogleCredentialValidator, GoogleCredentialValidator>();
+        services.AddHttpClient(GoogleAuthorizationCodeExchanger.HttpClientName, client =>
+        {
+            client.BaseAddress = new Uri("https://oauth2.googleapis.com/");
+            client.Timeout = TimeSpan.FromSeconds(10);
+        });
+        services.AddScoped<IGoogleAuthorizationCodeExchanger, GoogleAuthorizationCodeExchanger>();
 
         // ✅ REMOVED: SMS and OTP services (Mobile OTP feature is retired)
         services.AddHttpClient(BrevoEmailService.HttpClientName, client =>
@@ -55,6 +61,24 @@ public static class ServiceCollectionExtensions
             !clientId.EndsWith(".apps.googleusercontent.com", StringComparison.Ordinal))
             throw new InvalidOperationException(
                 "Authentication:Google:ClientId must contain a valid Google Web Client ID when Google authentication is enabled.");
+        var clientSecret = section["ClientSecret"]?.Trim();
+        if (string.IsNullOrWhiteSpace(clientSecret) || clientSecret.Length > 512)
+            throw new InvalidOperationException(
+                "Authentication:Google:ClientSecret must be configured when Google authentication is enabled.");
+        var origins = section.GetSection("AllowedCodeOrigins").Get<string[]>() ?? [];
+        if (origins.Length == 0 || origins.Any(origin => !IsValidCodeOrigin(origin)))
+            throw new InvalidOperationException(
+                "Authentication:Google:AllowedCodeOrigins must contain only valid HTTPS origins or HTTP loopback development origins.");
+    }
+
+    private static bool IsValidCodeOrigin(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value != value.Trim() || value.EndsWith('/')) return false;
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) ||
+            !string.IsNullOrEmpty(uri.UserInfo) || uri.AbsolutePath != "/" ||
+            !string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.Fragment)) return false;
+        return uri.Scheme == Uri.UriSchemeHttps ||
+            (uri.Scheme == Uri.UriSchemeHttp && uri.IsLoopback);
     }
 
     private static void ValidateEmailConfiguration(IConfiguration configuration)

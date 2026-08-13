@@ -70,6 +70,14 @@ existing non-Administrator account.
 - Payment signatures use constant-time verification.
 - Password changes and mobile-OTP resets revoke active refresh tokens.
 - Authentication endpoints have stricter per-client rate limits.
+- Google authentication supports both the rollout-compatible GIS ID-token endpoint and a
+  custom-button authorization-code endpoint. The code endpoint requires an exact configured
+  browser origin, a dedicated CORS policy and `X-CareerHarbor-Google-Code-Flow: 1`; the trusted
+  origin is also the GIS popup code exchange `redirect_uri`. Google access/refresh tokens are
+  discarded, and both flows share the same subject-based Career Harbor account/session logic.
+- Google authorization-code configuration uses `Authentication:Google:ClientSecret` and
+  `Authentication:Google:AllowedCodeOrigins`; credentials must be supplied only through secrets
+  or deployment environment variables.
 - Output caching is restricted to anonymous public-job reads and varies by query and origin.
 - Forwarded headers are accepted only from configured trusted proxies.
 

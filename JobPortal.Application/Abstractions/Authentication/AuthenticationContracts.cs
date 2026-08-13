@@ -23,6 +23,12 @@ public interface IGoogleAuthenticationService
         GoogleAuthenticationRequest request,
         string? ipAddress,
         CancellationToken cancellationToken = default);
+    Task<AuthenticationResponse> AuthenticateCodeAsync(
+        GoogleAuthorizationCodeRequest request,
+        string? origin,
+        string? flowHeader,
+        string? ipAddress,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed record ValidatedGoogleIdentity(
@@ -38,6 +44,21 @@ public interface IGoogleCredentialValidator
     Task<ValidatedGoogleIdentity> ValidateAsync(
         string credential,
         CancellationToken cancellationToken = default);
+}
+
+public interface IGoogleAuthorizationCodeExchanger
+{
+    Task<ValidatedGoogleIdentity> ExchangeAsync(
+        string code, string redirectUri, CancellationToken cancellationToken = default);
+}
+
+public enum GoogleAuthorizationCodeFailure { Invalid, Unavailable }
+
+public sealed class GoogleAuthorizationCodeException(
+    GoogleAuthorizationCodeFailure failure,
+    Exception? innerException = null) : Exception("Google authorization code exchange failed.", innerException)
+{
+    public GoogleAuthorizationCodeFailure Failure { get; } = failure;
 }
 
 public sealed class GoogleCredentialValidationException(
