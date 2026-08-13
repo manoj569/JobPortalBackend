@@ -36,6 +36,12 @@ public sealed record GoogleAuthenticationRequest(
     bool AcceptTerms = false);
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record GoogleAuthorizationCodeRequest(
+    string Code,
+    GoogleAuthenticationIntent Intent,
+    bool AcceptTerms = false);
+
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record RequestLoginOtpRequest(string PhoneNumber);
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]

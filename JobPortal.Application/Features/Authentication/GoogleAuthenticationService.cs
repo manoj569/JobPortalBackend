@@ -20,8 +20,10 @@ public sealed class GoogleAuthenticationService(
     IUnitOfWork unitOfWork,
     IJwtTokenService jwtTokenService,
     IGoogleCredentialValidator credentialValidator,
+    IGoogleAuthorizationCodeExchanger authorizationCodeExchanger,
     IAuditWriter auditWriter,
     IValidator<GoogleAuthenticationRequest> validator,
+    IValidator<GoogleAuthorizationCodeRequest> codeValidator,
     IOptions<GoogleAuthenticationOptions> options,
     TimeProvider timeProvider,
     ILogger<GoogleAuthenticationService> logger) : IGoogleAuthenticationService
@@ -65,13 +67,74 @@ public sealed class GoogleAuthenticationService(
             throw InvalidCredential();
         }
 
+        return await AuthenticateVerifiedIdentityAsync(
+            identity, request.Intent, ipAddress, cancellationToken);
+    }
+
+    public async Task<AuthenticationResponse> AuthenticateCodeAsync(
+        GoogleAuthorizationCodeRequest request,
+        string? origin,
+        string? flowHeader,
+        string? ipAddress,
+        CancellationToken cancellationToken = default)
+    {
+        await codeValidator.ValidateAndThrowAsync(request, cancellationToken);
+        EnsureEnabled();
+        if (request.Intent == GoogleAuthenticationIntent.Register && !request.AcceptTerms)
+            throw new AuthenticationFlowException(
+                "Terms and Privacy consent is required for registration.", 400,
+                "terms_acceptance_required");
+        if (!string.Equals(flowHeader, "1", StringComparison.Ordinal))
+            throw new AuthenticationFlowException(
+                "The Google authorization-code request is invalid.", 400,
+                "invalid_google_code_request");
+
+        var trustedOrigin = ResolveTrustedOrigin(origin);
+        ValidatedGoogleIdentity identity;
+        try
+        {
+            identity = await authorizationCodeExchanger.ExchangeAsync(
+                request.Code, trustedOrigin, cancellationToken);
+            ValidateIdentity(identity);
+        }
+        catch (GoogleAuthorizationCodeException exception)
+        {
+            throw exception.Failure == GoogleAuthorizationCodeFailure.Unavailable
+                ? new AuthenticationFlowException(
+                    "Google authentication is temporarily unavailable.", 503,
+                    "google_authentication_unavailable")
+                : InvalidAuthorizationCode();
+        }
+        catch (GoogleCredentialValidationException)
+        {
+            throw InvalidAuthorizationCode();
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            _ = exception;
+            GoogleAuthenticationEvent(logger, "code_exchange_failed", null);
+            throw new AuthenticationFlowException(
+                "Google authentication is temporarily unavailable.", 503,
+                "google_authentication_unavailable");
+        }
+
+        return await AuthenticateVerifiedIdentityAsync(
+            identity, request.Intent, ipAddress, cancellationToken);
+    }
+
+    private async Task<AuthenticationResponse> AuthenticateVerifiedIdentityAsync(
+        ValidatedGoogleIdentity identity,
+        GoogleAuthenticationIntent intent,
+        string? ipAddress,
+        CancellationToken cancellationToken)
+    {
         var subject = identity.Subject.Trim();
         var email = identity.Email.Trim();
         var normalizedEmail = email.ToLowerInvariant();
         var linked = await externalLogins.GetByProviderSubjectAsync(
             ExternalLoginProvider.Google, subject, cancellationToken);
 
-        if (request.Intent == GoogleAuthenticationIntent.Login)
+        if (intent == GoogleAuthenticationIntent.Login)
         {
             if (linked is null)
                 throw new AuthenticationFlowException(
@@ -205,6 +268,27 @@ public sealed class GoogleAuthenticationService(
     private static AuthenticationFlowException InvalidCredential() => new(
         "The Google credential is invalid or expired.", 401,
         "invalid_google_credential");
+    private static AuthenticationFlowException InvalidAuthorizationCode() => new(
+        "The Google authorization code is invalid or expired.", 401,
+        "invalid_google_authorization_code");
+    private void EnsureEnabled()
+    {
+        if (!options.Value.Enabled)
+            throw new AuthenticationFlowException(
+                "Google authentication is not available.", 503,
+                "google_authentication_disabled");
+    }
+
+    private string ResolveTrustedOrigin(string? origin)
+    {
+        if (string.IsNullOrWhiteSpace(origin) ||
+            !options.Value.AllowedCodeOrigins.Any(allowed =>
+                string.Equals(allowed, origin, StringComparison.Ordinal)))
+            throw new AuthenticationFlowException(
+                "This origin is not allowed for Google authentication.", 403,
+                "google_origin_not_allowed");
+        return origin;
+    }
     private static ConflictException ExistingAccountConflict() => new(
         ExistingAccountRequiresLogin, "existing_account_requires_login");
     private DateTime UtcNow => timeProvider.GetUtcNow().UtcDateTime;
