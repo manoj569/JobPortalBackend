@@ -30,6 +30,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<JobPortal.Application.Features.JobDiscovery.IJobDiscoveryRepository, JobDiscoveryRepository>();
         services.AddScoped<IAuditLogRepository, AuditLogRepository>();
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
+        services.AddScoped<IUserExternalLoginRepository, UserExternalLoginRepository>();
         services.AddScoped<IAuthenticationChallengeRepository,
             AuthenticationChallengeRepository>();
         services.AddScoped<IJobRepository, JobRepository>();

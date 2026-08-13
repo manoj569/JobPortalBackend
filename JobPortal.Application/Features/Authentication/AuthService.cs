@@ -141,7 +141,9 @@ public sealed class AuthService(
             user = await users.GetByNormalizedPhoneAsync(normalizedPhoneNumber, cancellationToken);
         }
 
-        if (user is null || user.Status != UserStatus.Active || !passwordHasher.Verify(request.Password, user.PasswordHash))
+        if (user is null || user.Status != UserStatus.Active ||
+            string.IsNullOrWhiteSpace(user.PasswordHash) ||
+            !passwordHasher.Verify(request.Password, user.PasswordHash))
             throw InvalidCredentials();
 
         user.LastLoginAtUtc = UtcNow;
@@ -160,7 +162,8 @@ public sealed class AuthService(
         var user = await users.GetByNormalizedEmailAsync(
             NormalizeEmail(request.Email),
             cancellationToken);
-        if (user is not { Status: UserStatus.Active })
+        if (user is not { Status: UserStatus.Active } ||
+            string.IsNullOrWhiteSpace(user.PasswordHash))
             return new(PasswordResetRequestedMessage);
 
         var rawToken = GeneratePasswordResetToken();
@@ -250,7 +253,8 @@ public sealed class AuthService(
     {
         await changePasswordValidator.ValidateAndThrowAsync(request, cancellationToken);
         var user = await users.GetByIdWithRoleAsync(userId, cancellationToken) ?? throw new UnauthorizedException();
-        if (!passwordHasher.Verify(request.CurrentPassword, user.PasswordHash))
+        if (string.IsNullOrWhiteSpace(user.PasswordHash) ||
+            !passwordHasher.Verify(request.CurrentPassword, user.PasswordHash))
             throw new BadRequestException("The current password is incorrect.", "invalid_current_password");
 
         user.PasswordHash = passwordHasher.Hash(request.NewPassword);

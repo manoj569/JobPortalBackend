@@ -7,7 +7,7 @@ public sealed class User : BaseEntity
 {
     public string Email { get; set; } = string.Empty;
     public string NormalizedEmail { get; set; } = string.Empty;
-    public string PasswordHash { get; set; } = string.Empty;
+    public string? PasswordHash { get; set; }
     public string FirstName { get; set; } = string.Empty;
     public string LastName { get; set; } = string.Empty;
     public string? PhoneNumber { get; set; }
@@ -58,6 +58,7 @@ public sealed class User : BaseEntity
     public Guid RoleId { get; set; }
     public Role Role { get; set; } = null!;
     public ICollection<RefreshToken> RefreshTokens { get; set; } = new List<RefreshToken>();
+    public ICollection<UserExternalLogin> ExternalLogins { get; set; } = [];
     public ICollection<Membership> Memberships { get; set; } = new List<Membership>();
     public ICollection<Payment> Payments { get; set; } = new List<Payment>();
     public ICollection<Company> OwnedCompanies { get; set; } = new List<Company>();

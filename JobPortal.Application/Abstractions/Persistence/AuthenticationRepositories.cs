@@ -58,7 +58,18 @@ public interface IRefreshTokenRepository
     Task RevokeActiveForUserAsync(Guid userId, DateTime revokedAtUtc, CancellationToken cancellationToken = default);
 }
 
+public interface IUserExternalLoginRepository
+{
+    Task<UserExternalLogin?> GetByProviderSubjectAsync(
+        ExternalLoginProvider provider,
+        string providerSubject,
+        CancellationToken cancellationToken = default);
+    Task AddAsync(UserExternalLogin externalLogin, CancellationToken cancellationToken = default);
+    void Update(UserExternalLogin externalLogin);
+}
+
 public interface IUnitOfWork
 {
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
+    void ResetAfterFailure() { }
 }

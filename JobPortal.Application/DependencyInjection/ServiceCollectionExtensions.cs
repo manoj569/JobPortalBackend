@@ -35,6 +35,7 @@ public static class ServiceCollectionExtensions
     {
         services.AddValidatorsFromAssembly(typeof(ServiceCollectionExtensions).Assembly);
         services.AddScoped<IAuthService, AuthService>();
+        services.AddScoped<IGoogleAuthenticationService, GoogleAuthenticationService>();
         services.AddScoped<IAuditWriter, AuditWriter>();
         services.AddScoped<IAuditLogService, AuditLogService>();
         services.AddScoped<AdminBootstrapService>();

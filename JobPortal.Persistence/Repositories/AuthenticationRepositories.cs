@@ -121,6 +121,26 @@ public sealed class AuthenticationChallengeRepository(
         context.OtpChallenges.Update(challenge);
 }
 
+public sealed class UserExternalLoginRepository(
+    JobPortalDbContext context) : IUserExternalLoginRepository
+{
+    public Task<UserExternalLogin?> GetByProviderSubjectAsync(
+        ExternalLoginProvider provider,
+        string providerSubject,
+        CancellationToken cancellationToken = default) =>
+        context.UserExternalLogins.Include(x => x.User).ThenInclude(x => x.Role)
+            .SingleOrDefaultAsync(x => x.Provider == provider &&
+                x.ProviderSubject == providerSubject, cancellationToken);
+
+    public Task AddAsync(
+        UserExternalLogin externalLogin,
+        CancellationToken cancellationToken = default) =>
+        context.UserExternalLogins.AddAsync(externalLogin, cancellationToken).AsTask();
+
+    public void Update(UserExternalLogin externalLogin) =>
+        context.UserExternalLogins.Update(externalLogin);
+}
+
 public sealed class RefreshTokenRepository(JobPortalDbContext context) : IRefreshTokenRepository
 {
     public Task<RefreshToken?> GetByTokenHashAsync(string tokenHash, CancellationToken cancellationToken = default) =>
@@ -155,4 +175,6 @@ public sealed class UnitOfWork(JobPortalDbContext context) : IUnitOfWork
                 "A database uniqueness constraint was violated.", exception);
         }
     }
+
+    public void ResetAfterFailure() => context.ChangeTracker.Clear();
 }

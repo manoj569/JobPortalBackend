@@ -17,6 +17,32 @@ public interface IAuthService
     Task ChangePasswordAsync(Guid userId, ChangePasswordRequest request, CancellationToken cancellationToken = default);
     Task LogoutAsync(Guid userId, LogoutRequest request, string? ipAddress, CancellationToken cancellationToken = default);
 }
+public interface IGoogleAuthenticationService
+{
+    Task<AuthenticationResponse> AuthenticateAsync(
+        GoogleAuthenticationRequest request,
+        string? ipAddress,
+        CancellationToken cancellationToken = default);
+}
+
+public sealed record ValidatedGoogleIdentity(
+    string Subject,
+    string Email,
+    bool EmailVerified,
+    string? GivenName,
+    string? FamilyName,
+    string? Name);
+
+public interface IGoogleCredentialValidator
+{
+    Task<ValidatedGoogleIdentity> ValidateAsync(
+        string credential,
+        CancellationToken cancellationToken = default);
+}
+
+public sealed class GoogleCredentialValidationException(
+    string message = "Google credential validation failed.",
+    Exception? innerException = null) : Exception(message, innerException);
 public interface IPasswordHasher
 {
     string Hash(string password);

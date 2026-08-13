@@ -7,6 +7,7 @@ namespace JobPortal.Persistence.Context;
 public sealed class JobPortalDbContext(DbContextOptions<JobPortalDbContext> options) : DbContext(options)
 {
     public DbSet<User> Users => Set<User>();
+    public DbSet<UserExternalLogin> UserExternalLogins => Set<UserExternalLogin>();
     public DbSet<CandidateResumeProfile> CandidateResumeProfiles => Set<CandidateResumeProfile>();
     public DbSet<CandidateSkill> CandidateSkills => Set<CandidateSkill>();
     public DbSet<CandidatePortfolio> CandidatePortfolios => Set<CandidatePortfolio>();

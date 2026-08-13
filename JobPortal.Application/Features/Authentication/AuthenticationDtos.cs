@@ -26,6 +26,15 @@ public sealed record RegistrationResponse(string Message);
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record LoginRequest(string Identifier, string Password);
 
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum GoogleAuthenticationIntent { Login = 1, Register }
+
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record GoogleAuthenticationRequest(
+    string Credential,
+    GoogleAuthenticationIntent Intent,
+    bool AcceptTerms = false);
+
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record RequestLoginOtpRequest(string PhoneNumber);
 
