@@ -16,6 +16,95 @@ namespace JobPortal.Application.Tests;
 
 public sealed class CandidateModuleTests
 {
+    [Fact]
+    public async Task ProfilePhotoCanBeUploadedReplacedRetrievedAndDeletedWithCandidateIsolation()
+    {
+        var fixture = CreateFixture();
+        var first = MinimalPng();
+        var uploaded = await fixture.Service.UploadProfilePhotoAsync(fixture.Candidate.Id,
+            new(new MemoryStream(first), first.Length, "application/octet-stream"));
+        var retrieved = await fixture.Service.DownloadProfilePhotoAsync(fixture.Candidate.Id);
+        Assert.True(uploaded.HasProfilePhoto);
+        Assert.Equal("image/png", retrieved.ContentType);
+
+        var second = MinimalPng();
+        var replaced = await fixture.Service.UploadProfilePhotoAsync(fixture.Candidate.Id,
+            new(new MemoryStream(second), second.Length, "image/png"));
+        Assert.NotEqual(uploaded.Version, replaced.Version);
+        await Assert.ThrowsAsync<UnauthorizedException>(() => fixture.Service.DownloadProfilePhotoAsync(Guid.NewGuid()));
+
+        await fixture.Service.DeleteProfilePhotoAsync(fixture.Candidate.Id);
+        await Assert.ThrowsAsync<NotFoundException>(() => fixture.Service.DownloadProfilePhotoAsync(fixture.Candidate.Id));
+    }
+
+    [Fact]
+    public async Task ProfilePhotoRejectsInvalidSignatureAndOversize()
+    {
+        var fixture = CreateFixture();
+        var invalid = new byte[32];
+        await Assert.ThrowsAsync<BadRequestException>(() => fixture.Service.UploadProfilePhotoAsync(
+            fixture.Candidate.Id, new(new MemoryStream(invalid), invalid.Length, "image/png")));
+        var oversized = new byte[1024 * 1024 + 1];
+        await Assert.ThrowsAsync<BadRequestException>(() => fixture.Service.UploadProfilePhotoAsync(
+            fixture.Candidate.Id, new(new MemoryStream(oversized), oversized.Length, "image/png")));
+    }
+
+    [Fact]
+    public async Task BasicDetailsAndCareerPreferencesAreTrimmedValidatedAndKeepContactReadOnly()
+    {
+        var fixture = CreateFixture();
+        fixture.Candidate.PhoneNumber = "+919876543210";
+        var details = await fixture.Service.UpdateBasicDetailsAsync(fixture.Candidate.Id,
+            new(CandidateWorkStatus.Experienced, false, " India ", " Pune ", " Baner ",
+                CandidateAvailability.OneMonth, 1200000, 1000000, 200000));
+        Assert.Equal("candidate@example.test", details.Email);
+        Assert.Equal("+919876543210", details.Mobile);
+        Assert.Equal("Pune", details.CurrentCity);
+
+        var preferences = await fixture.Service.UpdateCareerPreferencesAsync(fixture.Candidate.Id,
+            new([" Backend Engineer "], [" Pune "], 1500000,
+                [CandidateJobType.Permanent], [CandidateEmploymentPreference.FullTime],
+                [CandidateShiftPreference.Flexible]));
+        Assert.Equal("Backend Engineer", Assert.Single(preferences.PreferredJobRoles));
+        Assert.Equal("Pune", Assert.Single(preferences.PreferredCities));
+
+        var invalid = new UpdateCandidateCareerPreferencesRequest(
+            ["Engineer", " engineer "], [], -1, [], [], []);
+        Assert.False((await new UpdateCandidateCareerPreferencesRequestValidator()
+            .ValidateAsync(invalid)).IsValid);
+    }
+
+    [Fact]
+    public async Task CompletionRequiresEmploymentOnlyForExperiencedCandidates()
+    {
+        var fixture = CreateFixture();
+        fixture.Candidate.WorkStatus = CandidateWorkStatus.Fresher;
+        fixture.Candidate.CurrentCountry = "India";
+        fixture.Candidate.CurrentCity = "Pune";
+        var fresher = await fixture.Service.GetProfileCompletionAsync(fixture.Candidate.Id);
+        Assert.DoesNotContain("employment", fresher.MissingSections);
+
+        fixture.Candidate.WorkStatus = CandidateWorkStatus.Experienced;
+        var experienced = await fixture.Service.GetProfileCompletionAsync(fixture.Candidate.Id);
+        Assert.Contains("employment", experienced.MissingSections);
+        fixture.Repository.HasEmployment = true;
+        var completedEmployment = await fixture.Service.GetProfileCompletionAsync(fixture.Candidate.Id);
+        Assert.DoesNotContain("employment", completedEmployment.MissingSections);
+    }
+
+    [Fact]
+    public void TotalExperienceDoesNotDoubleCountOverlappingEmployment()
+    {
+        var periods = new CandidateEmploymentPeriod[]
+        {
+            new(new DateOnly(2020, 1, 1), new DateOnly(2021, 12, 31), false),
+            new(new DateOnly(2021, 1, 1), new DateOnly(2022, 12, 31), false)
+        };
+        Assert.InRange(CandidateService.CalculateTotalExperience(periods, new DateOnly(2026, 1, 1)), 2.9m, 3.1m);
+    }
+
+    private static byte[] MinimalPng() => Convert.FromBase64String(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=");
     private static readonly DateTime Now =
         new(2026, 7, 30, 10, 0, 0, DateTimeKind.Utc);
     private static readonly JsonSerializerOptions WebJson =
@@ -747,15 +836,18 @@ public sealed class CandidateModuleTests
         };
         var dashboard = new FakeDashboardRepository();
         var storage = new FakeResumeStorage();
+        var photoStorage = new FakeProfilePhotoStorage();
         var unitOfWork = new FakeUnitOfWork();
         var audit = new AuditWriterTestDouble();
         var timeProvider = new FixedTimeProvider(nowUtc ?? Now);
         var service = new CandidateService(
-            repository, dashboard, storage, unitOfWork, audit,
+            repository, dashboard, storage, photoStorage, unitOfWork, audit,
             new UpdateCandidateProfileRequestValidator(),
             new UpdateCandidateAboutRequestValidator(),
             new UpsertCandidateSkillRequestValidator(),
             new UpdateCandidateOnboardingRequestValidator(timeProvider),
+            new UpdateCandidateBasicDetailsRequestValidator(),
+            new UpdateCandidateCareerPreferencesRequestValidator(),
             new CandidatePageQueryValidator(),
             new JobApplicationQueryValidator(), new CreateJobApplicationRequestValidator(),
             timeProvider);
@@ -800,6 +892,9 @@ public sealed class CandidateModuleTests
         public HashSet<Guid> AppliedJobIds { get; } = [];
         public JobApplication? ExistingApplication { get; set; }
         public List<CandidateSkill> Skills { get; } = [];
+        public bool HasEducation { get; set; }
+        public bool HasEmployment { get; set; }
+        public IReadOnlyCollection<CandidateEmploymentPeriod> EmploymentPeriods { get; set; } = [];
 
         public Task<User?> GetCandidateAsync(Guid userId, CancellationToken cancellationToken = default) =>
             Task.FromResult(
@@ -812,6 +907,12 @@ public sealed class CandidateModuleTests
             Guid userId, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyCollection<CandidateSkill>>(
                 Skills.Where(x => x.UserId == userId && !x.IsDeleted).ToArray());
+        public Task<(bool HasEducation, bool HasEmployment)> GetProfileRecordPresenceAsync(
+            Guid userId, CancellationToken cancellationToken = default) =>
+            Task.FromResult((HasEducation, HasEmployment));
+        public Task<IReadOnlyCollection<CandidateEmploymentPeriod>> GetEmploymentPeriodsAsync(
+            Guid userId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(EmploymentPeriods);
         public Task<CandidateSkill?> GetSkillAsync(
             Guid userId, Guid skillId, CancellationToken cancellationToken = default) =>
             Task.FromResult(Skills.SingleOrDefault(x => x.UserId == userId &&
@@ -961,6 +1062,21 @@ public sealed class CandidateModuleTests
             Deleted.Add(storageKey);
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class FakeProfilePhotoStorage : IProfilePhotoStorage
+    {
+        private readonly Dictionary<Guid, StoredProfilePhoto> _photos = [];
+        public Task<StoredProfilePhoto?> GetAsync(Guid userId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(_photos.GetValueOrDefault(userId));
+        public Task<Guid> StoreAsync(Guid userId, byte[] content, string contentType, CancellationToken cancellationToken = default)
+        {
+            var version = Guid.NewGuid();
+            _photos[userId] = new(content, contentType, content.Length, version);
+            return Task.FromResult(version);
+        }
+        public Task<bool> DeleteAsync(Guid userId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(_photos.Remove(userId));
     }
 
     private sealed class FakeUnitOfWork : IUnitOfWork

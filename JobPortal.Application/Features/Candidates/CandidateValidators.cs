@@ -166,3 +166,59 @@ public sealed class UpsertCandidateSkillRequestValidator : AbstractValidator<Ups
             .When(x => x.YearsOfExperience.HasValue);
     }
 }
+
+public sealed class UpdateCandidateBasicDetailsRequestValidator :
+    AbstractValidator<UpdateCandidateBasicDetailsRequest>
+{
+    public UpdateCandidateBasicDetailsRequestValidator()
+    {
+        RuleFor(x => x.WorkStatus).IsInEnum();
+        RuleFor(x => x.CurrentCountry).NotEmpty().MaximumLength(100).Must(ProfileText.Safe);
+        RuleFor(x => x.CurrentCity).NotEmpty().MaximumLength(150).Must(ProfileText.Safe);
+        RuleFor(x => x.CurrentArea).MaximumLength(150).Must(ProfileText.OptionalSafe);
+        RuleFor(x => x.AvailabilityToJoin).IsInEnum().When(x => x.AvailabilityToJoin.HasValue);
+        RuleFor(x => x.CurrentAnnualSalary).GreaterThanOrEqualTo(0).When(x => x.CurrentAnnualSalary.HasValue);
+        RuleFor(x => x.CurrentFixedAnnualSalary).GreaterThanOrEqualTo(0).When(x => x.CurrentFixedAnnualSalary.HasValue);
+        RuleFor(x => x.CurrentVariableAnnualSalary).GreaterThanOrEqualTo(0).When(x => x.CurrentVariableAnnualSalary.HasValue);
+        RuleFor(x => x).Must(x => x.WorkStatus == CandidateWorkStatus.Experienced ||
+            x.CurrentAnnualSalary is null && x.CurrentFixedAnnualSalary is null &&
+            x.CurrentVariableAnnualSalary is null)
+            .WithMessage("Salary is available only for experienced candidates.");
+        RuleFor(x => x).Must(x => !x.CurrentFixedAnnualSalary.HasValue ||
+            !x.CurrentVariableAnnualSalary.HasValue || !x.CurrentAnnualSalary.HasValue ||
+            x.CurrentFixedAnnualSalary.Value + x.CurrentVariableAnnualSalary.Value <= x.CurrentAnnualSalary.Value)
+            .WithMessage("Fixed and variable salary cannot exceed total annual salary.");
+    }
+}
+
+public sealed class UpdateCandidateCareerPreferencesRequestValidator :
+    AbstractValidator<UpdateCandidateCareerPreferencesRequest>
+{
+    public UpdateCandidateCareerPreferencesRequestValidator()
+    {
+        RuleFor(x => x.PreferredJobRoles).NotNull().Must(x => x.Count <= 3)
+            .Must(ProfileText.Unique).WithMessage("Preferred job roles must be unique and cannot exceed 3.");
+        RuleForEach(x => x.PreferredJobRoles).NotEmpty().MaximumLength(100).Must(ProfileText.Safe);
+        RuleFor(x => x.PreferredCities).NotNull().Must(x => x.Count <= 5)
+            .Must(ProfileText.Unique).WithMessage("Preferred cities must be unique and cannot exceed 5.");
+        RuleForEach(x => x.PreferredCities).NotEmpty().MaximumLength(150).Must(ProfileText.Safe);
+        RuleFor(x => x.ExpectedAnnualSalary).GreaterThanOrEqualTo(0).When(x => x.ExpectedAnnualSalary.HasValue);
+        RuleFor(x => x.JobTypes).NotNull().Must(ProfileText.UniqueEnums);
+        RuleForEach(x => x.JobTypes).IsInEnum();
+        RuleFor(x => x.EmploymentTypes).NotNull().Must(ProfileText.UniqueEnums);
+        RuleForEach(x => x.EmploymentTypes).IsInEnum();
+        RuleFor(x => x.PreferredShifts).NotNull().Must(ProfileText.UniqueEnums);
+        RuleForEach(x => x.PreferredShifts).IsInEnum();
+    }
+}
+
+file static class ProfileText
+{
+    public static bool Safe(string value) => !string.IsNullOrWhiteSpace(value) &&
+        !value.Any(char.IsControl) && !value.Contains('<') && !value.Contains('>');
+    public static bool OptionalSafe(string? value) => string.IsNullOrWhiteSpace(value) || Safe(value);
+    public static bool Unique(IReadOnlyCollection<string> values) => values.All(x => !string.IsNullOrWhiteSpace(x)) &&
+        values.Select(x => x.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).Count() == values.Count;
+    public static bool UniqueEnums<T>(IReadOnlyCollection<T> values) where T : struct, Enum =>
+        values.Distinct().Count() == values.Count;
+}

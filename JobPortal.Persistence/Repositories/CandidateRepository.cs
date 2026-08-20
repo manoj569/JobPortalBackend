@@ -24,6 +24,17 @@ public sealed class CandidateRepository(
             .OrderBy(x => x.Name).ThenBy(x => x.Id)
             .ToArrayAsync(cancellationToken);
 
+    public async Task<(bool HasEducation, bool HasEmployment)> GetProfileRecordPresenceAsync(
+        Guid userId, CancellationToken cancellationToken = default) =>
+        (await context.CandidateEducation.AsNoTracking().AnyAsync(x => x.UserId == userId, cancellationToken),
+         await context.CandidateExperiences.AsNoTracking().AnyAsync(x => x.UserId == userId, cancellationToken));
+
+    public async Task<IReadOnlyCollection<CandidateEmploymentPeriod>> GetEmploymentPeriodsAsync(
+        Guid userId, CancellationToken cancellationToken = default) =>
+        await context.CandidateExperiences.AsNoTracking().Where(x => x.UserId == userId)
+            .Select(x => new CandidateEmploymentPeriod(x.StartDate, x.EndDate, x.IsCurrent))
+            .ToArrayAsync(cancellationToken);
+
     public Task<CandidateSkill?> GetSkillAsync(
         Guid userId, Guid skillId, CancellationToken cancellationToken = default) =>
         context.CandidateSkills.SingleOrDefaultAsync(

@@ -13,6 +13,13 @@ public interface ICandidateService
     Task<CandidateSkillResponse> UpdateSkillAsync(Guid userId, Guid skillId, UpsertCandidateSkillRequest request, CancellationToken cancellationToken = default);
     Task DeleteSkillAsync(Guid userId, Guid skillId, CancellationToken cancellationToken = default);
     Task<CandidateProfileCompletionResponse> GetProfileCompletionAsync(Guid userId, CancellationToken cancellationToken = default);
+    Task<CandidateBasicDetailsResponse> GetBasicDetailsAsync(Guid userId, CancellationToken cancellationToken = default);
+    Task<CandidateBasicDetailsResponse> UpdateBasicDetailsAsync(Guid userId, UpdateCandidateBasicDetailsRequest request, CancellationToken cancellationToken = default);
+    Task<CandidateCareerPreferencesResponse> GetCareerPreferencesAsync(Guid userId, CancellationToken cancellationToken = default);
+    Task<CandidateCareerPreferencesResponse> UpdateCareerPreferencesAsync(Guid userId, UpdateCandidateCareerPreferencesRequest request, CancellationToken cancellationToken = default);
+    Task<ProfilePhotoMetadata> UploadProfilePhotoAsync(Guid userId, ProfilePhotoUpload upload, CancellationToken cancellationToken = default);
+    Task<ProfilePhotoDownload> DownloadProfilePhotoAsync(Guid userId, CancellationToken cancellationToken = default);
+    Task DeleteProfilePhotoAsync(Guid userId, CancellationToken cancellationToken = default);
     Task<CandidateOnboardingResponse> GetOnboardingAsync(Guid userId, CancellationToken cancellationToken = default);
     Task<CandidateOnboardingResponse> UpdateOnboardingAsync(Guid userId, UpdateCandidateOnboardingRequest request, CancellationToken cancellationToken = default);
     Task<ResumeResponse> UploadResumeAsync(Guid userId, ResumeUpload upload, CancellationToken cancellationToken = default);
@@ -48,4 +55,13 @@ public interface IResumeStorage
     Task<string> StoreAsync(Stream content, string extension, CancellationToken cancellationToken = default);
     Task<Stream?> OpenReadAsync(string storageKey, CancellationToken cancellationToken = default);
     Task DeleteAsync(string storageKey, CancellationToken cancellationToken = default);
+}
+
+public sealed record StoredProfilePhoto(byte[] Content, string ContentType, int SizeBytes, Guid Version);
+
+public interface IProfilePhotoStorage
+{
+    Task<StoredProfilePhoto?> GetAsync(Guid userId, CancellationToken cancellationToken = default);
+    Task<Guid> StoreAsync(Guid userId, byte[] content, string contentType, CancellationToken cancellationToken = default);
+    Task<bool> DeleteAsync(Guid userId, CancellationToken cancellationToken = default);
 }

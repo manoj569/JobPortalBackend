@@ -66,6 +66,8 @@ public sealed class CandidateExperienceConfiguration : CandidateOwnedConfigurati
         b.Property(x => x.CompanyName).HasMaxLength(200).IsRequired();
         b.Property(x => x.Location).HasMaxLength(200);
         b.Property(x => x.Description).HasMaxLength(4000);
+        b.Property(x => x.AnnualSalary).HasPrecision(14, 2);
+        b.Property(x => x.SkillsUsedJson).HasColumnType("text").HasDefaultValue("[]").IsRequired();
         b.HasIndex(x => new { x.UserId, x.DisplayOrder });
     }
 }
@@ -82,7 +84,24 @@ public sealed class CandidateEducationConfiguration : CandidateOwnedConfiguratio
         b.Property(x => x.FieldOfStudy).HasMaxLength(200);
         b.Property(x => x.Grade).HasMaxLength(100);
         b.Property(x => x.Description).HasMaxLength(4000);
+        b.Property(x => x.GradingSystem).HasMaxLength(100);
         b.HasIndex(x => new { x.UserId, x.DisplayOrder });
+    }
+}
+
+public sealed class CandidateProfilePhotoConfiguration : IEntityTypeConfiguration<CandidateProfilePhoto>
+{
+    public void Configure(EntityTypeBuilder<CandidateProfilePhoto> b)
+    {
+        b.ToTable("CandidateProfilePhotos", t =>
+            t.HasCheckConstraint("CK_CandidateProfilePhotos_SizeBytes", "\"SizeBytes\" BETWEEN 1 AND 1048576"));
+        b.ConfigureBaseEntity();
+        b.Property(x => x.Content).HasColumnType("bytea").IsRequired();
+        b.Property(x => x.ContentType).HasMaxLength(32).IsRequired();
+        b.Property(x => x.Version).IsRequired();
+        b.HasIndex(x => x.UserId).IsUnique().HasFilter("\"IsDeleted\" = FALSE");
+        b.HasOne(x => x.User).WithOne(x => x.CandidateProfilePhoto)
+            .HasForeignKey<CandidateProfilePhoto>(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
     }
 }
 

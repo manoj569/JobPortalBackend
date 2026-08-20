@@ -70,6 +70,13 @@ existing non-Administrator account.
 - Payment signatures use constant-time verification.
 - Password changes and mobile-OTP resets revoke active refresh tokens.
 - Authentication endpoints have stricter per-client rate limits.
+- Candidate profile photos use the provider-neutral `IProfilePhotoStorage` abstraction. The MVP
+  implementation stores one signature-validated, private image per candidate in PostgreSQL
+  (`bytea`, maximum 1 MB). A durable object-storage implementation can replace it without changing
+  candidate API contracts; photos are not included in anonymous portfolio projections.
+- Candidate education and employment records are the same candidate-owned records used by the
+  portfolio editor. Public projections explicitly omit salary, notice-period, availability, contact,
+  and other private profile fields.
 - Google authentication supports both the rollout-compatible GIS ID-token endpoint and a
   custom-button authorization-code endpoint. The code endpoint requires an exact configured
   browser origin, a dedicated CORS policy and `X-CareerHarbor-Google-Code-Flow: 1`; the trusted

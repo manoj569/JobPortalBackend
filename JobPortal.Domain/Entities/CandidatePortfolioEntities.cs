@@ -36,6 +36,9 @@ public sealed class CandidateExperience : BaseEntity
     public DateOnly? EndDate { get; set; }
     public bool IsCurrent { get; set; }
     public string? Description { get; set; }
+    public decimal? AnnualSalary { get; set; }
+    public string SkillsUsedJson { get; set; } = "[]";
+    public CandidateAvailability? NoticePeriod { get; set; }
     public int DisplayOrder { get; set; }
 }
 
@@ -50,7 +53,20 @@ public sealed class CandidateEducation : BaseEntity
     public int? EndYear { get; set; }
     public string? Grade { get; set; }
     public string? Description { get; set; }
+    public EducationCourseType? CourseType { get; set; }
+    public bool IsCurrentlyStudying { get; set; }
+    public string? GradingSystem { get; set; }
     public int DisplayOrder { get; set; }
+}
+
+public sealed class CandidateProfilePhoto : BaseEntity
+{
+    public Guid UserId { get; set; }
+    public User User { get; set; } = null!;
+    public byte[] Content { get; set; } = [];
+    public string ContentType { get; set; } = string.Empty;
+    public int SizeBytes { get; set; }
+    public Guid Version { get; set; } = Guid.NewGuid();
 }
 
 public sealed class CandidateProject : BaseEntity

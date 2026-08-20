@@ -31,6 +31,59 @@ public sealed class CandidateController(ICandidateService candidates) : Controll
             User.GetRequiredUserId(), request, cancellationToken),
             "Candidate profile updated successfully."));
 
+    [HttpGet("profile/basic-details")]
+    public async Task<ActionResult<ApiResponse<CandidateBasicDetailsResponse>>> BasicDetails(
+        CancellationToken cancellationToken) =>
+        Ok(new ApiResponse<CandidateBasicDetailsResponse>(await candidates.GetBasicDetailsAsync(
+            User.GetRequiredUserId(), cancellationToken)));
+
+    [HttpPut("profile/basic-details")]
+    public async Task<ActionResult<ApiResponse<CandidateBasicDetailsResponse>>> UpdateBasicDetails(
+        UpdateCandidateBasicDetailsRequest request, CancellationToken cancellationToken) =>
+        Ok(new ApiResponse<CandidateBasicDetailsResponse>(await candidates.UpdateBasicDetailsAsync(
+            User.GetRequiredUserId(), request, cancellationToken), "Basic details updated successfully."));
+
+    [HttpGet("profile/career-preferences")]
+    public async Task<ActionResult<ApiResponse<CandidateCareerPreferencesResponse>>> CareerPreferences(
+        CancellationToken cancellationToken) =>
+        Ok(new ApiResponse<CandidateCareerPreferencesResponse>(await candidates.GetCareerPreferencesAsync(
+            User.GetRequiredUserId(), cancellationToken)));
+
+    [HttpPut("profile/career-preferences")]
+    public async Task<ActionResult<ApiResponse<CandidateCareerPreferencesResponse>>> UpdateCareerPreferences(
+        UpdateCandidateCareerPreferencesRequest request, CancellationToken cancellationToken) =>
+        Ok(new ApiResponse<CandidateCareerPreferencesResponse>(await candidates.UpdateCareerPreferencesAsync(
+            User.GetRequiredUserId(), request, cancellationToken), "Career preferences updated successfully."));
+
+    [HttpPut("profile/photo")]
+    [Consumes("multipart/form-data")]
+    [RequestSizeLimit(1100000)]
+    public async Task<ActionResult<ApiResponse<ProfilePhotoMetadata>>> UploadProfilePhoto(
+        IFormFile file, CancellationToken cancellationToken)
+    {
+        await using var stream = file.OpenReadStream();
+        return Ok(new ApiResponse<ProfilePhotoMetadata>(await candidates.UploadProfilePhotoAsync(
+            User.GetRequiredUserId(), new ProfilePhotoUpload(stream, file.Length, file.ContentType),
+            cancellationToken), "Profile photo updated successfully."));
+    }
+
+    [HttpGet("profile/photo")]
+    public async Task<IActionResult> ProfilePhoto(CancellationToken cancellationToken)
+    {
+        var photo = await candidates.DownloadProfilePhotoAsync(
+            User.GetRequiredUserId(), cancellationToken);
+        Response.Headers.CacheControl = "private, max-age=300";
+        Response.Headers.ETag = $"\"{photo.Version}\"";
+        return File(photo.Content, photo.ContentType);
+    }
+
+    [HttpDelete("profile/photo")]
+    public async Task<IActionResult> DeleteProfilePhoto(CancellationToken cancellationToken)
+    {
+        await candidates.DeleteProfilePhotoAsync(User.GetRequiredUserId(), cancellationToken);
+        return NoContent();
+    }
+
     [HttpGet("profile/skills")]
     public async Task<ActionResult<ApiResponse<IReadOnlyCollection<CandidateSkillResponse>>>> Skills(
         CancellationToken cancellationToken) =>

@@ -117,7 +117,7 @@ public sealed class CandidatePortfolioTests
             100 - x.DisplayOrder)).ToArray();
         await fixture.Service.UpdateSettingsAsync(fixture.User.Id,
             new(portfolio.Slug!, CandidatePortfolioTemplate.Professional, settings));
-        fixture.Experiences.Add(new CandidateExperience { UserId = fixture.User.Id, JobTitle = "Second", CompanyName = "B", StartDate = new(2020, 1, 1), DisplayOrder = 2 });
+        fixture.Experiences.Add(new CandidateExperience { UserId = fixture.User.Id, JobTitle = "Second", CompanyName = "B", StartDate = new(2020, 1, 1), DisplayOrder = 2, AnnualSalary = 999999, NoticePeriod = CandidateAvailability.OneMonth });
         fixture.Experiences.Add(new CandidateExperience { UserId = fixture.User.Id, JobTitle = "First", CompanyName = "A", StartDate = new(2019, 1, 1), DisplayOrder = 1 });
         await fixture.Service.PublishAsync(fixture.User.Id);
 
@@ -130,6 +130,8 @@ public sealed class CandidatePortfolioTests
         Assert.Equal(["First", "Second"], result.Sections.Experience!.Select(x => x.JobTitle));
         Assert.DoesNotContain("\"skills\"", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("resumeAvailable", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("annualSalary", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("noticePeriod", json, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -163,6 +165,8 @@ public sealed class CandidatePortfolioTests
         var fixture = CreateFixture();
         await Assert.ThrowsAsync<ValidationException>(() => fixture.Service.AddExperienceAsync(fixture.User.Id,
             new("Role", "Company", null, null, new(2025, 1, 1), new(2024, 1, 1), false, null, 0)));
+        await Assert.ThrowsAsync<ValidationException>(() => fixture.Service.AddExperienceAsync(fixture.User.Id,
+            new("Role", "Company", null, EmploymentType.FullTime, new(2025, 1, 1), null, false, null, 0)));
         await Assert.ThrowsAsync<ValidationException>(() => fixture.Service.AddEducationAsync(fixture.User.Id,
             new("Degree", "School", null, 2025, 2020, null, null, 0)));
         await Assert.ThrowsAsync<ValidationException>(() => fixture.Service.AddProjectAsync(fixture.User.Id,
