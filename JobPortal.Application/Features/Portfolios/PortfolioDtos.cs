@@ -11,9 +11,12 @@ public sealed record UpdatePortfolioSettingsRequest(
 
 public sealed record ExperienceRequest(string JobTitle, string CompanyName, string? Location,
     EmploymentType? EmploymentType, DateOnly StartDate, DateOnly? EndDate, bool IsCurrent,
-    string? Description, int DisplayOrder);
+    string? Description, int DisplayOrder, decimal? AnnualSalary = null,
+    IReadOnlyCollection<string>? SkillsUsed = null, CandidateAvailability? NoticePeriod = null);
 public sealed record EducationRequest(string Qualification, string Institution, string? FieldOfStudy,
-    int? StartYear, int? EndYear, string? Grade, string? Description, int DisplayOrder);
+    int? StartYear, int? EndYear, string? Grade, string? Description, int DisplayOrder,
+    EducationCourseType? CourseType = null, bool IsCurrentlyStudying = false,
+    string? GradingSystem = null);
 public sealed record ProjectRequest(string Name, string? Role, string Description,
     IReadOnlyCollection<string> Technologies, string? SourceUrl, string? LiveUrl,
     DateOnly? StartDate, DateOnly? EndDate, int DisplayOrder);
@@ -27,9 +30,18 @@ public sealed record PortfolioSectionSettingResponse(Guid Id, PortfolioSectionTy
     bool IsVisible, int DisplayOrder);
 public sealed record ExperienceResponse(Guid Id, string JobTitle, string CompanyName, string? Location,
     EmploymentType? EmploymentType, DateOnly StartDate, DateOnly? EndDate, bool IsCurrent,
-    string? Description, int DisplayOrder);
+    string? Description, int DisplayOrder, decimal? AnnualSalary = null,
+    IReadOnlyCollection<string>? SkillsUsed = null, CandidateAvailability? NoticePeriod = null);
 public sealed record EducationResponse(Guid Id, string Qualification, string Institution,
-    string? FieldOfStudy, int? StartYear, int? EndYear, string? Grade, string? Description, int DisplayOrder);
+    string? FieldOfStudy, int? StartYear, int? EndYear, string? Grade, string? Description, int DisplayOrder,
+    EducationCourseType? CourseType = null, bool IsCurrentlyStudying = false,
+    string? GradingSystem = null);
+public sealed record PublicExperienceResponse(Guid Id, string JobTitle, string CompanyName, string? Location,
+    EmploymentType? EmploymentType, DateOnly StartDate, DateOnly? EndDate, bool IsCurrent,
+    string? Description, int DisplayOrder, IReadOnlyCollection<string> SkillsUsed);
+public sealed record PublicEducationResponse(Guid Id, string Qualification, string Institution,
+    string? FieldOfStudy, int? StartYear, int? EndYear, string? Grade, string? Description,
+    int DisplayOrder, EducationCourseType? CourseType, bool IsCurrentlyStudying, string? GradingSystem);
 public sealed record ProjectResponse(Guid Id, string Name, string? Role, string Description,
     IReadOnlyCollection<string> Technologies, string? SourceUrl, string? LiveUrl,
     DateOnly? StartDate, DateOnly? EndDate, int DisplayOrder);
@@ -65,8 +77,8 @@ public sealed record PublicPortfolioCandidateResponse(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ProfileSummary);
 public sealed record PublicPortfolioSectionsResponse(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyCollection<string>? Skills,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyCollection<ExperienceResponse>? Experience,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyCollection<EducationResponse>? Education,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyCollection<PublicExperienceResponse>? Experience,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyCollection<PublicEducationResponse>? Education,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyCollection<ProjectResponse>? Projects,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyCollection<CertificationResponse>? Certifications,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyCollection<ProfessionalLinkResponse>? ProfessionalLinks,

@@ -8,7 +8,12 @@ public sealed record CandidateProfileResponse(
     Guid Id, string Email, string FirstName, string LastName, string? Headline, string? Bio,
     string? Location, IReadOnlyCollection<string> Skills, IReadOnlyCollection<string> Education,
     IReadOnlyCollection<string> Experience, string? LinkedInUrl, string? PortfolioUrl,
-    IReadOnlyCollection<EmploymentType> PreferredJobTypes, ResumeResponse? Resume);
+    IReadOnlyCollection<EmploymentType> PreferredJobTypes, ResumeResponse? Resume,
+    string? PhoneNumber = null, bool HasProfilePhoto = false,
+    string? ProfilePhotoVersion = null,
+    CandidateBasicDetailsResponse? BasicDetails = null,
+    CandidateCareerPreferencesResponse? CareerPreferences = null,
+    decimal TotalExperienceYears = 0);
 public sealed record UpdateCandidateProfileRequest(
     string? Headline, string? Bio, string? Location, IReadOnlyCollection<string> Skills,
     IReadOnlyCollection<string> Education, IReadOnlyCollection<string> Experience,
@@ -29,6 +34,54 @@ public sealed record CandidateProfileCompletionResponse(
     IReadOnlyCollection<string> CompletedSections,
     IReadOnlyCollection<string> MissingSections,
     IReadOnlyCollection<ProfileSectionCompletionResponse> Sections);
+
+public sealed record CandidateBasicDetailsResponse(
+    string Email,
+    string? Mobile,
+    CandidateWorkStatus? WorkStatus,
+    bool? IsOutsideIndia,
+    string? CurrentCountry,
+    string? CurrentCity,
+    string? CurrentArea,
+    CandidateAvailability? AvailabilityToJoin,
+    decimal? CurrentAnnualSalary,
+    decimal? CurrentFixedAnnualSalary,
+    decimal? CurrentVariableAnnualSalary,
+    string SalaryUnit = "INR per annum");
+
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record UpdateCandidateBasicDetailsRequest(
+    CandidateWorkStatus WorkStatus,
+    bool IsOutsideIndia,
+    string CurrentCountry,
+    string CurrentCity,
+    string? CurrentArea,
+    CandidateAvailability? AvailabilityToJoin,
+    decimal? CurrentAnnualSalary,
+    decimal? CurrentFixedAnnualSalary,
+    decimal? CurrentVariableAnnualSalary);
+
+public sealed record CandidateCareerPreferencesResponse(
+    IReadOnlyCollection<string> PreferredJobRoles,
+    IReadOnlyCollection<string> PreferredCities,
+    decimal? ExpectedAnnualSalary,
+    IReadOnlyCollection<CandidateJobType> JobTypes,
+    IReadOnlyCollection<CandidateEmploymentPreference> EmploymentTypes,
+    IReadOnlyCollection<CandidateShiftPreference> PreferredShifts,
+    string SalaryUnit = "INR per annum");
+
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record UpdateCandidateCareerPreferencesRequest(
+    IReadOnlyCollection<string> PreferredJobRoles,
+    IReadOnlyCollection<string> PreferredCities,
+    decimal? ExpectedAnnualSalary,
+    IReadOnlyCollection<CandidateJobType> JobTypes,
+    IReadOnlyCollection<CandidateEmploymentPreference> EmploymentTypes,
+    IReadOnlyCollection<CandidateShiftPreference> PreferredShifts);
+
+public sealed record ProfilePhotoUpload(Stream Content, long Length, string ContentType);
+public sealed record ProfilePhotoMetadata(bool HasProfilePhoto, string? Version);
+public sealed record ProfilePhotoDownload(Stream Content, string ContentType, int SizeBytes, string Version);
 
 public sealed record CandidateOnboardingResponse(
     CareerStage? CareerStage,

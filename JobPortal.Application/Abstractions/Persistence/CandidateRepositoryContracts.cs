@@ -8,6 +8,8 @@ public interface ICandidateRepository
 {
     Task<User?> GetCandidateAsync(Guid userId, CancellationToken cancellationToken = default);
     Task<IReadOnlyCollection<CandidateSkill>> GetSkillsAsync(Guid userId, CancellationToken cancellationToken = default);
+    Task<(bool HasEducation, bool HasEmployment)> GetProfileRecordPresenceAsync(Guid userId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyCollection<CandidateEmploymentPeriod>> GetEmploymentPeriodsAsync(Guid userId, CancellationToken cancellationToken = default);
     Task<CandidateSkill?> GetSkillAsync(Guid userId, Guid skillId, CancellationToken cancellationToken = default);
     Task<bool> SkillNameExistsAsync(Guid userId, string normalizedName, Guid? excludingSkillId, CancellationToken cancellationToken = default);
     Task AddSkillAsync(CandidateSkill skill, CancellationToken cancellationToken = default);
@@ -40,6 +42,7 @@ public interface ICandidateRepository
 }
 
 public sealed record CandidateJob(Guid Id, string Title, string Slug, string CompanyName, string? ApplicationUrl = null);
+public sealed record CandidateEmploymentPeriod(DateOnly StartDate, DateOnly? EndDate, bool IsCurrent);
 public sealed record RecommendationJobCandidate(Guid Id, string ReferenceNumber, string Title, string Slug,
     string Description, string? Requirements, string? Responsibilities, Guid CompanyId,
     string CompanyName, string CompanySlug, string? CompanyLogoUrl, string? CompanyIndustry,

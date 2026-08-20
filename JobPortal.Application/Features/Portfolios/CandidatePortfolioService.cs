@@ -320,8 +320,8 @@ public sealed partial class CandidatePortfolioService(
                 Visible(PortfolioSectionType.About) ? data.User.Bio : null),
             sectionOrder,
             new(Visible(PortfolioSectionType.Skills) ? Skills(data) : null,
-                Visible(PortfolioSectionType.Experience) ? data.Experiences.Select(Map).ToArray() : null,
-                Visible(PortfolioSectionType.Education) ? data.Education.Select(Map).ToArray() : null,
+                Visible(PortfolioSectionType.Experience) ? data.Experiences.Select(MapPublic).ToArray() : null,
+                Visible(PortfolioSectionType.Education) ? data.Education.Select(MapPublic).ToArray() : null,
                 Visible(PortfolioSectionType.Projects) ? data.Projects.Select(Map).ToArray() : null,
                 Visible(PortfolioSectionType.Certifications) ? data.Certifications.Select(Map).ToArray() : null,
                 Visible(PortfolioSectionType.ProfessionalLinks) ? data.ProfessionalLinks.Select(Map).ToArray() : null,
@@ -337,16 +337,18 @@ public sealed partial class CandidatePortfolioService(
     { try { return JsonSerializer.Deserialize<string[]>(json) ?? []; } catch (JsonException) { return []; } }
 
     private static PortfolioSectionSettingResponse Map(PortfolioSectionSetting x) => new(x.Id, x.SectionType, x.IsVisible, x.DisplayOrder);
-    private static ExperienceResponse Map(CandidateExperience x) => new(x.Id, x.JobTitle, x.CompanyName, x.Location, x.EmploymentType, x.StartDate, x.EndDate, x.IsCurrent, x.Description, x.DisplayOrder);
-    private static EducationResponse Map(CandidateEducation x) => new(x.Id, x.Qualification, x.Institution, x.FieldOfStudy, x.StartYear, x.EndYear, x.Grade, x.Description, x.DisplayOrder);
+    private static ExperienceResponse Map(CandidateExperience x) => new(x.Id, x.JobTitle, x.CompanyName, x.Location, x.EmploymentType, x.StartDate, x.EndDate, x.IsCurrent, x.Description, x.DisplayOrder, x.AnnualSalary, DeserializeStrings(x.SkillsUsedJson), x.NoticePeriod);
+    private static EducationResponse Map(CandidateEducation x) => new(x.Id, x.Qualification, x.Institution, x.FieldOfStudy, x.StartYear, x.EndYear, x.Grade, x.Description, x.DisplayOrder, x.CourseType, x.IsCurrentlyStudying, x.GradingSystem);
+    private static PublicExperienceResponse MapPublic(CandidateExperience x) => new(x.Id, x.JobTitle, x.CompanyName, x.Location, x.EmploymentType, x.StartDate, x.EndDate, x.IsCurrent, x.Description, x.DisplayOrder, DeserializeStrings(x.SkillsUsedJson));
+    private static PublicEducationResponse MapPublic(CandidateEducation x) => new(x.Id, x.Qualification, x.Institution, x.FieldOfStudy, x.StartYear, x.EndYear, x.Grade, x.Description, x.DisplayOrder, x.CourseType, x.IsCurrentlyStudying, x.GradingSystem);
     private static ProjectResponse Map(CandidateProject x) => new(x.Id, x.Name, x.Role, x.Description, DeserializeStrings(x.TechnologiesJson), x.SourceUrl, x.LiveUrl, x.StartDate, x.EndDate, x.DisplayOrder);
     private static CertificationResponse Map(CandidateCertification x) => new(x.Id, x.Name, x.Issuer, x.IssuedDate, x.ExpiryDate, x.DoesNotExpire, x.CredentialId, x.CredentialUrl, x.DisplayOrder);
     private static ProfessionalLinkResponse Map(CandidateProfessionalLink x) => new(x.Id, x.Type, x.Label, x.Url, x.DisplayOrder);
     private static CustomSectionResponse Map(PortfolioCustomSection x) => new(x.Id, x.Title, x.DisplayOrder, x.Items.OrderBy(y => y.DisplayOrder).ThenBy(y => y.Id).Select(Map).ToArray());
     private static CustomItemResponse Map(PortfolioCustomItem x) => new(x.Id, x.Title, x.Description, x.Date, x.Url, x.DisplayOrder);
 
-    private static void Apply(CandidateExperience x, ExperienceRequest r) { x.JobTitle = r.JobTitle.Trim(); x.CompanyName = r.CompanyName.Trim(); x.Location = TextNormalizer.TrimOrNull(r.Location); x.EmploymentType = r.EmploymentType; x.StartDate = r.StartDate; x.EndDate = r.EndDate; x.IsCurrent = r.IsCurrent; x.Description = TextNormalizer.TrimOrNull(r.Description); x.DisplayOrder = r.DisplayOrder; }
-    private static void Apply(CandidateEducation x, EducationRequest r) { x.Qualification = r.Qualification.Trim(); x.Institution = r.Institution.Trim(); x.FieldOfStudy = TextNormalizer.TrimOrNull(r.FieldOfStudy); x.StartYear = r.StartYear; x.EndYear = r.EndYear; x.Grade = TextNormalizer.TrimOrNull(r.Grade); x.Description = TextNormalizer.TrimOrNull(r.Description); x.DisplayOrder = r.DisplayOrder; }
+    private static void Apply(CandidateExperience x, ExperienceRequest r) { x.JobTitle = r.JobTitle.Trim(); x.CompanyName = r.CompanyName.Trim(); x.Location = TextNormalizer.TrimOrNull(r.Location); x.EmploymentType = r.EmploymentType; x.StartDate = r.StartDate; x.EndDate = r.IsCurrent ? null : r.EndDate; x.IsCurrent = r.IsCurrent; x.Description = TextNormalizer.TrimOrNull(r.Description); x.DisplayOrder = r.DisplayOrder; x.AnnualSalary = r.AnnualSalary; x.SkillsUsedJson = JsonSerializer.Serialize((r.SkillsUsed ?? []).Select(y => y.Trim()).Distinct(StringComparer.OrdinalIgnoreCase)); x.NoticePeriod = r.IsCurrent ? r.NoticePeriod : null; }
+    private static void Apply(CandidateEducation x, EducationRequest r) { x.Qualification = r.Qualification.Trim(); x.Institution = r.Institution.Trim(); x.FieldOfStudy = TextNormalizer.TrimOrNull(r.FieldOfStudy); x.StartYear = r.StartYear; x.EndYear = r.IsCurrentlyStudying ? null : r.EndYear; x.Grade = TextNormalizer.TrimOrNull(r.Grade); x.Description = TextNormalizer.TrimOrNull(r.Description); x.DisplayOrder = r.DisplayOrder; x.CourseType = r.CourseType; x.IsCurrentlyStudying = r.IsCurrentlyStudying; x.GradingSystem = TextNormalizer.TrimOrNull(r.GradingSystem); }
     private static void Apply(CandidateProject x, ProjectRequest r) { x.Name = r.Name.Trim(); x.Role = TextNormalizer.TrimOrNull(r.Role); x.Description = r.Description.Trim(); x.TechnologiesJson = JsonSerializer.Serialize(r.Technologies.Select(y => y.Trim()).Distinct(StringComparer.OrdinalIgnoreCase)); x.SourceUrl = TextNormalizer.TrimOrNull(r.SourceUrl); x.LiveUrl = TextNormalizer.TrimOrNull(r.LiveUrl); x.StartDate = r.StartDate; x.EndDate = r.EndDate; x.DisplayOrder = r.DisplayOrder; }
     private static void Apply(CandidateCertification x, CertificationRequest r) { x.Name = r.Name.Trim(); x.Issuer = TextNormalizer.TrimOrNull(r.Issuer); x.IssuedDate = r.IssuedDate; x.ExpiryDate = r.ExpiryDate; x.DoesNotExpire = r.DoesNotExpire; x.CredentialId = TextNormalizer.TrimOrNull(r.CredentialId); x.CredentialUrl = TextNormalizer.TrimOrNull(r.CredentialUrl); x.DisplayOrder = r.DisplayOrder; }
     private static void Apply(CandidateProfessionalLink x, ProfessionalLinkRequest r) { x.Type = r.Type; x.Label = TextNormalizer.TrimOrNull(r.Label); x.Url = r.Url.Trim(); x.DisplayOrder = r.DisplayOrder; }

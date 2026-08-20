@@ -25,6 +25,21 @@ public sealed class User : BaseEntity
     public string EducationJson { get; set; } = "[]";
     public string ExperienceJson { get; set; } = "[]";
     public string PreferredJobTypesJson { get; set; } = "[]";
+    public CandidateWorkStatus? WorkStatus { get; set; }
+    public bool? IsOutsideIndia { get; set; }
+    public string? CurrentCountry { get; set; }
+    public string? CurrentCity { get; set; }
+    public string? CurrentArea { get; set; }
+    public CandidateAvailability? AvailabilityToJoin { get; set; }
+    public decimal? CurrentAnnualSalary { get; set; }
+    public decimal? CurrentFixedAnnualSalary { get; set; }
+    public decimal? CurrentVariableAnnualSalary { get; set; }
+    public string PreferredJobRolesJson { get; set; } = "[]";
+    public string PreferredCitiesJson { get; set; } = "[]";
+    public decimal? ExpectedAnnualSalary { get; set; }
+    public string CandidateJobTypesJson { get; set; } = "[]";
+    public string CandidateEmploymentTypesJson { get; set; } = "[]";
+    public string PreferredShiftsJson { get; set; } = "[]";
     public CareerStage? CareerStage { get; set; }
     public string DesiredOpportunitiesJson { get; set; } = "[]";
     public string WorkPreferencesJson { get; set; } = "[]";
@@ -41,6 +56,7 @@ public sealed class User : BaseEntity
     public CandidateResumeProfile? ResumeProfile { get; set; }
     public ICollection<CandidateSkill> CandidateSkills { get; set; } = new List<CandidateSkill>();
     public CandidatePortfolio? CandidatePortfolio { get; set; }
+    public CandidateProfilePhoto? CandidateProfilePhoto { get; set; }
     public ICollection<CandidateExperience> CandidateExperiences { get; set; } = [];
     public ICollection<CandidateEducation> CandidateEducation { get; set; } = [];
     public ICollection<CandidateProject> CandidateProjects { get; set; } = [];

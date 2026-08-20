@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Buffers.Binary;
 using FluentValidation;
 using JobPortal.Application.Abstractions.Auditing;
 using JobPortal.Application.Abstractions.Candidates;
@@ -20,12 +21,15 @@ public sealed class CandidateService(
     ICandidateRepository candidates,
     IDashboardRepository dashboard,
     IResumeStorage resumeStorage,
+    IProfilePhotoStorage profilePhotoStorage,
     IUnitOfWork unitOfWork,
     IAuditWriter auditWriter,
     IValidator<UpdateCandidateProfileRequest> profileValidator,
     IValidator<UpdateCandidateAboutRequest> aboutValidator,
     IValidator<UpsertCandidateSkillRequest> skillValidator,
     IValidator<UpdateCandidateOnboardingRequest> onboardingValidator,
+    IValidator<UpdateCandidateBasicDetailsRequest> basicDetailsValidator,
+    IValidator<UpdateCandidateCareerPreferencesRequest> careerPreferencesValidator,
     IValidator<CandidatePageQuery> pageValidator,
     IValidator<JobApplicationQuery> applicationQueryValidator,
     IValidator<CreateJobApplicationRequest> applicationValidator,
@@ -34,6 +38,7 @@ public sealed class CandidateService(
     ILogger<CandidateService>? logger = null) : ICandidateService
 {
     private const long MaximumResumeBytes = 5 * 1024 * 1024;
+    private const int MaximumProfilePhotoBytes = 1024 * 1024;
     private const int FreeMonthlyApplicationLimit = 10;
     private const int PremiumDailyApplicationLimit = 35;
     private static readonly Dictionary<string, string[]> AllowedResumeTypes = new(StringComparer.OrdinalIgnoreCase)
@@ -43,8 +48,13 @@ public sealed class CandidateService(
         [".docx"] = ["application/vnd.openxmlformats-officedocument.wordprocessingml.document"]
     };
 
-    public async Task<CandidateProfileResponse> GetProfileAsync(Guid userId, CancellationToken cancellationToken = default) =>
-        MapProfile(await RequiredCandidateAsync(userId, cancellationToken));
+    public async Task<CandidateProfileResponse> GetProfileAsync(Guid userId, CancellationToken cancellationToken = default)
+    {
+        var user = await RequiredCandidateAsync(userId, cancellationToken);
+        return MapProfile(user, await profilePhotoStorage.GetAsync(userId, cancellationToken),
+            CalculateTotalExperience(await candidates.GetEmploymentPeriodsAsync(userId, cancellationToken),
+                DateOnly.FromDateTime(UtcNow)));
+    }
 
     public async Task<CandidateProfileResponse> UpdateProfileAsync(
         Guid userId, UpdateCandidateProfileRequest request, CancellationToken cancellationToken = default)
@@ -70,7 +80,106 @@ public sealed class CandidateService(
             user.Id.ToString(),
             Actor: new(userId, "Candidate")), cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
-        return MapProfile(user);
+        return MapProfile(user, await profilePhotoStorage.GetAsync(userId, cancellationToken),
+            CalculateTotalExperience(await candidates.GetEmploymentPeriodsAsync(userId, cancellationToken),
+                DateOnly.FromDateTime(UtcNow)));
+    }
+
+    public async Task<CandidateBasicDetailsResponse> GetBasicDetailsAsync(
+        Guid userId, CancellationToken cancellationToken = default) =>
+        MapBasicDetails(await RequiredCandidateAsync(userId, cancellationToken));
+
+    public async Task<CandidateBasicDetailsResponse> UpdateBasicDetailsAsync(
+        Guid userId, UpdateCandidateBasicDetailsRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        await basicDetailsValidator.ValidateAndThrowAsync(request, cancellationToken);
+        var user = await RequiredCandidateAsync(userId, cancellationToken);
+        user.WorkStatus = request.WorkStatus;
+        user.IsOutsideIndia = request.IsOutsideIndia;
+        user.CurrentCountry = request.CurrentCountry.Trim();
+        user.CurrentCity = request.CurrentCity.Trim();
+        user.CurrentArea = TextNormalizer.TrimOrNull(request.CurrentArea);
+        user.Location = user.CurrentCity;
+        user.AvailabilityToJoin = request.AvailabilityToJoin;
+        user.CurrentAnnualSalary = request.WorkStatus == CandidateWorkStatus.Experienced ? request.CurrentAnnualSalary : null;
+        user.CurrentFixedAnnualSalary = request.WorkStatus == CandidateWorkStatus.Experienced ? request.CurrentFixedAnnualSalary : null;
+        user.CurrentVariableAnnualSalary = request.WorkStatus == CandidateWorkStatus.Experienced ? request.CurrentVariableAnnualSalary : null;
+        await auditWriter.AppendAsync(new(AuditAction.Update, "CandidateBasicDetails",
+            user.Id.ToString(), Actor: new(userId, "Candidate")), cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+        return MapBasicDetails(user);
+    }
+
+    public async Task<CandidateCareerPreferencesResponse> GetCareerPreferencesAsync(
+        Guid userId, CancellationToken cancellationToken = default) =>
+        MapCareerPreferences(await RequiredCandidateAsync(userId, cancellationToken));
+
+    public async Task<CandidateCareerPreferencesResponse> UpdateCareerPreferencesAsync(
+        Guid userId, UpdateCandidateCareerPreferencesRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        await careerPreferencesValidator.ValidateAndThrowAsync(request, cancellationToken);
+        var user = await RequiredCandidateAsync(userId, cancellationToken);
+        user.PreferredJobRolesJson = SerializeStrings(request.PreferredJobRoles);
+        user.PreferredCitiesJson = SerializeStrings(request.PreferredCities);
+        user.ExpectedAnnualSalary = request.ExpectedAnnualSalary;
+        user.CandidateJobTypesJson = JsonSerializer.Serialize(request.JobTypes.Distinct());
+        user.CandidateEmploymentTypesJson = JsonSerializer.Serialize(request.EmploymentTypes.Distinct());
+        user.PreferredShiftsJson = JsonSerializer.Serialize(request.PreferredShifts.Distinct());
+        await auditWriter.AppendAsync(new(AuditAction.Update, "CandidateCareerPreferences",
+            user.Id.ToString(), Actor: new(userId, "Candidate")), cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+        return MapCareerPreferences(user);
+    }
+
+    public async Task<ProfilePhotoMetadata> UploadProfilePhotoAsync(
+        Guid userId, ProfilePhotoUpload upload, CancellationToken cancellationToken = default)
+    {
+        await RequiredCandidateAsync(userId, cancellationToken);
+        if (upload.Length is <= 0 or > MaximumProfilePhotoBytes)
+            throw new BadRequestException("Profile photo must be between 1 byte and 1 MB.", "invalid_profile_photo");
+        await using var buffer = new MemoryStream((int)upload.Length);
+        var chunk = new byte[81920];
+        while (true)
+        {
+            var read = await upload.Content.ReadAsync(chunk, cancellationToken);
+            if (read == 0) break;
+            if (buffer.Length + read > MaximumProfilePhotoBytes)
+                throw new BadRequestException("Profile photo must not exceed 1 MB.", "invalid_profile_photo");
+            await buffer.WriteAsync(chunk.AsMemory(0, read), cancellationToken);
+        }
+        if (buffer.Length != upload.Length)
+            throw new BadRequestException("Profile photo size is invalid.", "invalid_profile_photo");
+        var bytes = buffer.ToArray();
+        var contentType = DetectImageType(bytes) ?? throw new BadRequestException(
+            "Profile photo must be a valid JPEG, PNG, or WebP image.", "invalid_profile_photo");
+        var version = await profilePhotoStorage.StoreAsync(userId, bytes, contentType, cancellationToken);
+        await auditWriter.AppendAsync(new(AuditAction.Update, "CandidateProfilePhoto",
+            userId.ToString(), Actor: new(userId, "Candidate")), cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+        return new(true, version.ToString("N"));
+    }
+
+    public async Task<ProfilePhotoDownload> DownloadProfilePhotoAsync(
+        Guid userId, CancellationToken cancellationToken = default)
+    {
+        await RequiredCandidateAsync(userId, cancellationToken);
+        var photo = await profilePhotoStorage.GetAsync(userId, cancellationToken)
+            ?? throw new NotFoundException("Profile photo was not found.");
+        return new(new MemoryStream(photo.Content, writable: false), photo.ContentType,
+            photo.SizeBytes, photo.Version.ToString("N"));
+    }
+
+    public async Task DeleteProfilePhotoAsync(
+        Guid userId, CancellationToken cancellationToken = default)
+    {
+        await RequiredCandidateAsync(userId, cancellationToken);
+        if (!await profilePhotoStorage.DeleteAsync(userId, cancellationToken))
+            throw new NotFoundException("Profile photo was not found.");
+        await auditWriter.AppendAsync(new(AuditAction.Delete, "CandidateProfilePhoto",
+            userId.ToString(), Actor: new(userId, "Candidate")), cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
     }
 
     public async Task<CandidateAboutResponse> UpdateAboutAsync(
@@ -160,19 +269,34 @@ public sealed class CandidateService(
         var user = await RequiredCandidateAsync(userId, cancellationToken);
         var hasSkills = (await candidates.GetSkillsAsync(userId, cancellationToken)).Count > 0 ||
             Deserialize<string>(user.SkillsJson).Length > 0;
+        if (!user.WorkStatus.HasValue)
+        {
+            var legacySections = new[]
+            {
+                Section("basicDetails", 15, !string.IsNullOrWhiteSpace(user.FirstName) &&
+                    !string.IsNullOrWhiteSpace(user.LastName) && user.EmailConfirmed),
+                Section("resumeHeadline", 10, !string.IsNullOrWhiteSpace(user.Headline)),
+                Section("profileSummary", 15, !string.IsNullOrWhiteSpace(user.Bio)),
+                Section("skills", 20, hasSkills),
+                Section("resume", 20, !string.IsNullOrWhiteSpace(user.ResumeStorageKey)),
+                Section("careerPreferences", 20, CareerPreferencesComplete(user))
+            };
+            return Completion(legacySections);
+        }
+        var records = await candidates.GetProfileRecordPresenceAsync(userId, cancellationToken);
+        var experienced = user.WorkStatus == CandidateWorkStatus.Experienced ||
+            !user.WorkStatus.HasValue && user.CareerStage == CareerStage.Experienced;
         var sections = new[]
         {
-            Section("basicDetails", 15, !string.IsNullOrWhiteSpace(user.FirstName) &&
-                !string.IsNullOrWhiteSpace(user.LastName) && user.EmailConfirmed),
-            Section("resumeHeadline", 10, !string.IsNullOrWhiteSpace(user.Headline)),
-            Section("profileSummary", 15, !string.IsNullOrWhiteSpace(user.Bio)),
-            Section("skills", 20, hasSkills),
-            Section("resume", 20, !string.IsNullOrWhiteSpace(user.ResumeStorageKey)),
-            Section("careerPreferences", 20, CareerPreferencesComplete(user))
+            Section("overview", experienced ? 15 : 25, BasicDetailsComplete(user)),
+            Section("about", 15, !string.IsNullOrWhiteSpace(user.Headline) && !string.IsNullOrWhiteSpace(user.Bio)),
+            Section("skills", 15, hasSkills),
+            Section("resume", 15, !string.IsNullOrWhiteSpace(user.ResumeStorageKey)),
+            Section("careerPreferences", 20, CareerPreferencesComplete(user)),
+            Section("education", 10, records.HasEducation),
+            Section("employment", experienced ? 10 : 0, !experienced || records.HasEmployment)
         };
-        return new(sections.Where(x => x.IsCompleted).Sum(x => x.Weight),
-            sections.Where(x => x.IsCompleted).Select(x => x.Section).ToArray(),
-            sections.Where(x => !x.IsCompleted).Select(x => x.Section).ToArray(), sections);
+        return Completion(sections);
     }
 
     public async Task<CandidateOnboardingResponse> GetOnboardingAsync(
@@ -672,11 +796,23 @@ public sealed class CandidateService(
         return (extension, content);
     }
 
-    private static CandidateProfileResponse MapProfile(User user) => new(
+    private static CandidateProfileResponse MapProfile(
+        User user, StoredProfilePhoto? photo, decimal totalExperienceYears) => new(
         user.Id, user.Email, user.FirstName, user.LastName, user.Headline, user.Bio, user.Location,
         Deserialize<string>(user.SkillsJson), Deserialize<string>(user.EducationJson),
         Deserialize<string>(user.ExperienceJson), user.LinkedInUrl, user.PortfolioUrl,
-        Deserialize<EmploymentType>(user.PreferredJobTypesJson), MapResume(user));
+        Deserialize<EmploymentType>(user.PreferredJobTypesJson), MapResume(user), user.PhoneNumber,
+        photo is not null, photo?.Version.ToString("N"), MapBasicDetails(user),
+        MapCareerPreferences(user), totalExperienceYears);
+    private static CandidateBasicDetailsResponse MapBasicDetails(User user) => new(
+        user.Email, user.PhoneNumber, user.WorkStatus, user.IsOutsideIndia, user.CurrentCountry,
+        user.CurrentCity ?? user.Location, user.CurrentArea, user.AvailabilityToJoin,
+        user.CurrentAnnualSalary, user.CurrentFixedAnnualSalary, user.CurrentVariableAnnualSalary);
+    private static CandidateCareerPreferencesResponse MapCareerPreferences(User user) => new(
+        Deserialize<string>(user.PreferredJobRolesJson), Deserialize<string>(user.PreferredCitiesJson),
+        user.ExpectedAnnualSalary, Deserialize<CandidateJobType>(user.CandidateJobTypesJson),
+        Deserialize<CandidateEmploymentPreference>(user.CandidateEmploymentTypesJson),
+        Deserialize<CandidateShiftPreference>(user.PreferredShiftsJson));
     private static CandidateOnboardingResponse MapOnboarding(User user) => new(
         user.CareerStage,
         Deserialize<DesiredOpportunity>(user.DesiredOpportunitiesJson),
@@ -701,6 +837,88 @@ public sealed class CandidateService(
         JsonSerializer.Serialize(values.Select(x => x.Trim()).Distinct(StringComparer.OrdinalIgnoreCase));
     private static T[] Deserialize<T>(string json) =>
         string.IsNullOrWhiteSpace(json) ? [] : JsonSerializer.Deserialize<T[]>(json) ?? [];
+
+    private static string? DetectImageType(byte[] content)
+    {
+        var bytes = content.AsSpan();
+        if (IsValidJpeg(bytes)) return "image/jpeg";
+        if (IsValidPng(bytes)) return "image/png";
+        if (bytes.Length >= 20 && bytes[..4].SequenceEqual("RIFF"u8) &&
+            bytes[8..12].SequenceEqual("WEBP"u8) &&
+            BinaryPrimitives.ReadUInt32LittleEndian(bytes[4..8]) + 8 == bytes.Length &&
+            bytes[12..16] is var chunk &&
+            (chunk.SequenceEqual("VP8 "u8) || chunk.SequenceEqual("VP8L"u8) ||
+             chunk.SequenceEqual("VP8X"u8))) return "image/webp";
+        return null;
+    }
+
+    private static bool IsValidPng(ReadOnlySpan<byte> bytes)
+    {
+        if (bytes.Length < 45 ||
+            !bytes[..8].SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 })) return false;
+        var offset = 8;
+        var first = true;
+        while (offset + 12 <= bytes.Length)
+        {
+            var length = BinaryPrimitives.ReadUInt32BigEndian(bytes[offset..(offset + 4)]);
+            if (length > MaximumProfilePhotoBytes || offset + 12L + length > bytes.Length) return false;
+            var type = bytes[(offset + 4)..(offset + 8)];
+            if (first && (!type.SequenceEqual("IHDR"u8) || length != 13)) return false;
+            if (type.SequenceEqual("IEND"u8)) return length == 0 && offset + 12 == bytes.Length;
+            first = false;
+            offset += checked((int)length + 12);
+        }
+        return false;
+    }
+
+    private static bool IsValidJpeg(ReadOnlySpan<byte> bytes)
+    {
+        if (bytes.Length < 12 || !bytes[..2].SequenceEqual(new byte[] { 0xFF, 0xD8 }) ||
+            !bytes[^2..].SequenceEqual(new byte[] { 0xFF, 0xD9 })) return false;
+        var offset = 2;
+        var hasStartOfFrame = false;
+        while (offset + 4 <= bytes.Length - 2)
+        {
+            if (bytes[offset++] != 0xFF) return false;
+            while (offset < bytes.Length && bytes[offset] == 0xFF) offset++;
+            if (offset >= bytes.Length) return false;
+            var marker = bytes[offset++];
+            if (marker == 0xDA) return hasStartOfFrame;
+            if (marker is 0x01 or >= 0xD0 and <= 0xD7) continue;
+            if (offset + 2 > bytes.Length) return false;
+            var length = BinaryPrimitives.ReadUInt16BigEndian(bytes[offset..(offset + 2)]);
+            if (length < 2 || offset + length > bytes.Length - 2) return false;
+            if (marker is >= 0xC0 and <= 0xC3 or >= 0xC5 and <= 0xC7 or
+                >= 0xC9 and <= 0xCB or >= 0xCD and <= 0xCF) hasStartOfFrame = true;
+            offset += length;
+        }
+        return false;
+    }
+
+    internal static decimal CalculateTotalExperience(
+        IReadOnlyCollection<CandidateEmploymentPeriod> periods, DateOnly today)
+    {
+        var ranges = periods.Select(x => (Start: x.StartDate,
+                End: x.IsCurrent ? today : x.EndDate ?? x.StartDate))
+            .Where(x => x.End >= x.Start).OrderBy(x => x.Start).ToArray();
+        if (ranges.Length == 0) return 0;
+        var days = 0;
+        var start = ranges[0].Start;
+        var end = ranges[0].End;
+        foreach (var range in ranges.Skip(1))
+        {
+            if (range.Start <= end.AddDays(1))
+            {
+                if (range.End > end) end = range.End;
+                continue;
+            }
+            days += end.DayNumber - start.DayNumber + 1;
+            start = range.Start;
+            end = range.End;
+        }
+        days += end.DayNumber - start.DayNumber + 1;
+        return Math.Round(days / 365.2425m, 1, MidpointRounding.AwayFromZero);
+    }
     private void ApplyExtractedProfile(CandidateResumeProfile profile, string text)
     {
         var normalized = " " + Normalize(text) + " ";
@@ -854,12 +1072,26 @@ public sealed class CandidateService(
         string section, int weight, bool completed) =>
         new(section, weight, completed);
 
+    private static CandidateProfileCompletionResponse Completion(
+        IReadOnlyCollection<ProfileSectionCompletionResponse> sections) =>
+        new(sections.Where(x => x.IsCompleted).Sum(x => x.Weight),
+            sections.Where(x => x.IsCompleted).Select(x => x.Section).ToArray(),
+            sections.Where(x => !x.IsCompleted && x.Weight > 0).Select(x => x.Section).ToArray(), sections);
+
     private static bool CareerPreferencesComplete(User user) =>
-        user.OnboardingCompletedAtUtc.HasValue &&
-        user.CareerStage.HasValue &&
+        Deserialize<string>(user.PreferredJobRolesJson).Length > 0 &&
+        Deserialize<string>(user.PreferredCitiesJson).Length > 0 &&
+        Deserialize<CandidateEmploymentPreference>(user.CandidateEmploymentTypesJson).Length > 0 ||
+        user.OnboardingCompletedAtUtc.HasValue && user.CareerStage.HasValue &&
         !string.IsNullOrWhiteSpace(user.Location) &&
         Deserialize<DesiredOpportunity>(user.DesiredOpportunitiesJson).Length > 0 &&
         Deserialize<WorkPreference>(user.WorkPreferencesJson).Length > 0;
+
+    private static bool BasicDetailsComplete(User user) =>
+        !string.IsNullOrWhiteSpace(user.FirstName) && !string.IsNullOrWhiteSpace(user.LastName) &&
+        user.EmailConfirmed && user.WorkStatus.HasValue &&
+        !string.IsNullOrWhiteSpace(user.CurrentCountry) &&
+        !string.IsNullOrWhiteSpace(user.CurrentCity ?? user.Location);
 
     private sealed record ApplicationQuotaWindow(
         ApplicationQuotaPeriod Period,

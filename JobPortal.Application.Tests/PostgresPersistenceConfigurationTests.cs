@@ -63,6 +63,19 @@ public sealed class PostgresPersistenceConfigurationTests
             .FindProperty(nameof(User.PasswordHash))!.IsNullable);
     }
 
+    [Fact]
+    public void ProfilePhotoUsesBoundedPostgresByteaAndUniqueCandidateOwnership()
+    {
+        using var context = CreateContext();
+        var photo = context.Model.FindEntityType(typeof(CandidateProfilePhoto))!;
+        Assert.Equal("bytea", photo.FindProperty(nameof(CandidateProfilePhoto.Content))!.GetColumnType());
+        var owner = Assert.Single(photo.GetIndexes(), index => index.Properties
+            .Select(property => property.Name).SequenceEqual([nameof(CandidateProfilePhoto.UserId)]));
+        Assert.True(owner.IsUnique);
+        Assert.Equal("\"IsDeleted\" = FALSE", owner.GetFilter());
+        Assert.Equal(DeleteBehavior.Cascade, Assert.Single(photo.GetForeignKeys()).DeleteBehavior);
+    }
+
     [Theory]
     [InlineData(typeof(Membership))]
     [InlineData(typeof(Payment))]
