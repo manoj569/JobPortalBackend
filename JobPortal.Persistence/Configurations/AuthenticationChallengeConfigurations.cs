@@ -72,3 +72,20 @@ public sealed class OtpChallengeConfiguration :
             .OnDelete(DeleteBehavior.Restrict);
     }
 }
+
+public sealed class RegistrationEmailRequestConfiguration :
+    IEntityTypeConfiguration<RegistrationEmailRequest>
+{
+    public void Configure(EntityTypeBuilder<RegistrationEmailRequest> builder)
+    {
+        builder.ToTable("RegistrationEmailRequests", table =>
+            table.HasCheckConstraint("CK_RegistrationEmailRequests_AttemptCount", "\"AttemptCount\" >= 0"));
+        builder.ConfigureBaseEntity();
+        builder.Property(x => x.VerificationToken).HasMaxLength(512).IsRequired();
+        builder.HasIndex(x => new { x.SentAtUtc, x.NextAttemptAtUtc, x.LockedUntilUtc });
+        builder.HasIndex(x => x.UserId).HasFilter("\"SentAtUtc\" IS NULL AND \"IsDeleted\" = FALSE");
+        builder.HasOne(x => x.User).WithMany(x => x.RegistrationEmailRequests)
+            .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        builder.Property<uint>("xmin").HasColumnName("xmin").IsRowVersion();
+    }
+}

@@ -445,6 +445,9 @@ public sealed class AdminApplicationManagementTests
             Status = status;
             return Task.FromResult(Result);
         }
+        public Task<EmailDeliveryResult> SendRegistrationVerificationAsync(
+            User user, string rawToken, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 
     private sealed class FixedTimeProvider(DateTime utcNow) : TimeProvider

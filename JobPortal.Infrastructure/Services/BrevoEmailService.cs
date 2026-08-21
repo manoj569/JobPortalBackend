@@ -87,6 +87,27 @@ public sealed class BrevoEmailService(
             $"application-{status.ToString().ToLowerInvariant()}", cancellationToken);
     }
 
+    public Task<EmailDeliveryResult> SendRegistrationVerificationAsync(
+        User user, string rawToken, CancellationToken cancellationToken = default)
+    {
+        if (!Uri.TryCreate(configuration["AppUrls:FrontendBaseUrl"], UriKind.Absolute, out var frontend) ||
+            frontend.Scheme != Uri.UriSchemeHttp && frontend.Scheme != Uri.UriSchemeHttps)
+        {
+            DeliveryFailed(logger, "registration-verification", null, CorrelationId, null);
+            return Task.FromResult(EmailDeliveryResult.Failed);
+        }
+        var link = new UriBuilder(frontend)
+        {
+            Path = $"{frontend.AbsolutePath.TrimEnd('/')}/verify-email",
+            Query = $"token={Uri.EscapeDataString(rawToken)}",
+            Fragment = string.Empty
+        }.Uri;
+        return SendAsync(user.Email, "Verify your Career Harbor email",
+            $"Hello {SanitizeHeaderValue(user.FirstName)},{Environment.NewLine}{Environment.NewLine}" +
+            $"Verify your email using this link: {link.AbsoluteUri}{Environment.NewLine}" +
+            "This link expires in 24 hours.", "registration-verification", cancellationToken);
+    }
+
     private async Task<EmailDeliveryResult> SendAsync(
         string recipient, string subject, string body, string messageType,
         CancellationToken cancellationToken)

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using JobPortal.API.Middleware;
+using JobPortal.API.Controllers;
 using JobPortal.Application.Abstractions.Candidates;
 using JobPortal.Application.Abstractions.Persistence;
 using JobPortal.Application.Common.Exceptions;
@@ -9,6 +10,9 @@ using JobPortal.Domain.Common;
 using JobPortal.Domain.Entities;
 using JobPortal.Domain.Enums;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -47,6 +51,37 @@ public sealed class CandidateModuleTests
         var oversized = new byte[1024 * 1024 + 1];
         await Assert.ThrowsAsync<BadRequestException>(() => fixture.Service.UploadProfilePhotoAsync(
             fixture.Candidate.Id, new(new MemoryStream(oversized), oversized.Length, "image/png")));
+    }
+
+    [Fact]
+    public async Task ProfilePhotoResponseUsesPrivateAuthorizationVaryingCacheHeaders()
+    {
+        var fixture = CreateFixture();
+        var content = MinimalPng();
+        await fixture.Service.UploadProfilePhotoAsync(fixture.Candidate.Id,
+            new(new MemoryStream(content), content.Length, "image/png"));
+        var controller = new CandidateController(fixture.Service)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(
+                        [new Claim(ClaimTypes.NameIdentifier, fixture.Candidate.Id.ToString()),
+                         new Claim(ClaimTypes.Role, "Candidate")], "test"))
+                }
+            }
+        };
+
+        var result = await controller.ProfilePhoto(default);
+
+        Assert.IsType<FileStreamResult>(result);
+        Assert.Equal("private, no-store", controller.Response.Headers.CacheControl);
+        Assert.Equal("no-cache", controller.Response.Headers.Pragma);
+        Assert.Equal("Authorization", controller.Response.Headers.Vary);
+        Assert.StartsWith("\"private-photo-", controller.Response.Headers.ETag.ToString(), StringComparison.Ordinal);
+        Assert.NotNull(typeof(CandidateController).GetCustomAttributes(
+            typeof(AuthorizeAttribute), inherit: true).SingleOrDefault());
     }
 
     [Fact]

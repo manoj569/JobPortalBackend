@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Diagnostics;
 using FluentValidation;
 using JobPortal.Application.Abstractions.Auditing;
 using JobPortal.Application.Abstractions.Authentication;
@@ -28,6 +29,8 @@ public sealed class AuthService(
     IValidator<CompletePasswordResetRequest> completeResetValidator,
     IValidator<RefreshTokenRequest> refreshValidator,
     IValidator<ChangePasswordRequest> changePasswordValidator,
+    IValidator<VerifyEmailRequest> verifyEmailValidator,
+    IRegistrationEmailOutbox registrationEmails,
     TimeProvider timeProvider,
     ILogger<AuthService> logger) : IAuthService
 {
@@ -45,6 +48,11 @@ public sealed class AuthService(
 
     private static readonly TimeSpan PasswordResetTokenLifetime = TimeSpan.FromMinutes(30);
     private static readonly TimeSpan RefreshTokenLifetime = TimeSpan.FromDays(30);
+    private static readonly TimeSpan EmailVerificationTokenLifetime = TimeSpan.FromHours(24);
+    private static readonly Action<ILogger, string, double, Exception?> RegistrationTiming =
+        LoggerMessage.Define<string, double>(LogLevel.Information,
+            new EventId(1202, nameof(RegistrationTiming)),
+            "Registration stage {Operation} completed in {DurationMilliseconds:F1} ms.");
     private const string RegistrationSuccessMessage = "Registration successful. Please log in.";
     private const string PasswordChangedMessage = "Password changed successfully. Please log in.";
     private const string PasswordResetRequestedMessage =
@@ -54,29 +62,37 @@ public sealed class AuthService(
      RegisterRequest request,
      CancellationToken cancellationToken = default)
     {
+        var totalStarted = Stopwatch.GetTimestamp();
         request = request with
         {
             FullName = request.FullName?.Trim() ?? string.Empty,
             Email = request.Email?.Trim() ?? string.Empty
         };
 
+        var stageStarted = Stopwatch.GetTimestamp();
         await registerValidator.ValidateAndThrowAsync(request, cancellationToken);
+        LogRegistrationTiming("validation", stageStarted);
         _ = PersonalName.TrySplit(request.FullName, out var firstName, out var lastName);
         var normalizedEmail = NormalizeEmail(request.Email);
         _ = IndianMobileNumber.TryNormalizeTenDigit(request.PhoneNumber, out var normalizedPhoneNumber);
 
+        stageStarted = Stopwatch.GetTimestamp();
         var identityExists = await users.RegistrationIdentityExistsAsync(
             normalizedEmail,
             normalizedPhoneNumber,
             cancellationToken);
+        LogRegistrationTiming("duplicate_identity_lookup", stageStarted);
         if (identityExists)
         {
             LogAuthenticationEvent("send_skipped_existing_user", "skipped");
-
-            // ✅ CHANGED: Now throws a clear ConflictException instead of silently returning success
-            throw new ConflictException("An account with this email or phone number already exists.");
+            LogRegistrationTiming("total", totalStarted);
+            return new(RegistrationSuccessMessage);
         }
 
+        stageStarted = Stopwatch.GetTimestamp();
+        var passwordHash = passwordHasher.Hash(request.Password);
+        LogRegistrationTiming("password_hash", stageStarted);
+        var verificationToken = GenerateEmailVerificationToken();
         var user = new User
         {
             Id = Guid.NewGuid(), // <--- VERY IMPORTANT: We need to generate an ID!
@@ -84,14 +100,17 @@ public sealed class AuthService(
             NormalizedEmail = normalizedEmail,
             FirstName = firstName,
             LastName = lastName,
-            PasswordHash = passwordHasher.Hash(request.Password),
+            PasswordHash = passwordHash,
             PhoneNumber = normalizedPhoneNumber,
             NormalizedPhoneNumber = normalizedPhoneNumber,
             PhoneConfirmed = true,
             TermsAndPrivacyAcceptedAtUtc = UtcNow,
             TermsAndPrivacyVersion = LegalDocumentCatalog.CurrentVersion,
             Status = UserStatus.Active,
-            EmailConfirmed = true,
+            EmailConfirmed = false,
+            EmailVerificationTokenHash = HashEmailVerificationToken(verificationToken),
+            EmailVerificationTokenExpiresAtUtc = UtcNow.Add(EmailVerificationTokenLifetime),
+            EmailVerificationSentAtUtc = null,
             RoleId = SystemRoleIds.Candidate,
             Role = new Role
             {
@@ -102,6 +121,14 @@ public sealed class AuthService(
         };
 
         await users.AddAsync(user, cancellationToken);
+        await registrationEmails.EnqueueAsync(new RegistrationEmailRequest
+        {
+            UserId = user.Id,
+            User = user,
+            VerificationToken = verificationToken,
+            ExpiresAtUtc = user.EmailVerificationTokenExpiresAtUtc.Value,
+            NextAttemptAtUtc = UtcNow
+        }, cancellationToken);
         await auditWriter.AppendAsync(new(
             AuditAction.Create,
             "User",
@@ -111,16 +138,45 @@ public sealed class AuthService(
 
         try
         {
+            stageStarted = Stopwatch.GetTimestamp();
             await unitOfWork.SaveChangesAsync(cancellationToken);
+            LogRegistrationTiming("database_transaction", stageStarted);
         }
         catch (UniqueConstraintException exception)
         {
             LogAuthenticationEvent("registration_identity_checked", "uniqueness_conflict", exception);
+            LogRegistrationTiming("total", totalStarted);
             return new(RegistrationSuccessMessage);
         }
 
         LogAuthenticationEvent("registration_completed", "created");
+        LogRegistrationTiming("total", totalStarted);
         return new(RegistrationSuccessMessage);
+    }
+
+    public async Task<MessageResponse> VerifyEmailAsync(
+        VerifyEmailRequest request, CancellationToken cancellationToken = default)
+    {
+        await verifyEmailValidator.ValidateAndThrowAsync(request, cancellationToken);
+        var tokenHash = HashEmailVerificationToken(request.Token);
+        var user = await users.GetByEmailVerificationTokenHashAsync(tokenHash, cancellationToken);
+        if (user is null || user.EmailConfirmed ||
+            user.EmailVerificationTokenExpiresAtUtc is null ||
+            user.EmailVerificationTokenExpiresAtUtc <= UtcNow ||
+            !CryptographicOperations.FixedTimeEquals(
+                Convert.FromHexString(tokenHash),
+                Convert.FromHexString(user.EmailVerificationTokenHash!)))
+            throw new BadRequestException("The email verification link is invalid or expired.",
+                "invalid_email_verification_token");
+        user.EmailConfirmed = true;
+        user.EmailVerificationTokenHash = null;
+        user.EmailVerificationTokenExpiresAtUtc = null;
+        users.Update(user);
+        await auditWriter.AppendAsync(new(AuditAction.Update, "User", user.Id.ToString(),
+            new Dictionary<string, string?> { ["operation"] = "emailVerified" },
+            new(user.Id, user.Role.Name)), cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+        return new("Email verified successfully.");
     }
 
     public async Task<AuthenticationResponse> LoginAsync(
@@ -326,6 +382,13 @@ public sealed class AuthService(
 
     private static string HashPasswordResetToken(string rawToken) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(rawToken)));
+
+    private static string GenerateEmailVerificationToken() => GeneratePasswordResetToken();
+    private static string HashEmailVerificationToken(string rawToken) => HashPasswordResetToken(rawToken);
+
+    private void LogRegistrationTiming(string operation, long startedTimestamp) =>
+        RegistrationTiming(logger, operation,
+            Stopwatch.GetElapsedTime(startedTimestamp).TotalMilliseconds, null);
 
     private static bool VerifyPasswordResetToken(
         string rawToken,

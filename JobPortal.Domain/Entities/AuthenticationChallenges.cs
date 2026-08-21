@@ -39,3 +39,15 @@ public sealed class OtpChallenge : BaseEntity
     public Guid? PendingRegistrationId { get; set; }
     public PendingRegistration? PendingRegistration { get; set; }
 }
+
+public sealed class RegistrationEmailRequest : BaseEntity
+{
+    public Guid UserId { get; set; }
+    public User User { get; set; } = null!;
+    public string VerificationToken { get; set; } = string.Empty;
+    public DateTime ExpiresAtUtc { get; set; }
+    public int AttemptCount { get; set; }
+    public DateTime NextAttemptAtUtc { get; set; }
+    public DateTime? LockedUntilUtc { get; set; }
+    public DateTime? SentAtUtc { get; set; }
+}

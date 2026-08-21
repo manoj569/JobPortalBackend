@@ -77,6 +77,8 @@ builder.Services.AddOutputCache(options =>
 builder.Services.AddHostedService<JobExpiryHostedService>();
 builder.Services.Configure<JobDiscoveryOptions>(builder.Configuration.GetSection(JobDiscoveryOptions.SectionName));
 builder.Services.AddHostedService<JobDiscoveryHostedService>();
+builder.Services.AddHostedService<RegistrationEmailHostedService>();
+builder.Services.AddScoped<RegistrationEmailDispatcher>();
 
 // ✅ FINAL CORS CONFIGURATION
 var allowedOrigins = (builder.Configuration
