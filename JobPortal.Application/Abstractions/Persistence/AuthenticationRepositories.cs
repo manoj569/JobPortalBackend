@@ -10,6 +10,9 @@ public interface IUserRepository
         string tokenHash,
         CancellationToken cancellationToken = default) =>
         Task.FromResult<User?>(null);
+    Task<User?> GetByEmailVerificationTokenHashAsync(
+        string tokenHash, CancellationToken cancellationToken = default) =>
+        Task.FromResult<User?>(null);
     Task<User?> GetByNormalizedPhoneAsync(
         string normalizedPhoneNumber,
         CancellationToken cancellationToken = default);
@@ -56,6 +59,14 @@ public interface IRefreshTokenRepository
     Task AddAsync(RefreshToken refreshToken, CancellationToken cancellationToken = default);
     void Update(RefreshToken refreshToken);
     Task RevokeActiveForUserAsync(Guid userId, DateTime revokedAtUtc, CancellationToken cancellationToken = default);
+}
+
+public interface IRegistrationEmailOutbox
+{
+    Task EnqueueAsync(RegistrationEmailRequest request, CancellationToken cancellationToken = default);
+    Task<RegistrationEmailRequest?> ClaimDueAsync(DateTime nowUtc, CancellationToken cancellationToken = default);
+    Task MarkSentAsync(Guid requestId, DateTime sentAtUtc, CancellationToken cancellationToken = default);
+    Task MarkFailedAsync(Guid requestId, DateTime nextAttemptAtUtc, CancellationToken cancellationToken = default);
 }
 
 public interface IUserExternalLoginRepository

@@ -6,6 +6,8 @@ public interface IAuthService
 {
     Task<RegistrationResponse> RegisterAsync(
         RegisterRequest request, CancellationToken cancellationToken = default);
+    Task<MessageResponse> VerifyEmailAsync(
+        VerifyEmailRequest request, CancellationToken cancellationToken = default);
     Task<AuthenticationResponse> LoginAsync(LoginRequest request, string? ipAddress, CancellationToken cancellationToken = default);
     Task<MessageResponse> RequestPasswordResetAsync(
         RequestPasswordResetRequest request,
@@ -85,5 +87,7 @@ public interface IEmailService
     Task<EmailDeliveryResult> SendApplicationStatusAsync(
         User user, string jobTitle, JobApplicationStatus status,
         CancellationToken cancellationToken = default);
+    Task<EmailDeliveryResult> SendRegistrationVerificationAsync(
+        User user, string rawToken, CancellationToken cancellationToken = default);
 }
 public enum EmailDeliveryResult { Sent, Disabled, Failed }

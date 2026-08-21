@@ -20,6 +20,11 @@ public sealed class UserRepository(JobPortalDbContext context) : IUserRepository
             x => x.PasswordResetTokenHash == tokenHash,
             cancellationToken);
 
+    public Task<User?> GetByEmailVerificationTokenHashAsync(
+        string tokenHash, CancellationToken cancellationToken = default) =>
+        context.Users.Include(x => x.Role).SingleOrDefaultAsync(
+            x => x.EmailVerificationTokenHash == tokenHash, cancellationToken);
+
     public Task<User?> GetByNormalizedPhoneAsync(
         string normalizedPhoneNumber,
         CancellationToken cancellationToken = default) =>
@@ -139,6 +144,61 @@ public sealed class UserExternalLoginRepository(
 
     public void Update(UserExternalLogin externalLogin) =>
         context.UserExternalLogins.Update(externalLogin);
+}
+
+public sealed class RegistrationEmailOutbox(
+    JobPortalDbContext context,
+    IUnitOfWork unitOfWork) : IRegistrationEmailOutbox
+{
+    public Task EnqueueAsync(
+        RegistrationEmailRequest request, CancellationToken cancellationToken = default) =>
+        context.RegistrationEmailRequests.AddAsync(request, cancellationToken).AsTask();
+
+    public async Task<RegistrationEmailRequest?> ClaimDueAsync(
+        DateTime nowUtc, CancellationToken cancellationToken = default)
+    {
+        var request = await context.RegistrationEmailRequests
+            .Include(x => x.User)
+            .Where(x => x.SentAtUtc == null && x.NextAttemptAtUtc <= nowUtc &&
+                (x.LockedUntilUtc == null || x.LockedUntilUtc <= nowUtc) &&
+                x.ExpiresAtUtc > nowUtc)
+            .OrderBy(x => x.NextAttemptAtUtc).ThenBy(x => x.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (request is null) return null;
+        request.LockedUntilUtc = nowUtc.AddMinutes(2);
+        request.AttemptCount++;
+        try
+        {
+            await unitOfWork.SaveChangesAsync(cancellationToken);
+            return request;
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            unitOfWork.ResetAfterFailure();
+            return null;
+        }
+    }
+
+    public async Task MarkSentAsync(
+        Guid requestId, DateTime sentAtUtc, CancellationToken cancellationToken = default)
+    {
+        var request = await context.RegistrationEmailRequests
+            .SingleAsync(x => x.Id == requestId, cancellationToken);
+        request.SentAtUtc = sentAtUtc;
+        request.LockedUntilUtc = null;
+        request.VerificationToken = string.Empty;
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task MarkFailedAsync(
+        Guid requestId, DateTime nextAttemptAtUtc, CancellationToken cancellationToken = default)
+    {
+        var request = await context.RegistrationEmailRequests
+            .SingleAsync(x => x.Id == requestId, cancellationToken);
+        request.NextAttemptAtUtc = nextAttemptAtUtc;
+        request.LockedUntilUtc = null;
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+    }
 }
 
 public sealed class RefreshTokenRepository(JobPortalDbContext context) : IRefreshTokenRepository

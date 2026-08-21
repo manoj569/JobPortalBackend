@@ -1,7 +1,9 @@
 using System.Security.Cryptography;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using FluentValidation;
+using JobPortal.API.HostedServices;
 using JobPortal.Application.Abstractions.Authentication;
 using JobPortal.Application.Abstractions.Persistence;
 using JobPortal.Application.Common.Exceptions;
@@ -63,7 +65,11 @@ public sealed class AuthenticationTests
         Assert.Equal("+919876543210", user.NormalizedPhoneNumber);
         Assert.Equal(UserStatus.Active, user.Status);
         Assert.True(user.PhoneConfirmed);
-        Assert.True(user.EmailConfirmed);
+        Assert.False(user.EmailConfirmed);
+        Assert.NotNull(user.EmailVerificationTokenHash);
+        var verification = Assert.Single(fixture.RegistrationEmails.Items);
+        Assert.Equal(user.Id, verification.UserId);
+        Assert.NotEqual(verification.VerificationToken, user.EmailVerificationTokenHash);
         Assert.Equal(SystemRoleIds.Candidate, user.RoleId);
         Assert.NotEqual("abc123", user.PasswordHash);
         Assert.DoesNotContain("abc123", user.PasswordHash, StringComparison.Ordinal);
@@ -136,6 +142,7 @@ public sealed class AuthenticationTests
         var concurrent = CreateFixture();
         concurrent.UnitOfWork.ExceptionToThrow =
             new UniqueConstraintException("duplicate");
+        concurrent.UnitOfWork.OnFailure = concurrent.Users.Items.Clear;
         var concurrentResponse = await concurrent.Service.RegisterAsync(
             ValidRegistration());
         Assert.Equal(response.Message, concurrentResponse.Message);
@@ -216,6 +223,55 @@ public sealed class AuthenticationTests
 
         await Assert.ThrowsAsync<UnauthorizedException>(() =>
             fixture.Service.LoginAsync(new("user@example.com", "abc123"), null));
+    }
+
+    [Fact]
+    public async Task RegistrationDoesNotCallOrWaitForEmailProvider()
+    {
+        var fixture = CreateFixture();
+        fixture.Email.BeforeSend = () => Thread.Sleep(TimeSpan.FromSeconds(5));
+        var started = Stopwatch.GetTimestamp();
+
+        await fixture.Service.RegisterAsync(ValidRegistration());
+
+        Assert.True(Stopwatch.GetElapsedTime(started) < TimeSpan.FromSeconds(1));
+        Assert.Equal(0, fixture.Email.SendCount);
+        Assert.Single(fixture.RegistrationEmails.Items);
+        Assert.Contains(fixture.Logger.Messages, message =>
+            message.Contains("Registration stage", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task VerificationTokenIsSingleUseAndMarksEmailConfirmed()
+    {
+        var fixture = CreateFixture();
+        await fixture.Service.RegisterAsync(ValidRegistration());
+        var token = Assert.Single(fixture.RegistrationEmails.Items).VerificationToken;
+
+        var response = await fixture.Service.VerifyEmailAsync(new(token));
+
+        Assert.Equal("Email verified successfully.", response.Message);
+        Assert.True(Assert.Single(fixture.Users.Items).EmailConfirmed);
+        await Assert.ThrowsAsync<BadRequestException>(() =>
+            fixture.Service.VerifyEmailAsync(new(token)));
+    }
+
+    [Fact]
+    public async Task FailedBackgroundVerificationEmailRemainsQueuedForRetry()
+    {
+        var fixture = CreateFixture();
+        await fixture.Service.RegisterAsync(ValidRegistration());
+        fixture.Email.RegistrationResult = EmailDeliveryResult.Failed;
+        var dispatcher = new RegistrationEmailDispatcher(
+            fixture.RegistrationEmails, fixture.Email, fixture.Time,
+            new TestLogger<RegistrationEmailDispatcher>());
+
+        Assert.True(await dispatcher.ProcessOneAsync());
+
+        var queued = Assert.Single(fixture.RegistrationEmails.Items);
+        Assert.Null(queued.SentAtUtc);
+        Assert.True(queued.NextAttemptAtUtc > Now);
+        Assert.Equal(1, fixture.Email.RegistrationSendCount);
     }
 
     [Fact]
@@ -451,6 +507,7 @@ public sealed class AuthenticationTests
         var email = new EmailServiceFake();
         var audit = new AuditWriterTestDouble();
         var logger = new TestLogger<AuthService>();
+        var registrationEmails = new RegistrationEmailQueueFake();
         var service = new AuthService(
             users,
             refreshTokens,
@@ -465,6 +522,8 @@ public sealed class AuthenticationTests
             new CompletePasswordResetRequestValidator(),
             new RefreshTokenRequestValidator(),
             new ChangePasswordRequestValidator(),
+            new VerifyEmailRequestValidator(),
+            registrationEmails,
             time,
             logger);
         return new(
@@ -475,6 +534,7 @@ public sealed class AuthenticationTests
             passwords,
             email,
             audit,
+            registrationEmails,
             time,
             logger);
     }
@@ -487,6 +547,7 @@ public sealed class AuthenticationTests
         PasswordHasherFake Passwords,
         EmailServiceFake Email,
         AuditWriterTestDouble Audit,
+        RegistrationEmailQueueFake RegistrationEmails,
         MutableTimeProvider Time,
         TestLogger<AuthService> Logger);
 
@@ -505,6 +566,10 @@ public sealed class AuthenticationTests
             CancellationToken cancellationToken = default) =>
             Task.FromResult(Items.SingleOrDefault(
                 user => user.PasswordResetTokenHash == tokenHash));
+        public Task<User?> GetByEmailVerificationTokenHashAsync(
+            string tokenHash, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Items.SingleOrDefault(
+                user => user.EmailVerificationTokenHash == tokenHash));
 
         public Task<User?> GetByNormalizedPhoneAsync(
             string normalizedPhoneNumber,
@@ -579,6 +644,7 @@ public sealed class AuthenticationTests
     private sealed class UnitOfWorkFake : IUnitOfWork
     {
         public Exception? ExceptionToThrow { get; set; }
+        public Action? OnFailure { get; set; }
         public int SaveCount { get; private set; }
 
         public Task<int> SaveChangesAsync(
@@ -586,9 +652,11 @@ public sealed class AuthenticationTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             SaveCount++;
-            return ExceptionToThrow is null
-                ? Task.FromResult(1)
-                : Task.FromException<int>(ExceptionToThrow);
+            if (ExceptionToThrow is null)
+                return Task.FromResult(1);
+
+            OnFailure?.Invoke();
+            return Task.FromException<int>(ExceptionToThrow);
         }
     }
 
@@ -606,6 +674,8 @@ public sealed class AuthenticationTests
         public string? LastRawToken { get; private set; }
         public int SendCount { get; private set; }
         public User? User { get; private set; }
+        public EmailDeliveryResult RegistrationResult { get; set; } = EmailDeliveryResult.Sent;
+        public int RegistrationSendCount { get; private set; }
 
         public Task<EmailDeliveryResult> SendPasswordResetAsync(
             User user,
@@ -625,6 +695,31 @@ public sealed class AuthenticationTests
             JobApplicationStatus status,
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
+        public Task<EmailDeliveryResult> SendRegistrationVerificationAsync(
+            User user, string rawToken, CancellationToken cancellationToken = default)
+        {
+            RegistrationSendCount++;
+            return Task.FromResult(RegistrationResult);
+        }
+    }
+
+    private sealed class RegistrationEmailQueueFake : IRegistrationEmailOutbox
+    {
+        public List<RegistrationEmailRequest> Items { get; } = [];
+        public Task EnqueueAsync(RegistrationEmailRequest request, CancellationToken cancellationToken = default)
+        { Items.Add(request); return Task.CompletedTask; }
+        public Task<RegistrationEmailRequest?> ClaimDueAsync(DateTime nowUtc, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Claim(nowUtc));
+        private RegistrationEmailRequest? Claim(DateTime nowUtc)
+        {
+            var item = Items.FirstOrDefault(x => x.SentAtUtc is null && x.NextAttemptAtUtc <= nowUtc);
+            if (item is not null) item.AttemptCount++;
+            return item;
+        }
+        public Task MarkSentAsync(Guid requestId, DateTime sentAtUtc, CancellationToken cancellationToken = default)
+        { Items.Single(x => x.Id == requestId).SentAtUtc = sentAtUtc; return Task.CompletedTask; }
+        public Task MarkFailedAsync(Guid requestId, DateTime nextAttemptAtUtc, CancellationToken cancellationToken = default)
+        { Items.Single(x => x.Id == requestId).NextAttemptAtUtc = nextAttemptAtUtc; return Task.CompletedTask; }
     }
 
     private sealed class TestLogger<T> : ILogger<T>

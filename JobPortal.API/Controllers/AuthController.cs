@@ -29,6 +29,13 @@ public sealed class AuthController(
         return Ok(response);
     }
 
+    [HttpPost("verify-email")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(MessageResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<MessageResponse>> VerifyEmail(
+        VerifyEmailRequest request, CancellationToken cancellationToken) =>
+        Ok(await authService.VerifyEmailAsync(request, cancellationToken));
+
     [HttpPost("login")]
     [AllowAnonymous]
     [ProducesResponseType(typeof(AuthenticationResponse), StatusCodes.Status200OK)]

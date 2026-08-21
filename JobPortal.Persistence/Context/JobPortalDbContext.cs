@@ -24,6 +24,7 @@ public sealed class JobPortalDbContext(DbContextOptions<JobPortalDbContext> opti
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<PendingRegistration> PendingRegistrations => Set<PendingRegistration>();
     public DbSet<OtpChallenge> OtpChallenges => Set<OtpChallenge>();
+    public DbSet<RegistrationEmailRequest> RegistrationEmailRequests => Set<RegistrationEmailRequest>();
     public DbSet<Membership> Memberships => Set<Membership>();
     public DbSet<Payment> Payments => Set<Payment>();
     public DbSet<PaymentHistory> PaymentHistories => Set<PaymentHistory>();

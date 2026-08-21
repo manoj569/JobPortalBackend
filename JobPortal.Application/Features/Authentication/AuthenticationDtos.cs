@@ -24,6 +24,9 @@ public sealed record ResendRegistrationOtpRequest(Guid ChallengeId);
 public sealed record RegistrationResponse(string Message);
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record VerifyEmailRequest(string Token);
+
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record LoginRequest(string Identifier, string Password);
 
 [JsonConverter(typeof(JsonStringEnumConverter))]

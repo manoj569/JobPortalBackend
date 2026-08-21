@@ -72,8 +72,10 @@ public sealed class CandidateController(ICandidateService candidates) : Controll
     {
         var photo = await candidates.DownloadProfilePhotoAsync(
             User.GetRequiredUserId(), cancellationToken);
-        Response.Headers.CacheControl = "private, max-age=300";
-        Response.Headers.ETag = $"\"{photo.Version}\"";
+        Response.Headers.CacheControl = "private, no-store";
+        Response.Headers.Pragma = "no-cache";
+        Response.Headers.Vary = "Authorization";
+        Response.Headers.ETag = $"\"private-photo-{photo.Version}\"";
         return File(photo.Content, photo.ContentType);
     }
 

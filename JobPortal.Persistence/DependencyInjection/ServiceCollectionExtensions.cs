@@ -34,6 +34,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IUserExternalLoginRepository, UserExternalLoginRepository>();
         services.AddScoped<IAuthenticationChallengeRepository,
             AuthenticationChallengeRepository>();
+        services.AddScoped<IRegistrationEmailOutbox, RegistrationEmailOutbox>();
         services.AddScoped<IJobRepository, JobRepository>();
         services.AddScoped<IPublicJobRepository, PublicJobRepository>();
         services.AddScoped<IMembershipRepository, MembershipRepository>();

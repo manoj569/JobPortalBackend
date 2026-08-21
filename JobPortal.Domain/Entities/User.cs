@@ -85,4 +85,5 @@ public sealed class User : BaseEntity
     public ICollection<Setting> Settings { get; set; } = new List<Setting>();
     public ICollection<JobApplication> JobApplications { get; set; } = new List<JobApplication>();
     public ICollection<OtpChallenge> OtpChallenges { get; set; } = new List<OtpChallenge>();
+    public ICollection<RegistrationEmailRequest> RegistrationEmailRequests { get; set; } = [];
 }

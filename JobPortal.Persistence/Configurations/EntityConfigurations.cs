@@ -68,6 +68,8 @@ public sealed class UserConfiguration : IEntityTypeConfiguration<User>
             .IsUnique()
             .HasFilter("\"PasswordResetTokenHash\" IS NOT NULL AND \"IsDeleted\" = FALSE");
         builder.Property(x => x.EmailVerificationTokenHash).HasMaxLength(64);
+        builder.HasIndex(x => x.EmailVerificationTokenHash).IsUnique()
+            .HasFilter("\"EmailVerificationTokenHash\" IS NOT NULL AND \"IsDeleted\" = FALSE");
         builder.HasIndex(x => x.NormalizedEmail).IsUnique().HasFilter("\"IsDeleted\" = FALSE");
         builder.HasIndex(x => x.NormalizedPhoneNumber).IsUnique()
             .HasFilter("\"NormalizedPhoneNumber\" IS NOT NULL AND \"IsDeleted\" = FALSE");
