@@ -172,6 +172,11 @@ public sealed class CandidateRepository(
                      usage.PeriodStartsAtUtc == periodStartsAtUtc,
             cancellationToken);
 
+    public Task<bool> MobileNumberExistsAsync(Guid excludingUserId, string normalizedPhoneNumber,
+        CancellationToken cancellationToken = default) => context.Users.AsNoTracking().AnyAsync(
+            x => x.Id != excludingUserId && x.NormalizedPhoneNumber == normalizedPhoneNumber,
+            cancellationToken);
+
     public Task AddQuotaUsageAsync(
         ApplicationQuotaUsage quotaUsage,
         CancellationToken cancellationToken = default) =>

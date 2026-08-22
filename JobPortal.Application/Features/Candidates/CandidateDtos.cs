@@ -13,7 +13,9 @@ public sealed record CandidateProfileResponse(
     string? ProfilePhotoVersion = null,
     CandidateBasicDetailsResponse? BasicDetails = null,
     CandidateCareerPreferencesResponse? CareerPreferences = null,
-    decimal TotalExperienceYears = 0);
+    decimal TotalExperienceYears = 0,
+    string? MobileNumber = null,
+    bool MobileVerified = false);
 public sealed record UpdateCandidateProfileRequest(
     string? Headline, string? Bio, string? Location, IReadOnlyCollection<string> Skills,
     IReadOnlyCollection<string> Education, IReadOnlyCollection<string> Experience,
@@ -37,7 +39,8 @@ public sealed record CandidateProfileCompletionResponse(
 
 public sealed record CandidateBasicDetailsResponse(
     string Email,
-    string? Mobile,
+    string? MobileNumber,
+    bool MobileVerified,
     CandidateWorkStatus? WorkStatus,
     bool? IsOutsideIndia,
     string? CurrentCountry,
@@ -47,7 +50,11 @@ public sealed record CandidateBasicDetailsResponse(
     decimal? CurrentAnnualSalary,
     decimal? CurrentFixedAnnualSalary,
     decimal? CurrentVariableAnnualSalary,
-    string SalaryUnit = "INR per annum");
+    string SalaryUnit = "INR per annum")
+{
+    [JsonIgnore]
+    public string? Mobile => MobileNumber;
+}
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record UpdateCandidateBasicDetailsRequest(
@@ -59,7 +66,8 @@ public sealed record UpdateCandidateBasicDetailsRequest(
     CandidateAvailability? AvailabilityToJoin,
     decimal? CurrentAnnualSalary,
     decimal? CurrentFixedAnnualSalary,
-    decimal? CurrentVariableAnnualSalary);
+    decimal? CurrentVariableAnnualSalary,
+    string? MobileNumber = null);
 
 public sealed record CandidateCareerPreferencesResponse(
     IReadOnlyCollection<string> PreferredJobRoles,

@@ -19,6 +19,7 @@ using JobPortal.Persistence;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.ResponseCompression;
@@ -46,6 +47,46 @@ builder.Host.UseSerilog((context, services, configuration) => configuration
     .Enrich.FromLogContext());
 
 builder.Services.AddControllers();
+builder.Services.Configure<ApiBehaviorOptions>(options =>
+{
+    options.InvalidModelStateResponseFactory = context =>
+    {
+        var hasSpecificError = context.ModelState.Any(entry =>
+            !string.Equals(entry.Key, "request", StringComparison.OrdinalIgnoreCase) &&
+            entry.Value?.Errors.Count > 0);
+        var errors = context.ModelState
+            .Where(entry => entry.Value?.Errors.Count > 0 &&
+                !(hasSpecificError && string.Equals(
+                    entry.Key, "request", StringComparison.OrdinalIgnoreCase)))
+            .ToDictionary(
+                entry => entry.Key.TrimStart('$', '.'),
+                entry =>
+                {
+                    var field = entry.Key.TrimStart('$', '.');
+                    var canonicalMessage = field.StartsWith("employmentTypes", StringComparison.OrdinalIgnoreCase)
+                        ? "The value must be one of: FullTime, PartTime."
+                        : field.StartsWith("jobTypes", StringComparison.OrdinalIgnoreCase)
+                            ? "The value must be one of: Permanent, Contractual."
+                            : field.StartsWith("preferredShifts", StringComparison.OrdinalIgnoreCase)
+                                ? "The value must be one of: Day, Night, Flexible."
+                                : field.Equals("courseType", StringComparison.OrdinalIgnoreCase)
+                                    ? "The value must be one of: FullTime, PartTime, CorrespondenceOrDistance."
+                                    : null;
+                    return canonicalMessage is not null
+                        ? new[] { canonicalMessage }
+                        : entry.Value!.Errors.Select(error =>
+                            string.IsNullOrWhiteSpace(error.ErrorMessage)
+                                ? "The supplied value is invalid."
+                                : error.ErrorMessage).ToArray();
+                },
+                StringComparer.OrdinalIgnoreCase);
+        return new BadRequestObjectResult(new ValidationProblemDetails(errors)
+        {
+            Status = StatusCodes.Status400BadRequest,
+            Title = "One or more validation errors occurred."
+        });
+    };
+});
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IAuditContextAccessor, HttpAuditContextAccessor>();
 builder.Services.AddSingleton(TimeProvider.System);

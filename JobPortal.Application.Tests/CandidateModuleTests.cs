@@ -110,6 +110,42 @@ public sealed class CandidateModuleTests
     }
 
     [Fact]
+    public async Task CareerPreferenceCanonicalStringsDeserializeSaveAndRoundTrip()
+    {
+        const string json =
+            """{"preferredJobRoles":["Engineer"],"preferredCities":["Pune"],"expectedAnnualSalary":1200000,"jobTypes":["Permanent"],"employmentTypes":["FullTime"],"preferredShifts":["Flexible"]}""";
+        var request = JsonSerializer.Deserialize<UpdateCandidateCareerPreferencesRequest>(json, WebJson)!;
+        var fixture = CreateFixture();
+        await fixture.Service.UpdateCareerPreferencesAsync(fixture.Candidate.Id, request);
+        var response = await fixture.Service.GetCareerPreferencesAsync(fixture.Candidate.Id);
+        var responseJson = JsonSerializer.Serialize(response, WebJson);
+        Assert.Equal(CandidateEmploymentPreference.FullTime, Assert.Single(response.EmploymentTypes));
+        Assert.Contains("\"FullTime\"", responseJson, StringComparison.Ordinal);
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<UpdateCandidateCareerPreferencesRequest>(
+            json.Replace("FullTime", "Full-time", StringComparison.Ordinal), WebJson));
+    }
+
+    [Fact]
+    public async Task CandidateWithoutMobileCanAddUnverifiedNumberButExistingVerifiedNumberCannotBeReplaced()
+    {
+        var fixture = CreateFixture();
+        fixture.Candidate.PhoneNumber = null;
+        fixture.Candidate.NormalizedPhoneNumber = null;
+        fixture.Candidate.PhoneConfirmed = false;
+        var request = new UpdateCandidateBasicDetailsRequest(CandidateWorkStatus.Fresher,
+            false, "India", "Pune", null, null, null, null, null, "9876543210");
+        var added = await fixture.Service.UpdateBasicDetailsAsync(fixture.Candidate.Id, request);
+        Assert.Equal("+919876543210", added.MobileNumber);
+        Assert.False(added.MobileVerified);
+        fixture.Candidate.PhoneConfirmed = true;
+        var error = await Assert.ThrowsAsync<ConflictException>(() =>
+            fixture.Service.UpdateBasicDetailsAsync(fixture.Candidate.Id,
+                request with { MobileNumber = "9123456780" }));
+        Assert.Equal("mobile_number_change_requires_verification", error.Code);
+        Assert.Equal("+919876543210", fixture.Candidate.PhoneNumber);
+    }
+
+    [Fact]
     public async Task CompletionRequiresEmploymentOnlyForExperiencedCandidates()
     {
         var fixture = CreateFixture();
@@ -742,7 +778,7 @@ public sealed class CandidateModuleTests
         var response = await fixture.Service.UploadResumeAsync(fixture.Candidate.Id,
             new(stream, stream.Length, "../../unsafe.pdf", "application/pdf"));
 
-        Assert.Equal("resume.pdf", response.FileName);
+        Assert.Equal("unsafe.pdf", response.FileName);
         Assert.Single(fixture.Storage.Stored);
         Assert.DoesNotContain("prior.pdf", fixture.Storage.Deleted);
         Assert.DoesNotContain("unsafe", fixture.Storage.Stored.Single(), StringComparison.OrdinalIgnoreCase);
@@ -780,6 +816,68 @@ public sealed class CandidateModuleTests
         Assert.Equal(fixture.Candidate.Id, fixture.Repository.ListedForUserId);
         Assert.Equal(2, fixture.Repository.LastQuery!.PageNumber);
         Assert.Equal(10, fixture.Repository.LastQuery.PageSize);
+    }
+
+    [Fact]
+    public async Task ResumePreservesOriginalUnicodeDisplayNameForProfileAndDownloadWithoutExposingStorageKey()
+    {
+        var fixture = CreateFixture();
+        const string displayName = "My Resume FINAL résumé.pdf";
+        await using var stream = new MemoryStream("%PDF-1.7 test"u8.ToArray());
+        var uploaded = await fixture.Service.UploadResumeAsync(fixture.Candidate.Id,
+            new(stream, stream.Length, displayName, "application/pdf"));
+        var profile = await fixture.Service.GetProfileAsync(fixture.Candidate.Id);
+        var downloaded = await fixture.Service.DownloadResumeAsync(fixture.Candidate.Id);
+        var json = JsonSerializer.Serialize(profile, WebJson);
+        Assert.Equal(displayName, uploaded.FileName);
+        Assert.Equal(displayName, profile.Resume!.FileName);
+        Assert.Equal(displayName, downloaded.FileName);
+        Assert.DoesNotContain(fixture.Candidate.ResumeStorageKey!, json, StringComparison.Ordinal);
+        var controller = new CandidateController(fixture.Service)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(
+                        [new Claim(ClaimTypes.NameIdentifier, fixture.Candidate.Id.ToString()),
+                         new Claim(ClaimTypes.Role, "Candidate")], "test"))
+                }
+            }
+        };
+        var file = Assert.IsType<FileStreamResult>(await controller.DownloadResume(default));
+        Assert.Equal(displayName, file.FileDownloadName);
+        await Assert.ThrowsAsync<UnauthorizedException>(() =>
+            fixture.Service.DownloadResumeAsync(Guid.NewGuid()));
+    }
+
+    [Theory]
+    [InlineData(@"C:\Users\Candidate\Manoj_Shekapure_Resume.pdf", "Manoj_Shekapure_Resume.pdf")]
+    [InlineData("../../Manoj_Shekapure_Resume.pdf", "Manoj_Shekapure_Resume.pdf")]
+    public async Task ResumePathLikeNamesAreReducedToSafeBasename(string supplied, string expected)
+    {
+        var fixture = CreateFixture();
+        await using var stream = new MemoryStream("%PDF-1.7 test"u8.ToArray());
+        var response = await fixture.Service.UploadResumeAsync(fixture.Candidate.Id,
+            new(stream, stream.Length, supplied, "application/pdf"));
+        Assert.Equal(expected, response.FileName);
+        Assert.DoesNotContain(expected, fixture.Storage.Stored.Single(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task LegacyResumeWithoutDisplayNameUsesSafeFallback()
+    {
+        var fixture = CreateFixture();
+        fixture.Candidate.ResumeStorageKey = "generated-private-key";
+        fixture.Candidate.ResumeFileName = null;
+        fixture.Candidate.ResumeContentType = "application/pdf";
+        fixture.Candidate.ResumeSizeBytes = 12;
+        fixture.Candidate.ResumeUploadedAtUtc = Now;
+        fixture.Storage.Content["generated-private-key"] = "%PDF-1.7 old"u8.ToArray();
+        var profile = await fixture.Service.GetProfileAsync(fixture.Candidate.Id);
+        var download = await fixture.Service.DownloadResumeAsync(fixture.Candidate.Id);
+        Assert.Equal("resume.pdf", profile.Resume!.FileName);
+        Assert.Equal("resume.pdf", download.FileName);
     }
 
     [Fact]
@@ -1082,16 +1180,22 @@ public sealed class CandidateModuleTests
     {
         public List<string> Stored { get; } = [];
         public List<string> Deleted { get; } = [];
+        public Dictionary<string, byte[]> Content { get; } = [];
         public Task<string> StoreAsync(
             Stream content, string extension, CancellationToken cancellationToken = default)
         {
             var key = $"{Guid.NewGuid():N}{extension}";
             Stored.Add(key);
+            using var memory = new MemoryStream();
+            content.CopyTo(memory);
+            Content[key] = memory.ToArray();
+            content.Position = 0;
             return Task.FromResult(key);
         }
         public Task<Stream?> OpenReadAsync(
             string storageKey, CancellationToken cancellationToken = default) =>
-            Task.FromResult<Stream?>(null);
+            Task.FromResult<Stream?>(Content.TryGetValue(storageKey, out var bytes)
+                ? new MemoryStream(bytes, writable: false) : null);
         public Task DeleteAsync(string storageKey, CancellationToken cancellationToken = default)
         {
             Deleted.Add(storageKey);

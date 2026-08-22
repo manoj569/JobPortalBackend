@@ -88,6 +88,8 @@ public sealed class CandidatePortfolioTests
     public async Task PublishMakesAllowlistedPublicDtoReadableAndUnpublishRemovesIt()
     {
         var fixture = CreateFixture();
+        fixture.User.CurrentCity = "Private City";
+        fixture.User.CurrentArea = "Private Area";
         await fixture.Service.CreateAsync(fixture.User.Id, new(null, CandidatePortfolioTemplate.Professional));
         var published = await fixture.Service.PublishAsync(fixture.User.Id);
         var publicResult = await fixture.Service.GetPublicAsync(published.Portfolio.Slug!);
@@ -101,6 +103,8 @@ public sealed class CandidatePortfolioTests
         Assert.DoesNotContain("storage", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("career", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("candidatePortfolio", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Private City", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("Private Area", json, StringComparison.Ordinal);
 
         await fixture.Service.UnpublishAsync(fixture.User.Id);
         await fixture.Service.UnpublishAsync(fixture.User.Id);
@@ -157,6 +161,25 @@ public sealed class CandidatePortfolioTests
         Assert.Equal("Engineer", experience.JobTitle);
         await fixture.Service.DeleteExperienceAsync(fixture.User.Id, experience.Id);
         Assert.True(fixture.Experiences.Single().IsDeleted);
+    }
+
+    [Fact]
+    public async Task EducationCourseTypeCanonicalStringCreatesUpdatesAndRoundTrips()
+    {
+        var fixture = CreateFixture();
+        var request = JsonSerializer.Deserialize<EducationRequest>(
+            """{"qualification":"B.Tech","institution":"University","fieldOfStudy":"Computer Science","startYear":2020,"endYear":2024,"grade":"8.5","description":null,"displayOrder":1,"courseType":"FullTime","isCurrentlyStudying":false,"gradingSystem":"CGPA"}""",
+            WebJson)!;
+        var created = await fixture.Service.AddEducationAsync(fixture.User.Id, request);
+        var updated = await fixture.Service.UpdateEducationAsync(fixture.User.Id, created.Id,
+            request with { CourseType = EducationCourseType.CorrespondenceOrDistance });
+        Assert.Equal(EducationCourseType.FullTime, created.CourseType);
+        Assert.Equal(EducationCourseType.CorrespondenceOrDistance, updated.CourseType);
+        Assert.Contains("\"CorrespondenceOrDistance\"",
+            JsonSerializer.Serialize(updated, WebJson), StringComparison.Ordinal);
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<EducationRequest>(
+            """{"qualification":"B.Tech","institution":"University","displayOrder":1,"courseType":"CorrespondenceDistanceLearning"}""",
+            WebJson));
     }
 
     [Fact]

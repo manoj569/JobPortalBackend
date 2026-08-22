@@ -7,6 +7,8 @@ namespace JobPortal.Application.Abstractions.Persistence;
 public interface ICandidateRepository
 {
     Task<User?> GetCandidateAsync(Guid userId, CancellationToken cancellationToken = default);
+    Task<bool> MobileNumberExistsAsync(Guid excludingUserId, string normalizedPhoneNumber,
+        CancellationToken cancellationToken = default) => Task.FromResult(false);
     Task<IReadOnlyCollection<CandidateSkill>> GetSkillsAsync(Guid userId, CancellationToken cancellationToken = default);
     Task<(bool HasEducation, bool HasEmployment)> GetProfileRecordPresenceAsync(Guid userId, CancellationToken cancellationToken = default);
     Task<IReadOnlyCollection<CandidateEmploymentPeriod>> GetEmploymentPeriodsAsync(Guid userId, CancellationToken cancellationToken = default);
