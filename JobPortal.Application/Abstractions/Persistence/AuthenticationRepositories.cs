@@ -75,6 +75,11 @@ public interface IUserExternalLoginRepository
         ExternalLoginProvider provider,
         string providerSubject,
         CancellationToken cancellationToken = default);
+    Task<UserExternalLogin?> GetByUserProviderAsync(
+        Guid userId,
+        ExternalLoginProvider provider,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<UserExternalLogin?>(null);
     Task AddAsync(UserExternalLogin externalLogin, CancellationToken cancellationToken = default);
     void Update(UserExternalLogin externalLogin);
 }

@@ -30,8 +30,8 @@ public sealed class GoogleAuthenticationService(
 {
     private const string GoogleAccountNotRegistered =
         "No Google sign-in is available for this account. Create an account with Google or use your existing login method.";
-    private const string ExistingAccountRequiresLogin =
-        "An account may already use this email. Log in using your existing method.";
+    private const string IdentityLinkConflict =
+        "Google sign-in could not be completed for this account.";
     private static readonly TimeSpan RefreshTokenLifetime = TimeSpan.FromDays(30);
     private static readonly Action<ILogger, string, Exception?> GoogleAuthenticationEvent =
         LoggerMessage.Define<string>(LogLevel.Information,
@@ -134,20 +134,30 @@ public sealed class GoogleAuthenticationService(
         var linked = await externalLogins.GetByProviderSubjectAsync(
             ExternalLoginProvider.Google, subject, cancellationToken);
 
-        if (intent == GoogleAuthenticationIntent.Login)
+        var emailOwner = await users.GetByNormalizedEmailAsync(
+            normalizedEmail, cancellationToken);
+
+        if (linked is not null)
         {
-            if (linked is null)
-                throw new AuthenticationFlowException(
-                    GoogleAccountNotRegistered, 401,
-                    "google_account_not_registered");
+            if (emailOwner is not null && emailOwner.Id != linked.UserId)
+            {
+                GoogleAuthenticationEvent(logger, "identity_link_conflict", null);
+                throw IdentityConflict();
+            }
+
             return await LoginLinkedAsync(linked, ipAddress, cancellationToken);
         }
 
-        if (linked is not null)
-            return await LoginLinkedAsync(linked, ipAddress, cancellationToken);
+        if (emailOwner is not null)
+            return await LinkExistingUserAsync(
+                emailOwner, subject, email, ipAddress, cancellationToken);
 
-        if (await users.GetByNormalizedEmailAsync(normalizedEmail, cancellationToken) is not null)
-            throw ExistingAccountConflict();
+        if (intent == GoogleAuthenticationIntent.Login)
+        {
+            throw new AuthenticationFlowException(
+                GoogleAccountNotRegistered, 401,
+                "google_account_not_registered");
+        }
 
         var (firstName, lastName) = ResolveNames(identity);
         var user = new User
@@ -194,9 +204,74 @@ public sealed class GoogleAuthenticationService(
                 ExternalLoginProvider.Google, subject, cancellationToken);
             if (linked is not null)
                 return await LoginLinkedAsync(linked, ipAddress, cancellationToken);
-            throw ExistingAccountConflict();
+            throw IdentityConflict();
         }
         GoogleAuthenticationEvent(logger, "registered", null);
+        return response;
+    }
+
+    private async Task<AuthenticationResponse> LinkExistingUserAsync(
+        User user,
+        string subject,
+        string providerEmail,
+        string? ipAddress,
+        CancellationToken cancellationToken)
+    {
+        if (user.RoleId != SystemRoleIds.Candidate || user.Status != UserStatus.Active)
+            throw IdentityConflict();
+
+        var existingProvider = await externalLogins.GetByUserProviderAsync(
+            user.Id, ExternalLoginProvider.Google, cancellationToken);
+        if (existingProvider is not null)
+        {
+            if (!string.Equals(existingProvider.ProviderSubject, subject,
+                    StringComparison.Ordinal))
+            {
+                GoogleAuthenticationEvent(logger, "identity_link_conflict", null);
+                throw IdentityConflict();
+            }
+
+            return await LoginLinkedAsync(
+                existingProvider, ipAddress, cancellationToken);
+        }
+
+        var externalLogin = new UserExternalLogin
+        {
+            UserId = user.Id,
+            User = user,
+            Provider = ExternalLoginProvider.Google,
+            ProviderSubject = subject,
+            ProviderEmail = providerEmail,
+            LastLoginAtUtc = UtcNow
+        };
+        await externalLogins.AddAsync(externalLogin, cancellationToken);
+        user.LastLoginAtUtc = UtcNow;
+        users.Update(user);
+        await auditWriter.AppendAsync(new(
+            AuditAction.Update,
+            "UserExternalLogin",
+            user.Id.ToString(),
+            new Dictionary<string, string?> { ["operation"] = "googleLinked" },
+            new(user.Id, "Candidate")), cancellationToken);
+        var response = await IssueTokensAsync(user, ipAddress, cancellationToken);
+        try
+        {
+            await unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+        catch (UniqueConstraintException)
+        {
+            unitOfWork.ResetAfterFailure();
+            var subjectOwner = await externalLogins.GetByProviderSubjectAsync(
+                ExternalLoginProvider.Google, subject, cancellationToken);
+            if (subjectOwner is not null && subjectOwner.UserId == user.Id)
+                return await LoginLinkedAsync(
+                    subjectOwner, ipAddress, cancellationToken);
+
+            GoogleAuthenticationEvent(logger, "identity_link_conflict", null);
+            throw IdentityConflict();
+        }
+
+        GoogleAuthenticationEvent(logger, "linked", null);
         return response;
     }
 
@@ -289,7 +364,7 @@ public sealed class GoogleAuthenticationService(
                 "google_origin_not_allowed");
         return origin;
     }
-    private static ConflictException ExistingAccountConflict() => new(
-        ExistingAccountRequiresLogin, "existing_account_requires_login");
+    private static ConflictException IdentityConflict() => new(
+        IdentityLinkConflict, "google_identity_link_conflict");
     private DateTime UtcNow => timeProvider.GetUtcNow().UtcDateTime;
 }

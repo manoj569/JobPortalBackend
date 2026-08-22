@@ -202,6 +202,11 @@ public sealed class AuthService(
             !passwordHasher.Verify(request.Password, user.PasswordHash))
             throw InvalidCredentials();
 
+        if (!user.EmailConfirmed)
+            throw new AuthenticationFlowException(
+                "Verify your email before signing in.", 403,
+                "email_verification_required");
+
         user.LastLoginAtUtc = UtcNow;
         users.Update(user);
         var response = await IssueTokensAsync(user, ipAddress, cancellationToken);
