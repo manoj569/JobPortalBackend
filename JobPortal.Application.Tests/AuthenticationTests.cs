@@ -226,6 +226,22 @@ public sealed class AuthenticationTests
     }
 
     [Fact]
+    public async Task CorrectPasswordForUnverifiedAccountReturnsVerificationRequiredOutcome()
+    {
+        var fixture = CreateFixture();
+        var user = NewUser();
+        user.EmailConfirmed = false;
+        fixture.Users.Items.Add(user);
+
+        var error = await Assert.ThrowsAsync<AuthenticationFlowException>(() =>
+            fixture.Service.LoginAsync(new("user@example.com", "abc123"), null));
+
+        Assert.Equal("email_verification_required", error.Code);
+        Assert.Equal(403, error.StatusCode);
+        Assert.Empty(fixture.RefreshTokens.Added);
+    }
+
+    [Fact]
     public async Task RegistrationDoesNotCallOrWaitForEmailProvider()
     {
         var fixture = CreateFixture();
@@ -484,6 +500,7 @@ public sealed class AuthenticationTests
             NormalizedPhoneNumber = phone,
             PhoneNumber = phone,
             PhoneConfirmed = true,
+            EmailConfirmed = true,
             PasswordHash = HashPassword("abc123"),
             FirstName = "Manoj",
             LastName = "Shekapure",

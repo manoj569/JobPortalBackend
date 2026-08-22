@@ -137,6 +137,14 @@ public sealed class UserExternalLoginRepository(
             .SingleOrDefaultAsync(x => x.Provider == provider &&
                 x.ProviderSubject == providerSubject, cancellationToken);
 
+    public Task<UserExternalLogin?> GetByUserProviderAsync(
+        Guid userId,
+        ExternalLoginProvider provider,
+        CancellationToken cancellationToken = default) =>
+        context.UserExternalLogins.Include(x => x.User).ThenInclude(x => x.Role)
+            .SingleOrDefaultAsync(x => x.UserId == userId &&
+                x.Provider == provider, cancellationToken);
+
     public Task AddAsync(
         UserExternalLogin externalLogin,
         CancellationToken cancellationToken = default) =>

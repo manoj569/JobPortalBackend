@@ -159,7 +159,7 @@ public sealed class GoogleAuthenticationTests
     }
 
     [Fact]
-    public async Task UnknownLoginAndExistingEmailRegistrationUseSafeErrorsWithoutLinking()
+    public async Task UnknownLoginIsRejectedButExistingLocalEmailIsLinked()
     {
         var login = CreateFixture();
         var loginError = await Assert.ThrowsAsync<AuthenticationFlowException>(() =>
@@ -167,11 +167,14 @@ public sealed class GoogleAuthenticationTests
         Assert.Equal("google_account_not_registered", loginError.Code);
 
         var register = CreateFixture();
-        register.Users.Items.Add(Candidate());
-        var conflict = await Assert.ThrowsAsync<ConflictException>(() => register.Service.AuthenticateAsync(
-            new(RawCredential, GoogleAuthenticationIntent.Register, true), null));
-        Assert.Equal("existing_account_requires_login", conflict.Code);
-        Assert.Empty(register.ExternalLogins.Items);
+        var local = Candidate();
+        register.Users.Items.Add(local);
+        var response = await register.Service.AuthenticateAsync(
+            new(RawCredential, GoogleAuthenticationIntent.Login), null);
+        Assert.Equal(local.Id, response.User.Id);
+        Assert.Single(register.Users.Items);
+        Assert.Equal(local.Id, Assert.Single(register.ExternalLogins.Items).UserId);
+        Assert.Equal("existing-password-hash", local.PasswordHash);
     }
 
     [Fact]
@@ -182,7 +185,7 @@ public sealed class GoogleAuthenticationTests
         emailMatch.Users.Items.Add(administrator);
         var conflict = await Assert.ThrowsAsync<ConflictException>(() => emailMatch.Service.AuthenticateAsync(
             new(RawCredential, GoogleAuthenticationIntent.Register, true), null));
-        Assert.Equal("existing_account_requires_login", conflict.Code);
+        Assert.Equal("google_identity_link_conflict", conflict.Code);
 
         var linkedAdmin = CreateFixture();
         linkedAdmin.Users.Items.Add(administrator);
@@ -316,6 +319,93 @@ public sealed class GoogleAuthenticationTests
     }
 
     [Fact]
+    public async Task LinkingPreservesPasswordMembershipProfileApplicationsAndResume()
+    {
+        var fixture = CreateFixture();
+        var user = Candidate();
+        user.ResumeStorageKey = "private/resumes/existing.pdf";
+        var membership = new Membership { UserId = user.Id, User = user };
+        var profile = new CandidateResumeProfile { UserId = user.Id, User = user };
+        var application = new JobApplication { UserId = user.Id, User = user };
+        user.Memberships.Add(membership);
+        user.ResumeProfile = profile;
+        user.JobApplications.Add(application);
+        fixture.Users.Items.Add(user);
+
+        var response = await fixture.Service.AuthenticateAsync(
+            new(RawCredential, GoogleAuthenticationIntent.Login), null);
+
+        Assert.Equal(user.Id, response.User.Id);
+        Assert.Equal("existing-password-hash", user.PasswordHash);
+        Assert.Same(membership, Assert.Single(user.Memberships));
+        Assert.Same(profile, user.ResumeProfile);
+        Assert.Same(application, Assert.Single(user.JobApplications));
+        Assert.Equal("private/resumes/existing.pdf", user.ResumeStorageKey);
+        Assert.Single(fixture.Users.Items);
+    }
+
+    [Fact]
+    public async Task SubjectOwnedByDifferentEmailAccountAndDifferentSubjectOnUserAreRejectedSafely()
+    {
+        var subjectConflict = CreateFixture();
+        var subjectOwner = Candidate();
+        subjectOwner.Email = "first@example.com";
+        subjectOwner.NormalizedEmail = "first@example.com";
+        var emailOwner = Candidate();
+        subjectConflict.Users.Items.AddRange([subjectOwner, emailOwner]);
+        subjectConflict.ExternalLogins.Items.Add(Link(subjectOwner));
+        var error = await Assert.ThrowsAsync<ConflictException>(() => subjectConflict.Service.AuthenticateAsync(
+            new(RawCredential, GoogleAuthenticationIntent.Login), null));
+        Assert.Equal("google_identity_link_conflict", error.Code);
+
+        var differentSubject = CreateFixture();
+        var local = Candidate();
+        differentSubject.Users.Items.Add(local);
+        var prior = Link(local);
+        prior.ProviderSubject = "different-google-subject";
+        differentSubject.ExternalLogins.Items.Add(prior);
+        error = await Assert.ThrowsAsync<ConflictException>(() => differentSubject.Service.AuthenticateAsync(
+            new(RawCredential, GoogleAuthenticationIntent.Login), null));
+        Assert.Equal("google_identity_link_conflict", error.Code);
+        Assert.Single(differentSubject.ExternalLogins.Items);
+    }
+
+    [Fact]
+    public async Task ConcurrentLinkRaceUsesPersistedLinkAndDoesNotDuplicateUser()
+    {
+        var fixture = CreateFixture();
+        var local = Candidate();
+        fixture.Users.Items.Add(local);
+        fixture.UnitOfWork.ThrowUniqueOnce = true;
+        fixture.UnitOfWork.OnUnique = () =>
+        {
+            fixture.ExternalLogins.Items.Clear();
+            fixture.ExternalLogins.Items.Add(Link(local));
+        };
+
+        var response = await fixture.Service.AuthenticateAsync(
+            new(RawCredential, GoogleAuthenticationIntent.Login), null);
+
+        Assert.Equal(local.Id, response.User.Id);
+        Assert.Single(fixture.Users.Items);
+        Assert.Single(fixture.ExternalLogins.Items);
+    }
+
+    [Fact]
+    public async Task AuthenticationLogsContainNoCredentialEmailOrProviderSubject()
+    {
+        var fixture = CreateFixture();
+        fixture.Users.Items.Add(Candidate());
+        await fixture.Service.AuthenticateAsync(
+            new(RawCredential, GoogleAuthenticationIntent.Login), null);
+        var logs = string.Join("\n", fixture.Logger.Messages);
+        Assert.DoesNotContain(RawCredential, logs, StringComparison.Ordinal);
+        Assert.DoesNotContain(ValidIdentity.Email, logs, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(ValidIdentity.Subject, logs, StringComparison.Ordinal);
+        Assert.DoesNotContain("existing-password-hash", logs, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void EndpointIsAnonymousAndRequestCannotOverpostRoleOrUser()
     {
         var method = typeof(AuthController).GetMethod(nameof(AuthController.Google))!;
@@ -387,6 +477,7 @@ public sealed class GoogleAuthenticationTests
     {
         public List<UserExternalLogin> Items { get; } = [];
         public Task<UserExternalLogin?> GetByProviderSubjectAsync(ExternalLoginProvider provider, string subject, CancellationToken ct = default) => Task.FromResult(Items.SingleOrDefault(x => x.Provider == provider && x.ProviderSubject == subject));
+        public Task<UserExternalLogin?> GetByUserProviderAsync(Guid userId, ExternalLoginProvider provider, CancellationToken ct = default) => Task.FromResult(Items.SingleOrDefault(x => x.UserId == userId && x.Provider == provider));
         public Task AddAsync(UserExternalLogin login, CancellationToken ct = default) { Items.Add(login); return Task.CompletedTask; }
         public void Update(UserExternalLogin login) { }
     }
