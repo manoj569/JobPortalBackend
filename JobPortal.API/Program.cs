@@ -79,6 +79,7 @@ builder.Services.Configure<JobDiscoveryOptions>(builder.Configuration.GetSection
 builder.Services.AddHostedService<JobDiscoveryHostedService>();
 builder.Services.AddHostedService<RegistrationEmailHostedService>();
 builder.Services.AddScoped<RegistrationEmailDispatcher>();
+builder.Services.AddHostedService<InterviewScheduleNotificationHostedService>();
 
 // ✅ FINAL CORS CONFIGURATION
 var allowedOrigins = (builder.Configuration

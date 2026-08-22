@@ -48,6 +48,11 @@ public sealed class JobPortalDbContext(DbContextOptions<JobPortalDbContext> opti
     public DbSet<JobApplication> JobApplications => Set<JobApplication>();
     public DbSet<ApplicationQuotaUsage> ApplicationQuotaUsages => Set<ApplicationQuotaUsage>();
     public DbSet<JobApplicationStatusHistory> JobApplicationStatusHistory => Set<JobApplicationStatusHistory>();
+    public DbSet<InterviewInsight> InterviewInsights => Set<InterviewInsight>();
+    public DbSet<InterviewRound> InterviewRounds => Set<InterviewRound>();
+    public DbSet<CandidateInterviewSchedule> CandidateInterviewSchedules => Set<CandidateInterviewSchedule>();
+    public DbSet<InsightHelpfulnessFeedback> InsightHelpfulnessFeedback => Set<InsightHelpfulnessFeedback>();
+    public DbSet<InsightReport> InsightReports => Set<InsightReport>();
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
