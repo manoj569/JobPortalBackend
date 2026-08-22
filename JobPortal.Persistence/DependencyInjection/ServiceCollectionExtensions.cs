@@ -1,5 +1,6 @@
 using JobPortal.Application.Abstractions.Persistence;
 using JobPortal.Application.Abstractions.Candidates;
+using JobPortal.Application.Abstractions.InterviewInsights;
 using JobPortal.Persistence.Context;
 using JobPortal.Persistence.Repositories;
 using Microsoft.EntityFrameworkCore;
@@ -44,6 +45,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IAdminApplicationRepository, AdminApplicationRepository>();
         services.AddScoped<ICandidateRepository, CandidateRepository>();
         services.AddScoped<IProfilePhotoStorage, PostgresProfilePhotoStorage>();
+        services.AddScoped<IInterviewInsightRepository, InterviewInsightRepository>();
         services.AddScoped<ICandidatePortfolioRepository, CandidatePortfolioRepository>();
         services.AddScoped<ICompanyManagementRepository, CompanyManagementRepository>();
         services.AddScoped<ICategoryManagementRepository, CategoryManagementRepository>();
