@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace JobPortal.Domain.Enums;
 
 public enum CandidateSkillProficiency
@@ -18,7 +20,11 @@ public enum CandidateAvailability
     MoreThanThreeMonths,
     ServingNoticePeriod
 }
+[JsonConverter(typeof(JsonStringEnumConverter<CandidateJobType>))]
 public enum CandidateJobType { Permanent = 1, Contractual }
+[JsonConverter(typeof(JsonStringEnumConverter<CandidateEmploymentPreference>))]
 public enum CandidateEmploymentPreference { FullTime = 1, PartTime }
+[JsonConverter(typeof(JsonStringEnumConverter<CandidateShiftPreference>))]
 public enum CandidateShiftPreference { Day = 1, Night, Flexible }
+[JsonConverter(typeof(JsonStringEnumConverter<EducationCourseType>))]
 public enum EducationCourseType { FullTime = 1, PartTime, CorrespondenceOrDistance }

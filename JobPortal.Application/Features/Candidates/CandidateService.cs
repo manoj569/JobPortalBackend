@@ -95,6 +95,36 @@ public sealed class CandidateService(
     {
         await basicDetailsValidator.ValidateAndThrowAsync(request, cancellationToken);
         var user = await RequiredCandidateAsync(userId, cancellationToken);
+        var mobileAdded = false;
+        if (!string.IsNullOrWhiteSpace(request.MobileNumber))
+        {
+            _ = IndianMobileNumber.TryNormalizeTenDigit(
+                request.MobileNumber, out var normalizedMobile);
+            var existingMobile = user.NormalizedPhoneNumber;
+            if (string.IsNullOrWhiteSpace(existingMobile) &&
+                IndianMobileNumber.TryNormalize(user.PhoneNumber, out var normalizedExisting))
+                existingMobile = normalizedExisting;
+            if ((!string.IsNullOrWhiteSpace(existingMobile) ||
+                    !string.IsNullOrWhiteSpace(user.PhoneNumber)) &&
+                !string.Equals(existingMobile, normalizedMobile,
+                    StringComparison.Ordinal))
+                throw new ConflictException(
+                    "An existing mobile number cannot be replaced from profile settings.",
+                    "mobile_number_change_requires_verification");
+            if (string.IsNullOrWhiteSpace(existingMobile) &&
+                string.IsNullOrWhiteSpace(user.PhoneNumber))
+            {
+                if (await candidates.MobileNumberExistsAsync(
+                        userId, normalizedMobile, cancellationToken))
+                    throw new ConflictException(
+                        "This mobile number cannot be used.",
+                        "mobile_number_unavailable");
+                user.PhoneNumber = normalizedMobile;
+                user.NormalizedPhoneNumber = normalizedMobile;
+                user.PhoneConfirmed = false;
+                mobileAdded = true;
+            }
+        }
         user.WorkStatus = request.WorkStatus;
         user.IsOutsideIndia = request.IsOutsideIndia;
         user.CurrentCountry = request.CurrentCountry.Trim();
@@ -107,7 +137,16 @@ public sealed class CandidateService(
         user.CurrentVariableAnnualSalary = request.WorkStatus == CandidateWorkStatus.Experienced ? request.CurrentVariableAnnualSalary : null;
         await auditWriter.AppendAsync(new(AuditAction.Update, "CandidateBasicDetails",
             user.Id.ToString(), Actor: new(userId, "Candidate")), cancellationToken);
-        await unitOfWork.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+        catch (UniqueConstraintException) when (mobileAdded)
+        {
+            throw new ConflictException(
+                "This mobile number cannot be used.",
+                "mobile_number_unavailable");
+        }
         return MapBasicDetails(user);
     }
 
@@ -342,12 +381,14 @@ public sealed class CandidateService(
         Guid userId, ResumeUpload upload, CancellationToken cancellationToken = default)
     {
         var user = await RequiredCandidateAsync(userId, cancellationToken);
-        var (extension, validatedContent) = await ValidateResumeAsync(upload, cancellationToken);
+        var displayFileName = NormalizeResumeDisplayFileName(upload.FileName);
+        var (extension, validatedContent) = await ValidateResumeAsync(
+            upload with { FileName = displayFileName }, cancellationToken);
         var oldKey = user.ResumeStorageKey;
         await using var content = validatedContent;
         var storageKey = await resumeStorage.StoreAsync(content, extension, cancellationToken);
         user.ResumeStorageKey = storageKey;
-        user.ResumeFileName = $"resume{extension}";
+        user.ResumeFileName = displayFileName;
         user.ResumeContentType = upload.ContentType;
         user.ResumeSizeBytes = content.Length;
         user.ResumeUploadedAtUtc = UtcNow;
@@ -395,11 +436,12 @@ public sealed class CandidateService(
     public async Task<ResumeDownload> DownloadResumeAsync(Guid userId, CancellationToken cancellationToken = default)
     {
         var user = await RequiredCandidateAsync(userId, cancellationToken);
-        if (user.ResumeStorageKey is null || user.ResumeFileName is null || user.ResumeContentType is null)
+        if (user.ResumeStorageKey is null || user.ResumeContentType is null)
             throw new NotFoundException("Resume was not found.");
         var content = await resumeStorage.OpenReadAsync(user.ResumeStorageKey, cancellationToken)
             ?? throw new NotFoundException("Resume was not found.");
-        return new(content, user.ResumeFileName, user.ResumeContentType);
+        return new(content, ResumeDisplayFileName(user.ResumeFileName, user.ResumeContentType),
+            user.ResumeContentType);
     }
 
     public async Task DeleteResumeAsync(Guid userId, CancellationToken cancellationToken = default)
@@ -796,6 +838,31 @@ public sealed class CandidateService(
         return (extension, content);
     }
 
+    private static string NormalizeResumeDisplayFileName(string fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName) || fileName.Any(char.IsControl))
+            throw new BadRequestException("Resume filename is invalid.", "invalid_resume_filename");
+        var normalizedSeparators = fileName.Trim().Replace('\\', '/');
+        var basename = normalizedSeparators[(normalizedSeparators.LastIndexOf('/') + 1)..].Trim();
+        if (basename is "" or "." or ".." || basename.Length > 255 ||
+            basename.Any(char.IsControl))
+            throw new BadRequestException(
+                "Resume filename must be a non-empty basename of at most 255 characters.",
+                "invalid_resume_filename");
+        return basename;
+    }
+
+    private static string ResumeDisplayFileName(string? storedFileName, string contentType)
+    {
+        if (!string.IsNullOrWhiteSpace(storedFileName) && storedFileName.Length <= 255 &&
+            !storedFileName.Any(char.IsControl))
+            return NormalizeResumeDisplayFileName(storedFileName);
+        return contentType.Equals("application/msword", StringComparison.OrdinalIgnoreCase)
+            ? "resume.doc"
+            : contentType.Equals("application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                StringComparison.OrdinalIgnoreCase) ? "resume.docx" : "resume.pdf";
+    }
+
     private static CandidateProfileResponse MapProfile(
         User user, StoredProfilePhoto? photo, decimal totalExperienceYears) => new(
         user.Id, user.Email, user.FirstName, user.LastName, user.Headline, user.Bio, user.Location,
@@ -803,9 +870,10 @@ public sealed class CandidateService(
         Deserialize<string>(user.ExperienceJson), user.LinkedInUrl, user.PortfolioUrl,
         Deserialize<EmploymentType>(user.PreferredJobTypesJson), MapResume(user), user.PhoneNumber,
         photo is not null, photo?.Version.ToString("N"), MapBasicDetails(user),
-        MapCareerPreferences(user), totalExperienceYears);
+        MapCareerPreferences(user), totalExperienceYears, user.PhoneNumber,
+        user.PhoneConfirmed);
     private static CandidateBasicDetailsResponse MapBasicDetails(User user) => new(
-        user.Email, user.PhoneNumber, user.WorkStatus, user.IsOutsideIndia, user.CurrentCountry,
+        user.Email, user.PhoneNumber, user.PhoneConfirmed, user.WorkStatus, user.IsOutsideIndia, user.CurrentCountry,
         user.CurrentCity ?? user.Location, user.CurrentArea, user.AvailabilityToJoin,
         user.CurrentAnnualSalary, user.CurrentFixedAnnualSalary, user.CurrentVariableAnnualSalary);
     private static CandidateCareerPreferencesResponse MapCareerPreferences(User user) => new(
@@ -825,9 +893,10 @@ public sealed class CandidateService(
         user.YearsOfExperience,
         user.OnboardingCompletedAtUtc);
     private static ResumeResponse? MapResume(User user) =>
-        user.ResumeFileName is not null && user.ResumeContentType is not null &&
+        user.ResumeStorageKey is not null && user.ResumeContentType is not null &&
         user.ResumeSizeBytes.HasValue && user.ResumeUploadedAtUtc.HasValue
-            ? new(user.ResumeFileName, user.ResumeContentType, user.ResumeSizeBytes.Value, user.ResumeUploadedAtUtc.Value)
+            ? new(ResumeDisplayFileName(user.ResumeFileName, user.ResumeContentType),
+                user.ResumeContentType, user.ResumeSizeBytes.Value, user.ResumeUploadedAtUtc.Value)
             : null;
     private static JobApplicationResponse MapApplication(JobApplication application, CandidateJob job) => new(
         application.Id, application.JobId, job.Title, job.Slug, job.CompanyName,

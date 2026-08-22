@@ -1,4 +1,5 @@
 using FluentValidation;
+using JobPortal.Application.Common.Text;
 using JobPortal.Domain.Enums;
 
 namespace JobPortal.Application.Features.Candidates;
@@ -180,6 +181,10 @@ public sealed class UpdateCandidateBasicDetailsRequestValidator :
         RuleFor(x => x.CurrentAnnualSalary).GreaterThanOrEqualTo(0).When(x => x.CurrentAnnualSalary.HasValue);
         RuleFor(x => x.CurrentFixedAnnualSalary).GreaterThanOrEqualTo(0).When(x => x.CurrentFixedAnnualSalary.HasValue);
         RuleFor(x => x.CurrentVariableAnnualSalary).GreaterThanOrEqualTo(0).When(x => x.CurrentVariableAnnualSalary.HasValue);
+        RuleFor(x => x.MobileNumber)
+            .Must(value => string.IsNullOrWhiteSpace(value) ||
+                IndianMobileNumber.TryNormalizeTenDigit(value, out _))
+            .WithMessage("Mobile number must be a valid 10-digit Indian mobile number.");
         RuleFor(x => x).Must(x => x.WorkStatus == CandidateWorkStatus.Experienced ||
             x.CurrentAnnualSalary is null && x.CurrentFixedAnnualSalary is null &&
             x.CurrentVariableAnnualSalary is null)
