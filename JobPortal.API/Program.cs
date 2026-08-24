@@ -5,6 +5,7 @@ using System.Security.Claims;
 using System.Text;
 using System.Threading.RateLimiting;
 using JobPortal.API.Health;
+using JobPortal.API.Authorization;
 using JobPortal.API.HostedServices;
 using JobPortal.API.Middleware;
 using JobPortal.API.Services;
@@ -17,6 +18,8 @@ using JobPortal.Application.Abstractions.Authentication;
 using JobPortal.Infrastructure;
 using JobPortal.Persistence;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization.Policy;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
@@ -299,7 +302,12 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(options => options.AddPolicy(
+    InterviewInsightsMembershipPolicy.Name,
+    policy => policy.RequireAuthenticatedUser().RequireRole("Candidate")
+        .AddRequirements(new ActiveInterviewInsightsMembershipRequirement())));
+builder.Services.AddScoped<IAuthorizationHandler, ActiveInterviewInsightsMembershipHandler>();
+builder.Services.AddSingleton<IAuthorizationMiddlewareResultHandler, InterviewInsightsAuthorizationResultHandler>();
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddPersistence(builder.Configuration);
