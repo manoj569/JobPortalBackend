@@ -96,6 +96,12 @@ public sealed class PaymentRepository(JobPortalDbContext context) : IPaymentRepo
             .Include(x => x.History)
             .SingleOrDefaultAsync(x => x.ProviderOrderId == providerOrderId, cancellationToken);
 
+    public Task<Payment?> GetOwnedByProviderOrderIdAsync(
+        string providerOrderId, Guid userId, CancellationToken cancellationToken = default) =>
+        context.Payments.Include(x => x.Membership!).ThenInclude(x => x.History)
+            .Include(x => x.History).SingleOrDefaultAsync(
+                x => x.ProviderOrderId == providerOrderId && x.UserId == userId, cancellationToken);
+
     public Task<Payment?> GetLatestForUserAsync(
         Guid userId, CancellationToken cancellationToken = default) =>
         context.Payments.AsNoTracking().Where(x => x.UserId == userId)

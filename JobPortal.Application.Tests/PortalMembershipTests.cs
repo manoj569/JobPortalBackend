@@ -311,20 +311,116 @@ public sealed class PortalMembershipTests
         Jobs = { ["job"] = new(Guid.NewGuid(), "https://example.test/apply") }
     };
 
+    [Fact]
+    public async Task PhonePeCheckoutUsesAuthoritativePlanAndReturnsNoSecrets()
+    {
+        var fixture = CreatePaymentFixture();
+        var checkout = await fixture.Service.CreatePhonePeCheckoutAsync(UserId);
+        Assert.Equal(9900, fixture.PhonePe.RequestedAmount);
+        Assert.Equal(9900, checkout.AmountInMinorUnits);
+        Assert.Equal("INR", checkout.CurrencyCode);
+        Assert.Equal(30, checkout.DurationDays);
+        Assert.Equal(PaymentProvider.PhonePe, fixture.Payments.Payment!.Provider);
+        Assert.Equal(PaymentStatus.Pending, fixture.Payments.Payment.Status);
+        Assert.Equal(MembershipStatus.Pending, fixture.Memberships.Membership!.Status);
+        var json = JsonSerializer.Serialize(checkout);
+        Assert.DoesNotContain("secret", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("authorization", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("webhook", json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task PhonePeMerchantOrderIdsAreUnique()
+    {
+        var first = CreatePaymentFixture();
+        var second = CreatePaymentFixture();
+        var a = await first.Service.CreatePhonePeCheckoutAsync(UserId);
+        var b = await second.Service.CreatePhonePeCheckoutAsync(UserId);
+        Assert.NotEqual(a.MerchantOrderId, b.MerchantOrderId);
+        Assert.StartsWith("ch_", a.MerchantOrderId, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task VerifiedCompletedPhonePeWebhookActivatesExactlyOnce()
+    {
+        var fixture = CreatePaymentFixture();
+        var checkout = await fixture.Service.CreatePhonePeCheckoutAsync(UserId);
+        fixture.PhonePe.VerificationState = new(PhonePeOrderStateKind.Completed,
+            checkout.MerchantOrderId, "phonepe_txn_1", 9900);
+        var request = new PhonePeWebhookRequest("{\"event\":\"pg.order.completed\"}"u8.ToArray(), "valid");
+        await fixture.Service.ProcessPhonePeWebhookAsync(request);
+        var endsAt = fixture.Memberships.Membership!.EndsAtUtc;
+        await fixture.Service.ProcessPhonePeWebhookAsync(request);
+        Assert.Equal(PaymentStatus.Paid, fixture.Payments.Payment!.Status);
+        Assert.Equal(MembershipStatus.Active, fixture.Memberships.Membership.Status);
+        Assert.Equal(Now.AddDays(30), endsAt);
+        Assert.Equal(endsAt, fixture.Memberships.Membership.EndsAtUtc);
+        Assert.Equal("phonepe_txn_1", fixture.Payments.Payment.ProviderPaymentId);
+    }
+
+    [Theory]
+    [InlineData(PhonePeOrderStateKind.Failed, PaymentStatus.Failed)]
+    [InlineData(PhonePeOrderStateKind.Cancelled, PaymentStatus.Cancelled)]
+    public async Task FailedOrCancelledPhonePeDoesNotActivateMembership(
+        PhonePeOrderStateKind providerState, PaymentStatus expected)
+    {
+        var fixture = CreatePaymentFixture();
+        var checkout = await fixture.Service.CreatePhonePeCheckoutAsync(UserId);
+        fixture.PhonePe.VerificationState = new(providerState, checkout.MerchantOrderId,
+            "phonepe_txn_terminal", 9900);
+        await fixture.Service.ProcessPhonePeWebhookAsync(new("{}"u8.ToArray(), "valid"));
+        Assert.Equal(expected, fixture.Payments.Payment!.Status);
+        Assert.NotEqual(MembershipStatus.Active, fixture.Memberships.Membership!.Status);
+    }
+
+    [Fact]
+    public async Task InvalidPhonePeWebhookAuthenticationIsRejected()
+    {
+        var fixture = CreatePaymentFixture();
+        await fixture.Service.CreatePhonePeCheckoutAsync(UserId);
+        fixture.PhonePe.AuthorizationValid = false;
+        var error = await Assert.ThrowsAsync<BadRequestException>(() =>
+            fixture.Service.ProcessPhonePeWebhookAsync(new("{}"u8.ToArray(), "invalid")));
+        Assert.Equal("invalid_webhook_authentication", error.Code);
+        Assert.Equal(MembershipStatus.Pending, fixture.Memberships.Membership!.Status);
+    }
+
+    [Fact]
+    public async Task PhonePeVerificationFailureNeverActivatesMembership()
+    {
+        var fixture = CreatePaymentFixture();
+        await fixture.Service.CreatePhonePeCheckoutAsync(UserId);
+        fixture.PhonePe.VerificationFails = true;
+        await Assert.ThrowsAsync<AppException>(() =>
+            fixture.Service.ProcessPhonePeWebhookAsync(new("{}"u8.ToArray(), "valid")));
+        Assert.Equal(PaymentStatus.Pending, fixture.Payments.Payment!.Status);
+        Assert.Equal(MembershipStatus.Pending, fixture.Memberships.Membership!.Status);
+    }
+
+    [Fact]
+    public async Task CandidateCannotReadAnotherCandidatesPhonePeStatus()
+    {
+        var fixture = CreatePaymentFixture();
+        var checkout = await fixture.Service.CreatePhonePeCheckoutAsync(UserId);
+        await Assert.ThrowsAsync<NotFoundException>(() =>
+            fixture.Service.GetPhonePeStatusAsync(OtherCandidateId, checkout.MerchantOrderId));
+    }
+
     private static PaymentFixture CreatePaymentFixture()
     {
         var memberships = AvailableRepository();
         var payments = new FakePaymentRepository();
         var users = new FakeUserRepository();
         var gateway = new FakeRazorpayGateway();
+        var phonePe = new FakePhonePeGateway();
         var unitOfWork = new FakeUnitOfWork();
         var audit = new AuditWriterTestDouble();
         var service = new PaymentService(
-            payments, memberships, users, gateway, new FakePlanProvider(), unitOfWork,
+            payments, memberships, users, gateway, phonePe, new FakePlanProvider(), unitOfWork,
             audit,
             new CreatePaymentOrderRequestValidator(), new ConfirmRazorpayPaymentRequestValidator(),
             new FixedTimeProvider(Now));
-        return new(service, memberships, payments, users, gateway, unitOfWork, audit);
+        return new(service, memberships, payments, users, gateway, phonePe, unitOfWork, audit);
     }
 
     private sealed record PaymentFixture(
@@ -333,6 +429,7 @@ public sealed class PortalMembershipTests
         FakePaymentRepository Payments,
         FakeUserRepository Users,
         FakeRazorpayGateway Gateway,
+        FakePhonePeGateway PhonePe,
         FakeUnitOfWork UnitOfWork,
         AuditWriterTestDouble Audit);
 
@@ -392,6 +489,9 @@ public sealed class PortalMembershipTests
         public Task<Payment?> GetByProviderOrderIdAsync(
             string providerOrderId, CancellationToken cancellationToken = default) =>
             Task.FromResult(Payment?.ProviderOrderId == providerOrderId ? Payment : null);
+        public Task<Payment?> GetOwnedByProviderOrderIdAsync(
+            string providerOrderId, Guid userId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Payment?.ProviderOrderId == providerOrderId && Payment.UserId == userId ? Payment : null);
         public Task<Payment?> GetLatestForUserAsync(
             Guid userId, CancellationToken cancellationToken = default) =>
             Task.FromResult(Payment?.UserId == userId ? Payment : null);
@@ -470,6 +570,34 @@ public sealed class PortalMembershipTests
         public Task<RazorpayPaymentState> GetOrderPaymentStateAsync(
             string orderId, CancellationToken cancellationToken = default) =>
             Task.FromResult(ReconciliationState);
+    }
+
+    private sealed class FakePhonePeGateway : IPhonePeGateway
+    {
+        public List<string> MerchantOrderIds { get; } = [];
+        public long RequestedAmount { get; private set; }
+        public bool AuthorizationValid { get; set; } = true;
+        public PhonePeOrderStateKind CallbackState { get; set; } = PhonePeOrderStateKind.Completed;
+        public PhonePeOrderState? VerificationState { get; set; }
+        public bool VerificationFails { get; set; }
+        public Task<PhonePeCheckout> CreateCheckoutAsync(string merchantOrderId, long amountInMinorUnits,
+            CancellationToken cancellationToken = default)
+        {
+            MerchantOrderIds.Add(merchantOrderId);
+            RequestedAmount = amountInMinorUnits;
+            return Task.FromResult(new PhonePeCheckout("https://mercury.phonepe.com/checkout"));
+        }
+        public Task<PhonePeOrderState> GetOrderStatusAsync(string merchantOrderId,
+            CancellationToken cancellationToken = default)
+        {
+            if (VerificationFails) throw new AppException("verification unavailable", 503, "payment_verification_unavailable");
+            return Task.FromResult(VerificationState ?? new PhonePeOrderState(
+                PhonePeOrderStateKind.Pending, merchantOrderId, AmountInMinorUnits: 9900));
+        }
+        public bool VerifyWebhookAuthorization(string authorization) => AuthorizationValid;
+        public PhonePeCallback ParseCallback(ReadOnlyMemory<byte> rawBody) =>
+            new(MerchantOrderIds.Last(), CallbackState,
+                $"phonepe-event-{Convert.ToHexString(rawBody.Span)}");
     }
 
     private sealed class FakePlanProvider : IMembershipPlanProvider

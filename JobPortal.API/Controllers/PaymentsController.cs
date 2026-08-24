@@ -14,14 +14,56 @@ namespace JobPortal.API.Controllers;
 [Produces("application/json")]
 public sealed class PaymentsController(IPaymentService paymentService) : ControllerBase
 {
-    [HttpPost("razorpay/orders")]
-    [ProducesResponseType(typeof(ApiResponse<PaymentOrderResponse>), StatusCodes.Status201Created)]
+    [NonAction]
     public async Task<ActionResult<ApiResponse<PaymentOrderResponse>>> CreateOrder(
         [FromBody] CreatePaymentOrderRequest request, CancellationToken cancellationToken)
     {
         var result = await paymentService.CreateOrderAsync(User.GetRequiredUserId(), request, cancellationToken);
         return StatusCode(StatusCodes.Status201Created,
             new ApiResponse<PaymentOrderResponse>(result, "Razorpay order created."));
+    }
+
+    [HttpPost("phonepe/checkout")]
+    [ProducesResponseType(typeof(ApiResponse<PhonePeCheckoutResponse>), StatusCodes.Status201Created)]
+    public async Task<ActionResult<ApiResponse<PhonePeCheckoutResponse>>> CreatePhonePeCheckout(
+        CancellationToken cancellationToken)
+    {
+        var result = await paymentService.CreatePhonePeCheckoutAsync(
+            User.GetRequiredUserId(), cancellationToken);
+        return StatusCode(StatusCodes.Status201Created,
+            new ApiResponse<PhonePeCheckoutResponse>(result, "PhonePe checkout created."));
+    }
+
+    [HttpGet("phonepe/return/{merchantOrderId}")]
+    public async Task<ActionResult<ApiResponse<PhonePeReturnStatusResponse>>> PhonePeReturnStatus(
+        string merchantOrderId, CancellationToken cancellationToken) =>
+        Ok(new ApiResponse<PhonePeReturnStatusResponse>(
+            await paymentService.GetPhonePeStatusAsync(
+                User.GetRequiredUserId(), merchantOrderId, cancellationToken)));
+
+    [AllowAnonymous]
+    [HttpPost("phonepe/webhook")]
+    [Consumes("application/json")]
+    [RequestSizeLimit(1024 * 1024)]
+    public async Task<ActionResult<ApiResponse<PhonePeWebhookResponse>>> PhonePeWebhook(
+        CancellationToken cancellationToken)
+    {
+        const int maximumBytes = 1024 * 1024;
+        if (Request.ContentLength > maximumBytes)
+            return StatusCode(StatusCodes.Status413PayloadTooLarge);
+        await using var body = new MemoryStream();
+        var buffer = new byte[81920];
+        while (true)
+        {
+            var read = await Request.Body.ReadAsync(buffer, cancellationToken);
+            if (read == 0) break;
+            if (body.Length + read > maximumBytes)
+                return StatusCode(StatusCodes.Status413PayloadTooLarge);
+            await body.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+        }
+        var result = await paymentService.ProcessPhonePeWebhookAsync(new(
+            body.ToArray(), Request.Headers.Authorization.ToString()), cancellationToken);
+        return Ok(new ApiResponse<PhonePeWebhookResponse>(result));
     }
 
     [HttpPost("{paymentId:guid}/razorpay/confirm")]

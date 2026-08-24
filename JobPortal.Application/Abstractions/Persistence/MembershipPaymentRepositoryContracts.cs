@@ -23,6 +23,7 @@ public interface IPaymentRepository
     Task AddAsync(Payment payment, CancellationToken cancellationToken = default);
     Task<Payment?> GetOwnedAsync(Guid id, Guid userId, CancellationToken cancellationToken = default);
     Task<Payment?> GetByProviderOrderIdAsync(string providerOrderId, CancellationToken cancellationToken = default);
+    Task<Payment?> GetOwnedByProviderOrderIdAsync(string providerOrderId, Guid userId, CancellationToken cancellationToken = default);
     Task<Payment?> GetLatestForUserAsync(Guid userId, CancellationToken cancellationToken = default);
     Task<bool> HasProcessedProviderEventAsync(string providerEventId, CancellationToken cancellationToken = default);
     Task<(IReadOnlyCollection<PaymentResponse> Items, int TotalCount)> GetForUserAsync(Guid userId, HistoryQuery query, CancellationToken cancellationToken = default);
