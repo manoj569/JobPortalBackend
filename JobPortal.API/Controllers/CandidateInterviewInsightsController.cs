@@ -1,4 +1,5 @@
 using JobPortal.API.Extensions;
+using JobPortal.API.Authorization;
 using JobPortal.Application.Abstractions.InterviewInsights;
 using JobPortal.Application.Abstractions.CandidateCompanies;
 using JobPortal.Application.Features.CandidateCompanies;
@@ -10,7 +11,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace JobPortal.API.Controllers;
 
 [ApiController]
-[Authorize(Roles = "Candidate")]
+[Authorize(Policy = InterviewInsightsMembershipPolicy.Name)]
 [Route("api/candidate")]
 [Produces("application/json")]
 public sealed class CandidateInterviewInsightsController(IInterviewInsightService insights, ICandidateCompanyService companies) : ControllerBase
