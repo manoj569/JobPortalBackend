@@ -19,8 +19,14 @@ public sealed class CandidateInterviewInsightsController(IInterviewInsightServic
             await insights.CreateAsync(User.GetRequiredUserId(), request, ct), "Your experience is pending administrator review."));
 
     [HttpGet("interview-insights")]
-    public async Task<ActionResult<ApiResponse<PagedResponse<InterviewInsightResponse>>>> Search([FromQuery] InterviewInsightQuery query, CancellationToken ct) =>
-        Ok(new ApiResponse<PagedResponse<InterviewInsightResponse>>(await insights.SearchAsync(User.GetRequiredUserId(), query, ct)));
+    public async Task<ActionResult<ApiResponse<PagedResponse<InterviewInsightCardResponse>>>> Search([FromQuery] InterviewInsightQuery query, CancellationToken ct) =>
+        Ok(new ApiResponse<PagedResponse<InterviewInsightCardResponse>>(await insights.SearchAsync(User.GetRequiredUserId(), query, ct)));
+
+    [HttpGet("interview-insights/companies")]
+    public async Task<ActionResult<ApiResponse<IReadOnlyCollection<InterviewInsightCompanyResponse>>>> Companies(
+        [FromQuery] string query, [FromQuery] int limit = 10, CancellationToken ct = default) =>
+        Ok(new ApiResponse<IReadOnlyCollection<InterviewInsightCompanyResponse>>(
+            await insights.SearchCompaniesAsync(User.GetRequiredUserId(), query, limit, ct)));
 
     [HttpGet("interview-insights/{id:guid}")]
     public async Task<ActionResult<ApiResponse<InterviewInsightResponse>>> Get(Guid id, CancellationToken ct) =>

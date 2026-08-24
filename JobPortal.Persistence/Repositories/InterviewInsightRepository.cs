@@ -36,19 +36,58 @@ public sealed class InterviewInsightRepository(JobPortalDbContext db) : IIntervi
             .Include(x => x.Rounds.OrderBy(r => r.Sequence)).Where(x => x.Id == id);
         return await (tracking ? q : q.AsNoTracking()).SingleOrDefaultAsync(ct);
     }
-    public async Task<(IReadOnlyCollection<InterviewInsight>, int)> SearchPublishedAsync(InterviewInsightQuery query, CancellationToken ct)
+    public async Task<(IReadOnlyCollection<InterviewInsightCardResponse>, int)> SearchPublishedAsync(Guid candidateId, InterviewInsightQuery query, DateOnly? fromMonth, CancellationToken ct)
     {
-        var q = db.InterviewInsights.AsNoTracking().Where(x => x.Status == InterviewInsightStatus.Published)
-            .Include(x => x.Company).Include(x => x.AuthorCandidate).Include(x => x.Rounds.OrderBy(r => r.Sequence)).AsQueryable();
+        var q = db.InterviewInsights.AsNoTracking().Where(x => x.Status == InterviewInsightStatus.Published &&
+            !x.Reports.Any(r => r.Status == InsightReportStatus.Actioned));
         if (query.CompanyId.HasValue) q = q.Where(x => x.CompanyId == query.CompanyId);
-        if (!string.IsNullOrWhiteSpace(query.Role)) q = q.Where(x => EF.Functions.ILike(x.RoleTitle, $"%{query.Role.Trim()}%"));
+        if (!string.IsNullOrWhiteSpace(query.Company)) q = db.Database.IsNpgsql()
+            ? q.Where(x => EF.Functions.ILike(x.Company.Name, $"%{query.Company.Trim()}%"))
+            : q.Where(x => x.Company.Name.Contains(query.Company.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(query.Role)) q = db.Database.IsNpgsql()
+            ? q.Where(x => EF.Functions.ILike(x.RoleTitle, $"%{query.Role.Trim()}%"))
+            : q.Where(x => x.RoleTitle.Contains(query.Role.Trim(), StringComparison.OrdinalIgnoreCase));
         if (query.Difficulty.HasValue) q = q.Where(x => x.OverallDifficulty == query.Difficulty);
         if (query.RoundType.HasValue) q = q.Where(x => x.Rounds.Any(r => r.RoundType == query.RoundType));
+        if (!string.IsNullOrWhiteSpace(query.ExperienceLevel)) q = db.Database.IsNpgsql()
+            ? q.Where(x => x.ExperienceLevel != null && EF.Functions.ILike(x.ExperienceLevel, query.ExperienceLevel.Trim()))
+            : q.Where(x => x.ExperienceLevel != null && x.ExperienceLevel.Equals(query.ExperienceLevel.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (query.Outcome.HasValue) q = q.Where(x => x.Outcome == query.Outcome);
+        if (query.InterviewFormat.HasValue) q = q.Where(x => x.InterviewFormat == query.InterviewFormat);
+        if (fromMonth.HasValue) q = q.Where(x => x.InterviewDateMonth >= fromMonth);
         var total = await q.CountAsync(ct);
-        q = query.Sort.Equals("newest", StringComparison.OrdinalIgnoreCase)
+        q = query.Sort.Equals(nameof(InterviewInsightSort.Newest), StringComparison.OrdinalIgnoreCase)
             ? q.OrderByDescending(x => x.PublishedAtUtc).ThenByDescending(x => x.Id)
-            : q.OrderByDescending(x => x.HelpfulConfirmedCount).ThenByDescending(x => x.PublishedAtUtc);
-        return (await q.Skip((query.PageNumber - 1) * query.PageSize).Take(query.PageSize).ToListAsync(ct), total);
+            : query.Sort.Equals(nameof(InterviewInsightSort.MostRounds), StringComparison.OrdinalIgnoreCase)
+                ? q.OrderByDescending(x => x.Rounds.Count).ThenByDescending(x => x.PublishedAtUtc).ThenByDescending(x => x.Id)
+                : q.OrderByDescending(x => x.HelpfulConfirmedCount).ThenByDescending(x => x.PublishedAtUtc).ThenByDescending(x => x.Id);
+        var items = await q.Skip((query.PageNumber - 1) * query.PageSize).Take(query.PageSize)
+            .Select(x => new InterviewInsightCardResponse(x.Id, x.CompanyId, x.Company.Name, x.RoleTitle,
+                x.InterviewDateMonth.Month, x.InterviewDateMonth.Year, x.OverallDifficulty, x.Outcome,
+                x.ExperienceLevel, x.InterviewFormat, x.Rounds.Count,
+                x.Rounds.OrderBy(r => r.Sequence).Select(r => r.RoundType).Distinct().ToArray(),
+                x.Rounds.Where(r => r.RoundTitle != null).OrderBy(r => r.Sequence)
+                    .Select(r => r.RoundTitle!).Distinct().Take(6).ToArray(),
+                x.ProcessSummary.Length <= 240 ? x.ProcessSummary : x.ProcessSummary.Substring(0, 240),
+                x.HelpfulConfirmedCount,
+                db.JobApplications.Any(a => a.UserId == candidateId && a.Job.CompanyId == x.CompanyId) ||
+                    db.CandidateInterviewSchedules.Any(s => s.CandidateId == candidateId && s.CompanyId == x.CompanyId && s.Status != InterviewScheduleStatus.Cancelled),
+                x.AuthorCandidateId != candidateId && (db.JobApplications.Any(a => a.UserId == candidateId && a.Job.CompanyId == x.CompanyId) ||
+                    db.CandidateInterviewSchedules.Any(s => s.CandidateId == candidateId && s.CompanyId == x.CompanyId && s.Status != InterviewScheduleStatus.Cancelled)),
+                x.IsAnonymous, x.IsAnonymous ? null : (x.AuthorCandidate.FirstName + " " + x.AuthorCandidate.LastName).Trim()))
+            .ToListAsync(ct);
+        return (items, total);
+    }
+
+    public async Task<IReadOnlyCollection<InterviewInsightCompanyResponse>> SearchCompaniesAsync(string query, int limit, CancellationToken ct)
+    {
+        var companies = db.Companies.AsNoTracking();
+        companies = db.Database.IsNpgsql()
+            ? companies.Where(x => EF.Functions.ILike(x.Name, $"%{query}%"))
+            : companies.Where(x => x.Name.Contains(query, StringComparison.OrdinalIgnoreCase));
+        return await companies
+            .OrderBy(x => x.Name).ThenBy(x => x.Id).Take(limit)
+            .Select(x => new InterviewInsightCompanyResponse(x.Id, x.Name)).ToListAsync(ct);
     }
     public async Task<(IReadOnlyCollection<InterviewInsight>, int)> SearchAdminAsync(AdminInterviewInsightQuery query, CancellationToken ct)
     {
@@ -74,10 +113,20 @@ public sealed class InterviewInsightRepository(JobPortalDbContext db) : IIntervi
     public Task<bool> ReportExistsAsync(Guid candidateId, Guid insightId, CancellationToken ct) =>
         db.InsightReports.AsNoTracking().AnyAsync(x => x.ReporterCandidateId == candidateId && x.InsightId == insightId, ct);
     public Task AddReportAsync(InsightReport report, CancellationToken ct) => db.InsightReports.AddAsync(report, ct).AsTask();
-    public async Task<(int, int, int)> ContributionsAsync(Guid candidateId, CancellationToken ct)
+    public async Task<(int, int, int, int, int, IReadOnlyCollection<MyInterviewContributionCardResponse>)> ContributionsAsync(Guid candidateId, CancellationToken ct)
     {
-        var q = db.InterviewInsights.AsNoTracking().Where(x => x.AuthorCandidateId == candidateId && x.Status == InterviewInsightStatus.Published);
-        return (await q.CountAsync(ct), await q.SumAsync(x => x.HelpfulConfirmedCount, ct), await q.SumAsync(x => x.QualityScore, ct));
+        var q = db.InterviewInsights.AsNoTracking().Where(x => x.AuthorCandidateId == candidateId);
+        var published = await q.CountAsync(x => x.Status == InterviewInsightStatus.Published, ct);
+        var pending = await q.CountAsync(x => x.Status == InterviewInsightStatus.PendingReview, ct);
+        var needsChanges = await q.CountAsync(x => x.Status == InterviewInsightStatus.Rejected, ct);
+        var helped = await q.Where(x => x.Status == InterviewInsightStatus.Published).SumAsync(x => x.HelpfulConfirmedCount, ct);
+        var score = await q.Where(x => x.Status == InterviewInsightStatus.Published).SumAsync(x => x.QualityScore, ct);
+        var items = await q.OrderByDescending(x => x.UpdatedAtUtc ?? x.CreatedAtUtc)
+            .Select(x => new MyInterviewContributionCardResponse(x.Id, x.Company.Name, x.RoleTitle,
+                x.InterviewDateMonth.Month, x.InterviewDateMonth.Year, x.Status,
+                x.HelpfulConfirmedCount, x.QualityScore, x.UpdatedAtUtc ?? x.CreatedAtUtc,
+                x.Status == InterviewInsightStatus.Rejected ? x.ModerationReason : null)).ToListAsync(ct);
+        return (published, pending, needsChanges, helped, score, items);
     }
     public async Task<(string, int, int)> CompanySummaryAsync(Guid companyId, CancellationToken ct)
     {

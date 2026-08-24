@@ -32,6 +32,7 @@ public sealed class CreateInterviewInsightRequestValidator : AbstractValidator<C
         RuleFor(x => x.ExperienceLevel).MaximumLength(80);
         RuleFor(x => x.InterviewDateMonth).Must(x => x.Day == 1).WithMessage("InterviewDateMonth must be the first day of its month.");
         RuleFor(x => x.OverallDifficulty).IsInEnum();
+        RuleFor(x => x.InterviewFormat).IsInEnum().When(x => x.InterviewFormat.HasValue);
         RuleFor(x => x.ProcessSummary).NotEmpty().MaximumLength(3000).Must(InsightContentRules.IsSafe);
         RuleFor(x => x.PreparationTips).NotEmpty().MaximumLength(3000).Must(InsightContentRules.IsSafe);
         RuleFor(x => x.Outcome).IsInEnum().When(x => x.Outcome.HasValue);
@@ -56,6 +57,7 @@ public sealed class UpdateInterviewInsightRequestValidator : AbstractValidator<U
             RuleFor(x => x.ExperienceLevel).MaximumLength(80);
             RuleFor(x => x.InterviewDateMonth).Must(x => x.Day == 1);
             RuleFor(x => x.OverallDifficulty).IsInEnum();
+            RuleFor(x => x.InterviewFormat).IsInEnum().When(x => x.InterviewFormat.HasValue);
             RuleFor(x => x.ProcessSummary).NotEmpty().MaximumLength(3000).Must(InsightContentRules.IsSafe);
             RuleFor(x => x.PreparationTips).NotEmpty().MaximumLength(3000).Must(InsightContentRules.IsSafe);
             RuleFor(x => x.ContentGuidelinesAccepted).Equal(true);
@@ -72,6 +74,11 @@ public sealed class CreateInterviewScheduleRequestValidator : AbstractValidator<
         RuleFor(x => x.CompanyId).NotEmpty();
         RuleFor(x => x.RoleTitle).MaximumLength(160);
         RuleFor(x => x.InterviewAtUtc).NotEmpty();
+        RuleFor(x => x.InterviewFormat).IsInEnum().When(x => x.InterviewFormat.HasValue);
+        RuleFor(x => x.ApproximateTimeOfDay).IsInEnum().When(x => x.ApproximateTimeOfDay.HasValue);
+        RuleFor(x => x.PreparationStatus).IsInEnum().When(x => x.PreparationStatus.HasValue);
+        RuleFor(x => x.ExpectedRoundTypes).Must(x => x is null || x.Count <= 12).WithMessage("ExpectedRoundTypes cannot contain more than 12 values.");
+        RuleForEach(x => x.ExpectedRoundTypes).IsInEnum();
     }
 }
 public sealed class UpdateInterviewScheduleRequestValidator : AbstractValidator<UpdateInterviewScheduleRequest>
@@ -81,6 +88,11 @@ public sealed class UpdateInterviewScheduleRequestValidator : AbstractValidator<
         RuleFor(x => x.RoleTitle).MaximumLength(160);
         RuleFor(x => x.InterviewAtUtc).NotEmpty();
         RuleFor(x => x.Status).IsInEnum();
+        RuleFor(x => x.InterviewFormat).IsInEnum().When(x => x.InterviewFormat.HasValue);
+        RuleFor(x => x.ApproximateTimeOfDay).IsInEnum().When(x => x.ApproximateTimeOfDay.HasValue);
+        RuleFor(x => x.PreparationStatus).IsInEnum().When(x => x.PreparationStatus.HasValue);
+        RuleFor(x => x.ExpectedRoundTypes).Must(x => x is null || x.Count <= 12).WithMessage("ExpectedRoundTypes cannot contain more than 12 values.");
+        RuleForEach(x => x.ExpectedRoundTypes).IsInEnum();
     }
 }
 public sealed class CreateInsightFeedbackRequestValidator : AbstractValidator<CreateInsightFeedbackRequest>

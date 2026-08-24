@@ -42,7 +42,7 @@ public sealed class InterviewInsightService(
         };
         Apply(insight, request.RoleTitle, request.ExperienceLevel, request.InterviewDateMonth,
             request.OverallDifficulty, request.ProcessSummary, request.PreparationTips,
-            request.Outcome, request.IsAnonymous, request.Rounds);
+            request.Outcome, request.IsAnonymous, request.Rounds, request.InterviewFormat);
         await repository.AddInsightAsync(insight, ct);
         await audit.AppendAsync(new(AuditAction.Create, "InterviewInsight", insight.Id.ToString(),
             new Dictionary<string, string?> { ["status"] = "PendingReview" }, new(candidateId, "Candidate")), ct);
@@ -51,19 +51,33 @@ public sealed class InterviewInsightService(
         return Map(loaded, true, candidateId == loaded.AuthorCandidateId);
     }
 
-    public async Task<PagedResponse<InterviewInsightResponse>> SearchAsync(Guid candidateId, InterviewInsightQuery query, CancellationToken ct = default)
+    public async Task<PagedResponse<InterviewInsightCardResponse>> SearchAsync(Guid candidateId, InterviewInsightQuery query, CancellationToken ct = default)
     {
         await RequireCandidateAsync(candidateId, ct);
         ValidatePage(query.PageNumber, query.PageSize);
-        if (query.Sort is not ("mostHelpful" or "newest")) throw new BadRequestException("Sort must be mostHelpful or newest.");
-        var result = await repository.SearchPublishedAsync(query with { Role = query.Role?.Trim() }, ct);
-        var mapped = new List<InterviewInsightResponse>(result.Items.Count);
-        foreach (var item in result.Items)
-        {
-            var eligible = await EligibleForCompanyAsync(candidateId, item.CompanyId, ct);
-            mapped.Add(Map(item, eligible, false));
-        }
-        return new(mapped, query.PageNumber, query.PageSize, result.Total);
+        if (!Enum.TryParse<InterviewInsightSort>(query.Sort, true, out _)) throw new BadRequestException("Sort must be MostHelpful, Newest, or MostRounds.", "invalid_sort");
+        if (query.Company?.Trim().Length > 160) throw new BadRequestException("Company search must not exceed 160 characters.", "invalid_company");
+        if (query.Role?.Trim().Length > 160) throw new BadRequestException("Role must not exceed 160 characters.", "invalid_role");
+        if (query.ExperienceLevel?.Trim().Length > 80) throw new BadRequestException("ExperienceLevel must not exceed 80 characters.", "invalid_experience_level");
+        if (query.FromMonth.HasValue != query.FromYear.HasValue) throw new BadRequestException("FromMonth and FromYear must be supplied together.", "invalid_from_month");
+        if (query.FromMonth is < 1 or > 12 || query.FromYear is < 2000 or > 9999) throw new BadRequestException("FromMonth must be 1-12 and FromYear must be 2000-9999.", "invalid_from_month");
+        if (query.RecencyMonths is < 1 or > 120) throw new BadRequestException("RecencyMonths must be between 1 and 120.", "invalid_recency_months");
+        if (query.RecencyMonths.HasValue && query.FromMonth.HasValue) throw new BadRequestException("Use either FromMonth/FromYear or RecencyMonths, not both.", "conflicting_date_filters");
+        DateOnly? fromMonth = query.FromMonth.HasValue ? new(query.FromYear!.Value, query.FromMonth.Value, 1)
+            : query.RecencyMonths.HasValue ? new DateOnly(Now.Year, Now.Month, 1).AddMonths(1 - query.RecencyMonths.Value) : null;
+        var cleaned = query with { Company = Clean(query.Company), Role = Clean(query.Role), ExperienceLevel = Clean(query.ExperienceLevel) };
+        var result = await repository.SearchPublishedAsync(candidateId, cleaned, fromMonth, ct);
+        return new(result.Items, query.PageNumber, query.PageSize, result.Total);
+    }
+
+    public async Task<IReadOnlyCollection<InterviewInsightCompanyResponse>> SearchCompaniesAsync(Guid candidateId, string query, int limit, CancellationToken ct = default)
+    {
+        await RequireCandidateAsync(candidateId, ct);
+        var normalized = Clean(query);
+        if (normalized is null || normalized.Length < 2) throw new BadRequestException("Query must contain at least 2 characters.", "invalid_query");
+        if (normalized.Length > 160) throw new BadRequestException("Query must not exceed 160 characters.", "invalid_query");
+        if (limit is < 1 or > 20) throw new BadRequestException("Limit must be between 1 and 20.", "invalid_limit");
+        return await repository.SearchCompaniesAsync(normalized, limit, ct);
     }
 
     public async Task<InterviewInsightResponse> GetAsync(Guid candidateId, Guid id, CancellationToken ct = default)
@@ -85,7 +99,7 @@ public sealed class InterviewInsightService(
         item.Rounds.Clear();
         Apply(item, request.RoleTitle, request.ExperienceLevel, request.InterviewDateMonth,
             request.OverallDifficulty, request.ProcessSummary, request.PreparationTips,
-            request.Outcome, request.IsAnonymous, request.Rounds);
+            request.Outcome, request.IsAnonymous, request.Rounds, request.InterviewFormat);
         item.Status = InterviewInsightStatus.PendingReview;
         item.PublishedAtUtc = null;
         item.ModerationReason = null;
@@ -115,7 +129,10 @@ public sealed class InterviewInsightService(
         {
             CandidateId = candidateId, CompanyId = request.CompanyId, JobId = request.JobId,
             RoleTitle = Clean(request.RoleTitle), InterviewAtUtc = Utc(request.InterviewAtUtc),
-            ConfirmFeedbackAvailableAtUtc = Utc(request.InterviewAtUtc), Status = InterviewScheduleStatus.Scheduled
+            ConfirmFeedbackAvailableAtUtc = Utc(request.InterviewAtUtc), Status = InterviewScheduleStatus.Scheduled,
+            InterviewFormat = request.InterviewFormat, ApproximateTimeOfDay = request.ApproximateTimeOfDay,
+            ExpectedRoundTypes = SerializeRoundTypes(request.ExpectedRoundTypes), PreparationStatus = request.PreparationStatus,
+            ReminderRequested = request.ReminderRequested
         };
         await repository.AddScheduleAsync(schedule, ct);
         await repository.SaveAsync(ct);
@@ -137,6 +154,11 @@ public sealed class InterviewInsightService(
         schedule.InterviewAtUtc = Utc(request.InterviewAtUtc);
         schedule.ConfirmFeedbackAvailableAtUtc = schedule.InterviewAtUtc;
         schedule.Status = request.Status;
+        schedule.InterviewFormat = request.InterviewFormat;
+        schedule.ApproximateTimeOfDay = request.ApproximateTimeOfDay;
+        schedule.ExpectedRoundTypes = SerializeRoundTypes(request.ExpectedRoundTypes);
+        schedule.PreparationStatus = request.PreparationStatus;
+        schedule.ReminderRequested = request.ReminderRequested;
         await repository.SaveAsync(ct);
         return MapSchedule(schedule);
     }
@@ -203,7 +225,7 @@ public sealed class InterviewInsightService(
         if (x.Published > 0) badges.Add("First Insight Shared");
         if (x.Helped >= 10) badges.Add("10 Candidates Helped");
         if (x.Helped >= 50) badges.Add("50 Candidates Helped");
-        return new(x.Published, x.Helped, x.Score, badges);
+        return new(x.Published, x.Helped, x.Score, badges, x.Pending, x.NeedsChanges, x.Items);
     }
 
     public async Task<CompanyInterviewInsightSummaryResponse> CompanySummaryAsync(Guid candidateId, Guid companyId, CancellationToken ct = default)
@@ -230,11 +252,11 @@ public sealed class InterviewInsightService(
     }
     private static void Apply(InterviewInsight item, string role, string? level, DateOnly month,
         InterviewDifficulty difficulty, string summary, string tips, InterviewOutcome? outcome,
-        bool anonymous, IReadOnlyCollection<InterviewRoundRequest> rounds)
+        bool anonymous, IReadOnlyCollection<InterviewRoundRequest> rounds, InterviewFormat? format)
     {
         item.RoleTitle = role.Trim(); item.ExperienceLevel = Clean(level); item.InterviewDateMonth = month;
         item.OverallDifficulty = difficulty; item.ProcessSummary = summary.Trim(); item.PreparationTips = tips.Trim();
-        item.Outcome = outcome; item.IsAnonymous = anonymous;
+        item.Outcome = outcome; item.IsAnonymous = anonymous; item.InterviewFormat = format;
         var sequence = 1;
         foreach (var round in rounds) item.Rounds.Add(new InterviewRound
         {
@@ -251,12 +273,18 @@ public sealed class InterviewInsightService(
         x.Status, x.PublishedAtUtc, x.Rounds.Count, x.HelpfulConfirmedCount, x.QualityScore, full,
         full && !owner && x.Status == InterviewInsightStatus.Published,
         full ? x.Rounds.OrderBy(r => r.Sequence).Select(r => new InterviewRoundResponse(r.Id, r.Sequence,
-            r.RoundType, r.RoundTitle, r.DurationMinutes, r.QuestionsOrTopics, r.CandidateAdvice)).ToArray() : []);
+            r.RoundType, r.RoundTitle, r.DurationMinutes, r.QuestionsOrTopics, r.CandidateAdvice)).ToArray() : [],
+        x.InterviewFormat);
     private async Task<InterviewScheduleResponse> ScheduleResponseAsync(CandidateInterviewSchedule s, CancellationToken ct) =>
         MapSchedule(await repository.GetScheduleAsync(s.CandidateId, s.Id, false, ct) ?? s);
     private InterviewScheduleResponse MapSchedule(CandidateInterviewSchedule s) => new(s.Id, s.CompanyId,
         s.Company?.Name ?? string.Empty, s.JobId, s.RoleTitle, s.InterviewAtUtc, s.Status,
-        s.ConfirmFeedbackAvailableAtUtc, s.Status != InterviewScheduleStatus.Cancelled && s.InterviewAtUtc <= Now);
+        s.ConfirmFeedbackAvailableAtUtc, s.Status != InterviewScheduleStatus.Cancelled && s.InterviewAtUtc <= Now,
+        s.InterviewFormat, s.ApproximateTimeOfDay, ParseRoundTypes(s.ExpectedRoundTypes), s.PreparationStatus, s.ReminderRequested);
+    private static string? SerializeRoundTypes(IReadOnlyCollection<InterviewRoundType>? values) =>
+        values is null || values.Count == 0 ? null : string.Join(',', values.Distinct().Select(x => x.ToString()));
+    private static InterviewRoundType[] ParseRoundTypes(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? [] : value.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(x => Enum.Parse<InterviewRoundType>(x)).ToArray();
     private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     private static DateTime Utc(DateTime value) => value.Kind == DateTimeKind.Utc ? value : value.ToUniversalTime();
     private static bool IsMilestone(int before, int after) => (before < 1 && after >= 1) || (before < 10 && after >= 10) || (before < 50 && after >= 50);

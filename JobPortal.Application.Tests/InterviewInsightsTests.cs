@@ -89,6 +89,103 @@ public sealed class InterviewInsightsTests
         await Assert.ThrowsAsync<NotFoundException>(() => f.Service.GetAsync(f.ReaderId, second.Id));
     }
 
+    [Fact]
+    public async Task ExploreFiltersSortsAndProjectsOnlySafePublishedCards()
+    {
+        await using var f = await Fixture.CreateAsync();
+        var published = await f.AddPublishedInsightAsync(f.AuthorId, f.CompanyAId, anonymous: true);
+        published.RoleTitle = "Senior Backend Engineer";
+        published.ExperienceLevel = "Senior";
+        published.Outcome = InterviewOutcome.Selected;
+        published.InterviewFormat = InterviewFormat.Video;
+        published.HelpfulConfirmedCount = 4;
+        await f.Db.SaveChangesAsync();
+        f.Db.InterviewInsights.AddRange(
+            Insight(f.AuthorId, f.CompanyAId, InterviewInsightStatus.PendingReview),
+            Insight(f.AuthorId, f.CompanyAId, InterviewInsightStatus.Rejected),
+            Insight(f.AuthorId, f.CompanyAId, InterviewInsightStatus.Hidden),
+            Insight(f.AuthorId, f.CompanyAId, InterviewInsightStatus.Published, deleted: true));
+        var actioned = Insight(f.AuthorId, f.CompanyAId, InterviewInsightStatus.Published);
+        actioned.Reports.Add(new InsightReport { ReporterCandidateId = f.ReaderId,
+            Reason = InsightReportReason.ConfidentialContent, Status = InsightReportStatus.Actioned });
+        f.Db.InterviewInsights.Add(actioned);
+        await f.Db.SaveChangesAsync();
+
+        var result = await f.Service.SearchAsync(f.ReaderId, new InterviewInsightQuery(
+            CompanyId: f.CompanyAId, Role: "backend", RoundType: InterviewRoundType.Technical,
+            Difficulty: InterviewDifficulty.Moderate, Sort: "MostRounds", Company: "info",
+            ExperienceLevel: "Senior", Outcome: InterviewOutcome.Selected,
+            InterviewFormat: InterviewFormat.Video, FromMonth: 6, FromYear: 2026));
+
+        var card = Assert.Single(result.Items);
+        Assert.Equal(published.Id, card.Id);
+        Assert.False(card.CanReadFull);
+        Assert.False(card.CanGiveFeedback);
+        Assert.True(card.IsAnonymous);
+        Assert.Null(card.AuthorLabel);
+        var json = JsonSerializer.Serialize(card);
+        Assert.DoesNotContain("interviewAtUtc", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("authorCandidate", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("application", json, StringComparison.OrdinalIgnoreCase);
+
+        foreach (var sort in new[] { "MostHelpful", "Newest", "MostRounds" })
+            Assert.Single((await f.Service.SearchAsync(f.ReaderId, new(Sort: sort))).Items);
+    }
+
+    [Fact]
+    public async Task CompanyAutocompleteContributionsAndScheduleMetadataRemainOwnerSafe()
+    {
+        await using var f = await Fixture.CreateAsync();
+        var companies = await f.Service.SearchCompaniesAsync(f.ReaderId, " info ", 5);
+        var company = Assert.Single(companies);
+        Assert.Equal(f.CompanyAId, company.Id);
+        Assert.DoesNotContain("Owner", JsonSerializer.Serialize(company), StringComparison.OrdinalIgnoreCase);
+
+        var published = await f.AddPublishedInsightAsync(f.AuthorId, f.CompanyAId);
+        published.QualityScore = 3;
+        f.Db.InterviewInsights.Add(Insight(f.AuthorId, f.CompanyAId, InterviewInsightStatus.PendingReview));
+        var rejected = Insight(f.AuthorId, f.CompanyAId, InterviewInsightStatus.Rejected);
+        rejected.ModerationReason = "Please remove confidential details.";
+        f.Db.InterviewInsights.Add(rejected);
+        await f.Db.SaveChangesAsync();
+        var contributions = await f.Service.ContributionsAsync(f.AuthorId);
+        Assert.Equal(1, contributions.InsightsPublished);
+        Assert.Equal(1, contributions.PendingReview);
+        Assert.Equal(1, contributions.NeedsChanges);
+        Assert.Equal(3, contributions.Items!.Count);
+        Assert.All(contributions.Items, x => Assert.Contains(f.Db.InterviewInsights, i => i.Id == x.Id && i.AuthorCandidateId == f.AuthorId));
+        Assert.Null(contributions.Items.Single(x => x.Id == published.Id).ReviewerChangeRequest);
+        Assert.Equal("Please remove confidential details.", contributions.Items.Single(x => x.Id == rejected.Id).ReviewerChangeRequest);
+
+        var schedule = await f.Service.CreateScheduleAsync(f.ReaderId, new(f.CompanyAId, null, "Engineer", Now.AddDays(2),
+            InterviewFormat.Online, InterviewTimeOfDay.Morning, [InterviewRoundType.Technical, InterviewRoundType.HR],
+            InterviewPreparationStatus.Preparing, true));
+        Assert.Equal(InterviewFormat.Online, schedule.InterviewFormat);
+        Assert.Equal(2, schedule.ExpectedRoundTypes!.Count);
+        Assert.True(schedule.ReminderRequested);
+        Assert.DoesNotContain(JsonSerializer.Serialize(schedule), JsonSerializer.Serialize(await f.Service.SearchAsync(f.AuthorId, new())), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task InvalidExploreAndAutocompleteValuesHaveSpecificErrors()
+    {
+        await using var f = await Fixture.CreateAsync();
+        var sort = await Assert.ThrowsAsync<BadRequestException>(() => f.Service.SearchAsync(f.ReaderId, new(Sort: "popular")));
+        Assert.Equal("invalid_sort", sort.Code);
+        var month = await Assert.ThrowsAsync<BadRequestException>(() => f.Service.SearchAsync(f.ReaderId, new(FromMonth: 13, FromYear: 2026)));
+        Assert.Equal("invalid_from_month", month.Code);
+        var query = await Assert.ThrowsAsync<BadRequestException>(() => f.Service.SearchCompaniesAsync(f.ReaderId, "x", 10));
+        Assert.Equal("invalid_query", query.Code);
+    }
+
+    private static InterviewInsight Insight(Guid author, Guid company, InterviewInsightStatus status, bool deleted = false) => new()
+    {
+        AuthorCandidateId = author, CompanyId = company, RoleTitle = "Engineer",
+        InterviewDateMonth = new DateOnly(2026, 7, 1), OverallDifficulty = InterviewDifficulty.Moderate,
+        ProcessSummary = "A concise process summary.", PreparationTips = "Prepare core concepts.",
+        Status = status, IsDeleted = deleted
+    };
+
     private static CreateInterviewInsightRequest ValidCreate(Guid companyId) => new(companyId, null,
         "Software Engineer", "2-4 years", new DateOnly(2026, 7, 1), InterviewDifficulty.Moderate,
         "The process included technical and managerial discussions.",
