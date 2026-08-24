@@ -102,6 +102,17 @@ public sealed class PaymentRepository(JobPortalDbContext context) : IPaymentRepo
             .Include(x => x.History).SingleOrDefaultAsync(
                 x => x.ProviderOrderId == providerOrderId && x.UserId == userId, cancellationToken);
 
+    public Task<Payment?> GetLatestUnresolvedMembershipAsync(
+        Guid userId, CancellationToken cancellationToken = default) =>
+        context.Payments.Include(x => x.Membership!).ThenInclude(x => x.History)
+            .Include(x => x.History)
+            .Where(x => x.UserId == userId && x.MembershipId != null &&
+                x.ProviderOrderId != null &&
+                (x.Status == PaymentStatus.Created || x.Status == PaymentStatus.Pending ||
+                 x.Status == PaymentStatus.Authorized))
+            .OrderByDescending(x => x.CreatedAtUtc).ThenByDescending(x => x.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+
     public Task<Payment?> GetLatestForUserAsync(
         Guid userId, CancellationToken cancellationToken = default) =>
         context.Payments.AsNoTracking().Where(x => x.UserId == userId)

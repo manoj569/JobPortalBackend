@@ -13,6 +13,8 @@ public interface IPaymentService
     Task<PhonePeCheckoutResponse> CreatePhonePeCheckoutAsync(Guid userId, CancellationToken cancellationToken = default);
     Task<PhonePeReturnStatusResponse> GetPhonePeStatusAsync(Guid userId, string merchantOrderId, CancellationToken cancellationToken = default);
     Task<PhonePeWebhookResponse> ProcessPhonePeWebhookAsync(PhonePeWebhookRequest request, CancellationToken cancellationToken = default);
+    Task<PendingMembershipCheckoutResponse?> GetPendingMembershipCheckoutAsync(Guid userId, CancellationToken cancellationToken = default);
+    Task<PendingMembershipCheckoutResponse> CancelPendingMembershipCheckoutAsync(Guid userId, string publicReference, CancellationToken cancellationToken = default);
     Task<RazorpayWebhookResponse> ProcessWebhookAsync(RazorpayWebhookRequest request, CancellationToken cancellationToken = default);
     Task<PagedResponse<PaymentResponse>> GetPaymentsAsync(Guid userId, HistoryQuery query, CancellationToken cancellationToken = default);
     Task<PagedResponse<PaymentHistoryResponse>> GetHistoryAsync(Guid userId, HistoryQuery query, CancellationToken cancellationToken = default);
