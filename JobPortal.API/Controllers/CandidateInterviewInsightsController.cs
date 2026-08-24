@@ -1,5 +1,7 @@
 using JobPortal.API.Extensions;
 using JobPortal.Application.Abstractions.InterviewInsights;
+using JobPortal.Application.Abstractions.CandidateCompanies;
+using JobPortal.Application.Features.CandidateCompanies;
 using JobPortal.Application.Features.InterviewInsights;
 using JobPortal.Shared.Models;
 using Microsoft.AspNetCore.Authorization;
@@ -11,7 +13,7 @@ namespace JobPortal.API.Controllers;
 [Authorize(Roles = "Candidate")]
 [Route("api/candidate")]
 [Produces("application/json")]
-public sealed class CandidateInterviewInsightsController(IInterviewInsightService insights) : ControllerBase
+public sealed class CandidateInterviewInsightsController(IInterviewInsightService insights, ICandidateCompanyService companies) : ControllerBase
 {
     [HttpPost("interview-insights")]
     public async Task<ActionResult<ApiResponse<InterviewInsightResponse>>> Create(CreateInterviewInsightRequest request, CancellationToken ct) =>
@@ -23,10 +25,10 @@ public sealed class CandidateInterviewInsightsController(IInterviewInsightServic
         Ok(new ApiResponse<PagedResponse<InterviewInsightCardResponse>>(await insights.SearchAsync(User.GetRequiredUserId(), query, ct)));
 
     [HttpGet("interview-insights/companies")]
-    public async Task<ActionResult<ApiResponse<IReadOnlyCollection<InterviewInsightCompanyResponse>>>> Companies(
+    public async Task<ActionResult<ApiResponse<IReadOnlyCollection<CompanyOption>>>> Companies(
         [FromQuery] string query, [FromQuery] int limit = 10, CancellationToken ct = default) =>
-        Ok(new ApiResponse<IReadOnlyCollection<InterviewInsightCompanyResponse>>(
-            await insights.SearchCompaniesAsync(User.GetRequiredUserId(), query, limit, ct)));
+        Ok(new ApiResponse<IReadOnlyCollection<CompanyOption>>(
+            await companies.SearchAsync(User.GetRequiredUserId(), query, limit, ct)));
 
     [HttpGet("interview-insights/{id:guid}")]
     public async Task<ActionResult<ApiResponse<InterviewInsightResponse>>> Get(Guid id, CancellationToken ct) =>

@@ -20,6 +20,7 @@ public enum EmploymentType { FullTime = 1, PartTime, Contract, Internship, Freel
 public enum WorkplaceType { OnSite = 1, Remote, Hybrid }
 public enum ExperienceLevel { Entry = 1, Junior, Mid, Senior, Lead, Executive }
 public enum CompanyType { Startup = 1, Corporate, IndianMnc, ForeignMnc, Consultant }
+public enum CompanySubmissionSource { Administrative = 0, CandidateSubmitted = 1 }
 public enum PostedByType { Company = 1, Consultant }
 public enum PublicJobSort
 {

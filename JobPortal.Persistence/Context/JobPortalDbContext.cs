@@ -1,5 +1,6 @@
 using JobPortal.Domain.Common;
 using JobPortal.Domain.Entities;
+using JobPortal.Application.Features.CandidateCompanies;
 using Microsoft.EntityFrameworkCore;
 
 namespace JobPortal.Persistence.Context;
@@ -92,6 +93,8 @@ public sealed class JobPortalDbContext(DbContextOptions<JobPortalDbContext> opti
 
         foreach (var entry in ChangeTracker.Entries<BaseEntity>())
         {
+            if (entry.Entity is Company company && entry.State is EntityState.Added or EntityState.Modified)
+                company.NormalizedName = CompanyNameNormalizer.Normalize(company.Name);
             if (entry.State == EntityState.Added)
             {
                 entry.Entity.CreatedAtUtc = utcNow;

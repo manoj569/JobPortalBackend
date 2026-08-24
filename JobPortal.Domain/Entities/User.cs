@@ -78,6 +78,7 @@ public sealed class User : BaseEntity
     public ICollection<Membership> Memberships { get; set; } = new List<Membership>();
     public ICollection<Payment> Payments { get; set; } = new List<Payment>();
     public ICollection<Company> OwnedCompanies { get; set; } = new List<Company>();
+    public ICollection<Company> SubmittedCompanies { get; set; } = new List<Company>();
     public ICollection<SavedJob> SavedJobs { get; set; } = new List<SavedJob>();
     public ICollection<UserJobHistory> JobHistory { get; set; } = new List<UserJobHistory>();
     public ICollection<Notification> Notifications { get; set; } = new List<Notification>();
