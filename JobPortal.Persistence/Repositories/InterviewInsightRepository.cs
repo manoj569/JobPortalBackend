@@ -9,7 +9,7 @@ using Npgsql;
 
 namespace JobPortal.Persistence.Repositories;
 
-public sealed class InterviewInsightRepository(JobPortalDbContext db) : IInterviewInsightRepository
+public sealed class InterviewInsightRepository(JobPortalDbContext db) : IInterviewInsightRepository, IInterviewScheduleNotificationProcessor
 {
     public Task<bool> IsCandidateAsync(Guid candidateId, CancellationToken ct) =>
         db.Users.AsNoTracking().AnyAsync(x => x.Id == candidateId && x.Status == UserStatus.Active &&
@@ -146,33 +146,48 @@ public sealed class InterviewInsightRepository(JobPortalDbContext db) : IIntervi
     public Task AddNotificationAsync(Notification notification, CancellationToken ct) => db.Notifications.AddAsync(notification, ct).AsTask();
     public async Task<int> CreateDueScheduleNotificationsAsync(DateTime nowUtc, CancellationToken ct)
     {
-        var ids = await db.CandidateInterviewSchedules.AsNoTracking()
-            .Where(x => x.Status != InterviewScheduleStatus.Cancelled && x.FeedbackNotificationSentAtUtc == null &&
-                x.ConfirmFeedbackAvailableAtUtc <= nowUtc)
-            .OrderBy(x => x.ConfirmFeedbackAvailableAtUtc).Select(x => x.Id).Take(50).ToListAsync(ct);
-        var created = 0;
-        foreach (var id in ids)
+        var strategy = db.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
         {
             await using var transaction = await db.Database.BeginTransactionAsync(ct);
-            var claimed = await db.CandidateInterviewSchedules.Where(x => x.Id == id && x.FeedbackNotificationSentAtUtc == null)
-                .ExecuteUpdateAsync(s => s.SetProperty(x => x.FeedbackNotificationSentAtUtc, nowUtc), ct);
-            if (claimed == 1)
+            var attemptNotifications = new List<Notification>();
+            try
             {
-                var schedule = await db.CandidateInterviewSchedules.AsNoTracking().Include(x => x.Company).SingleAsync(x => x.Id == id, ct);
-                await db.Notifications.AddAsync(new Notification
+                var ids = await db.CandidateInterviewSchedules.AsNoTracking()
+                    .Where(x => x.Status != InterviewScheduleStatus.Cancelled && x.FeedbackNotificationSentAtUtc == null &&
+                        x.ConfirmFeedbackAvailableAtUtc <= nowUtc)
+                    .OrderBy(x => x.ConfirmFeedbackAvailableAtUtc).Select(x => x.Id).Take(50).ToListAsync(ct);
+                foreach (var id in ids)
                 {
-                    UserId = schedule.CandidateId, Type = NotificationType.Profile,
-                    Title = "How did your interview go?",
-                    Message = $"Tell the community whether the {schedule.Company.Name} insights helped.",
-                    ActionUrl = "/dashboard/interview-insights"
-                }, ct);
-                await db.SaveChangesAsync(ct);
+                    var claimed = await db.CandidateInterviewSchedules
+                        .Where(x => x.Id == id && x.FeedbackNotificationSentAtUtc == null)
+                        .ExecuteUpdateAsync(s => s.SetProperty(x => x.FeedbackNotificationSentAtUtc, nowUtc), ct);
+                    if (claimed != 1) continue;
+                    var schedule = await db.CandidateInterviewSchedules.AsNoTracking().Include(x => x.Company)
+                        .SingleAsync(x => x.Id == id, ct);
+                    attemptNotifications.Add(new Notification
+                    {
+                        UserId = schedule.CandidateId, Type = NotificationType.Profile,
+                        Title = "How did your interview go?",
+                        Message = $"Tell the community whether the {schedule.Company.Name} insights helped.",
+                        ActionUrl = "/dashboard/interview-insights"
+                    });
+                }
+                if (attemptNotifications.Count > 0)
+                {
+                    await db.Notifications.AddRangeAsync(attemptNotifications, ct);
+                    await db.SaveChangesAsync(ct);
+                }
                 await transaction.CommitAsync(ct);
-                created++;
+                return attemptNotifications.Count;
             }
-            else await transaction.RollbackAsync(ct);
-        }
-        return created;
+            catch
+            {
+                foreach (var notification in attemptNotifications)
+                    db.Entry(notification).State = EntityState.Detached;
+                throw;
+            }
+        });
     }
     public async Task SaveAsync(CancellationToken ct)
     {
