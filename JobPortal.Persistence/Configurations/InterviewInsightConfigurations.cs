@@ -51,6 +51,7 @@ public sealed class CandidateInterviewScheduleConfiguration : IEntityTypeConfigu
         builder.ToTable("CandidateInterviewSchedules");
         builder.HasKey(x => x.Id);
         builder.Property(x => x.RoleTitle).HasMaxLength(160);
+        builder.Property(x => x.ExpectedRoundTypes).HasMaxLength(160);
         builder.HasOne(x => x.Candidate).WithMany().HasForeignKey(x => x.CandidateId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(x => x.Company).WithMany().HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(x => x.Job).WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.SetNull);

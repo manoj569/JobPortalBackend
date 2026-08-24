@@ -15,6 +15,7 @@ public sealed class InterviewInsight : BaseEntity
     public string? ExperienceLevel { get; set; }
     public DateOnly InterviewDateMonth { get; set; }
     public InterviewDifficulty OverallDifficulty { get; set; }
+    public InterviewFormat? InterviewFormat { get; set; }
     public string ProcessSummary { get; set; } = string.Empty;
     public string PreparationTips { get; set; } = string.Empty;
     public InterviewOutcome? Outcome { get; set; }
@@ -54,6 +55,11 @@ public sealed class CandidateInterviewSchedule : BaseEntity
     public InterviewScheduleStatus Status { get; set; } = InterviewScheduleStatus.Scheduled;
     public DateTime ConfirmFeedbackAvailableAtUtc { get; set; }
     public DateTime? FeedbackNotificationSentAtUtc { get; set; }
+    public InterviewFormat? InterviewFormat { get; set; }
+    public InterviewTimeOfDay? ApproximateTimeOfDay { get; set; }
+    public string? ExpectedRoundTypes { get; set; }
+    public InterviewPreparationStatus? PreparationStatus { get; set; }
+    public bool ReminderRequested { get; set; }
 }
 
 public sealed class InsightHelpfulnessFeedback : BaseEntity
