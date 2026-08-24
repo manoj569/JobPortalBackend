@@ -24,3 +24,11 @@ public sealed record PaymentStatusResponse(
 public sealed record RazorpayWebhookRequest(
     ReadOnlyMemory<byte> RawBody, string Signature, string? EventId);
 public sealed record RazorpayWebhookResponse(string Outcome);
+public sealed record PhonePeCheckoutResponse(
+    string MerchantOrderId, string RedirectUrl, DateTime? ExpiresAtUtc,
+    string PlanName, long AmountInMinorUnits, string CurrencyCode, int DurationDays);
+public enum PhonePeBrowserPaymentStatus { Pending = 1, Completed, Failed, Cancelled }
+public sealed record PhonePeReturnStatusResponse(
+    string MerchantOrderId, PhonePeBrowserPaymentStatus Status);
+public sealed record PhonePeWebhookRequest(ReadOnlyMemory<byte> RawBody, string Authorization);
+public sealed record PhonePeWebhookResponse(string Outcome);

@@ -10,10 +10,27 @@ public interface IPaymentService
     Task<PaymentResponse> ConfirmAsync(Guid userId, Guid paymentId, ConfirmRazorpayPaymentRequest request, CancellationToken cancellationToken = default);
     Task<PaymentResponse> ReconcileAsync(Guid userId, Guid paymentId, CancellationToken cancellationToken = default);
     Task<PaymentStatusResponse> GetStatusAsync(Guid userId, CancellationToken cancellationToken = default);
+    Task<PhonePeCheckoutResponse> CreatePhonePeCheckoutAsync(Guid userId, CancellationToken cancellationToken = default);
+    Task<PhonePeReturnStatusResponse> GetPhonePeStatusAsync(Guid userId, string merchantOrderId, CancellationToken cancellationToken = default);
+    Task<PhonePeWebhookResponse> ProcessPhonePeWebhookAsync(PhonePeWebhookRequest request, CancellationToken cancellationToken = default);
     Task<RazorpayWebhookResponse> ProcessWebhookAsync(RazorpayWebhookRequest request, CancellationToken cancellationToken = default);
     Task<PagedResponse<PaymentResponse>> GetPaymentsAsync(Guid userId, HistoryQuery query, CancellationToken cancellationToken = default);
     Task<PagedResponse<PaymentHistoryResponse>> GetHistoryAsync(Guid userId, HistoryQuery query, CancellationToken cancellationToken = default);
 }
+
+public interface IPhonePeGateway
+{
+    Task<PhonePeCheckout> CreateCheckoutAsync(string merchantOrderId, long amountInMinorUnits, CancellationToken cancellationToken = default);
+    Task<PhonePeOrderState> GetOrderStatusAsync(string merchantOrderId, CancellationToken cancellationToken = default);
+    bool VerifyWebhookAuthorization(string authorization);
+    PhonePeCallback ParseCallback(ReadOnlyMemory<byte> rawBody);
+}
+
+public sealed record PhonePeCheckout(string RedirectUrl, DateTime? ExpiresAtUtc = null);
+public enum PhonePeOrderStateKind { Pending = 1, Completed, Failed, Cancelled }
+public sealed record PhonePeOrderState(PhonePeOrderStateKind State, string MerchantOrderId,
+    string? TransactionId = null, long? AmountInMinorUnits = null);
+public sealed record PhonePeCallback(string MerchantOrderId, PhonePeOrderStateKind State, string EventId);
 
 public interface IRazorpayGateway
 {

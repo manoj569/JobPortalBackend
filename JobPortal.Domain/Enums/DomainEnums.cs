@@ -13,7 +13,7 @@ public enum PaymentStatus
     Created,
     Expired
 }
-public enum PaymentProvider { Unknown = 0, Stripe, Razorpay, PayPal, BankTransfer }
+public enum PaymentProvider { Unknown = 0, Stripe, Razorpay, PayPal, BankTransfer, PhonePe }
 public enum JobStatus { Draft = 1, Published, Paused, Closed, Expired, Archived }
 public enum ResumeExtractionStatus { NotStarted = 0, Processing, Ready, Failed }
 public enum EmploymentType { FullTime = 1, PartTime, Contract, Internship, Freelance, Temporary }

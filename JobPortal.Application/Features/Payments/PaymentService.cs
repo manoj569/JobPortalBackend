@@ -20,6 +20,7 @@ public sealed class PaymentService(
     IMembershipRepository memberships,
     IUserRepository users,
     IRazorpayGateway razorpay,
+    IPhonePeGateway phonePe,
     IMembershipPlanProvider plans,
     IUnitOfWork unitOfWork,
     IAuditWriter auditWriter,
@@ -28,6 +29,184 @@ public sealed class PaymentService(
     TimeProvider timeProvider) : IPaymentService
 {
     private const int MaximumWebhookBytes = 1024 * 1024;
+
+    public async Task<PhonePeCheckoutResponse> CreatePhonePeCheckoutAsync(
+        Guid userId, CancellationToken cancellationToken = default)
+    {
+        await RequiredCandidateAsync(userId, cancellationToken);
+        var utcNow = UtcNow;
+        var plan = plans.GetDefaultPlan();
+        var membership = await memberships.GetPortalMembershipForUserAsync(userId, cancellationToken);
+        await ExpireMembershipIfNeededAsync(membership, userId, cancellationToken);
+        if (membership is { Status: MembershipStatus.Active } && membership.StartsAtUtc <= utcNow &&
+            (!membership.EndsAtUtc.HasValue || membership.EndsAtUtc > utcNow))
+            throw new ConflictException("An active portal membership already exists.");
+        if (membership?.Status == MembershipStatus.Pending)
+            throw new ConflictException("A portal membership payment order is already pending.");
+
+        var previousMembershipStatus = membership?.Status;
+        if (membership is null)
+        {
+            membership = new Membership
+            {
+                UserId = userId, PlanName = plan.Name,
+                Status = MembershipStatus.Pending, StartsAtUtc = utcNow
+            };
+            membership.History.Add(NewMembershipHistory(
+                membership, null, MembershipStatus.Pending, userId, "Payment initiated."));
+            await memberships.AddAsync(membership, cancellationToken);
+        }
+        else
+        {
+            membership.Status = MembershipStatus.Pending;
+            membership.PlanName = plan.Name;
+            membership.History.Add(NewMembershipHistory(
+                membership, previousMembershipStatus, MembershipStatus.Pending, userId, "Payment re-initiated."));
+        }
+
+        var payment = new Payment
+        {
+            UserId = userId, Membership = membership, Amount = plan.Amount,
+            CurrencyCode = plan.CurrencyCode.ToUpperInvariant(), Provider = PaymentProvider.PhonePe,
+            Status = PaymentStatus.Created
+        };
+        var merchantOrderId = $"ch_{payment.Id:N}";
+        payment.ProviderOrderId = merchantOrderId;
+        payment.TransactionReference = merchantOrderId;
+        payment.ProviderReceipt = merchantOrderId;
+        payment.History.Add(NewPaymentHistory(payment, null, PaymentStatus.Created, userId, "Local order created."));
+        await payments.AddAsync(payment, cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+
+        try
+        {
+            var amount = ToMinorUnits(payment.Amount);
+            var checkout = await phonePe.CreateCheckoutAsync(merchantOrderId, amount, cancellationToken);
+            payment.ProviderOrderCreatedAtUtc = UtcNow;
+            payment.Status = PaymentStatus.Pending;
+            payment.History.Add(NewPaymentHistory(
+                payment, PaymentStatus.Created, PaymentStatus.Pending, userId, "PhonePe checkout created."));
+            await auditWriter.AppendAsync(new(AuditAction.Create, "Payment", payment.Id.ToString(),
+                new Dictionary<string, string?>
+                {
+                    ["amount"] = payment.Amount.ToString(CultureInfo.InvariantCulture),
+                    ["currency"] = payment.CurrencyCode,
+                    ["provider"] = PaymentProvider.PhonePe.ToString(),
+                    ["status"] = PaymentStatus.Pending.ToString()
+                }, new(userId, "Candidate")), cancellationToken);
+            await unitOfWork.SaveChangesAsync(cancellationToken);
+            return new(merchantOrderId, checkout.RedirectUrl, checkout.ExpiresAtUtc,
+                plan.Name, amount, payment.CurrencyCode, plan.DurationDays);
+        }
+        catch
+        {
+            payment.Status = PaymentStatus.Failed;
+            payment.History.Add(NewPaymentHistory(payment, PaymentStatus.Created, PaymentStatus.Failed,
+                userId, "PhonePe checkout creation failed."));
+            RestoreMembershipAfterFailedOrder(
+                membership, previousMembershipStatus, userId, "PhonePe checkout creation failed.");
+            await unitOfWork.SaveChangesAsync(CancellationToken.None);
+            throw;
+        }
+    }
+
+    public async Task<PhonePeReturnStatusResponse> GetPhonePeStatusAsync(
+        Guid userId, string merchantOrderId, CancellationToken cancellationToken = default)
+    {
+        await RequiredCandidateAsync(userId, cancellationToken);
+        if (string.IsNullOrWhiteSpace(merchantOrderId) || merchantOrderId.Length > 200)
+            throw new NotFoundException("Payment was not found.");
+        var payment = await payments.GetOwnedByProviderOrderIdAsync(merchantOrderId, userId, cancellationToken);
+        if (payment is null || payment.Provider != PaymentProvider.PhonePe)
+            throw new NotFoundException("Payment was not found.");
+        if (payment.Status is PaymentStatus.Created or PaymentStatus.Pending)
+            await ReconcilePhonePeAsync(payment, cancellationToken);
+        return new(merchantOrderId, BrowserStatus(payment.Status));
+    }
+
+    public async Task<PhonePeWebhookResponse> ProcessPhonePeWebhookAsync(
+        PhonePeWebhookRequest request, CancellationToken cancellationToken = default)
+    {
+        if (request.RawBody.IsEmpty || request.RawBody.Length > MaximumWebhookBytes ||
+            string.IsNullOrWhiteSpace(request.Authorization) || !phonePe.VerifyWebhookAuthorization(request.Authorization))
+            throw new BadRequestException("Invalid PhonePe webhook authentication.", "invalid_webhook_authentication");
+        var callback = phonePe.ParseCallback(request.RawBody);
+        if (await payments.HasProcessedProviderEventAsync(callback.EventId, cancellationToken))
+            return new("Duplicate event acknowledged.");
+        var payment = await payments.GetByProviderOrderIdAsync(callback.MerchantOrderId, cancellationToken);
+        if (payment is null || payment.Provider != PaymentProvider.PhonePe)
+            throw new NotFoundException("Payment order was not found.");
+
+        var verified = await phonePe.GetOrderStatusAsync(callback.MerchantOrderId, cancellationToken);
+        ValidatePhonePeState(payment, verified);
+        payment.LastReconciledAtUtc = UtcNow;
+        await ApplyPhonePeStateAsync(payment, verified, callback.EventId,
+            new(null, "PhonePeWebhook"), "Webhook", cancellationToken);
+        return new("Payment event processed.");
+    }
+
+    private async Task ReconcilePhonePeAsync(Payment payment, CancellationToken cancellationToken)
+    {
+        var state = await phonePe.GetOrderStatusAsync(payment.ProviderOrderId!, cancellationToken);
+        ValidatePhonePeState(payment, state);
+        payment.LastReconciledAtUtc = UtcNow;
+        await ApplyPhonePeStateAsync(payment, state, null,
+            new(payment.UserId, "Candidate"), "Reconciliation", cancellationToken);
+    }
+
+    private async Task ApplyPhonePeStateAsync(
+        Payment payment, PhonePeOrderState state, string? eventId,
+        AuditActor actor, string source, CancellationToken cancellationToken)
+    {
+        switch (state.State)
+        {
+            case PhonePeOrderStateKind.Completed:
+                if (string.IsNullOrWhiteSpace(state.TransactionId))
+                    throw new ConflictException("PhonePe verification did not include a transaction reference.");
+                if (payment.Status != PaymentStatus.Paid)
+                    await CompletePaymentAsync(payment, state.TransactionId,
+                        "PhonePe server verification confirmed completion.", eventId,
+                        AuditAction.WebhookSuccess, source, actor, cancellationToken);
+                else if (eventId is not null)
+                {
+                    payment.History.Add(NewPaymentHistory(payment, PaymentStatus.Paid, PaymentStatus.Paid,
+                        payment.UserId, "Duplicate completion acknowledged.", eventId));
+                    await unitOfWork.SaveChangesAsync(cancellationToken);
+                }
+                break;
+            case PhonePeOrderStateKind.Failed:
+                if (payment.Status != PaymentStatus.Paid)
+                    await TransitionToTerminalAsync(payment, PaymentStatus.Failed, state.TransactionId,
+                        "PhonePe verification reported failure.", cancellationToken, eventId);
+                break;
+            case PhonePeOrderStateKind.Cancelled:
+                if (payment.Status != PaymentStatus.Paid)
+                    await TransitionToTerminalAsync(payment, PaymentStatus.Cancelled, state.TransactionId,
+                        "PhonePe verification reported cancellation.", cancellationToken, eventId);
+                break;
+            default:
+                if (eventId is not null)
+                    payment.History.Add(NewPaymentHistory(payment, payment.Status, payment.Status,
+                        payment.UserId, "Pending PhonePe event acknowledged.", eventId));
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+                break;
+        }
+    }
+
+    private static void ValidatePhonePeState(Payment payment, PhonePeOrderState state)
+    {
+        if (!string.Equals(payment.ProviderOrderId, state.MerchantOrderId, StringComparison.Ordinal) ||
+            state.AmountInMinorUnits != ToMinorUnits(payment.Amount))
+            throw new ConflictException("PhonePe payment details do not match the local payment.");
+    }
+
+    private static PhonePeBrowserPaymentStatus BrowserStatus(PaymentStatus status) => status switch
+    {
+        PaymentStatus.Paid => PhonePeBrowserPaymentStatus.Completed,
+        PaymentStatus.Failed or PaymentStatus.Expired => PhonePeBrowserPaymentStatus.Failed,
+        PaymentStatus.Cancelled => PhonePeBrowserPaymentStatus.Cancelled,
+        _ => PhonePeBrowserPaymentStatus.Pending
+    };
 
     public async Task<PaymentOrderResponse> CreateOrderAsync(
         Guid userId, CreatePaymentOrderRequest request, CancellationToken cancellationToken = default)
@@ -379,14 +558,14 @@ public sealed class PaymentService(
         membership.EndsAtUtc = extensionStart.AddDays(plans.GetDefaultPlan().DurationDays);
         membership.History.Add(NewMembershipHistory(
             membership, previousMembershipStatus, MembershipStatus.Active,
-            payment.UserId, "Verified Razorpay payment completed."));
+            payment.UserId, $"Verified {payment.Provider} payment completed."));
         await auditWriter.AppendAsync(new(
             paymentAuditAction,
             "Payment",
             payment.Id.ToString(),
             new Dictionary<string, string?>
             {
-                ["provider"] = PaymentProvider.Razorpay.ToString(),
+                ["provider"] = payment.Provider.ToString(),
                 ["source"] = auditSource,
                 ["status"] = PaymentStatus.Paid.ToString()
             },

@@ -45,6 +45,12 @@ public static class ServiceCollectionExtensions
         });
         services.AddScoped<IExternalJobSourceProvider, AdzunaJobSourceProvider>();
         services.AddSingleton<IRazorpayGateway, RazorpayGateway>();
+        services.AddSingleton<PhonePeAccessTokenCache>();
+        services.AddHttpClient<IPhonePeGateway, PhonePeGateway>(client =>
+        {
+            client.BaseAddress = new Uri("https://api-preprod.phonepe.com/apis/pg-sandbox/");
+            client.Timeout = TimeSpan.FromSeconds(15);
+        });
         services.AddSingleton<IMembershipPlanProvider, ConfigurationMembershipPlanProvider>();
         services.AddSingleton<IResumeStorage, LocalResumeStorage>();
         services.AddSingleton<IResumeTextExtractor, ResumeTextExtractor>();
