@@ -60,3 +60,8 @@ public interface IInterviewInsightRepository
     Task<int> CreateDueScheduleNotificationsAsync(DateTime nowUtc, CancellationToken ct);
     Task SaveAsync(CancellationToken ct);
 }
+
+public interface IInterviewScheduleNotificationProcessor
+{
+    Task<int> CreateDueScheduleNotificationsAsync(DateTime nowUtc, CancellationToken ct);
+}

@@ -47,7 +47,9 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICandidateRepository, CandidateRepository>();
         services.AddScoped<ICandidateCompanyRepository, CandidateCompanyRepository>();
         services.AddScoped<IProfilePhotoStorage, PostgresProfilePhotoStorage>();
-        services.AddScoped<IInterviewInsightRepository, InterviewInsightRepository>();
+        services.AddScoped<InterviewInsightRepository>();
+        services.AddScoped<IInterviewInsightRepository>(provider => provider.GetRequiredService<InterviewInsightRepository>());
+        services.AddScoped<IInterviewScheduleNotificationProcessor>(provider => provider.GetRequiredService<InterviewInsightRepository>());
         services.AddScoped<ICandidatePortfolioRepository, CandidatePortfolioRepository>();
         services.AddScoped<ICompanyManagementRepository, CompanyManagementRepository>();
         services.AddScoped<ICategoryManagementRepository, CategoryManagementRepository>();
