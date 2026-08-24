@@ -1,6 +1,7 @@
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using JobPortal.Infrastructure.Payments;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -33,6 +34,28 @@ public sealed class PhonePeGatewayTests
             Assert.Contains("9900", body, StringComparison.Ordinal);
         });
         Assert.All(handler.AuthorizationHeaders, value => Assert.StartsWith("O-Bearer ", value, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task CheckoutUsesCanonicalEncodedFrontendReturnUrl()
+    {
+        var handler = new RecordingHandler();
+        using var cache = new PhonePeAccessTokenCache();
+        using var client = Client(handler);
+        var gateway = new PhonePeGateway(client, Configuration(), TimeProvider.System, cache,
+            NullLogger<PhonePeGateway>.Instance);
+
+        await gateway.CreateCheckoutAsync("ch_order/value + 1", 9900);
+
+        using var request = JsonDocument.Parse(Assert.Single(handler.CheckoutBodies));
+        var redirectUrl = request.RootElement.GetProperty("paymentFlow")
+            .GetProperty("merchantUrls").GetProperty("redirectUrl").GetString();
+        Assert.Equal(
+            "https://career-harbor.example/payment/phonepe/return?merchantOrderId=ch_order%2Fvalue%20%2B%201",
+            redirectUrl);
+        Assert.DoesNotContain("status", redirectUrl, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("amount", redirectUrl, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("token", redirectUrl, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
