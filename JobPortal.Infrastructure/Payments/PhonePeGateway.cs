@@ -36,8 +36,8 @@ public sealed class PhonePeGateway(
     {
         var redirectUrl = new UriBuilder(redirectBaseUrl)
         {
-            Path = redirectBaseUrl.AbsolutePath.TrimEnd('/') + "/payments/phonepe/return",
-            Query = $"order={Uri.EscapeDataString(merchantOrderId)}"
+            Path = redirectBaseUrl.AbsolutePath.TrimEnd('/') + "/payment/phonepe/return",
+            Query = $"merchantOrderId={Uri.EscapeDataString(merchantOrderId)}"
         }.Uri.AbsoluteUri;
         using var request = new HttpRequestMessage(HttpMethod.Post, "checkout/v2/pay")
         {
