@@ -42,7 +42,7 @@ public sealed class PaymentService(
             (!membership.EndsAtUtc.HasValue || membership.EndsAtUtc > utcNow))
             throw new ConflictException("An active portal membership already exists.");
         if (membership?.Status == MembershipStatus.Pending)
-            throw new ConflictException("A portal membership payment order is already pending.");
+            await ThrowPendingCheckoutConflictAsync(userId, cancellationToken);
 
         var previousMembershipStatus = membership?.Status;
         if (membership is null)
@@ -208,6 +208,99 @@ public sealed class PaymentService(
         _ => PhonePeBrowserPaymentStatus.Pending
     };
 
+    public async Task<PendingMembershipCheckoutResponse?> GetPendingMembershipCheckoutAsync(
+        Guid userId, CancellationToken cancellationToken = default)
+    {
+        await RequiredCandidateAsync(userId, cancellationToken);
+        var payment = await payments.GetLatestUnresolvedMembershipAsync(userId, cancellationToken);
+        return payment is null ? null : ToPendingCheckoutResponse(payment);
+    }
+
+    public async Task<PendingMembershipCheckoutResponse> CancelPendingMembershipCheckoutAsync(
+        Guid userId, string publicReference, CancellationToken cancellationToken = default)
+    {
+        await RequiredCandidateAsync(userId, cancellationToken);
+        if (string.IsNullOrWhiteSpace(publicReference) || publicReference.Length > 200)
+            throw new NotFoundException("Payment was not found.");
+        var payment = await payments.GetOwnedByProviderOrderIdAsync(
+            publicReference, userId, cancellationToken);
+        if (payment?.MembershipId is null ||
+            payment.Provider is not (PaymentProvider.Razorpay or PaymentProvider.PhonePe))
+            throw new NotFoundException("Payment was not found.");
+
+        if (payment.Status == PaymentStatus.Paid)
+            throw new ConflictException(
+                "A completed membership payment cannot be cancelled.",
+                "completed_payment_cannot_be_cancelled");
+        if (payment.Status is PaymentStatus.Failed or PaymentStatus.Cancelled or PaymentStatus.Expired)
+            return ToPendingCheckoutResponse(payment);
+        if (payment.Status is not (PaymentStatus.Created or PaymentStatus.Pending or PaymentStatus.Authorized))
+            throw new ConflictException("Payment is not in a cancellable state.");
+
+        if (payment.Provider == PaymentProvider.PhonePe)
+        {
+            var state = await phonePe.GetOrderStatusAsync(publicReference, cancellationToken);
+            ValidatePhonePeState(payment, state);
+            payment.LastReconciledAtUtc = UtcNow;
+            await ApplyPhonePeStateAsync(payment, state, null,
+                new(userId, "Candidate"), "CancellationReconciliation", cancellationToken);
+        }
+        else
+        {
+            var state = await razorpay.GetOrderPaymentStateAsync(publicReference, cancellationToken);
+            payment.LastReconciledAtUtc = UtcNow;
+            await ApplyRazorpayCancellationStateAsync(payment, state, userId, cancellationToken);
+        }
+
+        if (payment.Status is PaymentStatus.Created or PaymentStatus.Pending or PaymentStatus.Authorized)
+        {
+            await auditWriter.AppendAsync(new(
+                AuditAction.Update, "Payment", payment.Id.ToString(),
+                new Dictionary<string, string?>
+                {
+                    ["provider"] = payment.Provider.ToString(),
+                    ["status"] = PaymentStatus.Cancelled.ToString(),
+                    ["source"] = "CandidateCheckoutCancellation"
+                }, new(userId, "Candidate")), cancellationToken);
+            await TransitionToTerminalAsync(payment, PaymentStatus.Cancelled, null,
+                "Candidate abandoned the local checkout; provider payment was not reversed.",
+                cancellationToken);
+        }
+
+        return ToPendingCheckoutResponse(payment);
+    }
+
+    private async Task ApplyRazorpayCancellationStateAsync(
+        Payment payment, RazorpayPaymentState state, Guid userId, CancellationToken cancellationToken)
+    {
+        switch (state.State)
+        {
+            case RazorpayPaymentStateKind.Paid:
+                ValidateProviderPaymentState(payment, state);
+                await CompletePaymentAsync(payment, state.PaymentId!,
+                    "Razorpay cancellation check confirmed capture.", null,
+                    AuditAction.Confirm, "CancellationReconciliation",
+                    new(userId, "Candidate"), cancellationToken);
+                break;
+            case RazorpayPaymentStateKind.Failed:
+                ValidateProviderPaymentState(payment, state);
+                await TransitionToTerminalAsync(payment, PaymentStatus.Failed, state.PaymentId,
+                    "Razorpay cancellation check reported failure.", cancellationToken);
+                break;
+            case RazorpayPaymentStateKind.Cancelled:
+                await TransitionToTerminalAsync(payment, PaymentStatus.Cancelled, state.PaymentId,
+                    "Razorpay cancellation check reported cancellation.", cancellationToken);
+                break;
+            case RazorpayPaymentStateKind.Expired:
+                await TransitionToTerminalAsync(payment, PaymentStatus.Expired, state.PaymentId,
+                    "Razorpay cancellation check reported expiration.", cancellationToken);
+                break;
+            default:
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+                break;
+        }
+    }
+
     public async Task<PaymentOrderResponse> CreateOrderAsync(
         Guid userId, CreatePaymentOrderRequest request, CancellationToken cancellationToken = default)
     {
@@ -222,7 +315,7 @@ public sealed class PaymentService(
             (!membership.EndsAtUtc.HasValue || membership.EndsAtUtc > utcNow))
             throw new ConflictException("An active portal membership already exists.");
         if (membership?.Status == MembershipStatus.Pending)
-            throw new ConflictException("A portal membership payment order is already pending.");
+            await ThrowPendingCheckoutConflictAsync(userId, cancellationToken);
 
         var previousMembershipStatus = membership?.Status;
         if (membership is null)
@@ -635,6 +728,35 @@ public sealed class PaymentService(
             membership, MembershipStatus.Active, MembershipStatus.Expired,
             userId, "Membership term expired."));
         await unitOfWork.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task ThrowPendingCheckoutConflictAsync(
+        Guid userId, CancellationToken cancellationToken)
+    {
+        var payment = await payments.GetLatestUnresolvedMembershipAsync(userId, cancellationToken);
+        if (payment is null)
+            throw new ConflictException("A portal membership payment order is already pending.");
+        var response = ToPendingCheckoutResponse(payment);
+        throw new PendingMembershipCheckoutException(new(
+            response.Provider, response.PublicReference, response.Status,
+            response.CreatedAtUtc, response.CanResume, response.CanCancel));
+    }
+
+    private static PendingMembershipCheckoutResponse ToPendingCheckoutResponse(Payment payment)
+    {
+        var status = payment.Status switch
+        {
+            PaymentStatus.Created => MembershipCheckoutStatus.Created,
+            PaymentStatus.Pending or PaymentStatus.Authorized => MembershipCheckoutStatus.Pending,
+            PaymentStatus.Paid or PaymentStatus.Refunded => MembershipCheckoutStatus.Completed,
+            PaymentStatus.Cancelled => MembershipCheckoutStatus.Cancelled,
+            _ => MembershipCheckoutStatus.Failed
+        };
+        var canCancel = status is MembershipCheckoutStatus.Created or MembershipCheckoutStatus.Pending;
+        return new PendingMembershipCheckoutResponse(
+            payment.ProviderOrderId!, payment.Provider, status,
+            payment.Amount, payment.CurrencyCode, payment.CreatedAtUtc,
+            false, canCancel, null);
     }
 
     private void RestoreMembershipAfterFailedOrder(

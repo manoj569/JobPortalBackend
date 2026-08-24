@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using JobPortal.Application.Features.Memberships;
 using JobPortal.Domain.Enums;
 using JobPortal.Shared.Models;
@@ -32,3 +33,15 @@ public sealed record PhonePeReturnStatusResponse(
     string MerchantOrderId, PhonePeBrowserPaymentStatus Status);
 public sealed record PhonePeWebhookRequest(ReadOnlyMemory<byte> RawBody, string Authorization);
 public sealed record PhonePeWebhookResponse(string Outcome);
+[JsonConverter(typeof(JsonStringEnumConverter<MembershipCheckoutStatus>))]
+public enum MembershipCheckoutStatus { Created = 1, Pending, Failed, Cancelled, Completed }
+public sealed record PendingMembershipCheckoutResponse(
+    string PublicReference,
+    [property: JsonConverter(typeof(JsonStringEnumConverter<PaymentProvider>))] PaymentProvider Provider,
+    MembershipCheckoutStatus Status,
+    decimal Amount, string Currency, DateTime CreatedAtUtc,
+    bool CanResume, bool CanCancel, string? RedirectUrl);
+public sealed record PendingMembershipCheckoutRecovery(
+    [property: JsonConverter(typeof(JsonStringEnumConverter<PaymentProvider>))] PaymentProvider Provider,
+    string PublicReference, MembershipCheckoutStatus Status,
+    DateTime CreatedAtUtc, bool CanResume, bool CanCancel);

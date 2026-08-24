@@ -1,6 +1,7 @@
 using FluentValidation;
 using JobPortal.Application.Common.Exceptions;
 using JobPortal.Application.Features.Candidates;
+using JobPortal.Application.Features.Payments;
 using JobPortal.Shared.Models;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
@@ -43,6 +44,13 @@ public sealed class GlobalExceptionMiddleware(
             // 2. Map Exceptions to Status Codes and Error Responses
             var (statusCode, error) = exception switch
             {
+                PendingMembershipCheckoutException pending => (
+                    pending.StatusCode,
+                    (object)new PendingMembershipCheckoutErrorResponse(
+                        pending.Code, pending.Message, pending.Recovery.Provider,
+                        pending.Recovery.PublicReference, pending.Recovery.Status,
+                        pending.Recovery.CreatedAtUtc, pending.Recovery.CanResume,
+                        pending.Recovery.CanCancel)),
                 // Explicitly handles your Quota Exception to include 'redirectToMembership'
                 ApplicationQuotaExceededException quotaException => (
                     quotaException.StatusCode,
@@ -95,3 +103,11 @@ public sealed class GlobalExceptionMiddleware(
         }
     }
 }
+
+public sealed record PendingMembershipCheckoutErrorResponse(
+    string Code, string Message,
+    [property: System.Text.Json.Serialization.JsonConverter(
+        typeof(System.Text.Json.Serialization.JsonStringEnumConverter<JobPortal.Domain.Enums.PaymentProvider>))]
+    JobPortal.Domain.Enums.PaymentProvider Provider,
+    string PublicReference, MembershipCheckoutStatus Status, DateTime CreatedAtUtc,
+    bool CanResume, bool CanCancel);

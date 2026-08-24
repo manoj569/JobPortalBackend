@@ -34,6 +34,21 @@ public sealed class PaymentsController(IPaymentService paymentService) : Control
             new ApiResponse<PhonePeCheckoutResponse>(result, "PhonePe checkout created."));
     }
 
+    [HttpGet("pending-membership-checkout")]
+    public async Task<ActionResult<ApiResponse<PendingMembershipCheckoutResponse?>>> PendingMembershipCheckout(
+        CancellationToken cancellationToken) =>
+        Ok(new ApiResponse<PendingMembershipCheckoutResponse?>(
+            await paymentService.GetPendingMembershipCheckoutAsync(
+                User.GetRequiredUserId(), cancellationToken)));
+
+    [HttpPost("pending-membership-checkout/{publicReference}/cancel")]
+    public async Task<ActionResult<ApiResponse<PendingMembershipCheckoutResponse>>> CancelPendingMembershipCheckout(
+        string publicReference, CancellationToken cancellationToken) =>
+        Ok(new ApiResponse<PendingMembershipCheckoutResponse>(
+            await paymentService.CancelPendingMembershipCheckoutAsync(
+                User.GetRequiredUserId(), publicReference, cancellationToken),
+            "Membership checkout reconciled."));
+
     [HttpGet("phonepe/return/{merchantOrderId}")]
     public async Task<ActionResult<ApiResponse<PhonePeReturnStatusResponse>>> PhonePeReturnStatus(
         string merchantOrderId, CancellationToken cancellationToken) =>
