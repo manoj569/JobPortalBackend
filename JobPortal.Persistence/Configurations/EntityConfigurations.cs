@@ -137,6 +137,7 @@ public sealed class CompanyConfiguration : IEntityTypeConfiguration<Company>
         builder.ToTable("Companies");
         builder.ConfigureBaseEntity();
         builder.Property(x => x.Name).HasMaxLength(200).IsRequired();
+        builder.Property(x => x.NormalizedName).HasMaxLength(160).IsRequired();
         builder.Property(x => x.Slug).HasMaxLength(220).IsRequired();
         builder.Property(x => x.Description).HasMaxLength(4000);
         builder.Property(x => x.WebsiteUrl).HasMaxLength(2048);
@@ -145,8 +146,12 @@ public sealed class CompanyConfiguration : IEntityTypeConfiguration<Company>
         builder.Property(x => x.Location).HasMaxLength(250);
         builder.HasIndex(x => new { x.CompanyType, x.Industry });
         builder.HasIndex(x => x.Slug).IsUnique().HasFilter("\"IsDeleted\" = FALSE");
+        builder.HasIndex(x => x.NormalizedName).IsUnique().HasFilter("\"IsDeleted\" = FALSE");
         builder.HasIndex(x => x.OwnerUserId);
+        builder.HasIndex(x => new { x.SubmittedByCandidateId, x.CreatedAtUtc });
         builder.HasOne(x => x.OwnerUser).WithMany(x => x.OwnedCompanies).HasForeignKey(x => x.OwnerUserId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne(x => x.SubmittedByCandidate).WithMany(x => x.SubmittedCompanies)
+            .HasForeignKey(x => x.SubmittedByCandidateId).OnDelete(DeleteBehavior.Restrict);
     }
 }
 
