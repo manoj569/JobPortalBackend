@@ -7,6 +7,7 @@ using System.Text;
 using System.Text.Json;
 using JobPortal.Application.Abstractions.Payments;
 using JobPortal.Application.Common.Exceptions;
+using JobPortal.Application.Features.Payments;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
@@ -33,11 +34,20 @@ public sealed class PhonePeGateway(
 
     public async Task<PhonePeCheckout> CreateCheckoutAsync(
         string merchantOrderId, long amountInMinorUnits, CancellationToken cancellationToken = default)
+        => await CreateCheckoutAsync(merchantOrderId, amountInMinorUnits, null, cancellationToken);
+
+    public async Task<PhonePeCheckout> CreateCheckoutAsync(
+        string merchantOrderId, long amountInMinorUnits, string? returnTo,
+        CancellationToken cancellationToken = default)
     {
+        returnTo = PaymentReturnPath.Validate(returnTo);
+        var query = $"merchantOrderId={Uri.EscapeDataString(merchantOrderId)}";
+        if (returnTo is not null)
+            query += $"&returnTo={Uri.EscapeDataString(returnTo)}";
         var redirectUrl = new UriBuilder(redirectBaseUrl)
         {
             Path = redirectBaseUrl.AbsolutePath.TrimEnd('/') + "/payment/phonepe/return",
-            Query = $"merchantOrderId={Uri.EscapeDataString(merchantOrderId)}"
+            Query = query
         }.Uri.AbsoluteUri;
         using var request = new HttpRequestMessage(HttpMethod.Post, "checkout/v2/pay")
         {

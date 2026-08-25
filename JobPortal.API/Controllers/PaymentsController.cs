@@ -26,10 +26,10 @@ public sealed class PaymentsController(IPaymentService paymentService) : Control
     [HttpPost("phonepe/checkout")]
     [ProducesResponseType(typeof(ApiResponse<PhonePeCheckoutResponse>), StatusCodes.Status201Created)]
     public async Task<ActionResult<ApiResponse<PhonePeCheckoutResponse>>> CreatePhonePeCheckout(
-        CancellationToken cancellationToken)
+        [FromQuery] string? returnTo, CancellationToken cancellationToken)
     {
         var result = await paymentService.CreatePhonePeCheckoutAsync(
-            User.GetRequiredUserId(), cancellationToken);
+            User.GetRequiredUserId(), returnTo, cancellationToken);
         return StatusCode(StatusCodes.Status201Created,
             new ApiResponse<PhonePeCheckoutResponse>(result, "PhonePe checkout created."));
     }
@@ -51,10 +51,10 @@ public sealed class PaymentsController(IPaymentService paymentService) : Control
 
     [HttpGet("phonepe/return/{merchantOrderId}")]
     public async Task<ActionResult<ApiResponse<PhonePeReturnStatusResponse>>> PhonePeReturnStatus(
-        string merchantOrderId, CancellationToken cancellationToken) =>
+        string merchantOrderId, [FromQuery] string? returnTo, CancellationToken cancellationToken) =>
         Ok(new ApiResponse<PhonePeReturnStatusResponse>(
             await paymentService.GetPhonePeStatusAsync(
-                User.GetRequiredUserId(), merchantOrderId, cancellationToken)));
+                User.GetRequiredUserId(), merchantOrderId, returnTo, cancellationToken)));
 
     [AllowAnonymous]
     [HttpPost("phonepe/webhook")]

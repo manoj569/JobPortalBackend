@@ -11,7 +11,9 @@ public interface IPaymentService
     Task<PaymentResponse> ReconcileAsync(Guid userId, Guid paymentId, CancellationToken cancellationToken = default);
     Task<PaymentStatusResponse> GetStatusAsync(Guid userId, CancellationToken cancellationToken = default);
     Task<PhonePeCheckoutResponse> CreatePhonePeCheckoutAsync(Guid userId, CancellationToken cancellationToken = default);
+    Task<PhonePeCheckoutResponse> CreatePhonePeCheckoutAsync(Guid userId, string? returnTo, CancellationToken cancellationToken = default);
     Task<PhonePeReturnStatusResponse> GetPhonePeStatusAsync(Guid userId, string merchantOrderId, CancellationToken cancellationToken = default);
+    Task<PhonePeReturnStatusResponse> GetPhonePeStatusAsync(Guid userId, string merchantOrderId, string? returnTo, CancellationToken cancellationToken = default);
     Task<PhonePeWebhookResponse> ProcessPhonePeWebhookAsync(PhonePeWebhookRequest request, CancellationToken cancellationToken = default);
     Task<PendingMembershipCheckoutResponse?> GetPendingMembershipCheckoutAsync(Guid userId, CancellationToken cancellationToken = default);
     Task<PendingMembershipCheckoutResponse> CancelPendingMembershipCheckoutAsync(Guid userId, string publicReference, CancellationToken cancellationToken = default);
@@ -23,6 +25,8 @@ public interface IPaymentService
 public interface IPhonePeGateway
 {
     Task<PhonePeCheckout> CreateCheckoutAsync(string merchantOrderId, long amountInMinorUnits, CancellationToken cancellationToken = default);
+    Task<PhonePeCheckout> CreateCheckoutAsync(string merchantOrderId, long amountInMinorUnits, string? returnTo, CancellationToken cancellationToken = default) =>
+        CreateCheckoutAsync(merchantOrderId, amountInMinorUnits, cancellationToken);
     Task<PhonePeOrderState> GetOrderStatusAsync(string merchantOrderId, CancellationToken cancellationToken = default);
     bool VerifyWebhookAuthorization(string authorization);
     PhonePeCallback ParseCallback(ReadOnlyMemory<byte> rawBody);

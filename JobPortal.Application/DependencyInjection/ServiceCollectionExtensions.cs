@@ -13,6 +13,7 @@ using JobPortal.Application.Abstractions.InterviewInsights;
 using JobPortal.Application.Abstractions.Memberships;
 using JobPortal.Application.Abstractions.Payments;
 using JobPortal.Application.Abstractions.Portfolios;
+using JobPortal.Application.Abstractions.Settings;
 using JobPortal.Application.Features.AdminApplications;
 using JobPortal.Application.Features.AdminDashboard;
 using JobPortal.Application.Features.AdminImports;
@@ -29,6 +30,7 @@ using JobPortal.Application.Features.Memberships;
 using JobPortal.Application.Features.Payments;
 using JobPortal.Application.Features.Portfolios;
 using JobPortal.Application.Features.PublicJobs;
+using JobPortal.Application.Features.Settings;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace JobPortal.Application;
@@ -54,6 +56,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IMembershipService, MembershipService>();
         services.AddScoped<IPaymentService, PaymentService>();
         services.AddScoped<IDashboardService, DashboardService>();
+        services.AddScoped<IAccountSettingsService, AccountSettingsService>();
         services.AddScoped<IAdminDashboardService, AdminDashboardService>();
         services.AddScoped<IAdminApplicationService, AdminApplicationService>();
         services.AddScoped<IAdminImportService, AdminImportService>();
