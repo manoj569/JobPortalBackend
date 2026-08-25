@@ -6,6 +6,7 @@ using JobPortal.Application.Abstractions.Persistence;
 using JobPortal.Application.Abstractions.Portfolios;
 using JobPortal.Application.Common.Exceptions;
 using JobPortal.Application.Common.Text;
+using JobPortal.Application.Features.Candidates;
 using JobPortal.Domain.Common;
 using JobPortal.Domain.Entities;
 using JobPortal.Domain.Enums;
@@ -304,7 +305,10 @@ public sealed partial class CandidatePortfolioService(
             p?.SectionSettings.OrderBy(x => x.DisplayOrder).ThenBy(x => x.SectionType).Select(Map).ToArray() ?? [],
             data.Experiences.Select(Map).ToArray(), data.Education.Select(Map).ToArray(),
             data.Projects.Select(Map).ToArray(), data.Certifications.Select(Map).ToArray(),
-            data.ProfessionalLinks.Select(Map).ToArray(), data.CustomSections.Select(Map).ToArray());
+            data.ProfessionalLinks.Select(Map).ToArray(), data.CustomSections.Select(Map).ToArray(),
+            data.User.AvailabilityToJoin,
+            CandidateProfileCompletionProjection.Create(data.User, Skills(data).Length > 0,
+                data.Education.Count > 0, data.Experiences.Count > 0));
     }
 
     private static PublicPortfolioResponse MapPublic(CandidatePortfolioData data, bool requirePublished)

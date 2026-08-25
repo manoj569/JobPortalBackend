@@ -146,6 +146,53 @@ public sealed class CandidateModuleTests
     }
 
     [Fact]
+    public async Task ExistingBasicDetailsArePreservedWhenAddingMobileOnly()
+    {
+        var fixture = CreateFixture();
+        fixture.Candidate.WorkStatus = CandidateWorkStatus.Experienced;
+        fixture.Candidate.IsOutsideIndia = false;
+        fixture.Candidate.CurrentCountry = "India";
+        fixture.Candidate.CurrentCity = "Pune";
+        fixture.Candidate.CurrentArea = "Baner";
+        fixture.Candidate.AvailabilityToJoin = CandidateAvailability.OneMonth;
+
+        var result = await fixture.Service.UpdateBasicDetailsAsync(
+            fixture.Candidate.Id, new(MobileNumber: "9876543210"));
+
+        Assert.Equal("+919876543210", result.MobileNumber);
+        Assert.Equal("India", result.CurrentCountry);
+        Assert.Equal("Pune", result.CurrentCity);
+        Assert.Equal("Baner", result.CurrentArea);
+        Assert.Equal(CandidateAvailability.OneMonth, result.NoticePeriod);
+    }
+
+    [Fact]
+    public async Task InvalidMobileProducesMobileNumberFieldError()
+    {
+        var request = new UpdateCandidateBasicDetailsRequest(
+            CandidateWorkStatus.Fresher, false, "India", "Pune",
+            MobileNumber: "12345");
+        var result = await new UpdateCandidateBasicDetailsRequestValidator().ValidateAsync(request);
+
+        var error = Assert.Single(result.Errors, x => x.PropertyName == "MobileNumber");
+        Assert.Equal("Mobile number must be a valid 10-digit Indian mobile number.", error.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task NoticePeriodPersistsThroughPrivateBasicDetails()
+    {
+        var fixture = CreateFixture();
+        var result = await fixture.Service.UpdateBasicDetailsAsync(fixture.Candidate.Id,
+            new(CandidateWorkStatus.Fresher, false, "India", "Pune",
+                NoticePeriod: CandidateAvailability.ImmediateJoiner));
+
+        Assert.Equal(CandidateAvailability.ImmediateJoiner, fixture.Candidate.AvailabilityToJoin);
+        Assert.Equal(CandidateAvailability.ImmediateJoiner, result.NoticePeriod);
+        Assert.Contains("\"noticePeriod\":\"ImmediateJoiner\"",
+            JsonSerializer.Serialize(result, WebJson), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task CompletionRequiresEmploymentOnlyForExperiencedCandidates()
     {
         var fixture = CreateFixture();
@@ -153,14 +200,14 @@ public sealed class CandidateModuleTests
         fixture.Candidate.CurrentCountry = "India";
         fixture.Candidate.CurrentCity = "Pune";
         var fresher = await fixture.Service.GetProfileCompletionAsync(fixture.Candidate.Id);
-        Assert.DoesNotContain("employment", fresher.MissingSections);
+        Assert.DoesNotContain("Employment", fresher.MissingSections);
 
         fixture.Candidate.WorkStatus = CandidateWorkStatus.Experienced;
         var experienced = await fixture.Service.GetProfileCompletionAsync(fixture.Candidate.Id);
-        Assert.Contains("employment", experienced.MissingSections);
+        Assert.Contains("Employment", experienced.MissingSections);
         fixture.Repository.HasEmployment = true;
         var completedEmployment = await fixture.Service.GetProfileCompletionAsync(fixture.Candidate.Id);
-        Assert.DoesNotContain("employment", completedEmployment.MissingSections);
+        Assert.DoesNotContain("Employment", completedEmployment.MissingSections);
     }
 
     [Fact]
@@ -262,6 +309,11 @@ public sealed class CandidateModuleTests
         fixture.Candidate.DesiredOpportunitiesJson = "[3]";
         fixture.Candidate.WorkPreferencesJson = "[1]";
         fixture.Candidate.OnboardingCompletedAtUtc = Now;
+        fixture.Candidate.WorkStatus = CandidateWorkStatus.Experienced;
+        fixture.Candidate.CurrentCountry = "India";
+        fixture.Candidate.CurrentCity = "Pune";
+        fixture.Repository.HasEducation = true;
+        fixture.Repository.HasEmployment = true;
         fixture.Repository.Skills.Add(new CandidateSkill
         {
             UserId = fixture.Candidate.Id, Name = "C#", NormalizedName = "C#"
@@ -271,7 +323,7 @@ public sealed class CandidateModuleTests
 
         Assert.Equal(100, result.CompletionPercentage);
         Assert.Empty(result.MissingSections);
-        Assert.Equal(6, result.CompletedSections.Count);
+        Assert.Equal(7, result.CompletedSections.Count);
         Assert.DoesNotContain("User", JsonSerializer.Serialize(result, WebJson));
     }
 
@@ -282,10 +334,11 @@ public sealed class CandidateModuleTests
 
         var result = await fixture.Service.GetProfileCompletionAsync(fixture.Candidate.Id);
 
-        Assert.Equal(15, result.CompletionPercentage);
+        Assert.Equal(0, result.CompletionPercentage);
         Assert.Equal(
-            ["resumeHeadline", "profileSummary", "skills", "resume", "careerPreferences"],
+            ["BasicDetails", "Skills", "CareerPreferences", "Education", "Resume", "ProfileSummary"],
             result.MissingSections);
+        Assert.Equal("BasicDetails", result.NextRecommendedIncompleteStep);
     }
 
     [Fact]

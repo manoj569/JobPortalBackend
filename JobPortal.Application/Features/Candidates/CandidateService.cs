@@ -93,13 +93,26 @@ public sealed class CandidateService(
         Guid userId, UpdateCandidateBasicDetailsRequest request,
         CancellationToken cancellationToken = default)
     {
-        await basicDetailsValidator.ValidateAndThrowAsync(request, cancellationToken);
         var user = await RequiredCandidateAsync(userId, cancellationToken);
+        var merged = request with
+        {
+            WorkStatus = request.WorkStatus ?? user.WorkStatus,
+            IsOutsideIndia = request.IsOutsideIndia ?? user.IsOutsideIndia,
+            CurrentCountry = request.CurrentCountry ?? user.CurrentCountry,
+            CurrentCity = request.CurrentCity ?? user.CurrentCity ?? user.Location,
+            CurrentArea = request.CurrentArea ?? user.CurrentArea,
+            AvailabilityToJoin = request.NoticePeriod ?? request.AvailabilityToJoin ?? user.AvailabilityToJoin,
+            NoticePeriod = request.NoticePeriod ?? request.AvailabilityToJoin ?? user.AvailabilityToJoin,
+            CurrentAnnualSalary = request.CurrentAnnualSalary ?? user.CurrentAnnualSalary,
+            CurrentFixedAnnualSalary = request.CurrentFixedAnnualSalary ?? user.CurrentFixedAnnualSalary,
+            CurrentVariableAnnualSalary = request.CurrentVariableAnnualSalary ?? user.CurrentVariableAnnualSalary
+        };
+        await basicDetailsValidator.ValidateAndThrowAsync(merged, cancellationToken);
         var mobileAdded = false;
-        if (!string.IsNullOrWhiteSpace(request.MobileNumber))
+        if (!string.IsNullOrWhiteSpace(merged.MobileNumber))
         {
             _ = IndianMobileNumber.TryNormalizeTenDigit(
-                request.MobileNumber, out var normalizedMobile);
+                merged.MobileNumber, out var normalizedMobile);
             var existingMobile = user.NormalizedPhoneNumber;
             if (string.IsNullOrWhiteSpace(existingMobile) &&
                 IndianMobileNumber.TryNormalize(user.PhoneNumber, out var normalizedExisting))
@@ -125,16 +138,16 @@ public sealed class CandidateService(
                 mobileAdded = true;
             }
         }
-        user.WorkStatus = request.WorkStatus;
-        user.IsOutsideIndia = request.IsOutsideIndia;
-        user.CurrentCountry = request.CurrentCountry.Trim();
-        user.CurrentCity = request.CurrentCity.Trim();
-        user.CurrentArea = TextNormalizer.TrimOrNull(request.CurrentArea);
+        user.WorkStatus = merged.WorkStatus;
+        user.IsOutsideIndia = merged.IsOutsideIndia;
+        user.CurrentCountry = merged.CurrentCountry!.Trim();
+        user.CurrentCity = merged.CurrentCity!.Trim();
+        user.CurrentArea = TextNormalizer.TrimOrNull(merged.CurrentArea);
         user.Location = user.CurrentCity;
-        user.AvailabilityToJoin = request.AvailabilityToJoin;
-        user.CurrentAnnualSalary = request.WorkStatus == CandidateWorkStatus.Experienced ? request.CurrentAnnualSalary : null;
-        user.CurrentFixedAnnualSalary = request.WorkStatus == CandidateWorkStatus.Experienced ? request.CurrentFixedAnnualSalary : null;
-        user.CurrentVariableAnnualSalary = request.WorkStatus == CandidateWorkStatus.Experienced ? request.CurrentVariableAnnualSalary : null;
+        user.AvailabilityToJoin = merged.NoticePeriod;
+        user.CurrentAnnualSalary = merged.WorkStatus == CandidateWorkStatus.Experienced ? merged.CurrentAnnualSalary : null;
+        user.CurrentFixedAnnualSalary = merged.WorkStatus == CandidateWorkStatus.Experienced ? merged.CurrentFixedAnnualSalary : null;
+        user.CurrentVariableAnnualSalary = merged.WorkStatus == CandidateWorkStatus.Experienced ? merged.CurrentVariableAnnualSalary : null;
         await auditWriter.AppendAsync(new(AuditAction.Update, "CandidateBasicDetails",
             user.Id.ToString(), Actor: new(userId, "Candidate")), cancellationToken);
         try
@@ -308,34 +321,9 @@ public sealed class CandidateService(
         var user = await RequiredCandidateAsync(userId, cancellationToken);
         var hasSkills = (await candidates.GetSkillsAsync(userId, cancellationToken)).Count > 0 ||
             Deserialize<string>(user.SkillsJson).Length > 0;
-        if (!user.WorkStatus.HasValue)
-        {
-            var legacySections = new[]
-            {
-                Section("basicDetails", 15, !string.IsNullOrWhiteSpace(user.FirstName) &&
-                    !string.IsNullOrWhiteSpace(user.LastName) && user.EmailConfirmed),
-                Section("resumeHeadline", 10, !string.IsNullOrWhiteSpace(user.Headline)),
-                Section("profileSummary", 15, !string.IsNullOrWhiteSpace(user.Bio)),
-                Section("skills", 20, hasSkills),
-                Section("resume", 20, !string.IsNullOrWhiteSpace(user.ResumeStorageKey)),
-                Section("careerPreferences", 20, CareerPreferencesComplete(user))
-            };
-            return Completion(legacySections);
-        }
         var records = await candidates.GetProfileRecordPresenceAsync(userId, cancellationToken);
-        var experienced = user.WorkStatus == CandidateWorkStatus.Experienced ||
-            !user.WorkStatus.HasValue && user.CareerStage == CareerStage.Experienced;
-        var sections = new[]
-        {
-            Section("overview", experienced ? 15 : 25, BasicDetailsComplete(user)),
-            Section("about", 15, !string.IsNullOrWhiteSpace(user.Headline) && !string.IsNullOrWhiteSpace(user.Bio)),
-            Section("skills", 15, hasSkills),
-            Section("resume", 15, !string.IsNullOrWhiteSpace(user.ResumeStorageKey)),
-            Section("careerPreferences", 20, CareerPreferencesComplete(user)),
-            Section("education", 10, records.HasEducation),
-            Section("employment", experienced ? 10 : 0, !experienced || records.HasEmployment)
-        };
-        return Completion(sections);
+        return CandidateProfileCompletionProjection.Create(
+            user, hasSkills, records.HasEducation, records.HasEmployment);
     }
 
     public async Task<CandidateOnboardingResponse> GetOnboardingAsync(
@@ -871,11 +859,12 @@ public sealed class CandidateService(
         Deserialize<EmploymentType>(user.PreferredJobTypesJson), MapResume(user), user.PhoneNumber,
         photo is not null, photo?.Version.ToString("N"), MapBasicDetails(user),
         MapCareerPreferences(user), totalExperienceYears, user.PhoneNumber,
-        user.PhoneConfirmed);
+        user.PhoneConfirmed, user.AvailabilityToJoin);
     private static CandidateBasicDetailsResponse MapBasicDetails(User user) => new(
         user.Email, user.PhoneNumber, user.PhoneConfirmed, user.WorkStatus, user.IsOutsideIndia, user.CurrentCountry,
         user.CurrentCity ?? user.Location, user.CurrentArea, user.AvailabilityToJoin,
-        user.CurrentAnnualSalary, user.CurrentFixedAnnualSalary, user.CurrentVariableAnnualSalary);
+        user.CurrentAnnualSalary, user.CurrentFixedAnnualSalary, user.CurrentVariableAnnualSalary,
+        user.AvailabilityToJoin);
     private static CandidateCareerPreferencesResponse MapCareerPreferences(User user) => new(
         Deserialize<string>(user.PreferredJobRolesJson), Deserialize<string>(user.PreferredCitiesJson),
         user.ExpectedAnnualSalary, Deserialize<CandidateJobType>(user.CandidateJobTypesJson),

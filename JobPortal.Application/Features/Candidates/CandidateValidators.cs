@@ -173,11 +173,22 @@ public sealed class UpdateCandidateBasicDetailsRequestValidator :
 {
     public UpdateCandidateBasicDetailsRequestValidator()
     {
-        RuleFor(x => x.WorkStatus).IsInEnum();
+        RuleFor(x => x.WorkStatus).NotNull().WithMessage("WorkStatus is required.")
+            .IsInEnum();
+        RuleFor(x => x.IsOutsideIndia).NotNull().WithMessage("IsOutsideIndia is required.");
         RuleFor(x => x.CurrentCountry).NotEmpty().MaximumLength(100).Must(ProfileText.Safe);
         RuleFor(x => x.CurrentCity).NotEmpty().MaximumLength(150).Must(ProfileText.Safe);
         RuleFor(x => x.CurrentArea).MaximumLength(150).Must(ProfileText.OptionalSafe);
         RuleFor(x => x.AvailabilityToJoin).IsInEnum().When(x => x.AvailabilityToJoin.HasValue);
+        RuleFor(x => x.NoticePeriod).IsInEnum()
+            .Must(value => !value.HasValue || value is
+                CandidateAvailability.ImmediateJoiner or
+                CandidateAvailability.FifteenDaysOrLess or
+                CandidateAvailability.OneMonth or
+                CandidateAvailability.ThreeMonths or
+                CandidateAvailability.Other)
+            .WithMessage("NoticePeriod must be ImmediateJoiner, FifteenDaysOrLess, OneMonth, ThreeMonths, or Other.")
+            .When(x => x.NoticePeriod.HasValue);
         RuleFor(x => x.CurrentAnnualSalary).GreaterThanOrEqualTo(0).When(x => x.CurrentAnnualSalary.HasValue);
         RuleFor(x => x.CurrentFixedAnnualSalary).GreaterThanOrEqualTo(0).When(x => x.CurrentFixedAnnualSalary.HasValue);
         RuleFor(x => x.CurrentVariableAnnualSalary).GreaterThanOrEqualTo(0).When(x => x.CurrentVariableAnnualSalary.HasValue);
