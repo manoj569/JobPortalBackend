@@ -32,7 +32,12 @@ public sealed class PaymentService(
 
     public async Task<PhonePeCheckoutResponse> CreatePhonePeCheckoutAsync(
         Guid userId, CancellationToken cancellationToken = default)
+        => await CreatePhonePeCheckoutAsync(userId, null, cancellationToken);
+
+    public async Task<PhonePeCheckoutResponse> CreatePhonePeCheckoutAsync(
+        Guid userId, string? returnTo, CancellationToken cancellationToken = default)
     {
+        returnTo = PaymentReturnPath.Validate(returnTo);
         await RequiredCandidateAsync(userId, cancellationToken);
         var utcNow = UtcNow;
         var plan = plans.GetDefaultPlan();
@@ -81,7 +86,7 @@ public sealed class PaymentService(
         try
         {
             var amount = ToMinorUnits(payment.Amount);
-            var checkout = await phonePe.CreateCheckoutAsync(merchantOrderId, amount, cancellationToken);
+            var checkout = await phonePe.CreateCheckoutAsync(merchantOrderId, amount, returnTo, cancellationToken);
             payment.ProviderOrderCreatedAtUtc = UtcNow;
             payment.Status = PaymentStatus.Pending;
             payment.History.Add(NewPaymentHistory(
@@ -96,7 +101,7 @@ public sealed class PaymentService(
                 }, new(userId, "Candidate")), cancellationToken);
             await unitOfWork.SaveChangesAsync(cancellationToken);
             return new(merchantOrderId, checkout.RedirectUrl, checkout.ExpiresAtUtc,
-                plan.Name, amount, payment.CurrencyCode, plan.DurationDays);
+                plan.Name, amount, payment.CurrencyCode, plan.DurationDays, returnTo);
         }
         catch
         {
@@ -112,7 +117,12 @@ public sealed class PaymentService(
 
     public async Task<PhonePeReturnStatusResponse> GetPhonePeStatusAsync(
         Guid userId, string merchantOrderId, CancellationToken cancellationToken = default)
+        => await GetPhonePeStatusAsync(userId, merchantOrderId, null, cancellationToken);
+
+    public async Task<PhonePeReturnStatusResponse> GetPhonePeStatusAsync(
+        Guid userId, string merchantOrderId, string? returnTo, CancellationToken cancellationToken = default)
     {
+        returnTo = PaymentReturnPath.Validate(returnTo);
         await RequiredCandidateAsync(userId, cancellationToken);
         if (string.IsNullOrWhiteSpace(merchantOrderId) || merchantOrderId.Length > 200)
             throw new NotFoundException("Payment was not found.");
@@ -121,7 +131,13 @@ public sealed class PaymentService(
             throw new NotFoundException("Payment was not found.");
         if (payment.Status is PaymentStatus.Created or PaymentStatus.Pending)
             await ReconcilePhonePeAsync(payment, cancellationToken);
-        return new(merchantOrderId, BrowserStatus(payment.Status));
+        var status = BrowserStatus(payment.Status);
+        var membership = payment.Membership;
+        var canReturn = status == PhonePeBrowserPaymentStatus.Completed &&
+            membership is { Status: MembershipStatus.Active } &&
+            membership.StartsAtUtc <= UtcNow &&
+            (!membership.EndsAtUtc.HasValue || membership.EndsAtUtc > UtcNow);
+        return new(merchantOrderId, status, canReturn ? returnTo : null);
     }
 
     public async Task<PhonePeWebhookResponse> ProcessPhonePeWebhookAsync(

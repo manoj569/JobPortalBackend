@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using JobPortal.Application.Common.Exceptions;
 using JobPortal.Application.Abstractions.Payments;
+using JobPortal.Application.Features.Payments;
 using Xunit;
 
 namespace JobPortal.Application.Tests;
@@ -56,6 +57,23 @@ public sealed class PhonePeGatewayTests
         Assert.DoesNotContain("status", redirectUrl, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("amount", redirectUrl, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("token", redirectUrl, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task CheckoutSafelyCarriesEncodedInterviewInsightsReturnPath()
+    {
+        var handler = new RecordingHandler();
+        using var cache = new PhonePeAccessTokenCache();
+        using var client = Client(handler);
+        var gateway = new PhonePeGateway(client, Configuration(), TimeProvider.System, cache,
+            NullLogger<PhonePeGateway>.Instance);
+
+        await gateway.CreateCheckoutAsync("ch_return", 9900, PaymentReturnPath.InterviewInsights);
+
+        using var request = JsonDocument.Parse(Assert.Single(handler.CheckoutBodies));
+        var redirectUrl = request.RootElement.GetProperty("paymentFlow")
+            .GetProperty("merchantUrls").GetProperty("redirectUrl").GetString();
+        Assert.Equal("https://career-harbor.example/payment/phonepe/return?merchantOrderId=ch_return&returnTo=%2Fdashboard%2Finterview-insights", redirectUrl);
     }
 
     [Fact]

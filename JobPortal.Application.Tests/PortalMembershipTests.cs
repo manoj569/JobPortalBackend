@@ -330,6 +330,40 @@ public sealed class PortalMembershipTests
     }
 
     [Fact]
+    public async Task SafeReturnPathIsReleasedOnlyAfterVerifiedActiveMembership()
+    {
+        var fixture = CreatePaymentFixture();
+        var checkout = await fixture.Service.CreatePhonePeCheckoutAsync(
+            UserId, PaymentReturnPath.InterviewInsights);
+        Assert.Equal(PaymentReturnPath.InterviewInsights, checkout.ReturnTo);
+
+        var pending = await fixture.Service.GetPhonePeStatusAsync(
+            UserId, checkout.MerchantOrderId, PaymentReturnPath.InterviewInsights);
+        Assert.Null(pending.ReturnTo);
+
+        fixture.PhonePe.VerificationState = new(PhonePeOrderStateKind.Completed,
+            checkout.MerchantOrderId, "phonepe_return_txn", 9900);
+        var completed = await fixture.Service.GetPhonePeStatusAsync(
+            UserId, checkout.MerchantOrderId, PaymentReturnPath.InterviewInsights);
+        Assert.Equal(PhonePeBrowserPaymentStatus.Completed, completed.Status);
+        Assert.Equal(PaymentReturnPath.InterviewInsights, completed.ReturnTo);
+    }
+
+    [Theory]
+    [InlineData("https://evil.example")]
+    [InlineData("//evil.example/path")]
+    [InlineData("/admin")]
+    [InlineData("/dashboard/interview-insights?next=https://evil.example")]
+    public async Task UnsafePaymentReturnPathsAreRejected(string returnTo)
+    {
+        var fixture = CreatePaymentFixture();
+        var error = await Assert.ThrowsAsync<BadRequestException>(() =>
+            fixture.Service.CreatePhonePeCheckoutAsync(UserId, returnTo));
+        Assert.Equal("invalid_return_to", error.Code);
+        Assert.Null(fixture.Payments.Payment);
+    }
+
+    [Fact]
     public async Task PhonePeMerchantOrderIdsAreUnique()
     {
         var first = CreatePaymentFixture();
