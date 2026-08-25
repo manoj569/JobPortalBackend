@@ -11,6 +11,7 @@ public enum CandidateSkillProficiency
 }
 
 public enum CandidateWorkStatus { Fresher = 1, Experienced }
+[JsonConverter(typeof(JsonStringEnumConverter<CandidateAvailability>))]
 public enum CandidateAvailability
 {
     FifteenDaysOrLess = 1,
@@ -18,7 +19,9 @@ public enum CandidateAvailability
     TwoMonths,
     ThreeMonths,
     MoreThanThreeMonths,
-    ServingNoticePeriod
+    ServingNoticePeriod,
+    ImmediateJoiner,
+    Other
 }
 [JsonConverter(typeof(JsonStringEnumConverter<CandidateJobType>))]
 public enum CandidateJobType { Permanent = 1, Contractual }

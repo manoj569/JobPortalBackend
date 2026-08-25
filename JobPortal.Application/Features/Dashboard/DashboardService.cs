@@ -11,6 +11,8 @@ using JobPortal.Application.Common.Validation;
 using JobPortal.Application.Features.Authentication;
 using JobPortal.Application.Features.Memberships;
 using JobPortal.Application.Features.Payments;
+using JobPortal.Application.Features.Candidates;
+using JobPortal.Domain.Common;
 using JobPortal.Domain.Entities;
 using JobPortal.Shared.Models;
 
@@ -18,6 +20,7 @@ namespace JobPortal.Application.Features.Dashboard;
 
 public sealed class DashboardService(
     IDashboardRepository dashboard,
+    ICandidateRepository candidates,
     IMembershipService membershipService,
     IPaymentService paymentService,
     IAuthService authService,
@@ -27,8 +30,11 @@ public sealed class DashboardService(
     TimeProvider timeProvider) : IDashboardService
 {
     public async Task<UserProfileResponse> GetProfileAsync(
-        Guid userId, CancellationToken cancellationToken = default) =>
-        MapProfile(await RequiredUserAsync(userId, cancellationToken));
+        Guid userId, CancellationToken cancellationToken = default)
+    {
+        var user = await RequiredUserAsync(userId, cancellationToken);
+        return MapProfile(user, await CompletionAsync(user, cancellationToken));
+    }
 
     public async Task<UserProfileResponse> UpdateProfileAsync(
         Guid userId, UpdateUserProfileRequest request, CancellationToken cancellationToken = default)
@@ -57,7 +63,7 @@ public sealed class DashboardService(
             "UserProfile",
             user.Id.ToString()), cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
-        return MapProfile(user);
+        return MapProfile(user, await CompletionAsync(user, cancellationToken));
     }
 
     public Task<IReadOnlyCollection<MembershipResponse>> GetMembershipsAsync(
@@ -180,8 +186,27 @@ public sealed class DashboardService(
 
     private async Task<User> RequiredUserAsync(Guid userId, CancellationToken cancellationToken) =>
         await dashboard.GetUserAsync(userId, cancellationToken) ?? throw new UnauthorizedException();
-    private static UserProfileResponse MapProfile(User x) => new(
+    private async Task<CandidateProfileCompletionResponse?> CompletionAsync(
+        User user, CancellationToken cancellationToken)
+    {
+        if (user.RoleId != SystemRoleIds.Candidate) return null;
+        var skills = await candidates.GetSkillsAsync(user.Id, cancellationToken);
+        var records = await candidates.GetProfileRecordPresenceAsync(user.Id, cancellationToken);
+        return CandidateProfileCompletionProjection.Create(user,
+            skills.Count > 0 || HasLegacySkills(user.SkillsJson),
+            records.HasEducation, records.HasEmployment);
+    }
+
+    private static bool HasLegacySkills(string json)
+    {
+        try { return System.Text.Json.JsonSerializer.Deserialize<string[]>(json)?.Length > 0; }
+        catch (System.Text.Json.JsonException) { return false; }
+    }
+
+    private static UserProfileResponse MapProfile(
+        User x, CandidateProfileCompletionResponse? completion) => new(
         x.Id, x.Email, x.FirstName, x.LastName, x.PhoneNumber, x.ProfileImageUrl,
-        x.Headline, x.Bio, x.EmailConfirmed, x.CreatedAtUtc, x.LastLoginAtUtc);
+        x.Headline, x.Bio, x.EmailConfirmed, x.CreatedAtUtc, x.LastLoginAtUtc,
+        x.AvailabilityToJoin, completion);
     private DateTime UtcNow => timeProvider.GetUtcNow().UtcDateTime;
 }

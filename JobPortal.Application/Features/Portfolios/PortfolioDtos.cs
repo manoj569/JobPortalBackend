@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using JobPortal.Application.Features.Candidates;
 using JobPortal.Domain.Enums;
 
 namespace JobPortal.Application.Features.Portfolios;
@@ -65,7 +66,9 @@ public sealed record PortfolioEditorResponse(
     IReadOnlyCollection<ProjectResponse> Projects,
     IReadOnlyCollection<CertificationResponse> Certifications,
     IReadOnlyCollection<ProfessionalLinkResponse> ProfessionalLinks,
-    IReadOnlyCollection<CustomSectionResponse> CustomSections);
+    IReadOnlyCollection<CustomSectionResponse> CustomSections,
+    CandidateAvailability? NoticePeriod = null,
+    CandidateProfileCompletionResponse? ProfileCompletion = null);
 
 public sealed record PortfolioPublishResponse(
     bool Published, IReadOnlyCollection<string> MissingRequirements,

@@ -15,7 +15,8 @@ public sealed record CandidateProfileResponse(
     CandidateCareerPreferencesResponse? CareerPreferences = null,
     decimal TotalExperienceYears = 0,
     string? MobileNumber = null,
-    bool MobileVerified = false);
+    bool MobileVerified = false,
+    CandidateAvailability? NoticePeriod = null);
 public sealed record UpdateCandidateProfileRequest(
     string? Headline, string? Bio, string? Location, IReadOnlyCollection<string> Skills,
     IReadOnlyCollection<string> Education, IReadOnlyCollection<string> Experience,
@@ -35,7 +36,8 @@ public sealed record CandidateProfileCompletionResponse(
     int CompletionPercentage,
     IReadOnlyCollection<string> CompletedSections,
     IReadOnlyCollection<string> MissingSections,
-    IReadOnlyCollection<ProfileSectionCompletionResponse> Sections);
+    IReadOnlyCollection<ProfileSectionCompletionResponse> Sections,
+    string? NextRecommendedIncompleteStep = null);
 
 public sealed record CandidateBasicDetailsResponse(
     string Email,
@@ -50,6 +52,7 @@ public sealed record CandidateBasicDetailsResponse(
     decimal? CurrentAnnualSalary,
     decimal? CurrentFixedAnnualSalary,
     decimal? CurrentVariableAnnualSalary,
+    CandidateAvailability? NoticePeriod = null,
     string SalaryUnit = "INR per annum")
 {
     [JsonIgnore]
@@ -58,16 +61,17 @@ public sealed record CandidateBasicDetailsResponse(
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record UpdateCandidateBasicDetailsRequest(
-    CandidateWorkStatus WorkStatus,
-    bool IsOutsideIndia,
-    string CurrentCountry,
-    string CurrentCity,
-    string? CurrentArea,
-    CandidateAvailability? AvailabilityToJoin,
-    decimal? CurrentAnnualSalary,
-    decimal? CurrentFixedAnnualSalary,
-    decimal? CurrentVariableAnnualSalary,
-    string? MobileNumber = null);
+    CandidateWorkStatus? WorkStatus = null,
+    bool? IsOutsideIndia = null,
+    string? CurrentCountry = null,
+    string? CurrentCity = null,
+    string? CurrentArea = null,
+    CandidateAvailability? AvailabilityToJoin = null,
+    decimal? CurrentAnnualSalary = null,
+    decimal? CurrentFixedAnnualSalary = null,
+    decimal? CurrentVariableAnnualSalary = null,
+    string? MobileNumber = null,
+    CandidateAvailability? NoticePeriod = null);
 
 public sealed record CandidateCareerPreferencesResponse(
     IReadOnlyCollection<string> PreferredJobRoles,

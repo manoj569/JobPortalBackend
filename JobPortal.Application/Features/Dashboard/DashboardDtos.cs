@@ -1,4 +1,5 @@
 using JobPortal.Application.Features.PublicJobs;
+using JobPortal.Application.Features.Candidates;
 using JobPortal.Domain.Enums;
 using JobPortal.Shared.Models;
 
@@ -7,7 +8,9 @@ namespace JobPortal.Application.Features.Dashboard;
 public sealed record UserProfileResponse(
     Guid Id, string Email, string FirstName, string LastName, string? PhoneNumber,
     string? ProfileImageUrl, string? Headline, string? Bio, bool EmailConfirmed,
-    DateTime CreatedAtUtc, DateTime? LastLoginAtUtc);
+    DateTime CreatedAtUtc, DateTime? LastLoginAtUtc,
+    CandidateAvailability? NoticePeriod = null,
+    CandidateProfileCompletionResponse? ProfileCompletion = null);
 public sealed record UpdateUserProfileRequest(
     string FirstName, string LastName, string? PhoneNumber,
     string? ProfileImageUrl, string? Headline, string? Bio);

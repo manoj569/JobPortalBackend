@@ -2,6 +2,7 @@ using System.Text.Json;
 using FluentValidation;
 using JobPortal.Application.Abstractions.Persistence;
 using JobPortal.Application.Common.Exceptions;
+using JobPortal.Application.Features.Candidates;
 using JobPortal.Application.Features.Portfolios;
 using JobPortal.Domain.Common;
 using JobPortal.Domain.Entities;
@@ -90,6 +91,7 @@ public sealed class CandidatePortfolioTests
         var fixture = CreateFixture();
         fixture.User.CurrentCity = "Private City";
         fixture.User.CurrentArea = "Private Area";
+        fixture.User.AvailabilityToJoin = CandidateAvailability.Other;
         await fixture.Service.CreateAsync(fixture.User.Id, new(null, CandidatePortfolioTemplate.Professional));
         var published = await fixture.Service.PublishAsync(fixture.User.Id);
         var publicResult = await fixture.Service.GetPublicAsync(published.Portfolio.Slug!);
@@ -105,10 +107,34 @@ public sealed class CandidatePortfolioTests
         Assert.DoesNotContain("candidatePortfolio", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Private City", json, StringComparison.Ordinal);
         Assert.DoesNotContain("Private Area", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("noticePeriod", json, StringComparison.OrdinalIgnoreCase);
 
         await fixture.Service.UnpublishAsync(fixture.User.Id);
         await fixture.Service.UnpublishAsync(fixture.User.Id);
         await Assert.ThrowsAsync<NotFoundException>(() => fixture.Service.GetPublicAsync(publicResult.Slug));
+    }
+
+    [Fact]
+    public async Task PrivateEditorReturnsNoticePeriodAndAuthoritativeCompletion()
+    {
+        var fixture = CreateFixture();
+        fixture.User.WorkStatus = CandidateWorkStatus.Fresher;
+        fixture.User.CurrentCountry = "India";
+        fixture.User.CurrentCity = "Pune";
+        fixture.User.EmailConfirmed = true;
+        fixture.User.AvailabilityToJoin = CandidateAvailability.FifteenDaysOrLess;
+
+        var editor = await fixture.Service.GetAsync(fixture.User.Id);
+        var expected = CandidateProfileCompletionProjection.Create(
+            fixture.User, true, false, false);
+
+        Assert.Equal(CandidateAvailability.FifteenDaysOrLess, editor.NoticePeriod);
+        Assert.NotNull(editor.ProfileCompletion);
+        Assert.Equal(expected.CompletionPercentage, editor.ProfileCompletion.CompletionPercentage);
+        Assert.Equal(expected.CompletedSections, editor.ProfileCompletion.CompletedSections);
+        Assert.Equal(expected.MissingSections, editor.ProfileCompletion.MissingSections);
+        Assert.Equal(expected.NextRecommendedIncompleteStep,
+            editor.ProfileCompletion.NextRecommendedIncompleteStep);
     }
 
     [Fact]
