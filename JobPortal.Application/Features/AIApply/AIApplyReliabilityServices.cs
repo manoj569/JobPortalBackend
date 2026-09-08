@@ -21,7 +21,35 @@ public sealed class AIApplyRetryPolicy(IOptions<AIApplyOptions> options) : IAIAp
 
 public sealed class AIApplyWorkerIdentity : IAIApplyWorkerIdentity
 {
-    public string Id { get; } = $"{Environment.MachineName[..Math.Min(32, Environment.MachineName.Length)]}-{Environment.ProcessId}-{Guid.NewGuid():N}"[..Math.Min(80, $"{Environment.MachineName}-{Environment.ProcessId}-{Guid.NewGuid():N}".Length)];
+    private const int MaximumInstanceIdentifierLength = 32;
+    private const int MaximumWorkerIdentityLength = 80;
+
+    public AIApplyWorkerIdentity() : this(CurrentInstanceIdentifier(), Environment.ProcessId, Guid.NewGuid())
+    {
+    }
+
+    internal AIApplyWorkerIdentity(string? instanceIdentifier, int processId, Guid processNonce)
+    {
+        var normalizedIdentifier = string.IsNullOrWhiteSpace(instanceIdentifier)
+            ? "worker"
+            : instanceIdentifier.Trim();
+        var identifierLength = Math.Min(
+            normalizedIdentifier.Length,
+            MaximumInstanceIdentifierLength);
+        var identifier = normalizedIdentifier[..identifierLength];
+        var identity = $"{identifier}-{processId}-{processNonce:N}";
+        Id = identity[..Math.Min(identity.Length, MaximumWorkerIdentityLength)];
+    }
+
+    public string Id { get; }
+
+    private static string? CurrentInstanceIdentifier() =>
+        new[]
+        {
+            Environment.GetEnvironmentVariable("RENDER_INSTANCE_ID"),
+            Environment.GetEnvironmentVariable("HOSTNAME"),
+            Environment.MachineName
+        }.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
 }
 public sealed class AIApplyWorkerState(IAIApplyWorkerIdentity identity, TimeProvider clock) : IAIApplyWorkerState
 {
