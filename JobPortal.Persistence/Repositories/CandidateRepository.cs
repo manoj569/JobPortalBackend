@@ -142,9 +142,11 @@ public sealed class CandidateRepository(
             (!x.EndsAtUtc.HasValue || x.EndsAtUtc > now), cancellationToken);
     }
 
-    public Task<bool> IsResumeReferencedAsync(
+    public async Task<bool> IsResumeReferencedAsync(
         string storageKey, CancellationToken cancellationToken = default) =>
-        context.JobApplications.IgnoreQueryFilters().AsNoTracking()
+        await context.JobApplications.IgnoreQueryFilters().AsNoTracking()
+            .AnyAsync(x => x.ResumeStorageKey == storageKey, cancellationToken) ||
+        await context.AIApplyApplications.IgnoreQueryFilters().AsNoTracking()
             .AnyAsync(x => x.ResumeStorageKey == storageKey, cancellationToken);
 
     public Task<JobApplication?> GetApplicationAsync(

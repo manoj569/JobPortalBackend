@@ -133,7 +133,7 @@ public sealed class PaymentRepository(JobPortalDbContext context) : IPaymentRepo
             .Skip((query.PageNumber - 1) * query.PageSize).Take(query.PageSize)
             .Select(x => new PaymentResponse(x.Id, x.Amount, x.CurrencyCode, x.Status, x.Provider,
                 x.ProviderOrderId, x.ProviderPaymentId, x.PaidAtUtc, x.MembershipId, x.CreatedAtUtc,
-                x.ProviderOrderCreatedAtUtc, x.LastReconciledAtUtc, null))
+                x.ProviderOrderCreatedAtUtc, x.LastReconciledAtUtc, x.PlanCode))
             .ToArrayAsync(cancellationToken);
         return (items, count);
     }

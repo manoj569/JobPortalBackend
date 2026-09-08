@@ -94,6 +94,21 @@ public sealed class PostgresPersistenceConfigurationTests
         Assert.True(xmin.ValueGenerated == Microsoft.EntityFrameworkCore.Metadata.ValueGenerated.OnAddOrUpdate);
     }
 
+    [Fact]
+    public void PaymentPlanAndAIApplyResumeSnapshotUseBoundedNullableColumns()
+    {
+        using var context = CreateContext();
+        var payment = context.Model.FindEntityType(typeof(Payment))!;
+        var application = context.Model.FindEntityType(typeof(AIApplyApplication))!;
+
+        Assert.Equal(50, payment.FindProperty(nameof(Payment.PlanCode))!.GetMaxLength());
+        Assert.True(payment.FindProperty(nameof(Payment.PlanCode))!.IsNullable);
+        Assert.Equal(255, application.FindProperty(nameof(AIApplyApplication.ResumeStorageKey))!.GetMaxLength());
+        Assert.Equal(255, application.FindProperty(nameof(AIApplyApplication.ResumeFileName))!.GetMaxLength());
+        Assert.Equal(100, application.FindProperty(nameof(AIApplyApplication.ResumeContentType))!.GetMaxLength());
+        Assert.True(application.FindProperty(nameof(AIApplyApplication.ResumeSizeBytes))!.IsNullable);
+    }
+
     private static JobPortalDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<JobPortalDbContext>()

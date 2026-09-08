@@ -1,8 +1,11 @@
+using System.Text.Json.Serialization;
 using JobPortal.Domain.Enums;
 
 namespace JobPortal.Application.Features.AIApply;
 
 public enum AIApplyControlAction { Enable = 1, Disable, Pause, Resume }
+[JsonConverter(typeof(JsonStringEnumConverter<AIApplyCandidateProgressState>))]
+public enum AIApplyCandidateProgressState { Queued = 1, Processing, WaitingForCandidate, Submitted, NeedsReview, Failed, Cancelled }
 public sealed record AIApplyProfileResponse(string FirstName, string LastName, string Email, string? Phone, string? CurrentLocation, IReadOnlyList<string> PreferredLocations, string? LinkedInUrl, string? GitHubUrl, string? PortfolioUrl, string? Degree, string? University, int? GraduationYear, decimal? TotalExperience, IReadOnlyList<string> Skills, IReadOnlyList<string> Certifications, CandidateAvailability? NoticePeriod, decimal? CurrentSalary, decimal? ExpectedSalary, bool? WillingToRelocate, string? WorkAuthorization, string? VisaSponsorshipPreference);
 public sealed record UpdateAIApplyProfileRequest(string? GitHubUrl, bool? WillingToRelocate, string? WorkAuthorization, string? VisaSponsorshipPreference);
 public sealed record AIApplyPreferencesResponse(IReadOnlyList<string> JobTitles, IReadOnlyList<string> Skills, decimal? MinimumExperience, decimal? MaximumExperience, IReadOnlyList<string> PreferredLocations, IReadOnlyList<WorkplaceType> WorkplaceTypes, decimal? MinimumSalary, decimal? MaximumSalary, IReadOnlyList<EmploymentType> EmploymentTypes);
@@ -14,7 +17,8 @@ public sealed record AIApplyRuleResponse(Guid Id, AIApplyRuleType RuleType, AIAp
 public sealed record QueueAIApplyRequest(Guid JobId, int Priority = 0, DateTime? ScheduledAtUtc = null);
 public sealed record CandidateExternalApplicationResponse(JobSiteIdentifier Site, string DisplayName, string Url, bool CanOpen);
 public sealed record AIApplyApplicationActions(bool CanOpenExternalApplication, bool CanContinue, bool CanCancel, bool RequiresCandidateAction);
-public sealed record AIApplyApplicationResponse(Guid Id, Guid JobId, AIApplyRunStatus Status, int Priority, DateTime ScheduledAtUtc, DateTime? StartedAtUtc, DateTime? CompletedAtUtc, int RetryCount, AIApplyFailureKind FailureKind, bool RequiresUserInput, decimal? MatchScore, DateTime CreatedAtUtc, CandidateExternalApplicationResponse? ExternalApplication = null, AIApplyApplicationActions? Actions = null, string? Message = null);
+public sealed record AIApplyResumeUsedResponse(string FileName);
+public sealed record AIApplyApplicationResponse(Guid Id, Guid JobId, AIApplyRunStatus Status, int Priority, DateTime ScheduledAtUtc, DateTime? StartedAtUtc, DateTime? CompletedAtUtc, int RetryCount, AIApplyFailureKind FailureKind, bool RequiresUserInput, decimal? MatchScore, DateTime CreatedAtUtc, CandidateExternalApplicationResponse? ExternalApplication = null, AIApplyApplicationActions? Actions = null, string? Message = null, string? JobTitle = null, string? CompanyName = null, AIApplyCandidateProgressState ProgressState = AIApplyCandidateProgressState.Queued, DateTime? SubmittedAtUtc = null, DateTime? UpdatedAtUtc = null, AIApplyResumeUsedResponse? ResumeUsed = null);
 public sealed record AIApplyQuestionResponse(Guid Id, Guid ApplicationId, string Question, string QuestionType, string? SuggestedAnswer, string? FinalAnswer, AIApplyQuestionStatus Status, DateTime? AnsweredAtUtc);
 public sealed record AnswerAIApplyQuestionRequest(string Answer, bool SaveToMemory = false);
 public sealed record UpdateAIApplyAnswerRequest(string Answer, bool IsActive = true);

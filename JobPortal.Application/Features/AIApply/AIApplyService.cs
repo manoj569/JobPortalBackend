@@ -68,9 +68,10 @@ public sealed class AIApplyService(IAIApplyRepository repository, IAIApplyAuthor
         var job = await repository.GetJobAsync(r.JobId, ct) ?? throw new NotFoundException("Job was not found."); if (job.Status != JobStatus.Published || job.ExpiresAtUtc <= Now) throw new ConflictException("The job is not available.", "job_unavailable");
         if (!SafeHttpsUrl.IsValid(job.ApplicationUrl, false)) throw new ConflictException("The external application URL is unavailable.", "application_url_unavailable"); var normalizedUrl = NormalizeUrl(job.ApplicationUrl);
         if (await repository.IsDuplicateAsync(userId, job.Id, normalizedUrl, ct)) throw new ConflictException("This job has already been queued or applied to.", "duplicate_application");
-        var prefs = await repository.GetPreferencesAsync(userId, ct) ?? new AIApplyPreference { UserId = userId }; var match = matcher.Match(await RequiredUser(userId, ct), job, prefs, await repository.GetRulesAsync(userId, ct));
+        var user = await RequiredUser(userId, ct);
+        var prefs = await repository.GetPreferencesAsync(userId, ct) ?? new AIApplyPreference { UserId = userId }; var match = matcher.Match(user, job, prefs, await repository.GetRulesAsync(userId, ct));
         if (!match.IsEligible) throw new ConflictException(string.Join(",", match.SkipReasons), "job_not_eligible");
-        var e = new AIApplyApplication { UserId = userId, JobId = job.Id, ExternalApplicationUrl = job.ApplicationUrl, NormalizedApplicationUrl = normalizedUrl, Priority = access.ProcessingPriority, ScheduledAtUtc = r.ScheduledAtUtc?.ToUniversalTime() ?? Now, MatchScore = match.MatchScore };
+        var e = new AIApplyApplication { UserId = userId, JobId = job.Id, ResumeStorageKey = user.ResumeStorageKey, ResumeFileName = user.ResumeFileName, ResumeContentType = user.ResumeContentType, ResumeSizeBytes = user.ResumeSizeBytes, ExternalApplicationUrl = job.ApplicationUrl, NormalizedApplicationUrl = normalizedUrl, Priority = access.ProcessingPriority, ScheduledAtUtc = r.ScheduledAtUtc?.ToUniversalTime() ?? Now, MatchScore = match.MatchScore };
         await repository.AddAsync(e, ct); await repository.SaveChangesAsync(ct); return await MapApplicationAsync(e, job, ct);
     }
     public async Task<IReadOnlyList<AIApplyApplicationResponse>> GetApplicationsAsync(Guid userId, DateTime? from, DateTime? to, CancellationToken ct = default)
@@ -139,7 +140,10 @@ public sealed class AIApplyService(IAIApplyRepository repository, IAIApplyAuthor
     private static AIApplyRuleResponse MapRule(AIApplyRule e) => new(e.Id, e.RuleType, e.Operator, e.Value, e.IsEnabled);
     private async Task<AIApplyApplicationResponse> MapApplicationAsync(AIApplyApplication e, Job? job, CancellationToken ct)
     {
-        var candidateAction = e.FailureKind is AIApplyFailureKind.LoginRequired or AIApplyFailureKind.HumanVerificationRequired || e.Status == AIApplyRunStatus.NeedsReview;
+        var status = e.Status == AIApplyRunStatus.Submitted && e.SubmissionConfirmedAtUtc is null
+            ? AIApplyRunStatus.NeedsReview
+            : e.Status;
+        var candidateAction = e.FailureKind is AIApplyFailureKind.LoginRequired or AIApplyFailureKind.HumanVerificationRequired || status == AIApplyRunStatus.NeedsReview;
         var destination = candidateAction && job is not null ? await externalLinks.ResolveAsync(job.ApplicationUrl, ct) : null;
         var jobEligible = job is { Status: JobStatus.Published } && job.ExpiresAtUtc > Now;
         var destinationUnchanged = job is not null && string.Equals(job.ApplicationUrl.Trim(), e.ExternalApplicationUrl.Trim(), StringComparison.Ordinal);
@@ -148,8 +152,21 @@ public sealed class AIApplyService(IAIApplyRepository repository, IAIApplyAuthor
             e.SubmissionAttemptedAtUtc is null && jobEligible && destinationUnchanged && destination is { SupportsRestartFromUrl: true, OperationallyAvailable: true };
         var canCancel = e.Status is AIApplyRunStatus.Queued or AIApplyRunStatus.WaitingForUser or AIApplyRunStatus.Failed;
         var external = destination is null ? null : new CandidateExternalApplicationResponse(destination.Site, destination.DisplayName, destination.Url, true);
-        return new(e.Id, e.JobId, e.Status, e.Priority, e.ScheduledAtUtc, e.StartedAtUtc, e.CompletedAtUtc, e.RetryCount, e.FailureKind, e.RequiresUserInput, e.MatchScore, e.CreatedAtUtc, external, new(external is not null, canContinue, canCancel, candidateAction), Message(e));
+        var resume = string.IsNullOrWhiteSpace(e.ResumeFileName)
+            ? null
+            : new AIApplyResumeUsedResponse(Path.GetFileName(e.ResumeFileName));
+        return new(e.Id, e.JobId, status, e.Priority, e.ScheduledAtUtc, e.StartedAtUtc, e.CompletedAtUtc, e.RetryCount, e.FailureKind, e.RequiresUserInput, e.MatchScore, e.CreatedAtUtc, external, new(external is not null, canContinue, canCancel, candidateAction), Message(e), job?.Title, job?.Company?.Name, Progress(status), e.SubmissionConfirmedAtUtc, e.UpdatedAtUtc ?? e.CreatedAtUtc, resume);
     }
+    private static AIApplyCandidateProgressState Progress(AIApplyRunStatus status) => status switch
+    {
+        AIApplyRunStatus.Queued => AIApplyCandidateProgressState.Queued,
+        AIApplyRunStatus.Processing => AIApplyCandidateProgressState.Processing,
+        AIApplyRunStatus.WaitingForUser => AIApplyCandidateProgressState.WaitingForCandidate,
+        AIApplyRunStatus.Submitted => AIApplyCandidateProgressState.Submitted,
+        AIApplyRunStatus.NeedsReview => AIApplyCandidateProgressState.NeedsReview,
+        AIApplyRunStatus.Cancelled => AIApplyCandidateProgressState.Cancelled,
+        _ => AIApplyCandidateProgressState.Failed
+    };
     private static string? Message(AIApplyApplication e) => e.FailureKind switch { AIApplyFailureKind.LoginRequired => "Sign in on the external application site, then return to continue.", AIApplyFailureKind.HumanVerificationRequired => "Complete the external site's verification, then return to continue.", AIApplyFailureKind.SubmissionUnconfirmed => "We could not safely confirm whether this application was submitted. Review it before taking further action.", AIApplyFailureKind.Duplicate => "This application was identified as a duplicate.", AIApplyFailureKind.JobExpired => "This job is no longer available.", _ => null };
     private static AIApplyQuestionResponse MapQuestion(AIApplyQuestion e) => new(e.Id, e.ApplicationId, e.Question, e.QuestionType, e.SuggestedAnswer, e.FinalAnswer, e.Status, e.AnsweredAtUtc);
     private static AIApplyAnswerResponse MapAnswer(UserApplicationAnswer e) => new(e.Id, e.Question, e.Answer, e.Category, e.Source, e.Confidence, e.IsVerified, e.IsActive);

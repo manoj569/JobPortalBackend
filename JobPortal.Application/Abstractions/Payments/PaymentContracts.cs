@@ -13,6 +13,8 @@ public interface IPaymentService
     Task<PaymentStatusResponse> GetStatusAsync(Guid userId, CancellationToken cancellationToken = default);
     Task<PhonePeCheckoutResponse> CreatePhonePeCheckoutAsync(Guid userId, CancellationToken cancellationToken = default);
     Task<PhonePeCheckoutResponse> CreatePhonePeCheckoutAsync(Guid userId, string? returnTo, CancellationToken cancellationToken = default);
+    Task<PhonePeCheckoutResponse> CreatePhonePeCheckoutAsync(Guid userId, CreatePaymentOrderRequest request, string? returnTo, CancellationToken cancellationToken = default) =>
+        CreatePhonePeCheckoutAsync(userId, returnTo, cancellationToken);
     Task<PhonePeReturnStatusResponse> GetPhonePeStatusAsync(Guid userId, string merchantOrderId, CancellationToken cancellationToken = default);
     Task<PhonePeReturnStatusResponse> GetPhonePeStatusAsync(Guid userId, string merchantOrderId, string? returnTo, CancellationToken cancellationToken = default);
     Task<PhonePeWebhookResponse> ProcessPhonePeWebhookAsync(PhonePeWebhookRequest request, CancellationToken cancellationToken = default);

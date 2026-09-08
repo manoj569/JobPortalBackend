@@ -344,11 +344,73 @@ public sealed class PortalMembershipTests
         Assert.Equal(30, checkout.DurationDays);
         Assert.Equal(PaymentProvider.PhonePe, fixture.Payments.Payment!.Provider);
         Assert.Equal(PaymentStatus.Pending, fixture.Payments.Payment.Status);
+        Assert.Equal("CareerHarborMembership", fixture.Payments.Payment.PlanCode);
         Assert.Equal(MembershipStatus.Pending, fixture.Memberships.Membership!.Status);
         var json = JsonSerializer.Serialize(checkout);
         Assert.DoesNotContain("secret", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("authorization", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("webhook", json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("CareerHarborMembership", 9900, "Job Application Access")]
+    [InlineData("AIApply", 99900, "AI Apply")]
+    [InlineData("AIApplyPro", 149900, "AI Apply Pro")]
+    public async Task PhonePeCheckoutSelectsBackendConfiguredPlan(
+        string planCode, long amountInMinorUnits, string planName)
+    {
+        var fixture = CreatePaymentFixture();
+
+        var checkout = await fixture.Service.CreatePhonePeCheckoutAsync(
+            UserId, new(planCode), null);
+
+        Assert.Equal(planCode, checkout.PlanCode);
+        Assert.Equal(planName, checkout.PlanName);
+        Assert.Equal(amountInMinorUnits, checkout.AmountInMinorUnits);
+        Assert.Equal(amountInMinorUnits, fixture.PhonePe.RequestedAmount);
+        Assert.Equal(planCode, fixture.Payments.Payment!.PlanCode);
+        Assert.Equal(amountInMinorUnits / 100m, fixture.Payments.Payment.Amount);
+    }
+
+    [Fact]
+    public void CheckoutRequestAcceptsOnlyAPlanIdentifier()
+    {
+        var property = Assert.Single(typeof(CreatePaymentOrderRequest).GetProperties());
+        Assert.Equal(nameof(CreatePaymentOrderRequest.PlanCode), property.Name);
+    }
+
+    [Fact]
+    public async Task PhonePeCheckoutRejectsInvalidOrInactivePlanBeforeProviderCall()
+    {
+        var fixture = CreatePaymentFixture();
+        await Assert.ThrowsAsync<NotFoundException>(() => fixture.Service.CreatePhonePeCheckoutAsync(
+            UserId, new("UnknownPlan"), null));
+        Assert.Empty(fixture.PhonePe.MerchantOrderIds);
+
+        fixture.Plans.DisabledPlanCode = "AIApply";
+        await Assert.ThrowsAsync<NotFoundException>(() => fixture.Service.CreatePhonePeCheckoutAsync(
+            UserId, new("AIApply"), null));
+        Assert.Empty(fixture.PhonePe.MerchantOrderIds);
+    }
+
+    [Fact]
+    public async Task VerifiedPhonePeCompletionActivatesExactPersistedPlanOnce()
+    {
+        var fixture = CreatePaymentFixture();
+        var checkout = await fixture.Service.CreatePhonePeCheckoutAsync(
+            UserId, new("AIApplyPro"), null);
+        fixture.PhonePe.VerificationState = new(PhonePeOrderStateKind.Completed,
+            checkout.MerchantOrderId, "phonepe_txn_pro", 149900);
+        var webhook = new PhonePeWebhookRequest("{}"u8.ToArray(), "valid");
+
+        await fixture.Service.ProcessPhonePeWebhookAsync(webhook);
+        var firstEnd = fixture.Memberships.Membership!.EndsAtUtc;
+        await fixture.Service.ProcessPhonePeWebhookAsync(webhook);
+
+        Assert.Equal("AI Apply Pro", fixture.Memberships.Membership.PlanName);
+        Assert.Equal(firstEnd, fixture.Memberships.Membership.EndsAtUtc);
+        Assert.Single(fixture.Payments.Payment!.History,
+            x => x.CurrentStatus == PaymentStatus.Paid);
     }
 
     [Fact]
@@ -603,12 +665,13 @@ public sealed class PortalMembershipTests
         var phonePe = new FakePhonePeGateway();
         var unitOfWork = new FakeUnitOfWork();
         var audit = new AuditWriterTestDouble();
+        var plans = new FakePlanProvider();
         var service = new PaymentService(
-            payments, memberships, users, gateway, phonePe, new FakePlanProvider(), unitOfWork,
+            payments, memberships, users, gateway, phonePe, plans, unitOfWork,
             audit,
             new CreatePaymentOrderRequestValidator(), new ConfirmRazorpayPaymentRequestValidator(),
             new FixedTimeProvider(Now));
-        return new(service, memberships, payments, users, gateway, phonePe, unitOfWork, audit);
+        return new(service, memberships, payments, users, gateway, phonePe, plans, unitOfWork, audit);
     }
 
     private sealed record PaymentFixture(
@@ -618,6 +681,7 @@ public sealed class PortalMembershipTests
         FakeUserRepository Users,
         FakeRazorpayGateway Gateway,
         FakePhonePeGateway PhonePe,
+        FakePlanProvider Plans,
         FakeUnitOfWork UnitOfWork,
         AuditWriterTestDouble Audit);
 
@@ -802,10 +866,16 @@ public sealed class PortalMembershipTests
 
     private sealed class FakePlanProvider : IMembershipPlanProvider
     {
+        public string? DisabledPlanCode { get; set; }
         public MembershipPlan GetDefaultPlan() =>
             new("Job Application Access", 99m, "INR", 30);
-        public IReadOnlyList<MembershipPlan> GetPlans() => [GetDefaultPlan(), new("AIApply", "AI Apply", 999m, "INR", 30, true, true, false), new("AIApplyPro", "AI Apply Pro", 1499m, "INR", 30, true, true, true)];
-        public MembershipPlan GetRequired(string planCode) => GetPlans().Single(x => x.Code == planCode);
+        public IReadOnlyList<MembershipPlan> GetPlans() => [
+            GetDefaultPlan() with { IsActive = DisabledPlanCode != "CareerHarborMembership" },
+            new("AIApply", "AI Apply", 999m, "INR", 30, DisabledPlanCode != "AIApply", true, false),
+            new("AIApplyPro", "AI Apply Pro", 1499m, "INR", 30, DisabledPlanCode != "AIApplyPro", true, true)];
+        public MembershipPlan GetRequired(string planCode) => GetPlans().SingleOrDefault(x =>
+            string.Equals(x.Code, planCode, StringComparison.OrdinalIgnoreCase) && x.IsActive)
+            ?? throw new NotFoundException("Membership plan was not found.");
         public MembershipPlan GetByPayment(decimal amount, string currencyCode) => GetPlans().Single(x => x.Amount == amount && x.CurrencyCode == currencyCode);
         public MembershipPlan? FindByName(string planName) => GetPlans().SingleOrDefault(x => x.Name == planName);
     }

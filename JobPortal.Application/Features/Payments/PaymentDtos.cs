@@ -29,7 +29,7 @@ public sealed record RazorpayWebhookResponse(string Outcome);
 public sealed record PhonePeCheckoutResponse(
     string MerchantOrderId, string RedirectUrl, DateTime? ExpiresAtUtc,
     string PlanName, long AmountInMinorUnits, string CurrencyCode, int DurationDays,
-    string? ReturnTo = null);
+    string? ReturnTo = null, string PlanCode = "CareerHarborMembership");
 public enum PhonePeBrowserPaymentStatus { Pending = 1, Completed, Failed, Cancelled }
 public sealed record PhonePeReturnStatusResponse(
     string MerchantOrderId, PhonePeBrowserPaymentStatus Status, string? ReturnTo = null);

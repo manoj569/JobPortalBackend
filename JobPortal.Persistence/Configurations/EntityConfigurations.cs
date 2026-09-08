@@ -297,6 +297,7 @@ public sealed class PaymentConfiguration : IEntityTypeConfiguration<Payment>
         builder.Ignore(x => x.RowVersion);
         builder.Property<uint>("xmin").HasColumnName("xmin").IsRowVersion();
         builder.Property(x => x.CurrencyCode).HasMaxLength(3).IsRequired();
+        builder.Property(x => x.PlanCode).HasMaxLength(50);
         builder.Property(x => x.TransactionReference).HasMaxLength(100);
         builder.Property(x => x.ProviderPaymentId).HasMaxLength(200);
         builder.Property(x => x.ProviderOrderId).HasMaxLength(200);

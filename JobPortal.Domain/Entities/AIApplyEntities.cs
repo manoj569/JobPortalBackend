@@ -52,6 +52,10 @@ public sealed class AIApplyApplication : BaseEntity
 {
     public Guid UserId { get; set; }
     public Guid JobId { get; set; }
+    public string? ResumeStorageKey { get; set; }
+    public string? ResumeFileName { get; set; }
+    public string? ResumeContentType { get; set; }
+    public long? ResumeSizeBytes { get; set; }
     public string ExternalApplicationUrl { get; set; } = string.Empty;
     public string NormalizedApplicationUrl { get; set; } = string.Empty;
     public AIApplyRunStatus Status { get; set; } = AIApplyRunStatus.Queued;
