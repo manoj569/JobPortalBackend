@@ -38,6 +38,8 @@ using Serilog;
 
 
 var builder = WebApplication.CreateBuilder(args);
+if (PlatformPortBinding.ResolveUrl(builder.Configuration["PORT"]) is { } platformUrl)
+    builder.WebHost.UseUrls(platformUrl);
 
 builder.Host.UseSerilog((context, services, configuration) => configuration
     .ReadFrom.Configuration(context.Configuration)
