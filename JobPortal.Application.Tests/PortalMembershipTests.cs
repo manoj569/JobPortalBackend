@@ -85,7 +85,7 @@ public sealed class PortalMembershipTests
     }
 
     [Fact]
-    public async Task ActiveOrPendingMembershipRejectsAnotherOrder()
+    public async Task ActiveMembershipCanRenewWhileAnUnresolvedOrderBlocksAnotherOrder()
     {
         var fixture = CreatePaymentFixture();
         fixture.Memberships.Membership = new Membership
@@ -95,13 +95,35 @@ public sealed class PortalMembershipTests
             StartsAtUtc = Now,
             EndsAtUtc = Now.AddDays(1)
         };
-        await Assert.ThrowsAsync<ConflictException>(
-            () => fixture.Service.CreateOrderAsync(UserId, new()));
+        var renewal = await fixture.Service.CreateOrderAsync(UserId, new());
+        Assert.Equal(9900, renewal.AmountInMinorUnits);
+        Assert.Equal(MembershipStatus.Active, fixture.Memberships.Membership.Status);
 
         fixture.Memberships.Membership.Status = MembershipStatus.Pending;
-        await Assert.ThrowsAsync<ConflictException>(
+        await Assert.ThrowsAsync<PendingMembershipCheckoutException>(
             () => fixture.Service.CreateOrderAsync(UserId, new()));
-        Assert.Equal(0, fixture.Gateway.CreateOrderCalls);
+        Assert.Equal(1, fixture.Gateway.CreateOrderCalls);
+    }
+
+    [Theory]
+    [InlineData("AIApply", 99900, "AI Apply")]
+    [InlineData("AIApplyPro", 149900, "AI Apply Pro")]
+    public async Task AiPlanCheckoutUsesAuthoritativeBackendPrice(string planCode, long amount, string planName)
+    {
+        var fixture = CreatePaymentFixture();
+        var order = await fixture.Service.CreateOrderAsync(UserId, new(planCode));
+        Assert.Equal(amount, order.AmountInMinorUnits); Assert.Equal(planName, order.PlanName); Assert.Equal(planCode, order.PlanCode);
+        Assert.Equal(amount / 100m, fixture.Payments.Payment!.Amount);
+    }
+
+    [Fact]
+    public async Task VerifiedProUpgradeActivatesProAndPreservesRemainingTerm()
+    {
+        var fixture = CreatePaymentFixture(); fixture.Memberships.Membership = new Membership { UserId = UserId, PlanName = "AI Apply", Status = MembershipStatus.Active, StartsAtUtc = Now.AddDays(-5), EndsAtUtc = Now.AddDays(10) };
+        var order = await fixture.Service.CreateOrderAsync(UserId, new("AIApplyPro"));
+        fixture.Gateway.ReconciliationState = new(RazorpayPaymentStateKind.Paid, "pay_pro", 149900, "INR");
+        await fixture.Service.ConfirmAsync(UserId, order.PaymentId, new(order.ProviderOrderId, "pay_pro", new('a', 64)));
+        Assert.Equal("AI Apply Pro", fixture.Memberships.Membership.PlanName); Assert.Equal(Now.AddDays(40), fixture.Memberships.Membership.EndsAtUtc);
     }
 
     [Fact]
@@ -782,6 +804,10 @@ public sealed class PortalMembershipTests
     {
         public MembershipPlan GetDefaultPlan() =>
             new("Job Application Access", 99m, "INR", 30);
+        public IReadOnlyList<MembershipPlan> GetPlans() => [GetDefaultPlan(), new("AIApply", "AI Apply", 999m, "INR", 30, true, true, false), new("AIApplyPro", "AI Apply Pro", 1499m, "INR", 30, true, true, true)];
+        public MembershipPlan GetRequired(string planCode) => GetPlans().Single(x => x.Code == planCode);
+        public MembershipPlan GetByPayment(decimal amount, string currencyCode) => GetPlans().Single(x => x.Amount == amount && x.CurrencyCode == currencyCode);
+        public MembershipPlan? FindByName(string planName) => GetPlans().SingleOrDefault(x => x.Name == planName);
     }
 
     private sealed class FakeUnitOfWork : IUnitOfWork

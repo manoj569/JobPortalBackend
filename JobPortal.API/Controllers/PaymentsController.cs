@@ -14,7 +14,7 @@ namespace JobPortal.API.Controllers;
 [Produces("application/json")]
 public sealed class PaymentsController(IPaymentService paymentService) : ControllerBase
 {
-    [NonAction]
+    [HttpPost("checkout")]
     public async Task<ActionResult<ApiResponse<PaymentOrderResponse>>> CreateOrder(
         [FromBody] CreatePaymentOrderRequest request, CancellationToken cancellationToken)
     {
@@ -22,6 +22,11 @@ public sealed class PaymentsController(IPaymentService paymentService) : Control
         return StatusCode(StatusCodes.Status201Created,
             new ApiResponse<PaymentOrderResponse>(result, "Razorpay order created."));
     }
+
+    [AllowAnonymous]
+    [HttpGet("plans")]
+    public ActionResult<ApiResponse<IReadOnlyList<MembershipPlanResponse>>> Plans() =>
+        Ok(new ApiResponse<IReadOnlyList<MembershipPlanResponse>>(paymentService.GetPlans()));
 
     [HttpPost("phonepe/checkout")]
     [ProducesResponseType(typeof(ApiResponse<PhonePeCheckoutResponse>), StatusCodes.Status201Created)]

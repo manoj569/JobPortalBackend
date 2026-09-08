@@ -4,6 +4,7 @@ namespace JobPortal.Application.Features.Payments;
 
 public sealed class CreatePaymentOrderRequestValidator : AbstractValidator<CreatePaymentOrderRequest>
 {
+    public CreatePaymentOrderRequestValidator() { RuleFor(x => x.PlanCode).NotEmpty().MaximumLength(50).Matches("^[A-Za-z][A-Za-z0-9]*$"); }
 }
 
 public sealed class ConfirmRazorpayPaymentRequestValidator : AbstractValidator<ConfirmRazorpayPaymentRequest>

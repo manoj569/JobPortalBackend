@@ -6,6 +6,7 @@ namespace JobPortal.Application.Abstractions.Payments;
 
 public interface IPaymentService
 {
+    IReadOnlyList<MembershipPlanResponse> GetPlans();
     Task<PaymentOrderResponse> CreateOrderAsync(Guid userId, CreatePaymentOrderRequest request, CancellationToken cancellationToken = default);
     Task<PaymentResponse> ConfirmAsync(Guid userId, Guid paymentId, ConfirmRazorpayPaymentRequest request, CancellationToken cancellationToken = default);
     Task<PaymentResponse> ReconcileAsync(Guid userId, Guid paymentId, CancellationToken cancellationToken = default);
@@ -57,6 +58,13 @@ public sealed record RazorpayPaymentState(
 public interface IMembershipPlanProvider
 {
     MembershipPlan GetDefaultPlan();
+    MembershipPlan GetRequired(string planCode) => string.Equals(planCode, "CareerHarborMembership", StringComparison.OrdinalIgnoreCase) ? GetDefaultPlan() : throw new KeyNotFoundException();
+    MembershipPlan GetByPayment(decimal amount, string currencyCode) { var plan = GetDefaultPlan(); return plan.Amount == amount && string.Equals(plan.CurrencyCode, currencyCode, StringComparison.OrdinalIgnoreCase) ? plan : throw new InvalidOperationException(); }
+    MembershipPlan? FindByName(string planName) { var plan = GetDefaultPlan(); return string.Equals(plan.Name, planName, StringComparison.OrdinalIgnoreCase) ? plan : null; }
+    IReadOnlyList<MembershipPlan> GetPlans() => [GetDefaultPlan()];
 }
 
-public sealed record MembershipPlan(string Name, decimal Amount, string CurrencyCode, int DurationDays);
+public sealed record MembershipPlan(string Code, string Name, decimal Amount, string CurrencyCode, int DurationDays, bool IsActive, bool AIApplyEnabled, bool AIApplyProEnabled)
+{
+    public MembershipPlan(string name, decimal amount, string currencyCode, int durationDays) : this("CareerHarborMembership", name, amount, currencyCode, durationDays, true, false, false) { }
+}

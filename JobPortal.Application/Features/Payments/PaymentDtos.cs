@@ -5,17 +5,18 @@ using JobPortal.Shared.Models;
 
 namespace JobPortal.Application.Features.Payments;
 
-public sealed record CreatePaymentOrderRequest;
+public sealed record CreatePaymentOrderRequest(string PlanCode = "CareerHarborMembership");
+public sealed record MembershipPlanResponse(string PlanCode, string DisplayName, decimal Price, string Currency, int DurationDays, bool CanUseStandardMembership, bool CanUseAIApply, bool CanUseAIApplyPro);
 public sealed record PaymentOrderResponse(
     Guid PaymentId, Guid MembershipId, string ProviderOrderId, string KeyId,
-    long AmountInMinorUnits, string CurrencyCode, string Receipt, string PlanName, int DurationDays);
+    long AmountInMinorUnits, string CurrencyCode, string Receipt, string PlanName, int DurationDays, string PlanCode = "CareerHarborMembership");
 public sealed record ConfirmRazorpayPaymentRequest(
     string RazorpayOrderId, string RazorpayPaymentId, string RazorpaySignature);
 public sealed record PaymentResponse(
     Guid Id, decimal Amount, string CurrencyCode, PaymentStatus Status,
     PaymentProvider Provider, string? ProviderOrderId, string? ProviderPaymentId,
     DateTime? PaidAtUtc, Guid? MembershipId, DateTime CreatedAtUtc,
-    DateTime? ProviderOrderCreatedAtUtc = null, DateTime? LastReconciledAtUtc = null);
+    DateTime? ProviderOrderCreatedAtUtc = null, DateTime? LastReconciledAtUtc = null, string? PlanCode = null);
 public sealed record PaymentHistoryResponse(
     Guid Id, Guid PaymentId, PaymentStatus? PreviousStatus, PaymentStatus CurrentStatus,
     DateTime OccurredAtUtc, string? ProviderEventId, string? Reason);
