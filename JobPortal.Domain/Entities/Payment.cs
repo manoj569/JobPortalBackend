@@ -5,6 +5,7 @@ namespace JobPortal.Domain.Entities;
 
 public sealed class Payment : BaseEntity
 {
+    public string? PlanCode { get; set; }
     public decimal Amount { get; set; }
     public string CurrencyCode { get; set; } = "USD";
     public PaymentStatus Status { get; set; } = PaymentStatus.Pending;

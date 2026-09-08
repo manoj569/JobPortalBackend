@@ -60,7 +60,7 @@ public sealed class PlaywrightJobApplicationBrowserAgent(
         try
         {
             var values = await ResolveValuesAsync(context.UserId, ct);
-            var resume = await ResolveResumeAsync(context.UserId, ct);
+            var resume = await ResolveResumeAsync(context, ct);
             if (!await siteHealth.CanExecuteAsync(adapter.Support.Site, DateTime.UtcNow, ct)) return Failure(AIApplyFailureKind.WebsiteError, "site_circuit_open", timer) with { Adapter = adapter.Support };
             var result = await adapter.ExecuteAsync(page, context, values, resume, ct);
             if (session is not null)
@@ -125,19 +125,19 @@ public sealed class PlaywrightJobApplicationBrowserAgent(
         return new(values, answers);
     }
 
-    private async Task<ResumePayload?> ResolveResumeAsync(Guid userId, CancellationToken ct)
+    private async Task<ResumePayload?> ResolveResumeAsync(BrowserApplicationContext context, CancellationToken ct)
     {
-        var user = await repository.GetUserProfileAsync(userId, ct);
-        var resumeSize = user?.ResumeSizeBytes;
-        if (user?.ResumeStorageKey is null || user.ResumeFileName is null || user.ResumeContentType is null ||
+        var application = await repository.GetApplicationAsync(context.UserId, context.ApplicationId, ct);
+        var resumeSize = application?.ResumeSizeBytes;
+        if (application?.ResumeStorageKey is null || application.ResumeFileName is null || application.ResumeContentType is null ||
             !resumeSize.HasValue || resumeSize is <= 0 or > 5 * 1024 * 1024 ||
-            user.ResumeContentType is not ("application/pdf" or "application/vnd.openxmlformats-officedocument.wordprocessingml.document" or "application/msword")) return null;
-        await using var source = await resumeStorage.OpenReadAsync(user.ResumeStorageKey, ct);
+            application.ResumeContentType is not ("application/pdf" or "application/vnd.openxmlformats-officedocument.wordprocessingml.document" or "application/msword")) return null;
+        await using var source = await resumeStorage.OpenReadAsync(application.ResumeStorageKey, ct);
         if (source is null) return null;
         using var memory = new MemoryStream((int)resumeSize.GetValueOrDefault());
         await source.CopyToAsync(memory, ct);
         if (memory.Length != resumeSize.GetValueOrDefault()) return null;
-        return new(Path.GetFileName(user.ResumeFileName), user.ResumeContentType, memory.ToArray());
+        return new(Path.GetFileName(application.ResumeFileName), application.ResumeContentType, memory.ToArray());
     }
 
     private static void Add(Dictionary<string, string> values, string key, string? value) { if (!string.IsNullOrWhiteSpace(value)) values[key] = value.Trim(); }

@@ -35,15 +35,21 @@ public sealed class PaymentService(
 
     public async Task<PhonePeCheckoutResponse> CreatePhonePeCheckoutAsync(
         Guid userId, CancellationToken cancellationToken = default)
-        => await CreatePhonePeCheckoutAsync(userId, null, cancellationToken);
+        => await CreatePhonePeCheckoutAsync(userId, new(), null, cancellationToken);
 
     public async Task<PhonePeCheckoutResponse> CreatePhonePeCheckoutAsync(
         Guid userId, string? returnTo, CancellationToken cancellationToken = default)
+        => await CreatePhonePeCheckoutAsync(userId, new(), returnTo, cancellationToken);
+
+    public async Task<PhonePeCheckoutResponse> CreatePhonePeCheckoutAsync(
+        Guid userId, CreatePaymentOrderRequest request, string? returnTo,
+        CancellationToken cancellationToken = default)
     {
         returnTo = PaymentReturnPath.Validate(returnTo);
+        await createOrderValidator.ValidateAndThrowAsync(request, cancellationToken);
         await RequiredCandidateAsync(userId, cancellationToken);
         var utcNow = UtcNow;
-        var plan = plans.GetDefaultPlan();
+        var plan = plans.GetRequired(request.PlanCode);
         var membership = await memberships.GetPortalMembershipForUserAsync(userId, cancellationToken);
         await ExpireMembershipIfNeededAsync(membership, userId, cancellationToken);
         if (membership is { Status: MembershipStatus.Active } && membership.StartsAtUtc <= utcNow &&
@@ -74,7 +80,7 @@ public sealed class PaymentService(
 
         var payment = new Payment
         {
-            UserId = userId, Membership = membership, Amount = plan.Amount,
+            UserId = userId, Membership = membership, PlanCode = plan.Code, Amount = plan.Amount,
             CurrencyCode = plan.CurrencyCode.ToUpperInvariant(), Provider = PaymentProvider.PhonePe,
             Status = PaymentStatus.Created
         };
@@ -104,7 +110,7 @@ public sealed class PaymentService(
                 }, new(userId, "Candidate")), cancellationToken);
             await unitOfWork.SaveChangesAsync(cancellationToken);
             return new(merchantOrderId, checkout.RedirectUrl, checkout.ExpiresAtUtc,
-                plan.Name, amount, payment.CurrencyCode, plan.DurationDays, returnTo);
+                plan.Name, amount, payment.CurrencyCode, plan.DurationDays, returnTo, plan.Code);
         }
         catch
         {
@@ -358,6 +364,7 @@ public sealed class PaymentService(
         {
             UserId = userId,
             Membership = membership,
+            PlanCode = plan.Code,
             Amount = plan.Amount,
             CurrencyCode = plan.CurrencyCode.ToUpperInvariant(),
             Provider = PaymentProvider.Razorpay,
@@ -620,7 +627,9 @@ public sealed class PaymentService(
         await RequiredCandidateAsync(userId, cancellationToken);
         RequestGuards.ValidatePagination(query.PageNumber, query.PageSize);
         var result = await payments.GetForUserAsync(userId, query, cancellationToken);
-        return new(result.Items.Select(x => x with { PlanCode = TryPlanCode(x.Amount, x.CurrencyCode) }).ToList(), query.PageNumber, query.PageSize, result.TotalCount);
+        return new(result.Items.Select(x => string.IsNullOrWhiteSpace(x.PlanCode)
+            ? x with { PlanCode = TryPlanCode(x.Amount, x.CurrencyCode) }
+            : x).ToList(), query.PageNumber, query.PageSize, result.TotalCount);
     }
 
     public async Task<PagedResponse<PaymentHistoryResponse>> GetHistoryAsync(
@@ -654,7 +663,7 @@ public sealed class PaymentService(
 
         var membership = payment.Membership
             ?? throw new ConflictException("Payment has no membership.");
-        var purchasedPlan = plans.GetByPayment(payment.Amount, payment.CurrencyCode);
+        var purchasedPlan = ResolvePurchasedPlan(payment);
         var previousMembershipStatus = membership.Status;
         var extensionStart = membership.Status == MembershipStatus.Active &&
             membership.EndsAtUtc.HasValue && membership.EndsAtUtc > utcNow
@@ -862,7 +871,23 @@ public sealed class PaymentService(
         x.ProviderOrderCreatedAtUtc, x.LastReconciledAtUtc, TryPlanCode(x));
 
     private string? TryPlanCode(Payment payment)
-        => TryPlanCode(payment.Amount, payment.CurrencyCode);
+        => string.IsNullOrWhiteSpace(payment.PlanCode)
+            ? TryPlanCode(payment.Amount, payment.CurrencyCode)
+            : payment.PlanCode;
+
+    private MembershipPlan ResolvePurchasedPlan(Payment payment)
+    {
+        if (string.IsNullOrWhiteSpace(payment.PlanCode))
+            return plans.GetByPayment(payment.Amount, payment.CurrencyCode);
+
+        var plan = plans.GetPlans().SingleOrDefault(x =>
+            string.Equals(x.Code, payment.PlanCode, StringComparison.OrdinalIgnoreCase))
+            ?? throw new InvalidOperationException("Payment does not match a configured membership plan.");
+        if (plan.Amount != payment.Amount ||
+            !string.Equals(plan.CurrencyCode, payment.CurrencyCode, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Payment does not match its configured membership plan.");
+        return plan;
+    }
 
     private string? TryPlanCode(decimal amount, string currencyCode)
     {

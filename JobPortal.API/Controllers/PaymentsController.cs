@@ -5,6 +5,7 @@ using JobPortal.Application.Features.Payments;
 using JobPortal.Shared.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 
 namespace JobPortal.API.Controllers;
 
@@ -31,10 +32,11 @@ public sealed class PaymentsController(IPaymentService paymentService) : Control
     [HttpPost("phonepe/checkout")]
     [ProducesResponseType(typeof(ApiResponse<PhonePeCheckoutResponse>), StatusCodes.Status201Created)]
     public async Task<ActionResult<ApiResponse<PhonePeCheckoutResponse>>> CreatePhonePeCheckout(
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] CreatePaymentOrderRequest? request,
         [FromQuery] string? returnTo, CancellationToken cancellationToken)
     {
         var result = await paymentService.CreatePhonePeCheckoutAsync(
-            User.GetRequiredUserId(), returnTo, cancellationToken);
+            User.GetRequiredUserId(), request ?? new(), returnTo, cancellationToken);
         return StatusCode(StatusCodes.Status201Created,
             new ApiResponse<PhonePeCheckoutResponse>(result, "PhonePe checkout created."));
     }
