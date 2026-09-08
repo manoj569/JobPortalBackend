@@ -1,5 +1,6 @@
 using FluentValidation;
 using JobPortal.Application.Abstractions.AdminApplications;
+using JobPortal.Application.Abstractions.AIApply;
 using JobPortal.Application.Abstractions.AdminDashboard;
 using JobPortal.Application.Abstractions.AdminImports;
 using JobPortal.Application.Abstractions.AdminManagement;
@@ -15,6 +16,7 @@ using JobPortal.Application.Abstractions.Payments;
 using JobPortal.Application.Abstractions.Portfolios;
 using JobPortal.Application.Abstractions.Settings;
 using JobPortal.Application.Features.AdminApplications;
+using JobPortal.Application.Features.AIApply;
 using JobPortal.Application.Features.AdminDashboard;
 using JobPortal.Application.Features.AdminImports;
 using JobPortal.Application.Features.AdminManagement;
@@ -41,6 +43,21 @@ public static class ServiceCollectionExtensions
     {
         services.AddValidatorsFromAssembly(typeof(ServiceCollectionExtensions).Assembly);
         services.AddScoped<IAuthService, AuthService>();
+        services.AddScoped<IAIApplyService, AIApplyService>();
+        services.AddScoped<IAIApplyAuthorizationService, AIApplyAuthorizationService>();
+        services.AddScoped<IAIApplyMatcher, DeterministicAIApplyMatcher>();
+        services.AddScoped<IApplicationQuestionMatcher, ApplicationQuestionMatcher>();
+        services.AddScoped<IApplicationQuestionClassifier, DeterministicApplicationQuestionClassifier>();
+        services.AddScoped<IApplicationSemanticMatcher, DeterministicApplicationSemanticMatcher>();
+        services.AddScoped<IAIApplicationAnswerPolicy, AIApplicationAnswerPolicy>();
+        services.AddScoped<IApplicationAnswerResolver, ApplicationAnswerResolver>();
+        services.AddScoped<IAIApplyLanguageModel, DisabledAIApplyLanguageModel>();
+        services.AddScoped<IApplicationFieldMapper, DeterministicApplicationFieldMapper>();
+        services.AddScoped<IJobApplicationBrowserAgent, UnconfiguredJobApplicationBrowserAgent>();
+        services.AddScoped<IAIApplyExecutionService, AIApplyExecutionService>();
+        services.AddScoped<IExternalJobSiteSessionService, ExternalJobSiteSessionService>();
+        services.AddScoped<IAIApplyRetryPolicy, AIApplyRetryPolicy>();
+        services.AddScoped<IApplicationExecutionCheckpoint, ApplicationExecutionCheckpoint>();
         services.AddScoped<IGoogleAuthenticationService, GoogleAuthenticationService>();
         services.AddScoped<IAuditWriter, AuditWriter>();
         services.AddScoped<IAuditLogService, AuditLogService>();

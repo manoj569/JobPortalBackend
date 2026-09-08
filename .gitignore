@@ -12,3 +12,5 @@ appsettings.*.local.json
 .env
 .env.*
 !.env.example
+
+/you-are-a-principal-net-9/

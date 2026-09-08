@@ -5,22 +5,54 @@ namespace JobPortal.API.HostedServices;
 
 public sealed class RegistrationEmailHostedService(
     IServiceScopeFactory scopes,
-    TimeProvider timeProvider) : BackgroundService
+    TimeProvider timeProvider,
+    ILogger<RegistrationEmailHostedService> logger,
+    TimeSpan? retryDelay = null) : BackgroundService
 {
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
+    private readonly TimeSpan retryDelay = retryDelay ?? TimeSpan.FromSeconds(15);
+    private static readonly Action<ILogger, Exception?> IterationFailed =
+        LoggerMessage.Define(LogLevel.Error,
+            new EventId(4102, nameof(IterationFailed)),
+            "Registration email polling iteration failed; the worker will retry.");
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5), timeProvider);
-        do
+        using var timer = new PeriodicTimer(PollInterval, timeProvider);
+        while (!stoppingToken.IsCancellationRequested)
         {
-            for (var processed = 0; processed < 20 && !stoppingToken.IsCancellationRequested; processed++)
+            if (!await RunIterationAsync(stoppingToken))
+            {
+                await Task.Delay(retryDelay, timeProvider, stoppingToken);
+                continue;
+            }
+            await timer.WaitForNextTickAsync(stoppingToken);
+        }
+    }
+
+    internal async Task<bool> RunIterationAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            for (var processed = 0; processed < 20 && !cancellationToken.IsCancellationRequested; processed++)
             {
                 await using var scope = scopes.CreateAsyncScope();
                 if (!await scope.ServiceProvider.GetRequiredService<RegistrationEmailDispatcher>()
-                    .ProcessOneAsync(stoppingToken)) break;
+                    .ProcessOneAsync(cancellationToken)) break;
             }
-        } while (await timer.WaitForNextTickAsync(stoppingToken));
+            cancellationToken.ThrowIfCancellationRequested();
+            return true;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            IterationFailed(logger, exception);
+            return false;
+        }
     }
-
 }
 
 public sealed class RegistrationEmailDispatcher(

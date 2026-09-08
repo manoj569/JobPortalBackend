@@ -54,6 +54,18 @@ public sealed class JobPortalDbContext(DbContextOptions<JobPortalDbContext> opti
     public DbSet<CandidateInterviewSchedule> CandidateInterviewSchedules => Set<CandidateInterviewSchedule>();
     public DbSet<InsightHelpfulnessFeedback> InsightHelpfulnessFeedback => Set<InsightHelpfulnessFeedback>();
     public DbSet<InsightReport> InsightReports => Set<InsightReport>();
+    public DbSet<AIApplyProfile> AIApplyProfiles => Set<AIApplyProfile>();
+    public DbSet<AIApplyPreference> AIApplyPreferences => Set<AIApplyPreference>();
+    public DbSet<AIApplySetting> AIApplySettings => Set<AIApplySetting>();
+    public DbSet<AIApplyRule> AIApplyRules => Set<AIApplyRule>();
+    public DbSet<AIApplyApplication> AIApplyApplications => Set<AIApplyApplication>();
+    public DbSet<AIApplyQuestion> AIApplyQuestions => Set<AIApplyQuestion>();
+    public DbSet<UserApplicationAnswer> UserApplicationAnswers => Set<UserApplicationAnswer>();
+    public DbSet<AIApplyExecutionLog> AIApplyExecutionLogs => Set<AIApplyExecutionLog>();
+    public DbSet<AIApplyCost> AIApplyCosts => Set<AIApplyCost>();
+    public DbSet<ExternalJobSiteSession> ExternalJobSiteSessions => Set<ExternalJobSiteSession>();
+    public DbSet<AIApplyWorkerInstance> AIApplyWorkerInstances => Set<AIApplyWorkerInstance>();
+    public DbSet<AIApplySiteOperationalState> AIApplySiteOperationalStates => Set<AIApplySiteOperationalState>();
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {

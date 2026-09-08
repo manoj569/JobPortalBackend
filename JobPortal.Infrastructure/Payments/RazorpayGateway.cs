@@ -127,22 +127,16 @@ public sealed class RazorpayGateway : IRazorpayGateway
 
 public sealed class ConfigurationMembershipPlanProvider(IConfiguration configuration) : IMembershipPlanProvider
 {
-    public MembershipPlan GetDefaultPlan()
+    public MembershipPlan GetDefaultPlan() => GetRequired("CareerHarborMembership");
+    public MembershipPlan GetRequired(string planCode) => GetPlans().SingleOrDefault(x => string.Equals(x.Code, planCode, StringComparison.OrdinalIgnoreCase) && x.IsActive)
+        ?? throw new JobPortal.Application.Common.Exceptions.NotFoundException("Membership plan was not found.");
+    public MembershipPlan GetByPayment(decimal amount, string currencyCode) => GetPlans().SingleOrDefault(x => x.Amount == amount && string.Equals(x.CurrencyCode, currencyCode, StringComparison.OrdinalIgnoreCase))
+        ?? throw new InvalidOperationException("Payment does not match a configured membership plan.");
+    public MembershipPlan? FindByName(string planName) => GetPlans().SingleOrDefault(x => string.Equals(x.Name, planName, StringComparison.OrdinalIgnoreCase));
+    public IReadOnlyList<MembershipPlan> GetPlans()
     {
-        var section = configuration.GetSection("Membership:DefaultPlan");
-        var name = section["Name"];
-        var currency = section["CurrencyCode"];
-        if (string.IsNullOrWhiteSpace(name) || name.Length > 100)
-            throw new InvalidOperationException(
-                "Membership plan name must contain between 1 and 100 characters.");
-        if (!decimal.TryParse(
-                section["Amount"], System.Globalization.CultureInfo.InvariantCulture, out var amount) ||
-            amount != 99m)
-            throw new InvalidOperationException("The portal membership amount must be INR 99.");
-        if (!string.Equals(currency, "INR", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("The portal membership currency must be INR.");
-        if (!int.TryParse(section["DurationDays"], out var duration) || duration != 30)
-            throw new InvalidOperationException("The portal membership duration must be 30 days.");
-        return new MembershipPlan(name, amount, "INR", duration);
+        var plans = configuration.GetSection("Membership:Plans").GetChildren().Select(x => new MembershipPlan(x.Key, x["DisplayName"] ?? "", decimal.Parse(x["Price"] ?? "0", System.Globalization.CultureInfo.InvariantCulture), x["Currency"] ?? "", int.Parse(x["DurationDays"] ?? "0", System.Globalization.CultureInfo.InvariantCulture), !bool.TryParse(x["IsActive"], out var active) || active, bool.TryParse(x["AIApplyEnabled"], out var ai) && ai, bool.TryParse(x["AIApplyProEnabled"], out var pro) && pro)).ToList();
+        if (plans.Count != 3 || plans.Any(x => string.IsNullOrWhiteSpace(x.Name) || x.CurrencyCode != "INR" || x.DurationDays != 30) || plans.Single(x => x.Code == "CareerHarborMembership").Amount != 99m || plans.Single(x => x.Code == "AIApply").Amount != 999m || plans.Single(x => x.Code == "AIApplyPro").Amount != 1499m) throw new InvalidOperationException("Membership plan configuration is invalid.");
+        return plans;
     }
 }

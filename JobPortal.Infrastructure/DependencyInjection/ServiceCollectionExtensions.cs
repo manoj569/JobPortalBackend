@@ -9,6 +9,9 @@ using JobPortal.Application.Features.JobDiscovery;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using JobPortal.Application.Features.Authentication;
+using JobPortal.Application.Abstractions.AIApply;
+using JobPortal.Application.Features.AIApply;
+using JobPortal.Infrastructure.AIApply;
 
 namespace JobPortal.Infrastructure;
 
@@ -54,6 +57,41 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IMembershipPlanProvider, ConfigurationMembershipPlanProvider>();
         services.AddSingleton<IResumeStorage, LocalResumeStorage>();
         services.AddSingleton<IResumeTextExtractor, ResumeTextExtractor>();
+        services.AddSingleton<PlaywrightBrowserManager>();
+        services.AddSingleton<IPlaywrightBrowserRuntime>(provider => provider.GetRequiredService<PlaywrightBrowserManager>());
+        services.AddSingleton<IExternalHostAddressResolver, SystemExternalHostAddressResolver>();
+        services.AddSingleton<ExternalNavigationPolicy>();
+        services.AddSingleton<IExternalJobSiteSessionProtector, ExternalJobSiteSessionProtector>();
+        if (configuration.GetValue("AIApply:ExternalSessions:Capture:Transport:Enabled", false))
+            services.AddSingleton<IExternalSessionCaptureTransport, SignalRExternalSessionCaptureTransport>();
+        else
+            services.AddSingleton<IExternalSessionCaptureTransport, DisabledExternalSessionCaptureTransport>();
+        services.AddScoped<IExternalSessionSiteRegistry, ConfiguredExternalSessionSiteRegistry>();
+        services.AddSingleton<ExternalSessionCaptureManager>();
+        services.AddSingleton<IExternalSessionCaptureCleanup>(sp => sp.GetRequiredService<ExternalSessionCaptureManager>());
+        services.AddScoped<IExternalSessionCaptureService, ExternalSessionCaptureService>();
+        services.AddScoped<IExternalSessionCaptureInteractionService, ExternalSessionCaptureInteractionService>();
+        services.AddSingleton<IExternalJobSiteSessionValidator, WorkdayExternalSessionValidator>();
+        services.AddSingleton<IExternalJobSiteSessionValidator, LinkedInExternalSessionValidator>();
+        services.AddSingleton<IExternalJobSiteSessionValidator, NaukriExternalSessionValidator>();
+        services.AddSingleton<IExternalJobSiteSessionValidator, IndeedExternalSessionValidator>();
+        services.AddSingleton<IExternalJobSiteSessionValidator, FounditExternalSessionValidator>();
+        services.AddSingleton<IExternalJobSiteSessionValidator, WellfoundExternalSessionValidator>();
+        services.AddScoped<GenericJobSiteAdapter>();
+        services.AddScoped<IJobSiteAdapter>(sp => sp.GetRequiredService<GenericJobSiteAdapter>());
+        services.AddScoped<IJobSiteAdapter, GreenhouseJobSiteAdapter>();
+        services.AddScoped<IJobSiteAdapter, LeverJobSiteAdapter>();
+        services.AddScoped<IJobSiteAdapter, AshbyJobSiteAdapter>();
+        services.AddScoped<IJobSiteAdapter, SmartRecruitersJobSiteAdapter>();
+        services.AddScoped<IJobSiteAdapter, AccountOrientedJobSiteAdapter>();
+        services.AddScoped<IJobSiteAdapterResolver, JobSiteAdapterResolver>();
+        services.AddScoped<ICandidateExternalApplicationLinkService, CandidateExternalApplicationLinkService>();
+        if (!configuration.GetValue("AIApply:ExternalSessions:Enabled", false))
+            services.AddSingleton<IExternalJobSiteSessionStore, DisabledExternalJobSiteSessionStore>();
+        services.AddScoped<IJobSiteAdapterHealthService, ConfiguredJobSiteAdapterHealthService>();
+        services.AddSingleton<IAIApplyWorkerIdentity, AIApplyWorkerIdentity>();
+        services.AddSingleton<IAIApplyWorkerState, AIApplyWorkerState>();
+        services.AddScoped<IJobApplicationBrowserAgent, PlaywrightJobApplicationBrowserAgent>();
 
         return services;
     }

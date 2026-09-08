@@ -5,6 +5,7 @@ using System.Security.Claims;
 using System.Text;
 using System.Threading.RateLimiting;
 using JobPortal.API.Health;
+using JobPortal.API.Hubs;
 using JobPortal.API.Authorization;
 using JobPortal.API.HostedServices;
 using JobPortal.API.Middleware;
@@ -13,11 +14,14 @@ using JobPortal.API.Startup;
 using JobPortal.API.Swagger;
 using JobPortal.Application;
 using JobPortal.Application.Features.JobDiscovery;
+using JobPortal.Application.Features.AIApply;
 using JobPortal.Application.Abstractions.Auditing;
 using JobPortal.Application.Abstractions.Authentication;
 using JobPortal.Infrastructure;
 using JobPortal.Persistence;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.DataProtection;
+using System.Security.Cryptography.X509Certificates;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Authorization.Policy;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
@@ -27,6 +31,7 @@ using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using Serilog;
@@ -34,22 +39,18 @@ using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Allow local development to see Swagger, but keep Production on Render
-if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("RENDER")))
-{
-    builder.Environment.EnvironmentName = "Development";
-}
-else
-{
-    builder.Environment.EnvironmentName = "Production";
-}
-
 builder.Host.UseSerilog((context, services, configuration) => configuration
     .ReadFrom.Configuration(context.Configuration)
     .ReadFrom.Services(services)
     .Enrich.FromLogContext());
 
 builder.Services.AddControllers();
+builder.Services.AddSignalR(options =>
+{
+    options.EnableDetailedErrors = false;
+    options.MaximumReceiveMessageSize = 4096;
+    options.StreamBufferCapacity = 1;
+});
 builder.Services.Configure<ApiBehaviorOptions>(options =>
 {
     options.InvalidModelStateResponseFactory = context =>
@@ -91,6 +92,19 @@ builder.Services.Configure<ApiBehaviorOptions>(options =>
     };
 });
 builder.Services.AddHttpContextAccessor();
+var externalSessions = builder.Configuration.GetSection("AIApply:ExternalSessions");
+var dataProtection = builder.Services.AddDataProtection().SetApplicationName("CareerHarbor");
+if (externalSessions.GetValue("Enabled", false))
+{
+    var keysPath = externalSessions["DataProtectionKeysPath"];
+    if (!string.IsNullOrWhiteSpace(keysPath))
+        dataProtection.PersistKeysToFileSystem(Directory.CreateDirectory(keysPath));
+    var certificatePath = externalSessions["DataProtectionCertificatePath"];
+    var certificatePassword = externalSessions["DataProtectionCertificatePassword"];
+    if (!string.IsNullOrWhiteSpace(certificatePath) && !string.IsNullOrWhiteSpace(certificatePassword))
+        dataProtection.ProtectKeysWithCertificate(X509CertificateLoader.LoadPkcs12FromFile(
+            certificatePath, certificatePassword, X509KeyStorageFlags.EphemeralKeySet));
+}
 builder.Services.AddScoped<IAuditContextAccessor, HttpAuditContextAccessor>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
@@ -124,16 +138,20 @@ builder.Services.AddHostedService<JobDiscoveryHostedService>();
 builder.Services.AddHostedService<RegistrationEmailHostedService>();
 builder.Services.AddScoped<RegistrationEmailDispatcher>();
 builder.Services.AddHostedService<InterviewScheduleNotificationHostedService>();
+builder.Services.AddOptions<AIApplyOptions>()
+    .Bind(builder.Configuration.GetSection(AIApplyOptions.SectionName))
+    .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<AIApplyOptions>>(
+    new AIApplyOptionsValidator(builder.Environment.IsDevelopment()));
+builder.Services.AddHostedService<AIApplyHostedService>();
+builder.Services.AddHostedService<ExternalSessionCaptureCleanupHostedService>();
 
 // ✅ FINAL CORS CONFIGURATION
-var allowedOrigins = (builder.Configuration
-    .GetSection("Cors:AllowedOrigins")
-    .Get<string[]>() ?? [])
-    .Concat([
-        "http://localhost:5173",
-        "http://localhost:4173",
-        "https://*.vercel.app"
-    ])
+var configuredOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
+var allowedOrigins = configuredOrigins
+    .Concat(builder.Environment.IsDevelopment()
+        ? ["http://localhost:5173", "http://localhost:4173"]
+        : [])
     .Distinct(StringComparer.OrdinalIgnoreCase)
     .ToArray();
 
@@ -223,6 +241,26 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit = 0,
                 AutoReplenishment = true
             }));
+    options.AddPolicy("AIApplyContinue", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 10,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                AutoReplenishment = true
+            }));
+    options.AddPolicy("ExternalSessionCapture", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 10,
+                Window = TimeSpan.FromMinutes(5),
+                QueueLimit = 0,
+                AutoReplenishment = true
+            }));
     options.OnRejected = async (context, cancellationToken) =>
     {
         if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))
@@ -236,7 +274,11 @@ builder.Services.AddRateLimiter(options =>
 
 builder.Services.AddHealthChecks()
     .AddCheck("self", () => HealthCheckResult.Healthy(), tags: ["live"])
-    .AddCheck<DatabaseHealthCheck>("database", tags: ["ready"]);
+    .AddCheck<DatabaseHealthCheck>("database", tags: ["ready"])
+    .AddCheck<AIApplyWorkerHealthCheck>("ai-apply-worker", tags: ["ready"])
+    .AddCheck<AIApplyBrowserHealthCheck>("ai-apply-browser", tags: ["ready"])
+    .AddCheck<AIApplyExternalSessionHealthCheck>("ai-apply-external-sessions", tags: ["ready"])
+    .AddCheck<AIApplyCaptureTransportHealthCheck>("ai-apply-capture-transport", tags: ["ready"]);
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
@@ -274,6 +316,10 @@ builder.Services.AddSwaggerGen(options =>
 // On Render, set this via an environment variable named "Jwt__Key"
 // (double underscore = ":" in .NET configuration binding).
 var jwtSettings = builder.Configuration.GetSection("Jwt");
+var jwtIssuer = jwtSettings["Issuer"]
+    ?? throw new InvalidOperationException("JWT issuer is not configured.");
+var jwtAudience = jwtSettings["Audience"]
+    ?? throw new InvalidOperationException("JWT audience is not configured.");
 var signingKey = jwtSettings["Key"]
     ?? throw new InvalidOperationException("JWT signing key is not configured. Set the 'Jwt:Key' configuration value (env var 'Jwt__Key' on Render).");
 if (signingKey.Length < 32)
@@ -297,8 +343,23 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         options.TokenValidationParameters = new TokenValidationParameters
         {
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(signingKey)),
-            ValidateIssuer = false,
-            ValidateAudience = false
+            ValidateIssuerSigningKey = true,
+            ValidateIssuer = true,
+            ValidIssuer = jwtIssuer,
+            ValidateAudience = true,
+            ValidAudience = jwtAudience,
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.FromMinutes(1)
+        };
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var token = context.Request.Query["access_token"];
+                if (!string.IsNullOrEmpty(token) && context.HttpContext.Request.Path.StartsWithSegments("/hubs/ai-apply/external-session-capture"))
+                    context.Token = token;
+                return Task.CompletedTask;
+            }
         };
     });
 
@@ -357,6 +418,7 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions
     Predicate = registration => registration.Tags.Contains("ready")
 }).AllowAnonymous().DisableRateLimiting();
 app.MapControllers();
+app.MapHub<ExternalSessionCaptureHub>("/hubs/ai-apply/external-session-capture");
 
 app.Run();
 

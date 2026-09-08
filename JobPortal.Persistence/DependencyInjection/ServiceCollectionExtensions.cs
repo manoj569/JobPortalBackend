@@ -7,6 +7,7 @@ using JobPortal.Persistence.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using JobPortal.Application.Abstractions.AIApply;
 
 namespace JobPortal.Persistence;
 
@@ -54,6 +55,10 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICompanyManagementRepository, CompanyManagementRepository>();
         services.AddScoped<ICategoryManagementRepository, CategoryManagementRepository>();
         services.AddScoped<IUnitOfWork, UnitOfWork>();
+        services.AddScoped<IAIApplyRepository, AIApplyRepository>();
+        services.AddScoped<IAIApplyOperationalStore, AIApplyOperationalStore>();
+        if (bool.TryParse(configuration["AIApply:ExternalSessions:Enabled"], out var externalSessionsEnabled) && externalSessionsEnabled)
+            services.AddScoped<IExternalJobSiteSessionStore, ExternalJobSiteSessionStore>();
         return services;
     }
 }

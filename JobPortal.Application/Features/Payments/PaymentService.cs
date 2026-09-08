@@ -30,6 +30,9 @@ public sealed class PaymentService(
 {
     private const int MaximumWebhookBytes = 1024 * 1024;
 
+    public IReadOnlyList<MembershipPlanResponse> GetPlans() => plans.GetPlans().Where(x => x.IsActive).Select(x =>
+        new MembershipPlanResponse(x.Code, x.Name, x.Amount, x.CurrencyCode, x.DurationDays, true, x.AIApplyEnabled, x.AIApplyProEnabled)).ToList();
+
     public async Task<PhonePeCheckoutResponse> CreatePhonePeCheckoutAsync(
         Guid userId, CancellationToken cancellationToken = default)
         => await CreatePhonePeCheckoutAsync(userId, null, cancellationToken);
@@ -323,15 +326,10 @@ public sealed class PaymentService(
         await createOrderValidator.ValidateAndThrowAsync(request, cancellationToken);
         await RequiredCandidateAsync(userId, cancellationToken);
         var utcNow = UtcNow;
-        var plan = plans.GetDefaultPlan();
+        var plan = plans.GetRequired(request.PlanCode);
         var membership = await memberships.GetPortalMembershipForUserAsync(userId, cancellationToken);
         await ExpireMembershipIfNeededAsync(membership, userId, cancellationToken);
-        if (membership is { Status: MembershipStatus.Active } &&
-            membership.StartsAtUtc <= utcNow &&
-            (!membership.EndsAtUtc.HasValue || membership.EndsAtUtc > utcNow))
-            throw new ConflictException("An active portal membership already exists.");
-        if (membership?.Status == MembershipStatus.Pending)
-            await ThrowPendingCheckoutConflictAsync(userId, cancellationToken);
+        await ThrowPendingCheckoutConflictAsync(userId, cancellationToken);
 
         var previousMembershipStatus = membership?.Status;
         if (membership is null)
@@ -347,7 +345,7 @@ public sealed class PaymentService(
                 membership, null, MembershipStatus.Pending, userId, "Payment initiated."));
             await memberships.AddAsync(membership, cancellationToken);
         }
-        else
+        else if (membership.Status != MembershipStatus.Active)
         {
             membership.Status = MembershipStatus.Pending;
             membership.PlanName = plan.Name;
@@ -405,7 +403,7 @@ public sealed class PaymentService(
             await unitOfWork.SaveChangesAsync(cancellationToken);
             return new PaymentOrderResponse(
                 payment.Id, membership.Id, order.Id, razorpay.KeyId, order.Amount,
-                order.Currency, order.Receipt, plan.Name, plan.DurationDays);
+                order.Currency, order.Receipt, plan.Name, plan.DurationDays, plan.Code);
         }
         catch
         {
@@ -622,7 +620,7 @@ public sealed class PaymentService(
         await RequiredCandidateAsync(userId, cancellationToken);
         RequestGuards.ValidatePagination(query.PageNumber, query.PageSize);
         var result = await payments.GetForUserAsync(userId, query, cancellationToken);
-        return new(result.Items, query.PageNumber, query.PageSize, result.TotalCount);
+        return new(result.Items.Select(x => x with { PlanCode = TryPlanCode(x.Amount, x.CurrencyCode) }).ToList(), query.PageNumber, query.PageSize, result.TotalCount);
     }
 
     public async Task<PagedResponse<PaymentHistoryResponse>> GetHistoryAsync(
@@ -656,6 +654,7 @@ public sealed class PaymentService(
 
         var membership = payment.Membership
             ?? throw new ConflictException("Payment has no membership.");
+        var purchasedPlan = plans.GetByPayment(payment.Amount, payment.CurrencyCode);
         var previousMembershipStatus = membership.Status;
         var extensionStart = membership.Status == MembershipStatus.Active &&
             membership.EndsAtUtc.HasValue && membership.EndsAtUtc > utcNow
@@ -664,7 +663,8 @@ public sealed class PaymentService(
         if (membership.Status != MembershipStatus.Active)
             membership.StartsAtUtc = utcNow;
         membership.Status = MembershipStatus.Active;
-        membership.EndsAtUtc = extensionStart.AddDays(plans.GetDefaultPlan().DurationDays);
+        membership.PlanName = purchasedPlan.Name;
+        membership.EndsAtUtc = extensionStart.AddDays(purchasedPlan.DurationDays);
         membership.History.Add(NewMembershipHistory(
             membership, previousMembershipStatus, MembershipStatus.Active,
             payment.UserId, $"Verified {payment.Provider} payment completed."));
@@ -750,8 +750,7 @@ public sealed class PaymentService(
         Guid userId, CancellationToken cancellationToken)
     {
         var payment = await payments.GetLatestUnresolvedMembershipAsync(userId, cancellationToken);
-        if (payment is null)
-            throw new ConflictException("A portal membership payment order is already pending.");
+        if (payment is null) return;
         var response = ToPendingCheckoutResponse(payment);
         throw new PendingMembershipCheckoutException(new(
             response.Provider, response.PublicReference, response.Status,
@@ -857,10 +856,19 @@ public sealed class PaymentService(
     private static long ToMinorUnits(decimal amount) =>
         checked((long)decimal.Round(amount * 100m, 0, MidpointRounding.AwayFromZero));
 
-    private static PaymentResponse ToResponse(Payment x) => new(
+    private PaymentResponse ToResponse(Payment x) => new(
         x.Id, x.Amount, x.CurrencyCode, x.Status, x.Provider, x.ProviderOrderId,
         x.ProviderPaymentId, x.PaidAtUtc, x.MembershipId, x.CreatedAtUtc,
-        x.ProviderOrderCreatedAtUtc, x.LastReconciledAtUtc);
+        x.ProviderOrderCreatedAtUtc, x.LastReconciledAtUtc, TryPlanCode(x));
+
+    private string? TryPlanCode(Payment payment)
+        => TryPlanCode(payment.Amount, payment.CurrencyCode);
+
+    private string? TryPlanCode(decimal amount, string currencyCode)
+    {
+        try { return plans.GetByPayment(amount, currencyCode).Code; }
+        catch (InvalidOperationException) { return null; }
+    }
 
     private PaymentHistory NewPaymentHistory(
         Payment payment, PaymentStatus? previous, PaymentStatus current,
