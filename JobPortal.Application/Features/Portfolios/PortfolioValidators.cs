@@ -5,10 +5,36 @@ namespace JobPortal.Application.Features.Portfolios;
 
 internal static class PortfolioValidation
 {
+    private static readonly string[] GradingSystems =
+        ["Percentage", "Cgpa10", "Gpa4", "Grade", "PassFail", "Other", "10", "CGPA"];
     public static bool PlainText(string? value) =>
         string.IsNullOrEmpty(value) || !value.Any(char.IsControl) &&
         !value.Contains('<', StringComparison.Ordinal) && !value.Contains('>', StringComparison.Ordinal);
     public static bool Order(int value) => value is >= 0 and <= 1000;
+    public static bool Meaningful(string? value) => !string.IsNullOrWhiteSpace(value) &&
+        value.Any(char.IsLetterOrDigit) && PlainText(value);
+    public static bool Salary(decimal? value) => !value.HasValue ||
+        value.Value is >= 0 and <= 1000000000 && decimal.Truncate(value.Value) == value.Value;
+    public static bool Grade(string? system, string? score)
+    {
+        if (string.IsNullOrWhiteSpace(system)) return string.IsNullOrWhiteSpace(score) || Meaningful(score);
+        if (string.IsNullOrWhiteSpace(score)) return false;
+        if (system.Equals("Percentage", StringComparison.OrdinalIgnoreCase))
+            return decimal.TryParse(score, System.Globalization.NumberStyles.Number,
+                System.Globalization.CultureInfo.InvariantCulture, out var percentage) && percentage is >= 0 and <= 100;
+        if (system.Equals("Cgpa10", StringComparison.OrdinalIgnoreCase) ||
+            system.Equals("CGPA", StringComparison.OrdinalIgnoreCase) || system == "10")
+            return decimal.TryParse(score, System.Globalization.NumberStyles.Number,
+                System.Globalization.CultureInfo.InvariantCulture, out var cgpa) && cgpa is >= 0 and <= 10;
+        if (system.Equals("Gpa4", StringComparison.OrdinalIgnoreCase))
+            return decimal.TryParse(score, System.Globalization.NumberStyles.Number,
+                System.Globalization.CultureInfo.InvariantCulture, out var gpa) && gpa is >= 0 and <= 4;
+        if (system.Equals("PassFail", StringComparison.OrdinalIgnoreCase))
+            return score.Equals("Pass", StringComparison.OrdinalIgnoreCase) || score.Equals("Fail", StringComparison.OrdinalIgnoreCase);
+        return score.Length <= 100 && Meaningful(score);
+    }
+    public static bool GradingSystem(string? value) => string.IsNullOrWhiteSpace(value) ||
+        GradingSystems.Contains(value.Trim(), StringComparer.OrdinalIgnoreCase);
 }
 
 public sealed class CreatePortfolioRequestValidator : AbstractValidator<CreatePortfolioRequest>
@@ -40,21 +66,20 @@ public sealed class ExperienceRequestValidator : AbstractValidator<ExperienceReq
 {
     public ExperienceRequestValidator()
     {
-        RuleFor(x => x.JobTitle).NotEmpty().MaximumLength(200).Must(PortfolioValidation.PlainText);
-        RuleFor(x => x.CompanyName).NotEmpty().MaximumLength(200).Must(PortfolioValidation.PlainText);
+        RuleFor(x => x.JobTitle).NotEmpty().MaximumLength(200).Must(PortfolioValidation.Meaningful);
+        RuleFor(x => x.CompanyName).NotEmpty().MaximumLength(200).Must(PortfolioValidation.Meaningful);
         RuleFor(x => x.Location).MaximumLength(200).Must(PortfolioValidation.PlainText);
         RuleFor(x => x.EmploymentType).IsInEnum().When(x => x.EmploymentType.HasValue);
         RuleFor(x => x.StartDate).NotEmpty();
-        RuleFor(x => x.EndDate).Null().When(x => x.IsCurrent).WithMessage("Current experience cannot have an end date.");
         RuleFor(x => x.EndDate).NotNull().When(x => !x.IsCurrent).WithMessage("Previous experience requires an end date.");
         RuleFor(x => x.EndDate).GreaterThanOrEqualTo(x => x.StartDate).When(x => x.EndDate.HasValue && !x.IsCurrent);
         RuleFor(x => x.Description).MaximumLength(4000).Must(PortfolioValidation.PlainText);
-        RuleFor(x => x.AnnualSalary).GreaterThanOrEqualTo(0).When(x => x.AnnualSalary.HasValue);
+        RuleFor(x => x.AnnualSalary).Must(PortfolioValidation.Salary).When(x => x.AnnualSalary.HasValue);
         RuleFor(x => x.NoticePeriod).IsInEnum().When(x => x.NoticePeriod.HasValue);
         RuleFor(x => x.NoticePeriod).Null().When(x => !x.IsCurrent)
             .WithMessage("Notice period is available only for current employment.");
         RuleFor(x => x.SkillsUsed).Must(x => x is null || x.Count <= 30);
-        RuleForEach(x => x.SkillsUsed).NotEmpty().MaximumLength(100).Must(PortfolioValidation.PlainText);
+        RuleForEach(x => x.SkillsUsed).NotEmpty().MaximumLength(100).Must(PortfolioValidation.Meaningful);
         RuleFor(x => x.SkillsUsed).Must(x => x is null || x.Select(y => y.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase).Count() == x.Count)
             .WithMessage("Skills used must not contain duplicates.");
@@ -66,17 +91,19 @@ public sealed class EducationRequestValidator : AbstractValidator<EducationReque
     public EducationRequestValidator(TimeProvider timeProvider)
     {
         var maximumYear = timeProvider.GetUtcNow().Year + 10;
-        RuleFor(x => x.Qualification).NotEmpty().MaximumLength(200).Must(PortfolioValidation.PlainText);
-        RuleFor(x => x.Institution).NotEmpty().MaximumLength(250).Must(PortfolioValidation.PlainText);
+        RuleFor(x => x.Qualification).NotEmpty().MaximumLength(200).Must(PortfolioValidation.Meaningful);
+        RuleFor(x => x.Institution).NotEmpty().MaximumLength(250).Must(PortfolioValidation.Meaningful);
         RuleFor(x => x.FieldOfStudy).MaximumLength(200).Must(PortfolioValidation.PlainText);
-        RuleFor(x => x.StartYear).InclusiveBetween(1900, maximumYear).When(x => x.StartYear.HasValue);
-        RuleFor(x => x.EndYear).InclusiveBetween(1900, maximumYear).When(x => x.EndYear.HasValue);
-        RuleFor(x => x.EndYear).GreaterThanOrEqualTo(x => x.StartYear!.Value).When(x => x.StartYear.HasValue && x.EndYear.HasValue);
-        RuleFor(x => x.EndYear).Null().When(x => x.IsCurrentlyStudying)
-            .WithMessage("Currently studying education cannot have an ending year.");
+        RuleFor(x => x.StartYear).InclusiveBetween(1950, maximumYear).When(x => x.StartYear.HasValue);
+        RuleFor(x => x.EndYear).InclusiveBetween(1950, maximumYear).When(x => !x.IsCurrentlyStudying && x.EndYear.HasValue);
+        RuleFor(x => x.EndYear).GreaterThanOrEqualTo(x => x.StartYear!.Value).When(x => !x.IsCurrentlyStudying && x.StartYear.HasValue && x.EndYear.HasValue);
+        RuleFor(x => x.EndYear).NotNull().When(x => !x.IsCurrentlyStudying)
+            .WithMessage("Completed education requires an ending year.");
         RuleFor(x => x.CourseType).IsInEnum().When(x => x.CourseType.HasValue);
-        RuleFor(x => x.GradingSystem).MaximumLength(100).Must(PortfolioValidation.PlainText);
+        RuleFor(x => x.GradingSystem).MaximumLength(100).Must(PortfolioValidation.GradingSystem);
         RuleFor(x => x.Grade).MaximumLength(100).Must(PortfolioValidation.PlainText);
+        RuleFor(x => x.Grade).Must((request, grade) => PortfolioValidation.Grade(request.GradingSystem, grade))
+            .WithMessage("Grade or score is invalid for the selected grading system.");
         RuleFor(x => x.Description).MaximumLength(4000).Must(PortfolioValidation.PlainText);
         RuleFor(x => x.DisplayOrder).Must(PortfolioValidation.Order);
     }

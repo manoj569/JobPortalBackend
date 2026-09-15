@@ -53,7 +53,8 @@ public sealed class CandidateService(
         var user = await RequiredCandidateAsync(userId, cancellationToken);
         return MapProfile(user, await profilePhotoStorage.GetAsync(userId, cancellationToken),
             CalculateTotalExperience(await candidates.GetEmploymentPeriodsAsync(userId, cancellationToken),
-                DateOnly.FromDateTime(UtcNow)));
+                DateOnly.FromDateTime(UtcNow)),
+            (await candidates.GetSkillsAsync(userId, cancellationToken)).Select(x => x.Name).ToArray());
     }
 
     public async Task<CandidateProfileResponse> UpdateProfileAsync(
@@ -82,12 +83,17 @@ public sealed class CandidateService(
         await unitOfWork.SaveChangesAsync(cancellationToken);
         return MapProfile(user, await profilePhotoStorage.GetAsync(userId, cancellationToken),
             CalculateTotalExperience(await candidates.GetEmploymentPeriodsAsync(userId, cancellationToken),
-                DateOnly.FromDateTime(UtcNow)));
+                DateOnly.FromDateTime(UtcNow)),
+            (await candidates.GetSkillsAsync(userId, cancellationToken)).Select(x => x.Name).ToArray());
     }
 
     public async Task<CandidateBasicDetailsResponse> GetBasicDetailsAsync(
-        Guid userId, CancellationToken cancellationToken = default) =>
-        MapBasicDetails(await RequiredCandidateAsync(userId, cancellationToken));
+        Guid userId, CancellationToken cancellationToken = default)
+    {
+        var user = await RequiredCandidateAsync(userId, cancellationToken);
+        return MapBasicDetails(user,
+            (await candidates.GetSkillsAsync(userId, cancellationToken)).Select(x => x.Name).ToArray());
+    }
 
     public async Task<CandidateBasicDetailsResponse> UpdateBasicDetailsAsync(
         Guid userId, UpdateCandidateBasicDetailsRequest request,
@@ -105,9 +111,13 @@ public sealed class CandidateService(
             NoticePeriod = request.NoticePeriod ?? request.AvailabilityToJoin ?? user.AvailabilityToJoin,
             CurrentAnnualSalary = request.CurrentAnnualSalary ?? user.CurrentAnnualSalary,
             CurrentFixedAnnualSalary = request.CurrentFixedAnnualSalary ?? user.CurrentFixedAnnualSalary,
-            CurrentVariableAnnualSalary = request.CurrentVariableAnnualSalary ?? user.CurrentVariableAnnualSalary
+            CurrentVariableAnnualSalary = request.CurrentVariableAnnualSalary ?? user.CurrentVariableAnnualSalary,
+            Skills = request.Skills?.Select(NormalizeSelectionWhitespace).ToArray()
         };
         await basicDetailsValidator.ValidateAndThrowAsync(merged, cancellationToken);
+        if (request.MobileNumber is not null && user.PhoneConfirmed)
+            throw new ConflictException("Verified mobile numbers cannot be changed through basic details.",
+                "mobile_number_change_requires_verification");
         var mobileAdded = false;
         if (!string.IsNullOrWhiteSpace(merged.MobileNumber))
         {
@@ -117,15 +127,13 @@ public sealed class CandidateService(
             if (string.IsNullOrWhiteSpace(existingMobile) &&
                 IndianMobileNumber.TryNormalize(user.PhoneNumber, out var normalizedExisting))
                 existingMobile = normalizedExisting;
-            if ((!string.IsNullOrWhiteSpace(existingMobile) ||
-                    !string.IsNullOrWhiteSpace(user.PhoneNumber)) &&
+            if (user.PhoneConfirmed &&
                 !string.Equals(existingMobile, normalizedMobile,
                     StringComparison.Ordinal))
                 throw new ConflictException(
                     "An existing mobile number cannot be replaced from profile settings.",
                     "mobile_number_change_requires_verification");
-            if (string.IsNullOrWhiteSpace(existingMobile) &&
-                string.IsNullOrWhiteSpace(user.PhoneNumber))
+            if (!string.Equals(existingMobile, normalizedMobile, StringComparison.Ordinal))
             {
                 if (await candidates.MobileNumberExistsAsync(
                         userId, normalizedMobile, cancellationToken))
@@ -139,6 +147,10 @@ public sealed class CandidateService(
             }
         }
         user.WorkStatus = merged.WorkStatus;
+        if (request.ResumeHeadline is not null)
+            user.Headline = TextNormalizer.TrimOrNull(request.ResumeHeadline);
+        if (merged.Skills is not null)
+            user.SkillsJson = SerializeStrings(merged.Skills);
         user.IsOutsideIndia = merged.IsOutsideIndia;
         user.CurrentCountry = merged.CurrentCountry!.Trim();
         user.CurrentCity = merged.CurrentCity!.Trim();
@@ -160,7 +172,8 @@ public sealed class CandidateService(
                 "This mobile number cannot be used.",
                 "mobile_number_unavailable");
         }
-        return MapBasicDetails(user);
+        return MapBasicDetails(user,
+            (await candidates.GetSkillsAsync(userId, cancellationToken)).Select(x => x.Name).ToArray());
     }
 
     public async Task<CandidateCareerPreferencesResponse> GetCareerPreferencesAsync(
@@ -171,10 +184,15 @@ public sealed class CandidateService(
         Guid userId, UpdateCandidateCareerPreferencesRequest request,
         CancellationToken cancellationToken = default)
     {
-        await careerPreferencesValidator.ValidateAndThrowAsync(request, cancellationToken);
+        var normalized = request with
+        {
+            PreferredJobRoles = SplitSelections(request.PreferredJobRoles),
+            PreferredCities = SplitSelections(request.PreferredCities)
+        };
+        await careerPreferencesValidator.ValidateAndThrowAsync(normalized, cancellationToken);
         var user = await RequiredCandidateAsync(userId, cancellationToken);
-        user.PreferredJobRolesJson = SerializeStrings(request.PreferredJobRoles);
-        user.PreferredCitiesJson = SerializeStrings(request.PreferredCities);
+        user.PreferredJobRolesJson = SerializeStrings(normalized.PreferredJobRoles);
+        user.PreferredCitiesJson = SerializeStrings(normalized.PreferredCities);
         user.ExpectedAnnualSalary = request.ExpectedAnnualSalary;
         user.CandidateJobTypesJson = JsonSerializer.Serialize(request.JobTypes.Distinct());
         user.CandidateEmploymentTypesJson = JsonSerializer.Serialize(request.EmploymentTypes.Distinct());
@@ -262,7 +280,7 @@ public sealed class CandidateService(
     {
         await skillValidator.ValidateAndThrowAsync(request, cancellationToken);
         await RequiredCandidateAsync(userId, cancellationToken);
-        var name = request.Name.Trim();
+        var name = NormalizeSelectionWhitespace(request.Name);
         var normalizedName = NormalizeSkillName(name);
         if (await candidates.SkillNameExistsAsync(userId, normalizedName, null, cancellationToken))
             throw new ConflictException("This skill already exists in your profile.");
@@ -289,7 +307,7 @@ public sealed class CandidateService(
         await RequiredCandidateAsync(userId, cancellationToken);
         var skill = await candidates.GetSkillAsync(userId, skillId, cancellationToken)
             ?? throw new NotFoundException("Skill was not found.");
-        var name = request.Name.Trim();
+        var name = NormalizeSelectionWhitespace(request.Name);
         var normalizedName = NormalizeSkillName(name);
         if (await candidates.SkillNameExistsAsync(userId, normalizedName, skillId, cancellationToken))
             throw new ConflictException("This skill already exists in your profile.");
@@ -852,19 +870,24 @@ public sealed class CandidateService(
     }
 
     private static CandidateProfileResponse MapProfile(
-        User user, StoredProfilePhoto? photo, decimal totalExperienceYears) => new(
+        User user, StoredProfilePhoto? photo, decimal totalExperienceYears,
+        IReadOnlyCollection<string> storedSkills) => new(
         user.Id, user.Email, user.FirstName, user.LastName, user.Headline, user.Bio, user.Location,
-        Deserialize<string>(user.SkillsJson), Deserialize<string>(user.EducationJson),
+        PrefillSkills(user, storedSkills), Deserialize<string>(user.EducationJson),
         Deserialize<string>(user.ExperienceJson), user.LinkedInUrl, user.PortfolioUrl,
         Deserialize<EmploymentType>(user.PreferredJobTypesJson), MapResume(user), user.PhoneNumber,
-        photo is not null, photo?.Version.ToString("N"), MapBasicDetails(user),
+        photo is not null, photo?.Version.ToString("N"), MapBasicDetails(user, storedSkills),
         MapCareerPreferences(user), totalExperienceYears, user.PhoneNumber,
         user.PhoneConfirmed, user.AvailabilityToJoin);
-    private static CandidateBasicDetailsResponse MapBasicDetails(User user) => new(
+    private static CandidateBasicDetailsResponse MapBasicDetails(User user,
+        IReadOnlyCollection<string> storedSkills) => new(
         user.Email, user.PhoneNumber, user.PhoneConfirmed, user.WorkStatus, user.IsOutsideIndia, user.CurrentCountry,
         user.CurrentCity ?? user.Location, user.CurrentArea, user.AvailabilityToJoin,
         user.CurrentAnnualSalary, user.CurrentFixedAnnualSalary, user.CurrentVariableAnnualSalary,
-        user.AvailabilityToJoin);
+        user.AvailabilityToJoin, "INR per annum", user.Headline, PrefillSkills(user, storedSkills));
+    private static string[] PrefillSkills(User user, IReadOnlyCollection<string> storedSkills) =>
+        Deserialize<string>(user.SkillsJson).Concat(storedSkills)
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
     private static CandidateCareerPreferencesResponse MapCareerPreferences(User user) => new(
         Deserialize<string>(user.PreferredJobRolesJson), Deserialize<string>(user.PreferredCitiesJson),
         user.ExpectedAnnualSalary, Deserialize<CandidateJobType>(user.CandidateJobTypesJson),
@@ -893,6 +916,11 @@ public sealed class CandidateService(
         application.SubmittedAtUtc, application.WithdrawnAtUtc, application.ApplicationMethod);
     private static string SerializeStrings(IEnumerable<string> values) =>
         JsonSerializer.Serialize(values.Select(x => x.Trim()).Distinct(StringComparer.OrdinalIgnoreCase));
+    private static string[] SplitSelections(IEnumerable<string> values) =>
+        values.SelectMany(value => value.Split(',', StringSplitOptions.TrimEntries))
+            .Select(NormalizeSelectionWhitespace).Where(value => value.Length > 0).ToArray();
+    private static string NormalizeSelectionWhitespace(string value) =>
+        string.Join(' ', value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
     private static T[] Deserialize<T>(string json) =>
         string.IsNullOrWhiteSpace(json) ? [] : JsonSerializer.Deserialize<T[]>(json) ?? [];
 

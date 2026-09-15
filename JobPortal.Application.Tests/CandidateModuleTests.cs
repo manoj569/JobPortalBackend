@@ -126,6 +126,15 @@ public sealed class CandidateModuleTests
     }
 
     [Fact]
+    public async Task CareerPreferencesSplitLegacyCommaSeparatedRoleIntoSelections()
+    {
+        var fixture = CreateFixture();
+        var result = await fixture.Service.UpdateCareerPreferencesAsync(fixture.Candidate.Id,
+            new([".NET Developer, Product Manager"], ["Pune"], 2500000, [], [], []));
+        Assert.Equal([".NET Developer", "Product Manager"], result.PreferredJobRoles);
+    }
+
+    [Fact]
     public async Task CandidateWithoutMobileCanAddUnverifiedNumberButExistingVerifiedNumberCannotBeReplaced()
     {
         var fixture = CreateFixture();
@@ -137,12 +146,15 @@ public sealed class CandidateModuleTests
         var added = await fixture.Service.UpdateBasicDetailsAsync(fixture.Candidate.Id, request);
         Assert.Equal("+919876543210", added.MobileNumber);
         Assert.False(added.MobileVerified);
+        var replaced = await fixture.Service.UpdateBasicDetailsAsync(fixture.Candidate.Id,
+            request with { MobileNumber = "9123456780" });
+        Assert.Equal("+919123456780", replaced.MobileNumber);
         fixture.Candidate.PhoneConfirmed = true;
         var error = await Assert.ThrowsAsync<ConflictException>(() =>
             fixture.Service.UpdateBasicDetailsAsync(fixture.Candidate.Id,
                 request with { MobileNumber = "9123456780" }));
         Assert.Equal("mobile_number_change_requires_verification", error.Code);
-        Assert.Equal("+919876543210", fixture.Candidate.PhoneNumber);
+        Assert.Equal("+919123456780", fixture.Candidate.PhoneNumber);
     }
 
     [Fact]
@@ -154,6 +166,7 @@ public sealed class CandidateModuleTests
         fixture.Candidate.CurrentCountry = "India";
         fixture.Candidate.CurrentCity = "Pune";
         fixture.Candidate.CurrentArea = "Baner";
+        fixture.Candidate.Headline = ".NET Developer";
         fixture.Candidate.AvailabilityToJoin = CandidateAvailability.OneMonth;
 
         var result = await fixture.Service.UpdateBasicDetailsAsync(
@@ -164,6 +177,36 @@ public sealed class CandidateModuleTests
         Assert.Equal("Pune", result.CurrentCity);
         Assert.Equal("Baner", result.CurrentArea);
         Assert.Equal(CandidateAvailability.OneMonth, result.NoticePeriod);
+        Assert.Equal(".NET Developer", result.ResumeHeadline);
+    }
+
+    [Fact]
+    public async Task PrivateProfilePrefillsDedicatedSkillsAndBasicHeadline()
+    {
+        var fixture = CreateFixture();
+        fixture.Candidate.Headline = ".NET Developer";
+        fixture.Repository.Skills.Add(new CandidateSkill
+        { UserId = fixture.Candidate.Id, Name = "C#", NormalizedName = "C#" });
+        var basic = await fixture.Service.GetBasicDetailsAsync(fixture.Candidate.Id);
+        var profile = await fixture.Service.GetProfileAsync(fixture.Candidate.Id);
+        Assert.Equal(".NET Developer", basic.ResumeHeadline);
+        Assert.Contains("C#", basic.Skills!);
+        Assert.Contains("C#", profile.Skills);
+    }
+
+    [Fact]
+    public async Task BasicDetailsSkillUpdateIsVisibleToCompletion()
+    {
+        var fixture = CreateFixture();
+        fixture.Candidate.WorkStatus = CandidateWorkStatus.Fresher;
+        fixture.Candidate.IsOutsideIndia = false;
+        fixture.Candidate.CurrentCountry = "India";
+        fixture.Candidate.CurrentCity = "Pune";
+        var saved = await fixture.Service.UpdateBasicDetailsAsync(fixture.Candidate.Id,
+            new(Skills: ["C#", ".NET"]));
+        var completion = await fixture.Service.GetProfileCompletionAsync(fixture.Candidate.Id);
+        Assert.Equal(["C#", ".NET"], saved.Skills);
+        Assert.Contains("Skills", completion.CompletedSections);
     }
 
     [Fact]
@@ -336,7 +379,7 @@ public sealed class CandidateModuleTests
 
         Assert.Equal(0, result.CompletionPercentage);
         Assert.Equal(
-            ["BasicDetails", "Skills", "CareerPreferences", "Education", "Resume", "ProfileSummary"],
+            ["BasicDetails", "ProfileSummary", "Skills", "CareerPreferences", "Education", "Resume"],
             result.MissingSections);
         Assert.Equal("BasicDetails", result.NextRecommendedIncompleteStep);
     }

@@ -16,16 +16,36 @@ public static class PersonalName
             return false;
 
         var normalized = value.Trim();
-        if (normalized.Length > 201 ||
-            normalized.Contains("  ", StringComparison.Ordinal) ||
-            normalized.EnumerateRunes().Any(rune => rune.Value != ' ' &&
-                !IsUnicodeNameCharacter(rune)))
+        if (normalized.Length > 201 || !IsValid(normalized))
             return false;
 
         var words = normalized.Split(' ', StringSplitOptions.None);
         firstName = words[0];
         lastName = string.Join(' ', words.Skip(1));
         return firstName.Length is > 0 and <= 100 && lastName.Length <= 100;
+    }
+
+    public static bool IsValid(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        var normalized = value.Trim();
+        if (normalized.Contains("  ", StringComparison.Ordinal) ||
+            normalized.Any(char.IsControl) || normalized.Contains('<') || normalized.Contains('>'))
+            return false;
+        return normalized.Split(' ').All(word =>
+        {
+            var runes = word.EnumerateRunes().ToArray();
+            if (runes.Length == 0 || !IsUnicodeNameCharacter(runes[0]) ||
+                !IsUnicodeNameCharacter(runes[^1])) return false;
+            for (var index = 1; index < runes.Length - 1; index++)
+            {
+                if (IsUnicodeNameCharacter(runes[index])) continue;
+                if (runes[index].Value is not ('\'' or '-') ||
+                    !IsUnicodeNameCharacter(runes[index - 1]) ||
+                    !IsUnicodeNameCharacter(runes[index + 1])) return false;
+            }
+            return true;
+        });
     }
 
     private static bool IsUnicodeNameCharacter(Rune rune) =>

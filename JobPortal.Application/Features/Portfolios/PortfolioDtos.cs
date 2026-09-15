@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using JobPortal.Application.Common.Validation;
 using JobPortal.Application.Features.Candidates;
 using JobPortal.Domain.Enums;
 
@@ -12,7 +13,8 @@ public sealed record UpdatePortfolioSettingsRequest(
 
 public sealed record ExperienceRequest(string JobTitle, string CompanyName, string? Location,
     EmploymentType? EmploymentType, DateOnly StartDate, DateOnly? EndDate, bool IsCurrent,
-    string? Description, int DisplayOrder, decimal? AnnualSalary = null,
+    string? Description, int DisplayOrder,
+    [property: JsonConverter(typeof(WholeInrAmountJsonConverter))] decimal? AnnualSalary = null,
     IReadOnlyCollection<string>? SkillsUsed = null, CandidateAvailability? NoticePeriod = null);
 public sealed record EducationRequest(string Qualification, string Institution, string? FieldOfStudy,
     int? StartYear, int? EndYear, string? Grade, string? Description, int DisplayOrder,

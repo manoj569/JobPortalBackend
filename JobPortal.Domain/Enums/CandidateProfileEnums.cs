@@ -10,6 +10,7 @@ public enum CandidateSkillProficiency
     Expert
 }
 
+[JsonConverter(typeof(JsonStringEnumConverter<CandidateWorkStatus>))]
 public enum CandidateWorkStatus { Fresher = 1, Experienced }
 [JsonConverter(typeof(JsonStringEnumConverter<CandidateAvailability>))]
 public enum CandidateAvailability
