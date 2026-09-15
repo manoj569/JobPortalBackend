@@ -13,7 +13,7 @@ public sealed class RegisterRequestValidator : AbstractValidator<RegisterRequest
             .MaximumLength(201)
             .Must(value => PersonalName.TrySplit(value, out _, out _))
             .WithMessage(
-                "FullName must contain Unicode letters separated by single spaces only.");
+                "FullName must contain Unicode letters, spaces, apostrophes or hyphens.");
         RuleFor(x => x.Email)
             .NotEmpty()
             .MaximumLength(256)

@@ -189,13 +189,16 @@ public sealed class UpdateCandidateBasicDetailsRequestValidator :
                 CandidateAvailability.Other)
             .WithMessage("NoticePeriod must be ImmediateJoiner, FifteenDaysOrLess, OneMonth, ThreeMonths, or Other.")
             .When(x => x.NoticePeriod.HasValue);
-        RuleFor(x => x.CurrentAnnualSalary).GreaterThanOrEqualTo(0).When(x => x.CurrentAnnualSalary.HasValue);
-        RuleFor(x => x.CurrentFixedAnnualSalary).GreaterThanOrEqualTo(0).When(x => x.CurrentFixedAnnualSalary.HasValue);
-        RuleFor(x => x.CurrentVariableAnnualSalary).GreaterThanOrEqualTo(0).When(x => x.CurrentVariableAnnualSalary.HasValue);
+        RuleFor(x => x.CurrentAnnualSalary).Must(ProfileText.Salary).When(x => x.CurrentAnnualSalary.HasValue);
+        RuleFor(x => x.CurrentFixedAnnualSalary).Must(ProfileText.Salary).When(x => x.CurrentFixedAnnualSalary.HasValue);
+        RuleFor(x => x.CurrentVariableAnnualSalary).Must(ProfileText.Salary).When(x => x.CurrentVariableAnnualSalary.HasValue);
         RuleFor(x => x.MobileNumber)
             .Must(value => string.IsNullOrWhiteSpace(value) ||
                 IndianMobileNumber.TryNormalizeTenDigit(value, out _))
             .WithMessage("Mobile number must be a valid 10-digit Indian mobile number.");
+        RuleFor(x => x.ResumeHeadline).MaximumLength(180).Must(ProfileText.OptionalSafe);
+        RuleFor(x => x.Skills).Must(x => x is null || x.Count <= 50 && ProfileText.Unique(x));
+        RuleForEach(x => x.Skills).NotEmpty().MaximumLength(100).Must(ProfileText.Safe);
         RuleFor(x => x).Must(x => x.WorkStatus == CandidateWorkStatus.Experienced ||
             x.CurrentAnnualSalary is null && x.CurrentFixedAnnualSalary is null &&
             x.CurrentVariableAnnualSalary is null)
@@ -218,7 +221,7 @@ public sealed class UpdateCandidateCareerPreferencesRequestValidator :
         RuleFor(x => x.PreferredCities).NotNull().Must(x => x.Count <= 5)
             .Must(ProfileText.Unique).WithMessage("Preferred cities must be unique and cannot exceed 5.");
         RuleForEach(x => x.PreferredCities).NotEmpty().MaximumLength(150).Must(ProfileText.Safe);
-        RuleFor(x => x.ExpectedAnnualSalary).GreaterThanOrEqualTo(0).When(x => x.ExpectedAnnualSalary.HasValue);
+        RuleFor(x => x.ExpectedAnnualSalary).Must(ProfileText.Salary).When(x => x.ExpectedAnnualSalary.HasValue);
         RuleFor(x => x.JobTypes).NotNull().Must(ProfileText.UniqueEnums);
         RuleForEach(x => x.JobTypes).IsInEnum();
         RuleFor(x => x.EmploymentTypes).NotNull().Must(ProfileText.UniqueEnums);
@@ -231,7 +234,10 @@ public sealed class UpdateCandidateCareerPreferencesRequestValidator :
 file static class ProfileText
 {
     public static bool Safe(string value) => !string.IsNullOrWhiteSpace(value) &&
-        !value.Any(char.IsControl) && !value.Contains('<') && !value.Contains('>');
+        value.Any(char.IsLetterOrDigit) && !value.Any(char.IsControl) &&
+        !value.Contains('<') && !value.Contains('>');
+    public static bool Salary(decimal? value) => !value.HasValue ||
+        value.Value is >= 0 and <= 1000000000 && decimal.Truncate(value.Value) == value.Value;
     public static bool OptionalSafe(string? value) => string.IsNullOrWhiteSpace(value) || Safe(value);
     public static bool Unique(IReadOnlyCollection<string> values) => values.All(x => !string.IsNullOrWhiteSpace(x)) &&
         values.Select(x => x.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).Count() == values.Count;

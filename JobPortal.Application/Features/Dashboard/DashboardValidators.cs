@@ -7,8 +7,8 @@ public sealed class UpdateUserProfileRequestValidator : AbstractValidator<Update
 {
     public UpdateUserProfileRequestValidator()
     {
-        RuleFor(x => x.FirstName).NotEmpty().MaximumLength(100);
-        RuleFor(x => x.LastName).NotEmpty().MaximumLength(100);
+        RuleFor(x => x.FirstName).NotEmpty().MaximumLength(100).Must(PersonalName.IsValid);
+        RuleFor(x => x.LastName).NotEmpty().MaximumLength(100).Must(PersonalName.IsValid);
         RuleFor(x => x.PhoneNumber)
             .MaximumLength(32)
             .Must(value => string.IsNullOrWhiteSpace(value) ||

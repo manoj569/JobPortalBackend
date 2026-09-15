@@ -10,25 +10,26 @@ public static class CandidateProfileCompletionProjection
         User user, bool hasSkills, bool hasEducation, bool hasEmployment)
     {
         var experienced = user.WorkStatus == CandidateWorkStatus.Experienced ||
-            !user.WorkStatus.HasValue && user.CareerStage == CareerStage.Experienced;
+            !user.WorkStatus.HasValue && (user.CareerStage == CareerStage.Experienced || hasEmployment);
         var sections = new[]
         {
             Step("BasicDetails", experienced ? 15 : 25,
                 !string.IsNullOrWhiteSpace(user.FirstName) &&
-                !string.IsNullOrWhiteSpace(user.LastName) && user.EmailConfirmed &&
+                !string.IsNullOrWhiteSpace(user.LastName) &&
+                !string.IsNullOrWhiteSpace(user.Headline) &&
                 user.WorkStatus.HasValue && !string.IsNullOrWhiteSpace(user.CurrentCountry) &&
                 !string.IsNullOrWhiteSpace(user.CurrentCity ?? user.Location)),
+            Step("ProfileSummary", 15, !string.IsNullOrWhiteSpace(user.Bio)),
             Step("Skills", 15, hasSkills),
             Step("CareerPreferences", 20, CareerPreferencesComplete(user)),
             Step("Education", 10, hasEducation),
-            Step("Employment", experienced ? 10 : 0, !experienced || hasEmployment),
-            Step("Resume", 15, !string.IsNullOrWhiteSpace(user.ResumeStorageKey)),
-            Step("ProfileSummary", 15,
-                !string.IsNullOrWhiteSpace(user.Headline) && !string.IsNullOrWhiteSpace(user.Bio))
+            Step("Employment", experienced ? 10 : 0, hasEmployment),
+            Step("Resume", 15, !string.IsNullOrWhiteSpace(user.ResumeStorageKey))
         };
-        var missing = sections.Where(x => !x.IsCompleted && x.Weight > 0).ToArray();
-        return new(sections.Where(x => x.IsCompleted).Sum(x => x.Weight),
-            sections.Where(x => x.IsCompleted).Select(x => x.Section).ToArray(),
+        var applicable = sections.Where(x => x.Weight > 0).ToArray();
+        var missing = applicable.Where(x => !x.IsCompleted).ToArray();
+        return new(applicable.Where(x => x.IsCompleted).Sum(x => x.Weight),
+            applicable.Where(x => x.IsCompleted).Select(x => x.Section).ToArray(),
             missing.Select(x => x.Section).ToArray(), sections,
             missing.FirstOrDefault()?.Section);
     }
@@ -38,8 +39,7 @@ public static class CandidateProfileCompletionProjection
 
     private static bool CareerPreferencesComplete(User user) =>
         Values<string>(user.PreferredJobRolesJson).Length > 0 &&
-        Values<string>(user.PreferredCitiesJson).Length > 0 &&
-        Values<CandidateEmploymentPreference>(user.CandidateEmploymentTypesJson).Length > 0 ||
+        Values<string>(user.PreferredCitiesJson).Length > 0 ||
         user.OnboardingCompletedAtUtc.HasValue && user.CareerStage.HasValue &&
         !string.IsNullOrWhiteSpace(user.Location) &&
         Values<DesiredOpportunity>(user.DesiredOpportunitiesJson).Length > 0 &&

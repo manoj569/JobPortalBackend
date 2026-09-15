@@ -30,10 +30,11 @@ public sealed class AuthenticationTests
     [InlineData("Cher", true)]
     [InlineData("Manoj  Shekapure", false)]
     [InlineData("Manoj7 Shekapure", false)]
-    [InlineData("Manoj-Shekapure", false)]
+    [InlineData("Manoj-Shekapure", true)]
+    [InlineData("O'Connor", true)]
     [InlineData("Manoj 🙂", false)]
     [InlineData("", false)]
-    public async Task FullNameAllowsOnlyUnicodeLettersAndSingleSpaces(
+    public async Task FullNameAllowsUnicodeLettersApostrophesHyphensAndSingleSpaces(
         string fullName,
         bool expectedValid)
     {

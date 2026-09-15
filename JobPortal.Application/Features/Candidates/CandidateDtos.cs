@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using JobPortal.Application.Common.Validation;
 using JobPortal.Domain.Enums;
 using JobPortal.Shared.Models;
 
@@ -53,7 +54,9 @@ public sealed record CandidateBasicDetailsResponse(
     decimal? CurrentFixedAnnualSalary,
     decimal? CurrentVariableAnnualSalary,
     CandidateAvailability? NoticePeriod = null,
-    string SalaryUnit = "INR per annum")
+    string SalaryUnit = "INR per annum",
+    string? ResumeHeadline = null,
+    IReadOnlyCollection<string>? Skills = null)
 {
     [JsonIgnore]
     public string? Mobile => MobileNumber;
@@ -67,11 +70,13 @@ public sealed record UpdateCandidateBasicDetailsRequest(
     string? CurrentCity = null,
     string? CurrentArea = null,
     CandidateAvailability? AvailabilityToJoin = null,
-    decimal? CurrentAnnualSalary = null,
-    decimal? CurrentFixedAnnualSalary = null,
-    decimal? CurrentVariableAnnualSalary = null,
+    [property: JsonConverter(typeof(WholeInrAmountJsonConverter))] decimal? CurrentAnnualSalary = null,
+    [property: JsonConverter(typeof(WholeInrAmountJsonConverter))] decimal? CurrentFixedAnnualSalary = null,
+    [property: JsonConverter(typeof(WholeInrAmountJsonConverter))] decimal? CurrentVariableAnnualSalary = null,
     string? MobileNumber = null,
-    CandidateAvailability? NoticePeriod = null);
+    CandidateAvailability? NoticePeriod = null,
+    string? ResumeHeadline = null,
+    IReadOnlyCollection<string>? Skills = null);
 
 public sealed record CandidateCareerPreferencesResponse(
     IReadOnlyCollection<string> PreferredJobRoles,
@@ -86,7 +91,7 @@ public sealed record CandidateCareerPreferencesResponse(
 public sealed record UpdateCandidateCareerPreferencesRequest(
     IReadOnlyCollection<string> PreferredJobRoles,
     IReadOnlyCollection<string> PreferredCities,
-    decimal? ExpectedAnnualSalary,
+    [property: JsonConverter(typeof(WholeInrAmountJsonConverter))] decimal? ExpectedAnnualSalary,
     IReadOnlyCollection<CandidateJobType> JobTypes,
     IReadOnlyCollection<CandidateEmploymentPreference> EmploymentTypes,
     IReadOnlyCollection<CandidateShiftPreference> PreferredShifts);
