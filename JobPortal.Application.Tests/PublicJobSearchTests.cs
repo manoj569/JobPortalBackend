@@ -35,12 +35,12 @@ public sealed class PublicJobSearchTests
     }
 
     [Fact]
-    public void SearchAndFacetQueriesAreSqlServerTranslatable()
+    public void SearchAndFacetQueriesArePostgresTranslatable()
     {
         using var context = new JobPortalDbContext(
             new DbContextOptionsBuilder<JobPortalDbContext>()
-                .UseSqlServer(
-                    "Server=(localdb)\\MSSQLLocalDB;Database=TranslationOnly;Trusted_Connection=True")
+                .UseNpgsql(
+                    "Host=localhost;Database=TranslationOnly;Username=postgres;SSL Mode=Disable")
                 .Options);
         var repository = new PublicJobRepository(context, new FixedTimeProvider(Now));
         var query = new PublicJobQuery(
@@ -75,6 +75,20 @@ public sealed class PublicJobSearchTests
         Assert.Contains("PublishedAtUtc", searchSql, StringComparison.Ordinal);
         Assert.Contains("LOWER", searchSql, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("GROUP BY", facetSql, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void FacetsRoutePreservesFilterOptionsCompatibility()
+    {
+        var templates = typeof(PublicJobsController)
+            .GetMethod(nameof(PublicJobsController.FilterOptions))!
+            .GetCustomAttributes(typeof(HttpGetAttribute), false)
+            .Cast<HttpGetAttribute>()
+            .Select(attribute => attribute.Template)
+            .ToArray();
+
+        Assert.Contains("filter-options", templates);
+        Assert.Contains("facets", templates);
     }
 
     [Fact]
@@ -260,6 +274,102 @@ public sealed class PublicJobSearchTests
     }
 
     [Fact]
+    public async Task MultiSelectUsesOrWithinEachFacetAndAndAcrossFacets()
+    {
+        await using var fixture = await SearchFixture.CreateAsync();
+        var cases = new (PublicJobQuery Query, Guid[] Expected)[]
+        {
+            (new(RoleCategories: ["Software Development", "Account Management"]),
+                [fixture.Featured.Id, fixture.Latest.Id]),
+            (new(Departments: ["Engineering", "Operations"]),
+                [fixture.Featured.Id, fixture.Flexible.Id]),
+            (new(EducationRequirements: ["B.Tech/B.E.", "Any Postgraduate"]),
+                [fixture.Featured.Id, fixture.Flexible.Id]),
+            (new(
+                Locations: ["Pune", "Mumbai"],
+                RoleCategories: ["Software Development", "Account Management"],
+                Departments: ["Engineering"]),
+                [fixture.Featured.Id])
+        };
+
+        foreach (var (query, expected) in cases)
+        {
+            var (items, count) = await fixture.Repository.SearchAsync(query);
+            Assert.Equal(expected.Length, count);
+            Assert.Equal(expected.Order(), items.Select(item => item.Id).Order());
+        }
+    }
+
+    [Fact]
+    public async Task LocationFacetSafelyGroupsCaseAndOuterWhitespace()
+    {
+        await using var fixture = await SearchFixture.CreateAsync();
+        fixture.Latest.Location = "  pUnE  ";
+        await fixture.Context.SaveChangesAsync();
+
+        var options = await fixture.Repository.GetFilterOptionsAsync(new PublicJobQuery());
+        var pune = Assert.Single(options.Locations, option => option.Value == "pune");
+        Assert.Equal(2, pune.Count);
+        Assert.False(string.IsNullOrWhiteSpace(pune.Label));
+
+        var (items, count) = await fixture.Repository.SearchAsync(
+            new PublicJobQuery(Locations: [pune.Value]));
+        Assert.Equal(2, count);
+        Assert.Equal(
+            new[] { fixture.Featured.Id, fixture.Latest.Id }.Order(),
+            items.Select(item => item.Id).Order());
+    }
+
+    [Fact]
+    public async Task FacetsCountOnlyVisibleJobsAndCountsComeFromStoredData()
+    {
+        await using var fixture = await SearchFixture.CreateAsync();
+        var visible = fixture.Copy("second-engineering", JobStatus.Published);
+        visible.Location = "Pune";
+        visible.Department = "Engineering";
+        visible.RoleCategory = "Software Development";
+        visible.EducationRequirement = "B.Tech/B.E.";
+        var hidden = fixture.Copy("hidden-engineering", JobStatus.Published, isHidden: true);
+        hidden.Location = visible.Location;
+        hidden.Department = visible.Department;
+        hidden.RoleCategory = visible.RoleCategory;
+        hidden.EducationRequirement = visible.EducationRequirement;
+        var expired = fixture.Copy("expired-engineering", JobStatus.Published,
+            expiresAtUtc: Now.AddSeconds(-1));
+        expired.Location = visible.Location;
+        expired.Department = visible.Department;
+        expired.RoleCategory = visible.RoleCategory;
+        expired.EducationRequirement = visible.EducationRequirement;
+        fixture.Context.Jobs.AddRange(visible, hidden, expired);
+        await fixture.Context.SaveChangesAsync();
+
+        var options = await fixture.Repository.GetFilterOptionsAsync(new PublicJobQuery());
+
+        Assert.Equal(2, Assert.Single(options.Locations,
+            option => option.Value == "pune").Count);
+        Assert.Equal(2, Assert.Single(options.Departments,
+            option => option.Value == "Engineering").Count);
+        Assert.Equal(2, Assert.Single(options.RoleCategories,
+            option => option.Value == "Software Development").Count);
+        Assert.Equal(2, Assert.Single(options.EducationRequirements,
+            option => option.Value == "B.Tech/B.E.").Count);
+    }
+
+    [Fact]
+    public async Task ZeroResultCombinationReturnsValidEmptyPage()
+    {
+        await using var fixture = await SearchFixture.CreateAsync();
+        var service = new PublicJobService(fixture.Repository, new PublicJobQueryValidator());
+
+        var result = await service.SearchAsync(new PublicJobQuery(
+            Locations: ["Pune"], Departments: ["Sales"]));
+
+        Assert.Empty(result.Items);
+        Assert.Equal(0, result.TotalCount);
+        Assert.Equal(0, result.TotalPages);
+    }
+
+    [Fact]
     public async Task FilterOptionsUseEligibleJobsAndExcludeOnlyTheirOwnDimension()
     {
         await using var fixture = await SearchFixture.CreateAsync();
@@ -268,7 +378,7 @@ public sealed class PublicJobSearchTests
             new PublicJobQuery(Departments: ["Engineering"]));
 
         Assert.Equal(
-            new[] { ("Pune", 1) },
+            new[] { ("pune", 1) },
             options.Locations.Select(option => (option.Value, option.Count)));
         Assert.Equal(3, options.Departments.Sum(option => option.Count));
         Assert.Contains(options.Departments, option =>
@@ -283,7 +393,7 @@ public sealed class PublicJobSearchTests
         var nameFilteredOptions = await fixture.Repository.GetFilterOptionsAsync(
             new PublicJobQuery(CompanyName: " alpha ", CategoryName: "sales"));
         Assert.Equal(
-            new[] { ("Delhi", 1) },
+            new[] { ("delhi", 1) },
             nameFilteredOptions.Locations.Select(option => (option.Value, option.Count)));
     }
 

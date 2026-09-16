@@ -279,17 +279,25 @@ public sealed class PublicJobRepository(
     internal IQueryable<Job> FilteredJobsQuery(PublicJobQuery query) =>
         ApplyFilters(AvailableJobs(), query);
 
+#pragma warning disable CA1304, CA1311, CA1862 // Parameterless casing is translated by EF; comparison overloads are not.
     internal IQueryable<StringFacetOption> LocationFacetQuery(PublicJobQuery query)
     {
         var options = ApplyFilters(AvailableJobs(), query, FacetDimension.Location)
             .Where(job => job.Location != null && job.Location != string.Empty)
-            .GroupBy(job => job.Location!)
-            .Select(group => new { Value = group.Key, Count = group.Count() })
+            .GroupBy(job => job.Location!.Trim().ToLower())
+            .Select(group => new
+            {
+                Value = group.Key,
+                Label = (group.Min(job => job.Location!) ?? group.Key).Trim(),
+                Count = group.Count()
+            })
             .OrderByDescending(option => option.Count)
             .ThenBy(option => option.Value);
 
-        return options.Select(option => new StringFacetOption(option.Value, option.Count));
+        return options.Select(option =>
+            new StringFacetOption(option.Value, option.Label, option.Count));
     }
+#pragma warning restore CA1304, CA1311, CA1862
 
     private IQueryable<Job> AvailableJobs()
     {
@@ -302,6 +310,7 @@ public sealed class PublicJobRepository(
             (!job.ExpiresAtUtc.HasValue || job.ExpiresAtUtc > utcNow));
     }
 
+#pragma warning disable CA1304, CA1311, CA1862 // Parameterless casing is translated by EF; comparison overloads are not.
     private IQueryable<Job> ApplyFilters(
         IQueryable<Job> source,
         PublicJobQuery query,
@@ -320,7 +329,6 @@ public sealed class PublicJobRepository(
 
         if (query.CategoryId.HasValue)
             source = source.Where(job => job.CategoryId == query.CategoryId.Value);
-#pragma warning disable CA1304, CA1311, CA1862 // Parameterless casing is translated by EF; comparison overloads are not.
         var categoryName = FirstValue(query.CategoryName);
         if (categoryName is not null)
         {
@@ -346,18 +354,21 @@ public sealed class PublicJobRepository(
                     job.Company.Name.ToLower().Contains(normalizedCompanyName));
             }
         }
-#pragma warning restore CA1304, CA1311, CA1862
-
         if (excluded != FacetDimension.Location)
         {
             var location = FirstValue(query.Location);
-            var locations = Values(query.Locations);
+            var locations = NormalizedValues(query.Locations);
             if (location is not null)
+            {
+                var normalizedLocation = location.ToLowerInvariant();
                 source = source.Where(job =>
-                    job.Location != null && job.Location.Contains(location));
+                    job.Location != null &&
+                    job.Location.Trim().ToLower().Contains(normalizedLocation));
+            }
             if (locations.Length > 0)
                 source = source.Where(job =>
-                    job.Location != null && locations.Contains(job.Location));
+                    job.Location != null &&
+                    locations.Contains(job.Location.Trim().ToLower()));
         }
 
         if (excluded != FacetDimension.WorkMode)
@@ -486,6 +497,7 @@ public sealed class PublicJobRepository(
 
         return source;
     }
+#pragma warning restore CA1304, CA1311, CA1862
 
     private static IOrderedQueryable<Job> ApplySorting(
         IQueryable<Job> source,
@@ -544,6 +556,9 @@ public sealed class PublicJobRepository(
             .Where(value => value.Length > 0)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray() ?? [];
+
+    private static string[] NormalizedValues(string[]? values) =>
+        Values(values).Select(value => value.ToLowerInvariant()).ToArray();
 
     private static T[] Values<T>(T[]? values) where T : struct =>
         values?.Distinct().ToArray() ?? [];

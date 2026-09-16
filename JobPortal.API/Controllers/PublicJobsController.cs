@@ -42,6 +42,7 @@ public sealed class PublicJobsController(IPublicJobService jobService) : Control
         GetPageAsync(query with { IsFeatured = true, FeaturedOnly = true }, cancellationToken);
 
     [HttpGet("filter-options")]
+    [HttpGet("facets")]
     [ProducesResponseType(typeof(ApiResponse<PublicJobFilterOptionsResponse>), StatusCodes.Status200OK)]
     public async Task<ActionResult<ApiResponse<PublicJobFilterOptionsResponse>>> FilterOptions(
         [FromQuery] PublicJobQuery query,
