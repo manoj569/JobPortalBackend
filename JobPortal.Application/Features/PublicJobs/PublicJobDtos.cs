@@ -89,7 +89,10 @@ public sealed record PublicJobSearchResponse(
     public int TotalPages => (int)Math.Ceiling(TotalCount / (double)PageSize);
 }
 
-public sealed record StringFacetOption(string Value, int Count);
+public sealed record StringFacetOption(string Value, string Label, int Count)
+{
+    public StringFacetOption(string value, int count) : this(value, value, count) { }
+}
 public sealed record EnumFacetOption<TEnum>(TEnum Value, int Count) where TEnum : struct, Enum;
 public sealed record CompanyFacetOption(Guid Id, string Name, int Count);
 public sealed record InternshipDurationFacetOption(
