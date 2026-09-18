@@ -115,7 +115,7 @@ public sealed class UrlCanonicalizer : IUrlCanonicalizer
             return string.Empty;
 
         // Remove leading '?'
-        var query = queryString.StartsWith("?") ? queryString[1..] : queryString;
+        var query = queryString.Length > 0 && queryString[0] == '?' ? queryString.Substring(1) : queryString;
 
         if (string.IsNullOrEmpty(query))
             return string.Empty;
@@ -170,7 +170,7 @@ public sealed class UrlCanonicalizer : IUrlCanonicalizer
             // Encode name and value properly
             var encodedName = Uri.EscapeDataString(param.Key);
             var encodedValue = Uri.EscapeDataString(param.Value);
-            sb.Append($"{encodedName}={encodedValue}");
+            sb.Append(encodedName).Append('=').Append(encodedValue);
         }
 
         return "?" + sb.ToString();

@@ -78,7 +78,7 @@ public sealed class JobDeduplicationService : IJobDeduplicationService
     /// Finds the best fuzzy match from a list of candidates.
     /// Returns the candidate with the HIGHEST similarity score.
     /// </summary>
-    private (Job? Job, double Score) FindBestFuzzyMatch(
+    private static (Job? Job, double Score) FindBestFuzzyMatch(
         IReadOnlyList<Job> candidates, string title, string company, string? location)
     {
         Job? bestMatch = null;

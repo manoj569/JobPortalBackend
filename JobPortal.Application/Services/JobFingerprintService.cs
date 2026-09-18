@@ -59,9 +59,11 @@ public class JobFingerprintService : IJobFingerprintService
         result = sb.ToString();
 
         // Collapse consecutive whitespace to single space
-        var parts = result.Split(new[] { ' ', '\t', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+        var parts = result.Split(WhitespaceChars, StringSplitOptions.RemoveEmptyEntries);
         result = string.Join(" ", parts);
 
         return result;
     }
+
+    private static readonly char[] WhitespaceChars = { ' ', '\t', '\n', '\r' };
 }

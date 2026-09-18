@@ -35,6 +35,7 @@ using JobPortal.Application.Features.Portfolios;
 using JobPortal.Application.Features.Referrals;
 using JobPortal.Application.Features.PublicJobs;
 using JobPortal.Application.Features.Settings;
+using JobPortal.Application.Services;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace JobPortal.Application;
