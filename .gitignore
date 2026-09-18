@@ -1,16 +1,54 @@
-**/bin/
-**/obj/
-.vs/
-.vscode/
-Logs/
-*.user
-*.suo
-*.cache
-*.log
-appsettings.Local.json
-appsettings.*.local.json
-.env
-.env.*
-!.env.example
+```
+# Build artifacts
+bin/
+obj/
+*.dll
+*.exe
+*.pdb
+*.so
+*.dylib
+*.jar
+*.war
+*.class
 
-/you-are-a-principal-net-9/
+# Dependencies
+packages/
+node_modules/
+vendor/
+
+# Logs
+*.log
+**/logs/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Environment specific
+.env
+.env.local
+*.env.*
+
+# IDE specific
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test coverage
+coverage/
+htmlcov/
+*.coverage
+
+# Distribution packages
+dist/
+build/
+*.egg-info/
+
+# Cache directories
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.PythonCache/
+```

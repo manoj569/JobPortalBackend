@@ -83,6 +83,12 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IJobDiscoveryService, JobDiscoveryService>();
         services.AddScoped<ICompanyManagementService, CompanyManagementService>();
         services.AddScoped<ICategoryManagementService, CategoryManagementService>();
+        
+        // Job Aggregation & Deduplication (Phase 1)
+        services.AddScoped<IUrlCanonicalizer, UrlCanonicalizer>();
+        services.AddScoped<IJobFingerprintService, JobFingerprintService>();
+        services.AddScoped<IJobDeduplicationService, JobDeduplicationService>();
+        
         return services;
     }
 }
