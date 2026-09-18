@@ -12,6 +12,9 @@ using JobPortal.Application.Features.Authentication;
 using JobPortal.Application.Abstractions.AIApply;
 using JobPortal.Application.Features.AIApply;
 using JobPortal.Infrastructure.AIApply;
+using JobPortal.Application.Abstractions.Referrals;
+using JobPortal.Shared.Options;
+using Microsoft.Extensions.Options;
 
 namespace JobPortal.Infrastructure;
 
@@ -47,6 +50,23 @@ public static class ServiceCollectionExtensions
             client.Timeout = TimeSpan.FromSeconds(10);
         });
         services.AddScoped<IExternalJobSourceProvider, AdzunaJobSourceProvider>();
+
+        services.Configure<AiExtractionOptions>(configuration.GetSection(AiExtractionOptions.SectionName));
+        services.AddHttpClient(ClaudeJobUrlExtractionService.PageFetchClientName, client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(15);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd(
+                "Mozilla/5.0 (compatible; CareerHarborReferralBot/1.0)");
+        });
+        services.AddHttpClient(ClaudeJobUrlExtractionService.AnthropicClientName, (sp, client) =>
+        {
+            var aiOptions = sp.GetRequiredService<IOptions<AiExtractionOptions>>().Value;
+            client.BaseAddress = new Uri("https://api.openai.com/v1/");
+            client.Timeout = TimeSpan.FromSeconds(aiOptions.TimeoutSeconds);
+            client.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", aiOptions.ApiKey);
+        });
+        services.AddScoped<IJobUrlExtractionService, ClaudeJobUrlExtractionService>();
         services.AddSingleton<IRazorpayGateway, RazorpayGateway>();
         services.AddSingleton<PhonePeAccessTokenCache>();
         services.AddHttpClient<IPhonePeGateway, PhonePeGateway>(client =>

@@ -3,6 +3,7 @@ using System;
 using JobPortal.Persistence.Context;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace JobPortal.Persistence.Postgres.Migrations
 {
     [DbContext(typeof(JobPortalDbContext))]
-    partial class JobPortalDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260917102238_AddJobReferrals")]
+    partial class AddJobReferrals
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1476,98 +1479,6 @@ namespace JobPortal.Persistence.Postgres.Migrations
                     b.HasIndex("ParentCategoryId", "DisplayOrder");
 
                     b.ToTable("Categories", (string)null);
-
-                    b.HasData(
-                        new
-                        {
-                            Id = new Guid("10000000-0000-0000-0000-000000000001"),
-                            CreatedAtUtc = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            DisplayOrder = 10,
-                            IsDeleted = false,
-                            Name = "Software Engineering",
-                            Slug = "software-engineering"
-                        },
-                        new
-                        {
-                            Id = new Guid("10000000-0000-0000-0000-000000000002"),
-                            CreatedAtUtc = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            DisplayOrder = 20,
-                            IsDeleted = false,
-                            Name = "Data Science & Analytics",
-                            Slug = "data-science-analytics"
-                        },
-                        new
-                        {
-                            Id = new Guid("10000000-0000-0000-0000-000000000003"),
-                            CreatedAtUtc = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            DisplayOrder = 30,
-                            IsDeleted = false,
-                            Name = "AI & Machine Learning",
-                            Slug = "ai-machine-learning"
-                        },
-                        new
-                        {
-                            Id = new Guid("10000000-0000-0000-0000-000000000004"),
-                            CreatedAtUtc = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            DisplayOrder = 40,
-                            IsDeleted = false,
-                            Name = "DevOps & Cloud Engineering",
-                            Slug = "devops-cloud-engineering"
-                        },
-                        new
-                        {
-                            Id = new Guid("10000000-0000-0000-0000-000000000005"),
-                            CreatedAtUtc = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            DisplayOrder = 50,
-                            IsDeleted = false,
-                            Name = "Cybersecurity",
-                            Slug = "cybersecurity"
-                        },
-                        new
-                        {
-                            Id = new Guid("10000000-0000-0000-0000-000000000006"),
-                            CreatedAtUtc = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            DisplayOrder = 60,
-                            IsDeleted = false,
-                            Name = "Quality Assurance & Testing",
-                            Slug = "quality-assurance-testing"
-                        },
-                        new
-                        {
-                            Id = new Guid("10000000-0000-0000-0000-000000000007"),
-                            CreatedAtUtc = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            DisplayOrder = 70,
-                            IsDeleted = false,
-                            Name = "Product Management",
-                            Slug = "product-management"
-                        },
-                        new
-                        {
-                            Id = new Guid("10000000-0000-0000-0000-000000000008"),
-                            CreatedAtUtc = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            DisplayOrder = 80,
-                            IsDeleted = false,
-                            Name = "UI/UX Design",
-                            Slug = "ui-ux-design"
-                        },
-                        new
-                        {
-                            Id = new Guid("10000000-0000-0000-0000-000000000009"),
-                            CreatedAtUtc = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            DisplayOrder = 90,
-                            IsDeleted = false,
-                            Name = "Engineering Management",
-                            Slug = "engineering-management"
-                        },
-                        new
-                        {
-                            Id = new Guid("10000000-0000-0000-0000-000000000010"),
-                            CreatedAtUtc = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            DisplayOrder = 100,
-                            IsDeleted = false,
-                            Name = "IT Support & Administration",
-                            Slug = "it-support-administration"
-                        });
                 });
 
             modelBuilder.Entity("JobPortal.Domain.Entities.Company", b =>

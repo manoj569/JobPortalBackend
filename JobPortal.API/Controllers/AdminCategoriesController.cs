@@ -7,21 +7,23 @@ using Microsoft.AspNetCore.Mvc;
 namespace JobPortal.API.Controllers;
 
 [ApiController]
-[Authorize(Roles = "Administrator")]
 [Route("api/admin/categories")]
 [Produces("application/json")]
 public sealed class AdminCategoriesController(ICategoryManagementService categories) : ControllerBase
 {
     [HttpGet]
+    [Authorize(Roles = "Administrator")]
     public async Task<ActionResult<ApiResponse<PagedResponse<CategoryResponse>>>> Search(
         [FromQuery] CategorySearchQuery query, CancellationToken cancellationToken) =>
         Ok(new ApiResponse<PagedResponse<CategoryResponse>>(await categories.SearchAsync(query, cancellationToken)));
 
     [HttpGet("{id:guid}")]
+    [Authorize(Roles = "Administrator")]
     public async Task<ActionResult<ApiResponse<CategoryResponse>>> Get(Guid id, CancellationToken cancellationToken) =>
         Ok(new ApiResponse<CategoryResponse>(await categories.GetByIdAsync(id, cancellationToken)));
 
     [HttpPost]
+    [Authorize(Roles = "Administrator")]
     public async Task<ActionResult<ApiResponse<CategoryResponse>>> Create(
         [FromBody] CreateCategoryRequest request, CancellationToken cancellationToken)
     {
@@ -31,12 +33,14 @@ public sealed class AdminCategoriesController(ICategoryManagementService categor
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Roles = "Administrator")]
     public async Task<ActionResult<ApiResponse<CategoryResponse>>> Update(
         Guid id, [FromBody] UpdateCategoryRequest request, CancellationToken cancellationToken) =>
         Ok(new ApiResponse<CategoryResponse>(await categories.UpdateAsync(id, request, cancellationToken),
             "Category updated successfully."));
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Roles = "Administrator")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
     {
         await categories.DeleteAsync(id, cancellationToken);
@@ -44,6 +48,7 @@ public sealed class AdminCategoriesController(ICategoryManagementService categor
     }
 
     [HttpGet("options")]
+    [Authorize(Roles = "Candidate,Administrator")]
     public async Task<ActionResult<ApiResponse<IReadOnlyCollection<AdminOptionResponse>>>> Options(
         CancellationToken cancellationToken) =>
         Ok(new ApiResponse<IReadOnlyCollection<AdminOptionResponse>>(

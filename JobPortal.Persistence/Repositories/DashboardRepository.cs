@@ -85,6 +85,8 @@ public sealed class DashboardRepository(
     {
         await context.Notifications.AddAsync(notification, cancellationToken);
     }
+    public Task<bool> NotificationExistsAsync(Guid userId, NotificationType type, Guid referralId, CancellationToken cancellationToken = default) =>
+        context.Notifications.AnyAsync(x => x.UserId == userId && x.Type == type && x.ReferralId == referralId, cancellationToken);
     public Task<int> MarkAllNotificationsReadAsync(
         Guid userId, DateTime readAtUtc, CancellationToken cancellationToken = default) =>
         context.Notifications.Where(x => x.UserId == userId && !x.IsRead)

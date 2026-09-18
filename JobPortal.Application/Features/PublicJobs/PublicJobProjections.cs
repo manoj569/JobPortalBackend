@@ -16,5 +16,10 @@ public static class PublicJobProjections
             job.MinimumExperienceYears, job.MaximumExperienceYears,
             job.InternshipDurationMonths, job.IsFlexibleDuration,
             job.Department, job.RoleCategory, job.EducationRequirement,
-            job.PostedByType, job.Company.CompanyType, job.Company.Industry);
+            job.PostedByType, job.Company.CompanyType, job.Company.Industry,
+            job.Referral != null,
+            job.Referral == null ? null : job.Referral.Id,
+            job.Referral == null ? null : (job.Referral.ReferrerUser.FirstName + " " + job.Referral.ReferrerUser.LastName).Trim(),
+            job.Referral == null ? null : job.Referral.ReviewedAtUtc,
+            null, null, null);
 }

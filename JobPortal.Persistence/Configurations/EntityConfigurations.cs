@@ -167,6 +167,18 @@ public sealed class CategoryConfiguration : IEntityTypeConfiguration<Category>
         builder.HasIndex(x => x.Slug).IsUnique().HasFilter("\"IsDeleted\" = FALSE");
         builder.HasIndex(x => new { x.ParentCategoryId, x.DisplayOrder });
         builder.HasOne(x => x.ParentCategory).WithMany(x => x.Children).HasForeignKey(x => x.ParentCategoryId).OnDelete(DeleteBehavior.Restrict);
+        var created = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        builder.HasData(
+            new Category { Id = Guid.Parse("10000000-0000-0000-0000-000000000001"), Name = "Software Engineering", Slug = "software-engineering", DisplayOrder = 10, CreatedAtUtc = created },
+            new Category { Id = Guid.Parse("10000000-0000-0000-0000-000000000002"), Name = "Data Science & Analytics", Slug = "data-science-analytics", DisplayOrder = 20, CreatedAtUtc = created },
+            new Category { Id = Guid.Parse("10000000-0000-0000-0000-000000000003"), Name = "AI & Machine Learning", Slug = "ai-machine-learning", DisplayOrder = 30, CreatedAtUtc = created },
+            new Category { Id = Guid.Parse("10000000-0000-0000-0000-000000000004"), Name = "DevOps & Cloud Engineering", Slug = "devops-cloud-engineering", DisplayOrder = 40, CreatedAtUtc = created },
+            new Category { Id = Guid.Parse("10000000-0000-0000-0000-000000000005"), Name = "Cybersecurity", Slug = "cybersecurity", DisplayOrder = 50, CreatedAtUtc = created },
+            new Category { Id = Guid.Parse("10000000-0000-0000-0000-000000000006"), Name = "Quality Assurance & Testing", Slug = "quality-assurance-testing", DisplayOrder = 60, CreatedAtUtc = created },
+            new Category { Id = Guid.Parse("10000000-0000-0000-0000-000000000007"), Name = "Product Management", Slug = "product-management", DisplayOrder = 70, CreatedAtUtc = created },
+            new Category { Id = Guid.Parse("10000000-0000-0000-0000-000000000008"), Name = "UI/UX Design", Slug = "ui-ux-design", DisplayOrder = 80, CreatedAtUtc = created },
+            new Category { Id = Guid.Parse("10000000-0000-0000-0000-000000000009"), Name = "Engineering Management", Slug = "engineering-management", DisplayOrder = 90, CreatedAtUtc = created },
+            new Category { Id = Guid.Parse("10000000-0000-0000-0000-000000000010"), Name = "IT Support & Administration", Slug = "it-support-administration", DisplayOrder = 100, CreatedAtUtc = created });
     }
 }
 
@@ -244,6 +256,67 @@ public sealed class JobRecruiterContactConfiguration
             .WithOne(x => x.RecruiterContact)
             .HasForeignKey<JobRecruiterContact>(x => x.JobId)
             .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+public sealed class JobReferralConfiguration : IEntityTypeConfiguration<JobReferral>
+{
+    public void Configure(EntityTypeBuilder<JobReferral> builder)
+    {
+        builder.ToTable("JobReferrals");
+        builder.ConfigureBaseEntity();
+
+        builder.Property(x => x.SourceUrl)
+            .HasMaxLength(2048);
+
+        builder.Property(x => x.RejectionReason)
+            .HasMaxLength(1000);
+
+        builder.HasIndex(x => x.JobId)
+            .IsUnique()
+            .HasFilter("\"IsDeleted\" = FALSE");
+
+        builder.HasIndex(x => x.ReferrerUserId);
+
+        builder.HasIndex(x => x.ApprovalStatus);
+
+        builder.HasOne(x => x.Job)
+            .WithOne(x => x.Referral)
+            .HasForeignKey<JobReferral>(x => x.JobId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne(x => x.ReferrerUser)
+            .WithMany(x => x.ReferredJobs)
+            .HasForeignKey(x => x.ReferrerUserId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(x => x.ReviewedByUser)
+            .WithMany()
+            .HasForeignKey(x => x.ReviewedByUserId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public sealed class ReferralUnlockConfiguration : IEntityTypeConfiguration<ReferralUnlock>
+{
+    public void Configure(EntityTypeBuilder<ReferralUnlock> builder)
+    {
+        builder.ToTable("ReferralUnlocks");
+        builder.ConfigureBaseEntity();
+
+        builder.HasIndex(x => new { x.JobReferralId, x.UserId })
+            .IsUnique()
+            .HasFilter("\"IsDeleted\" = FALSE");
+
+        builder.HasOne(x => x.JobReferral)
+            .WithMany()
+            .HasForeignKey(x => x.JobReferralId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne(x => x.User)
+            .WithMany(x => x.ReferralUnlocks)
+            .HasForeignKey(x => x.UserId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }
 
@@ -442,6 +515,8 @@ public sealed class NotificationConfiguration : IEntityTypeConfiguration<Notific
         builder.Property(x => x.Title).HasMaxLength(250).IsRequired();
         builder.Property(x => x.Message).HasMaxLength(4000).IsRequired();
         builder.Property(x => x.ActionUrl).HasMaxLength(2048);
+        builder.HasIndex(x => new { x.UserId, x.Type, x.ReferralId }).IsUnique()
+            .HasFilter("\"ReferralId\" IS NOT NULL AND \"IsDeleted\" = FALSE");
 
         // ✅ We add an index to speed up queries filtering by read time
         builder.HasIndex(x => new { x.UserId, x.IsRead, x.CreatedAtUtc });

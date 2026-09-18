@@ -316,6 +316,10 @@ public sealed class PublicJobRepository(
         PublicJobQuery query,
         FacetDimension excluded = FacetDimension.None)
     {
+        if (query.ReferralOnly)
+            source = source.Where(job => job.Referral != null &&
+                job.Referral.ApprovalStatus == JobReferralApprovalStatus.Approved &&
+                job.Status == JobStatus.Published);
         var keyword = FirstValue(query.Keyword, query.Search);
         if (keyword is not null)
         {

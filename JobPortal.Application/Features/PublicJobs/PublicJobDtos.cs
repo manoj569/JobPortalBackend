@@ -39,7 +39,8 @@ public sealed record PublicJobQuery(
     bool? FeaturedOnly = null,
     int? Page = null,
     string? CompanyName = null,
-    string? CategoryName = null)
+    string? CategoryName = null,
+    bool ReferralOnly = false)
 {
     public int EffectivePageNumber => Page ?? PageNumber;
 }
@@ -55,7 +56,10 @@ public sealed record PublicJobSummary(
     int? MinimumExperienceYears, int? MaximumExperienceYears,
     int? InternshipDurationMonths, bool IsFlexibleDuration,
     string? Department, string? RoleCategory, string? EducationRequirement,
-    PostedByType? PostedByType, CompanyType? CompanyType, string? Industry);
+    PostedByType? PostedByType, CompanyType? CompanyType, string? Industry,
+    bool IsReferralJob = false, Guid? ReferralId = null, string? ReferrerName = null,
+    DateTime? ReferralApprovedAtUtc = null, decimal? MatchScore = null,
+    IReadOnlyCollection<string>? MatchReasons = null, bool? IsResumeMatch = null);
 
 public sealed record PublicJobDetails(
     Guid Id, string ReferenceNumber, string Title, string Slug, string Description,

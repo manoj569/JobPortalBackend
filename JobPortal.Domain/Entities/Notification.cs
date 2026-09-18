@@ -12,6 +12,8 @@ public class Notification : BaseEntity
     public string? ActionUrl { get; set; }
     public bool IsRead { get; set; }
     public DateTime? ReadAtUtc { get; set; }
+    public Guid? ReferralId { get; set; }
+    public Guid? JobId { get; set; }
 
     public User? User { get; set; }
 

@@ -2,6 +2,7 @@ using JobPortal.Application.Abstractions.Persistence;
 using JobPortal.Application.Abstractions.Candidates;
 using JobPortal.Application.Abstractions.CandidateCompanies;
 using JobPortal.Application.Abstractions.InterviewInsights;
+using JobPortal.Application.Abstractions.Referrals;
 using JobPortal.Persistence.Context;
 using JobPortal.Persistence.Repositories;
 using Microsoft.EntityFrameworkCore;
@@ -39,6 +40,7 @@ public static class ServiceCollectionExtensions
             AuthenticationChallengeRepository>();
         services.AddScoped<IRegistrationEmailOutbox, RegistrationEmailOutbox>();
         services.AddScoped<IJobRepository, JobRepository>();
+        services.AddScoped<IJobReferralRepository, JobReferralRepository>();
         services.AddScoped<IPublicJobRepository, PublicJobRepository>();
         services.AddScoped<IMembershipRepository, MembershipRepository>();
         services.AddScoped<IPaymentRepository, PaymentRepository>();
