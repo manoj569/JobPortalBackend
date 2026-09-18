@@ -645,7 +645,6 @@ public sealed class SettingConfiguration : IEntityTypeConfiguration<Setting>
                 .HasForeignKey<JobReferral>(x => x.JobId)
                 .OnDelete(DeleteBehavior.SetNull);
             
-            builder.Ignore(x => x.RowVersion);
             builder.Property<uint>("xmin").HasColumnName("xmin").IsRowVersion();
         }
     }
@@ -673,7 +672,6 @@ public sealed class SettingConfiguration : IEntityTypeConfiguration<Setting>
                 .HasFilter("\"IsDeleted\" = FALSE");
             builder.HasIndex(x => new { x.IsActive, x.LastRunAtUtc });
             
-            builder.Ignore(x => x.RowVersion);
             builder.Property<uint>("xmin").HasColumnName("xmin").IsRowVersion();
         }
     }

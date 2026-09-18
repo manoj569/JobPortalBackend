@@ -1,28 +1,54 @@
-```
 # Build artifacts
 bin/
 obj/
-out/
+*.dll
+*.exe
+*.pdb
+*.so
+*.dylib
 
 # Dependencies
 packages/
+node_modules/
+bower_components/
 
 # Logs
 *.log
-
-# Environment
-.env
-.env.local
-*.env.*
 
 # OS generated files
 .DS_Store
 Thumbs.db
 
-# IDE files
+# Environment specific
+.env
+.env.local
+.env.*
+
+# IDE
 .vscode/
 .idea/
-*.suo
+*.swp
+*.swo
+
+# Test and coverage
+coverage/
+htmlcov/
+.coverage
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Python specific
+__pycache__/
+*.pyc
+*.pyo
+.Python
+*.so
+*.egg
+
+# .NET specific
 *.user
 *.userosscache
 *.sln.docstates
@@ -30,5 +56,37 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
-*~
-```
+*.bak
+
+# Compression
+*.zip
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.gz
+*.rar
+*.7z
+
+# MyPy
+.mypy_cache/
+__pycache__/
+
+# PyTest
+.pytest_cache/
+
+# Gradle
+.gradle/
+build/
+
+# Julia
+julia-*/
+
+# Zig
+zig-out/
+zig-cache/
+
+# Rust
+target/
+
+# Go
+vendor/
