@@ -160,3 +160,19 @@ public sealed class JobSearchQueryValidator : AbstractValidator<JobSearchQuery>
         }
     }
 }
+
+public sealed class ComposeJobRequestValidator : AbstractValidator<ComposeJobRequest>
+{
+    public ComposeJobRequestValidator()
+    {
+        RuleFor(x => x.Job).NotNull();
+        RuleFor(x => x.Job.Title).NotEmpty().MaximumLength(250).When(x => x.Job is not null);
+        RuleFor(x => x.Category)
+            .Must(x => x is not null && (x.ExistingId.HasValue ^ x.New is not null))
+            .WithMessage("Provide exactly one category: existingId or new.");
+        RuleFor(x => x.Category!.New!.Name)
+            .NotEmpty().MaximumLength(100)
+            .When(x => x.Category?.New is not null)
+            .WithMessage("New category name is required and cannot exceed 100 characters.");
+    }
+}

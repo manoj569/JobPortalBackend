@@ -45,7 +45,8 @@ public enum NotificationType
     Payment,
     Membership,
     Security,
-    System
+    System,
+    ReferralApproved
 }
 public enum AuditAction
 {
@@ -82,3 +83,4 @@ public enum CareerStage { Student = 1, Fresher, Experienced }
 public enum DesiredOpportunity { Internship = 1, FresherJob, ExperiencedJob }
 public enum WorkPreference { Remote = 1, Hybrid, OnSite }
 public enum OtpPurpose { Registration = 1, Login }
+public enum JobReferralApprovalStatus { Pending = 1, Approved, Rejected }

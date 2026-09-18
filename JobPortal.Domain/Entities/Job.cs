@@ -42,4 +42,5 @@ public sealed class Job : BaseEntity
     public ICollection<UserJobHistory> UserHistory { get; set; } = new List<UserJobHistory>();
     public ICollection<JobApplication> Applications { get; set; } = new List<JobApplication>();
     public JobRecruiterContact? RecruiterContact { get; set; }
+    public JobReferral? Referral { get; set; }
 }

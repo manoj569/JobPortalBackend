@@ -87,4 +87,6 @@ public sealed class User : BaseEntity
     public ICollection<JobApplication> JobApplications { get; set; } = new List<JobApplication>();
     public ICollection<OtpChallenge> OtpChallenges { get; set; } = new List<OtpChallenge>();
     public ICollection<RegistrationEmailRequest> RegistrationEmailRequests { get; set; } = [];
+    public ICollection<JobReferral> ReferredJobs { get; set; } = new List<JobReferral>();
+    public ICollection<ReferralUnlock> ReferralUnlocks { get; set; } = new List<ReferralUnlock>();
 }

@@ -1,5 +1,6 @@
 using JobPortal.Application.Features.Dashboard;
 using JobPortal.Domain.Entities;
+using JobPortal.Domain.Enums;
 
 namespace JobPortal.Application.Abstractions.Persistence;
 
@@ -17,4 +18,5 @@ public interface IDashboardRepository
     Task<Notification?> GetNotificationAsync(Guid userId, Guid notificationId, CancellationToken cancellationToken = default);
     Task<int> MarkAllNotificationsReadAsync(Guid userId, DateTime readAtUtc, CancellationToken cancellationToken = default);
     Task AddNotificationAsync(Notification notification, CancellationToken cancellationToken = default);
+    Task<bool> NotificationExistsAsync(Guid userId, NotificationType type, Guid referralId, CancellationToken cancellationToken = default);
 }

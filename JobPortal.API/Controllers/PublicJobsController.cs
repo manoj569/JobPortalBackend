@@ -23,6 +23,12 @@ public sealed class PublicJobsController(IPublicJobService jobService) : Control
         [FromQuery] PublicJobQuery query, CancellationToken cancellationToken) =>
         GetPageAsync(query, cancellationToken);
 
+    [HttpGet("referrals")]
+    [ProducesResponseType(typeof(ApiResponse<PublicJobSearchResponse>), StatusCodes.Status200OK)]
+    public Task<ActionResult<ApiResponse<PublicJobSearchResponse>>> ReferralJobs(
+        [FromQuery] PublicJobQuery query, CancellationToken cancellationToken) =>
+        GetPageAsync(query with { ReferralOnly = true }, cancellationToken);
+
     [HttpGet("latest")]
     [ProducesResponseType(typeof(ApiResponse<PublicJobSearchResponse>), StatusCodes.Status200OK)]
     public Task<ActionResult<ApiResponse<PublicJobSearchResponse>>> Latest(

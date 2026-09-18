@@ -403,6 +403,10 @@ if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
+
+    // Redirects both / and /index.html to /swagger
+    app.MapGet("/", () => Results.Redirect("/swagger"));
+    app.MapGet("/index.html", () => Results.Redirect("/swagger"));
 }
 
 app.UseHttpsRedirection();

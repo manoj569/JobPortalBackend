@@ -1271,6 +1271,9 @@ public sealed class CandidateModuleTests
             Notifications.Add(notification);
             return Task.CompletedTask;
         }
+        public Task<bool> NotificationExistsAsync(Guid userId, NotificationType type, Guid referralId,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(Notifications.Any(x => x.UserId == userId && x.Type == type && x.ReferralId == referralId));
     }
     private sealed class FakeResumeStorage : IResumeStorage
     {

@@ -19,5 +19,6 @@ public static class DashboardProjections
                 saved.Job.InternshipDurationMonths, saved.Job.IsFlexibleDuration,
                 saved.Job.Department, saved.Job.RoleCategory,
                 saved.Job.EducationRequirement, saved.Job.PostedByType,
-                saved.Job.Company.CompanyType, saved.Job.Company.Industry));
+                saved.Job.Company.CompanyType, saved.Job.Company.Industry,
+                false, null, null, null, null, null, null));
 }
