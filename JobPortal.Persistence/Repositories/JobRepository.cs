@@ -16,13 +16,15 @@ public sealed class JobRepository(JobPortalDbContext context) : IJobRepository
         return query
             .Include(x => x.Company)
             .Include(x => x.Category)
+            .Include(x => x.Referral)
             .Include(x => x.RecruiterContact).SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
     }
 
     public async Task<(IReadOnlyCollection<Job> Items, int TotalCount)> SearchAsync(JobSearchQuery query, CancellationToken cancellationToken = default)
     {
         IQueryable<Job> source = context.Jobs.AsNoTracking().IgnoreQueryFilters()
-            .Include(x => x.Company).Include(x => x.Category);
+            .Include(x => x.Company).Include(x => x.Category)
+            .Include(x => x.Referral);
 
         if (query.IsDeleted.HasValue) source = source.Where(x => x.IsDeleted == query.IsDeleted.Value);
         if (!string.IsNullOrWhiteSpace(query.Search))

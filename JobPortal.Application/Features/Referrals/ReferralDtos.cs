@@ -25,7 +25,8 @@ public sealed record JobReferralResponse(
     JobReferralApprovalStatus ApprovalStatus,
     string? RejectionReason,
     DateTime CreatedAtUtc,
-    DateTime? ReviewedAtUtc);
+    DateTime? ReviewedAtUtc,
+    DateTime? ApprovedAtUtc = null);
 
 public sealed record ReviewJobReferralRequest(
     JobReferralApprovalStatus Decision,

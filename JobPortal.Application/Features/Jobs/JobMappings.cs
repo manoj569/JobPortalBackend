@@ -15,7 +15,8 @@ public static class JobMappings
         job.CreatedAtUtc, job.UpdatedAtUtc, job.IsDeleted, job.DeletedAtUtc,
         job.MinimumExperienceYears, job.MaximumExperienceYears,
         job.InternshipDurationMonths, job.IsFlexibleDuration, job.Department,
-        job.RoleCategory, job.EducationRequirement, job.PostedByType);
+        job.RoleCategory, job.EducationRequirement, job.PostedByType,
+        job.Referral is not null, job.Referral?.Id, job.Referral?.ApprovalStatus, job.Referral?.ReviewedAtUtc);
 
     public static void Apply(this Job job, UpdateJobRequest request)
     {

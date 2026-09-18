@@ -207,6 +207,7 @@ public sealed class JobReferralService(
             referral.ApprovalStatus,
             referral.RejectionReason,
             referral.CreatedAtUtc,
-            referral.ReviewedAtUtc));
+            referral.ReviewedAtUtc,
+            referral.ApprovalStatus == JobReferralApprovalStatus.Approved ? referral.ReviewedAtUtc : null));
     }
 }

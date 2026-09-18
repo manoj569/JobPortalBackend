@@ -42,7 +42,10 @@ public sealed class JobReferralRepository(JobPortalDbContext context) : IJobRefe
         int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
         var query = WithIncludes()
-            .Where(x => x.ApprovalStatus == JobReferralApprovalStatus.Approved)
+            .Where(x => x.ApprovalStatus == JobReferralApprovalStatus.Approved &&
+                x.Job.Status == JobStatus.Published &&
+                !x.Job.IsHidden && !x.Job.IsDeleted &&
+                (!x.Job.ExpiresAtUtc.HasValue || x.Job.ExpiresAtUtc > DateTime.UtcNow))
             .OrderByDescending(x => x.CreatedAtUtc);
 
         var totalCount = await query.CountAsync(cancellationToken);

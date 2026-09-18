@@ -24,6 +24,7 @@ public sealed class PublicJobsController(IPublicJobService jobService) : Control
         GetPageAsync(query, cancellationToken);
 
     [HttpGet("referrals")]
+    [OutputCache(NoStore = true)]
     [ProducesResponseType(typeof(ApiResponse<PublicJobSearchResponse>), StatusCodes.Status200OK)]
     public Task<ActionResult<ApiResponse<PublicJobSearchResponse>>> ReferralJobs(
         [FromQuery] PublicJobQuery query, CancellationToken cancellationToken) =>
