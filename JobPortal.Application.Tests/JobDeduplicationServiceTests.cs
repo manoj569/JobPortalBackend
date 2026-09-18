@@ -1,316 +1,142 @@
 using JobPortal.Application.Abstractions.Jobs;
 using JobPortal.Application.Abstractions.Persistence;
+using JobPortal.Application.Features.Jobs;
 using JobPortal.Application.Services;
 using JobPortal.Domain.Entities;
 using JobPortal.Domain.Enums;
-using Moq;
 using Xunit;
+using MatchType = JobPortal.Application.Abstractions.Jobs.MatchType;
 
 namespace JobPortal.Application.Tests;
 
-/// <summary>
-/// Unit tests for JobDeduplicationService.
-/// </summary>
 public class JobDeduplicationServiceTests
 {
-    private readonly Mock<IJobRepository> _jobRepositoryMock;
-    private readonly Mock<IUrlCanonicalizer> _urlCanonicalizerMock;
-    private readonly IJobFingerprintService _fingerprintService;
+    private readonly TestJobRepository _jobs = new();
+    private readonly TestUrlCanonicalizer _urls = new();
+    private readonly IJobFingerprintService _fingerprints = new JobFingerprintService();
     private readonly JobDeduplicationService _service;
 
-    public JobDeduplicationServiceTests()
-    {
-        _jobRepositoryMock = new Mock<IJobRepository>();
-        _urlCanonicalizerMock = new Mock<IUrlCanonicalizer>();
-        _fingerprintService = new JobFingerprintService();
-        _service = new JobDeduplicationService(_jobRepositoryMock.Object, _fingerprintService, _urlCanonicalizerMock.Object);
-    }
+    public JobDeduplicationServiceTests() => _service = new(_jobs, _fingerprints, _urls);
 
     [Fact]
     public async Task FindDuplicateAsync_ExternalUrlMatch_ReturnsSourceUrlMatch()
     {
-        // Arrange
-        var existingJob = CreateTestJob("Existing Title", "Acme Corp", "SF");
-        _urlCanonicalizerMock.Setup(c => c.Canonicalize("https://example.com/job/123")).Returns("https://example.com/job/123");
-        _jobRepositoryMock.Setup(r => r.FindByExternalUrlAsync("https://example.com/job/123", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(existingJob);
-
-        // Act
-        var result = await _service.FindDuplicateAsync(
-            "New Title", "Acme Corp", "SF", "https://example.com/job/123", Guid.NewGuid());
-
-        // Assert
-        Assert.True(result.IsDuplicate);
-        Assert.Equal(MatchType.SourceUrl, result.MatchTypeEnum);
-        Assert.Same(existingJob, result.MatchedJob);
-        Assert.Null(result.SimilarityScore);
+        var job = CreateJob("Existing Title", "Acme Corp", "SF");
+        _jobs.ExternalUrlMatch = job;
+        var result = await Find("New Title", "Acme Corp", "SF", "https://example.com/job/123");
+        Assert.True(result.IsDuplicate); Assert.Equal(MatchType.SourceUrl, result.MatchTypeEnum); Assert.Same(job, result.MatchedJob); Assert.Null(result.SimilarityScore);
     }
 
     [Fact]
     public async Task FindDuplicateAsync_FingerprintMatch_ReturnsFingerprintMatch()
     {
-        // Arrange
-        var title = "Software Engineer";
-        var company = "Acme Corp";
-        var location = "San Francisco";
-        var fingerprint = _fingerprintService.GenerateFingerprint(title, company, location);
-        
-        var existingJob = CreateTestJob(title, company, location);
-        existingJob.FingerprintHash = fingerprint;
-        
-        _urlCanonicalizerMock.Setup(c => c.Canonicalize(It.IsAny<string>())).Returns((string? s) => s);
-        _jobRepositoryMock.Setup(r => r.FindByExternalUrlAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Job?)null);
-        _jobRepositoryMock.Setup(r => r.FindByFingerprintHashAsync(fingerprint, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(existingJob);
-
-        // Act
-        var result = await _service.FindDuplicateAsync(title, company, location, null, Guid.NewGuid());
-
-        // Assert
-        Assert.True(result.IsDuplicate);
-        Assert.Equal(MatchType.Fingerprint, result.MatchTypeEnum);
-        Assert.Same(existingJob, result.MatchedJob);
-        Assert.Null(result.SimilarityScore);
+        const string title = "Software Engineer", company = "Acme Corp", location = "San Francisco";
+        var job = CreateJob(title, company, location);
+        job.FingerprintHash = _fingerprints.GenerateFingerprint(title, company, location);
+        _jobs.FingerprintMatch = job;
+        var result = await Find(title, company, location);
+        Assert.True(result.IsDuplicate); Assert.Equal(MatchType.Fingerprint, result.MatchTypeEnum); Assert.Same(job, result.MatchedJob); Assert.Null(result.SimilarityScore);
     }
 
     [Fact]
     public async Task FindDuplicateAsync_FuzzyMatchAboveThreshold_ReturnsFuzzyMatch()
     {
-        // Arrange
-        var companyId = Guid.NewGuid();
-        var candidateJob = CreateTestJob("Software Engineer", "Acme Corp", "San Francisco");
-        
-        _urlCanonicalizerMock.Setup(c => c.Canonicalize(It.IsAny<string>())).Returns((string? s) => s);
-        _jobRepositoryMock.Setup(r => r.FindByExternalUrlAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Job?)null);
-        _jobRepositoryMock.Setup(r => r.FindByFingerprintHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Job?)null);
-        _jobRepositoryMock.Setup(r => r.FindCandidatesForFuzzyMatchAsync(companyId, It.IsAny<string>(), It.IsAny<string>(), 100, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { candidateJob });
-
-        // Act - Very similar title and same location
-        var result = await _service.FindDuplicateAsync(
-            "Senior Software Engineer", "Acme Corp", "San Francisco", null, companyId);
-
-        // Assert
-        Assert.True(result.IsDuplicate);
-        Assert.Equal(MatchType.Fuzzy, result.MatchTypeEnum);
-        Assert.Same(candidateJob, result.MatchedJob);
-        Assert.NotNull(result.SimilarityScore);
-        Assert.InRange(result.SimilarityScore.Value, 0.85, 1.0);
+        var job = CreateJob("Software Engineer", "Acme Corp", "San Francisco"); _jobs.FuzzyCandidates = [job];
+        var result = await Find("Senior Software Engineer", "Acme Corp", "San Francisco");
+        Assert.True(result.IsDuplicate); Assert.Equal(MatchType.Fuzzy, result.MatchTypeEnum); Assert.Same(job, result.MatchedJob); Assert.NotNull(result.SimilarityScore); Assert.InRange(result.SimilarityScore.Value, 0.85, 1.0);
     }
 
     [Fact]
     public async Task FindDuplicateAsync_FuzzyMatchBelowThreshold_ReturnsNoMatch()
     {
-        // Arrange
-        var companyId = Guid.NewGuid();
-        var candidateJob = CreateTestJob("Data Scientist", "Acme Corp", "New York");
-        
-        _urlCanonicalizerMock.Setup(c => c.Canonicalize(It.IsAny<string>())).Returns((string? s) => s);
-        _jobRepositoryMock.Setup(r => r.FindByExternalUrlAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Job?)null);
-        _jobRepositoryMock.Setup(r => r.FindByFingerprintHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Job?)null);
-        _jobRepositoryMock.Setup(r => r.FindCandidatesForFuzzyMatchAsync(companyId, It.IsAny<string>(), It.IsAny<string>(), 100, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { candidateJob });
-
-        // Act - Very different title and location
-        var result = await _service.FindDuplicateAsync(
-            "Marketing Manager", "Acme Corp", "Los Angeles", null, companyId);
-
-        // Assert
-        Assert.False(result.IsDuplicate);
-        Assert.Equal(MatchType.None, result.MatchTypeEnum);
-        Assert.Null(result.MatchedJob);
-        Assert.Null(result.SimilarityScore);
+        _jobs.FuzzyCandidates = [CreateJob("Data Scientist", "Acme Corp", "New York")];
+        var result = await Find("Marketing Manager", "Acme Corp", "Los Angeles");
+        Assert.False(result.IsDuplicate); Assert.Equal(MatchType.None, result.MatchTypeEnum); Assert.Null(result.MatchedJob); Assert.Null(result.SimilarityScore);
     }
 
     [Fact]
     public async Task FindDuplicateAsync_NoMatch_ReturnsNoMatch()
     {
-        // Arrange
-        var companyId = Guid.NewGuid();
-        
-        _urlCanonicalizerMock.Setup(c => c.Canonicalize(It.IsAny<string>())).Returns((string? s) => s);
-        _jobRepositoryMock.Setup(r => r.FindByExternalUrlAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Job?)null);
-        _jobRepositoryMock.Setup(r => r.FindByFingerprintHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Job?)null);
-        _jobRepositoryMock.Setup(r => r.FindCandidatesForFuzzyMatchAsync(companyId, It.IsAny<string>(), It.IsAny<string>(), 100, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Array.Empty<Job>());
-
-        // Act
-        var result = await _service.FindDuplicateAsync(
-            "Software Engineer", "Acme Corp", "San Francisco", null, companyId);
-
-        // Assert
-        Assert.False(result.IsDuplicate);
-        Assert.Equal(MatchType.None, result.MatchTypeEnum);
-        Assert.Null(result.MatchedJob);
-        Assert.Null(result.SimilarityScore);
+        var result = await Find("Software Engineer", "Acme Corp", "San Francisco");
+        Assert.False(result.IsDuplicate); Assert.Equal(MatchType.None, result.MatchTypeEnum); Assert.Null(result.MatchedJob); Assert.Null(result.SimilarityScore);
     }
 
     [Fact]
     public async Task FindDuplicateAsync_UrlMatchTakesPrecedenceOverFingerprint()
     {
-        // Arrange
-        var urlMatchJob = CreateTestJob("URL Match", "Company A", "Location A");
-        var fingerprintMatchJob = CreateTestJob("Fingerprint Match", "Company B", "Location B");
-        
-        _urlCanonicalizerMock.Setup(c => c.Canonicalize("https://example.com/job")).Returns("https://example.com/job");
-        _jobRepositoryMock.Setup(r => r.FindByExternalUrlAsync("https://example.com/job", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(urlMatchJob);
-        _jobRepositoryMock.Setup(r => r.FindByFingerprintHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(fingerprintMatchJob);
-
-        // Act
-        var result = await _service.FindDuplicateAsync(
-            "Any Title", "Any Company", "Any Location", "https://example.com/job", Guid.NewGuid());
-
-        // Assert
-        Assert.True(result.IsDuplicate);
-        Assert.Equal(MatchType.SourceUrl, result.MatchTypeEnum);
-        Assert.Same(urlMatchJob, result.MatchedJob);
+        var urlJob = CreateJob("URL Match", "Company A", "Location A"); _jobs.ExternalUrlMatch = urlJob; _jobs.FingerprintMatch = CreateJob("Fingerprint Match", "Company B", "Location B");
+        var result = await Find("Any Title", "Any Company", "Any Location", "https://example.com/job");
+        Assert.True(result.IsDuplicate); Assert.Equal(MatchType.SourceUrl, result.MatchTypeEnum); Assert.Same(urlJob, result.MatchedJob);
     }
 
     [Fact]
     public async Task FindDuplicateAsync_FingerprintTakesPrecedenceOverFuzzy()
     {
-        // Arrange
-        var title = "Software Engineer";
-        var company = "Acme Corp";
-        var location = "San Francisco";
-        var fingerprint = _fingerprintService.GenerateFingerprint(title, company, location);
-        
-        var fingerprintMatchJob = CreateTestJob(title, company, location);
-        fingerprintMatchJob.FingerprintHash = fingerprint;
-        
-        var fuzzyMatchJob = CreateTestJob("Similar Software Engineer", "Acme Corp", "San Francisco");
-        
-        _urlCanonicalizerMock.Setup(c => c.Canonicalize(It.IsAny<string>())).Returns((string? s) => s);
-        _jobRepositoryMock.Setup(r => r.FindByExternalUrlAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Job?)null);
-        _jobRepositoryMock.Setup(r => r.FindByFingerprintHashAsync(fingerprint, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(fingerprintMatchJob);
-        _jobRepositoryMock.Setup(r => r.FindCandidatesForFuzzyMatchAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), 100, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { fuzzyMatchJob });
-
-        // Act
-        var result = await _service.FindDuplicateAsync(title, company, location, null, Guid.NewGuid());
-
-        // Assert
-        Assert.True(result.IsDuplicate);
-        Assert.Equal(MatchType.Fingerprint, result.MatchTypeEnum);
-        Assert.Same(fingerprintMatchJob, result.MatchedJob);
+        const string title = "Software Engineer", company = "Acme Corp", location = "San Francisco";
+        var job = CreateJob(title, company, location); job.FingerprintHash = _fingerprints.GenerateFingerprint(title, company, location);
+        _jobs.FingerprintMatch = job; _jobs.FuzzyCandidates = [CreateJob("Similar Software Engineer", company, location)];
+        var result = await Find(title, company, location);
+        Assert.True(result.IsDuplicate); Assert.Equal(MatchType.Fingerprint, result.MatchTypeEnum); Assert.Same(job, result.MatchedJob);
     }
 
     [Fact]
     public async Task FindDuplicateAsync_NullCompanyId_SkipsFuzzyMatch()
     {
-        // Arrange
-        _urlCanonicalizerMock.Setup(c => c.Canonicalize(It.IsAny<string>())).Returns((string? s) => s);
-        _jobRepositoryMock.Setup(r => r.FindByExternalUrlAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Job?)null);
-        _jobRepositoryMock.Setup(r => r.FindByFingerprintHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Job?)null);
-
-        // Act - companyId is null, so fuzzy match should be skipped
-        var result = await _service.FindDuplicateAsync(
-            "Software Engineer", "Acme Corp", "San Francisco", null, null);
-
-        // Assert
-        Assert.False(result.IsDuplicate);
-        Assert.Equal(MatchType.None, result.MatchTypeEnum);
-        
-        // Verify fuzzy match was never called
-        _jobRepositoryMock.Verify(r => r.FindCandidatesForFuzzyMatchAsync(
-            It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+        var result = await _service.FindDuplicateAsync("Software Engineer", "Acme Corp", "San Francisco", null, null);
+        Assert.False(result.IsDuplicate); Assert.Equal(MatchType.None, result.MatchTypeEnum); Assert.Equal(0, _jobs.FuzzyMatchCalls);
     }
 
     [Fact]
     public async Task FindDuplicateAsync_EmptyExternalUrl_SkipsUrlMatch()
     {
-        // Arrange
-        var companyId = Guid.NewGuid();
-        
-        _urlCanonicalizerMock.Setup(c => c.Canonicalize(It.IsAny<string>())).Returns((string? s) => s);
-        _jobRepositoryMock.Setup(r => r.FindByFingerprintHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Job?)null);
-        _jobRepositoryMock.Setup(r => r.FindCandidatesForFuzzyMatchAsync(companyId, It.IsAny<string>(), It.IsAny<string>(), 100, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Array.Empty<Job>());
-
-        // Act
-        var result = await _service.FindDuplicateAsync(
-            "Software Engineer", "Acme Corp", "San Francisco", "", companyId);
-
-        // Assert
-        Assert.False(result.IsDuplicate);
-        
-        // Verify URL lookup was never called
-        _jobRepositoryMock.Verify(r => r.FindByExternalUrlAsync(
-            It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        var result = await Find("Software Engineer", "Acme Corp", "San Francisco", "");
+        Assert.False(result.IsDuplicate); Assert.Equal(0, _jobs.ExternalUrlLookupCalls);
     }
 
     [Fact]
     public async Task FindDuplicateAsync_CanonicalizedUrlMatch_ReturnsSourceUrlMatch()
     {
-        // Arrange - URL with tracking params should canonicalize to same base URL
-        var existingJob = CreateTestJob("Existing Title", "Acme Corp", "SF");
-        _urlCanonicalizerMock.Setup(c => c.Canonicalize("https://example.com/job/123?utm_source=test")).Returns("https://example.com/job/123");
-        _jobRepositoryMock.Setup(r => r.FindByExternalUrlAsync("https://example.com/job/123", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(existingJob);
-
-        // Act
-        var result = await _service.FindDuplicateAsync(
-            "New Title", "Acme Corp", "SF", "https://example.com/job/123?utm_source=test", Guid.NewGuid());
-
-        // Assert
-        Assert.True(result.IsDuplicate);
-        Assert.Equal(MatchType.SourceUrl, result.MatchTypeEnum);
-        Assert.Same(existingJob, result.MatchedJob);
+        var job = CreateJob("Existing Title", "Acme Corp", "SF");
+        _urls.Overrides["https://example.com/job/123?utm_source=test"] = "https://example.com/job/123"; _jobs.ExternalUrlMatch = job;
+        var result = await Find("New Title", "Acme Corp", "SF", "https://example.com/job/123?utm_source=test");
+        Assert.True(result.IsDuplicate); Assert.Equal(MatchType.SourceUrl, result.MatchTypeEnum); Assert.Same(job, result.MatchedJob);
     }
 
     [Fact]
     public async Task FindDuplicateAsync_MultipleFuzzyCandidates_ReturnsHighestSimilarity()
     {
-        // Arrange
-        var companyId = Guid.NewGuid();
-        var lowScoreJob = CreateTestJob("Data Analyst", "Acme Corp", "Boston");
-        var highScoreJob = CreateTestJob("Senior Software Engineer", "Acme Corp", "San Francisco");
-        var mediumScoreJob = CreateTestJob("Software Developer", "Acme Corp", "San Jose");
-
-        _urlCanonicalizerMock.Setup(c => c.Canonicalize(It.IsAny<string>())).Returns((string? s) => s);
-        _jobRepositoryMock.Setup(r => r.FindByExternalUrlAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Job?)null);
-        _jobRepositoryMock.Setup(r => r.FindByFingerprintHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Job?)null);
-        _jobRepositoryMock.Setup(r => r.FindCandidatesForFuzzyMatchAsync(companyId, It.IsAny<string>(), It.IsAny<string>(), 100, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { lowScoreJob, highScoreJob, mediumScoreJob });
-
-        // Act - Looking for "Senior Software Engineer" in SF
-        var result = await _service.FindDuplicateAsync(
-            "Senior Software Engineer", "Acme Corp", "San Francisco", null, companyId);
-
-        // Assert - Should return the highest similarity match
-        Assert.True(result.IsDuplicate);
-        Assert.Equal(MatchType.Fuzzy, result.MatchTypeEnum);
-        Assert.Same(highScoreJob, result.MatchedJob);
+        var low = CreateJob("Data Analyst", "Acme Corp", "Boston"); var high = CreateJob("Senior Software Engineer", "Acme Corp", "San Francisco"); var medium = CreateJob("Software Developer", "Acme Corp", "San Jose"); _jobs.FuzzyCandidates = [low, high, medium];
+        var result = await Find("Senior Software Engineer", "Acme Corp", "San Francisco");
+        Assert.True(result.IsDuplicate); Assert.Equal(MatchType.Fuzzy, result.MatchTypeEnum); Assert.Same(high, result.MatchedJob);
     }
 
-    private static Job CreateTestJob(string title, string company, string location)
+    private Task<DeduplicationResult> Find(string title, string company, string location, string? externalUrl = null) => _service.FindDuplicateAsync(title, company, location, externalUrl, Guid.NewGuid());
+    private static Job CreateJob(string title, string company, string location) => new() { Id = Guid.NewGuid(), Title = title, Location = location, Status = JobStatus.Published, Company = new Company { Id = Guid.NewGuid(), Name = company }, CompanyId = Guid.NewGuid(), CategoryId = Guid.NewGuid(), ApplicationUrl = "https://example.com/job" };
+
+    private sealed class TestUrlCanonicalizer : IUrlCanonicalizer
     {
-        return new Job
-        {
-            Id = Guid.NewGuid(),
-            Title = title,
-            Location = location,
-            Status = JobStatus.Published,
-            Company = new Company { Id = Guid.NewGuid(), Name = company },
-            CompanyId = Guid.NewGuid(),
-            CategoryId = Guid.NewGuid(),
-            ApplicationUrl = "https://example.com/job"
-        };
+        public Dictionary<string, string?> Overrides { get; } = new();
+        public string? Canonicalize(string? url) => url is not null && Overrides.TryGetValue(url, out var value) ? value : url;
+    }
+
+    private sealed class TestJobRepository : IJobRepository
+    {
+        public Job? ExternalUrlMatch { get; set; }
+        public Job? FingerprintMatch { get; set; }
+        public IReadOnlyList<Job> FuzzyCandidates { get; set; } = Array.Empty<Job>();
+        public int ExternalUrlLookupCalls { get; private set; }
+        public int FuzzyMatchCalls { get; private set; }
+        public Task<Job?> FindByExternalUrlAsync(string externalUrl, CancellationToken cancellationToken = default) { ExternalUrlLookupCalls++; return Task.FromResult(ExternalUrlMatch); }
+        public Task<Job?> FindByFingerprintHashAsync(string fingerprintHash, CancellationToken cancellationToken = default) => Task.FromResult(FingerprintMatch);
+        public Task<IReadOnlyList<Job>> FindCandidatesForFuzzyMatchAsync(Guid companyId, string title, string location, int maxResults, CancellationToken cancellationToken = default) { FuzzyMatchCalls++; return Task.FromResult(FuzzyCandidates); }
+        public Task<Job?> GetByIdAsync(Guid id, bool includeDeleted = false, CancellationToken cancellationToken = default) => Task.FromResult<Job?>(null);
+        public Task<(IReadOnlyCollection<Job> Items, int TotalCount)> SearchAsync(JobSearchQuery query, CancellationToken cancellationToken = default) => Task.FromResult(((IReadOnlyCollection<Job>)Array.Empty<Job>(), 0));
+        public Task<bool> CompanyExistsAsync(Guid companyId, CancellationToken cancellationToken = default) => Task.FromResult(false);
+        public Task<bool> CategoryExistsAsync(Guid categoryId, CancellationToken cancellationToken = default) => Task.FromResult(false);
+        public Task<int> ExpireOverduePublishedAsync(DateTime utcNow, CancellationToken cancellationToken = default) => Task.FromResult(0);
+        public Task AddAsync(Job job, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public void Update(Job job) { }
+        public void Remove(Job job) { }
+        public Task DeletePermanentlyAsync(Guid id, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 }

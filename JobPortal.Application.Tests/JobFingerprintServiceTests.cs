@@ -251,13 +251,12 @@ public class JobFingerprintServiceTests
         var fp2 = _service.GenerateFingerprint(input2, "Company", "Location");
         var fp3 = _service.GenerateFingerprint(input3, "Company", "Location");
 
-        // Assert - Document current behavior (punctuation removed)
+        // Assert - Punctuation is removed rather than replaced with whitespace.
         Assert.Equal(64, fp1.Length);
-        // Current implementation removes ., so "Node.js" becomes "node js"
+        // "Node.js Developer" and "Nodejs Developer" both normalize to "nodejs developer".
         Assert.DoesNotContain(".", fp1);
-        // fp1 and fp2 will be same since . becomes space separation
-        Assert.Equal(fp1, fp2);
-        // fp3 is different because no separator between node and js
-        Assert.NotEqual(fp1, fp3);
+        Assert.Equal(fp1, fp3);
+        // The whitespace in "Node js Developer" remains significant.
+        Assert.NotEqual(fp1, fp2);
     }
 }
