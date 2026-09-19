@@ -257,6 +257,10 @@ public sealed class JobReferralServiceTests
         public void Remove(Job job) => job.IsDeleted = true;
         public Task DeletePermanentlyAsync(Guid id, CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
+        public Task<Job?> FindByExternalUrlAsync(string externalUrl, CancellationToken cancellationToken = default) => Task.FromResult<Job?>(null);
+        public Task<Job?> FindByFingerprintHashAsync(string fingerprintHash, CancellationToken cancellationToken = default) => Task.FromResult<Job?>(null);
+        public Task<IReadOnlyList<Job>> FindCandidatesForFuzzyMatchAsync(Guid companyId, string title, string location, int maxResults, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<Job>>(Array.Empty<Job>());
     }
 
     private sealed class MembershipRepositoryFake : IMembershipRepository

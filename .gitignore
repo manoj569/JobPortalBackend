@@ -1,16 +1,92 @@
-**/bin/
-**/obj/
-.vs/
-.vscode/
-Logs/
-*.user
-*.suo
-*.cache
-*.log
-appsettings.Local.json
-appsettings.*.local.json
-.env
-.env.*
-!.env.example
+# Build artifacts
+bin/
+obj/
+*.dll
+*.exe
+*.pdb
+*.so
+*.dylib
 
-/you-are-a-principal-net-9/
+# Dependencies
+packages/
+node_modules/
+bower_components/
+
+# Logs
+*.log
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Environment specific
+.env
+.env.local
+.env.*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test and coverage
+coverage/
+htmlcov/
+.coverage
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Python specific
+__pycache__/
+*.pyc
+*.pyo
+.Python
+*.so
+*.egg
+
+# .NET specific
+*.user
+*.userosscache
+*.sln.docstates
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+
+# Compression
+*.zip
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.gz
+*.rar
+*.7z
+
+# MyPy
+.mypy_cache/
+__pycache__/
+
+# PyTest
+.pytest_cache/
+
+# Gradle
+.gradle/
+build/
+
+# Julia
+julia-*/
+
+# Zig
+zig-out/
+zig-cache/
+
+# Rust
+target/
+
+# Go
+vendor/
