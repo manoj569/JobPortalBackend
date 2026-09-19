@@ -1,5 +1,3 @@
-using System.Collections.Concurrent;
-
 namespace JobPortal.Application.Abstractions.Jobs;
 
 /// <summary>
@@ -47,14 +45,13 @@ public sealed class UrlCanonicalizer : IUrlCanonicalizer
         "fbclid"
     };
 
-    private static readonly ConcurrentDictionary<string, string?> Cache = new();
-
     public string? Canonicalize(string? url)
     {
         if (string.IsNullOrWhiteSpace(url))
             return null;
 
-        return Cache.GetOrAdd(url.Trim(), CanonicalizeInternal);
+        // External URLs are unbounded input; do not retain them in a static cache.
+        return CanonicalizeInternal(url.Trim());
     }
 
     private static string? CanonicalizeInternal(string url)
@@ -90,6 +87,8 @@ public sealed class UrlCanonicalizer : IUrlCanonicalizer
             // Keep path as-is (preserve casing), but normalize empty path to "/"
             if (string.IsNullOrEmpty(path))
                 path = "/";
+            else if (path.Length > 1)
+                path = path.TrimEnd('/') is { Length: > 0 } trimmed ? trimmed : "/";
 
             // Process query parameters
             var queryString = uri.Query;
@@ -121,7 +120,7 @@ public sealed class UrlCanonicalizer : IUrlCanonicalizer
             return string.Empty;
 
         // Parse query parameters
-        var parameters = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var parameters = new List<(string Key, string Value, bool HasEquals)>();
         var pairs = query.Split('&', StringSplitOptions.RemoveEmptyEntries);
 
         foreach (var pair in pairs)
@@ -150,15 +149,16 @@ public sealed class UrlCanonicalizer : IUrlCanonicalizer
             if (TrackingParameters.Contains(decodedName))
                 continue;
 
-            // Store parameter (last value wins for duplicates)
-            parameters[decodedName] = Uri.UnescapeDataString(value);
+            // Unknown query names can be case-sensitive and repeated. Preserve
+            // multiplicity and duplicate ordering instead of last-value-wins.
+            parameters.Add((decodedName, Uri.UnescapeDataString(value), eqIndex >= 0));
         }
 
         if (parameters.Count == 0)
             return string.Empty;
 
-        // Sort parameters deterministically by name (case-insensitive)
-        var sortedParams = parameters.OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase);
+        // Stable ordinal ordering preserves unknown key casing and duplicate order.
+        var sortedParams = parameters.OrderBy(p => p.Key, StringComparer.Ordinal);
 
         // Build normalized query string
         var sb = new System.Text.StringBuilder();
@@ -170,7 +170,8 @@ public sealed class UrlCanonicalizer : IUrlCanonicalizer
             // Encode name and value properly
             var encodedName = Uri.EscapeDataString(param.Key);
             var encodedValue = Uri.EscapeDataString(param.Value);
-            sb.Append(encodedName).Append('=').Append(encodedValue);
+            sb.Append(encodedName);
+            if (param.HasEquals) sb.Append('=').Append(encodedValue);
         }
 
         return "?" + sb.ToString();

@@ -74,12 +74,18 @@ public sealed class JobRepository(JobPortalDbContext context) : IJobRepository
         _ = await context.Jobs.IgnoreQueryFilters().Where(x => x.Id == id).ExecuteDeleteAsync(cancellationToken);
 
     // Job Aggregation & Deduplication (Phase 1)
-    public Task<Job?> FindByExternalUrlAsync(string externalUrl, CancellationToken cancellationToken = default) =>
-        context.Jobs
+    public Task<Job?> FindByExternalUrlAsync(string externalUrl, CancellationToken cancellationToken = default)
+    {
+        var hash = JobPortal.Application.Abstractions.Jobs.ApplicationUrlIdentity.Hash(externalUrl);
+        if (hash is null) return Task.FromResult<Job?>(null);
+        return CanonicalUrlQuery(hash).FirstOrDefaultAsync(cancellationToken);
+    }
+
+    internal IQueryable<Job> CanonicalUrlQuery(string hash) => context.Jobs
             .AsNoTracking()
             .Include(x => x.Company)
             .Include(x => x.Category)
-            .FirstOrDefaultAsync(x => x.ApplicationUrl == externalUrl && !x.IsDeleted, cancellationToken);
+            .Where(x => x.CanonicalApplicationUrlHash == hash && !x.IsDeleted);
 
     public Task<Job?> FindByFingerprintHashAsync(string fingerprintHash, CancellationToken cancellationToken = default) =>
         context.Jobs

@@ -13,6 +13,8 @@ public sealed class Job : BaseEntity
     public string? Requirements { get; set; }
     public string? Benefits { get; set; }
     public string ApplicationUrl { get; set; } = string.Empty;
+    // Derived lookup metadata. The actionable URL above remains unchanged.
+    public string? CanonicalApplicationUrlHash { get; set; }
     public string? Location { get; set; }
     public decimal? MinimumSalary { get; set; }
     public decimal? MaximumSalary { get; set; }

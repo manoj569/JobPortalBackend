@@ -54,6 +54,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IExternalJobSourceProvider, AdzunaJobSourceProvider>();
 
         // Public ATS aggregation is separate from Adzuna and AI Apply adapters.
+        services.AddTransient<AggregationHttpRetryHandler>();
+        services.AddSingleton<AggregationHttpRetryState>();
         services.AddOptions<JobAggregationOptions>()
             .Bind(configuration.GetSection(JobAggregationOptions.SectionName))
             .Validate(options => options.Scheduler is
@@ -63,20 +65,20 @@ public static class ServiceCollectionExtensions
         services.AddHttpClient(GreenhouseExternalJobProvider.HttpClientName, client =>
         {
             client.BaseAddress = new Uri("https://boards-api.greenhouse.io/");
-            client.Timeout = TimeSpan.FromSeconds(10);
-        });
+            client.Timeout = Timeout.InfiniteTimeSpan;
+        }).AddHttpMessageHandler<AggregationHttpRetryHandler>();
         services.AddScoped<IExternalJobProvider, GreenhouseExternalJobProvider>();
         services.AddHttpClient(LeverExternalJobProvider.HttpClientName, client =>
         {
             client.BaseAddress = new Uri("https://api.lever.co/");
-            client.Timeout = TimeSpan.FromSeconds(10);
-        });
+            client.Timeout = Timeout.InfiniteTimeSpan;
+        }).AddHttpMessageHandler<AggregationHttpRetryHandler>();
         services.AddScoped<IExternalJobProvider, LeverExternalJobProvider>();
         services.AddHttpClient(AshbyExternalJobProvider.HttpClientName, client =>
         {
             client.BaseAddress = new Uri("https://api.ashbyhq.com/");
-            client.Timeout = TimeSpan.FromSeconds(10);
-        });
+            client.Timeout = Timeout.InfiniteTimeSpan;
+        }).AddHttpMessageHandler<AggregationHttpRetryHandler>();
         services.AddScoped<IExternalJobProvider, AshbyExternalJobProvider>();
 
         services.Configure<AiExtractionOptions>(configuration.GetSection(AiExtractionOptions.SectionName));

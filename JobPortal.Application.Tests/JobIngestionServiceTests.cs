@@ -44,7 +44,7 @@ public class JobIngestionServiceTests
             _deduplication,
             _fingerprints,
             _unitOfWork,
-            TimeProvider.System);
+            TimeProvider.System, new TestAggregationLocks(), new UrlCanonicalizer());
     }
 
     [Fact]

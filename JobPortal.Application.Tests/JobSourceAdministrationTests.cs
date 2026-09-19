@@ -460,14 +460,16 @@ internal sealed class JobSourceFixture : IDisposable
     public JobSourceRepository Repository { get; }
     public JobSourceCategoryResolver Resolver { get; }
     public JobSourceRunGuard Guard { get; } = new();
+    public TestAggregationLocks Locks { get; }
     public AuditWriterTestDouble Audit { get; } = new();
     public FixtureProvider Provider { get; } = new();
     public JobSourceRunner Runner { get; }
     public JobSourceManagementService Service { get; }
     public SaveJobSourceRequest Request => new(Company.Id, "https://example.test/careers", AtsType.Greenhouse, "acme");
 
-    public JobSourceFixture()
+    public JobSourceFixture(TestAggregationLocks? locks = null)
     {
+        Locks = locks ?? new();
         Source = new() { Company = Company, CompanyId = Company.Id, CareerPageUrl = Request.CareerPageUrl, AtsType = AtsType.Greenhouse, AtsIdentifier = "acme" };
         Context.AddRange(Company, Category, Source);
         Context.SaveChanges();
@@ -479,7 +481,7 @@ internal sealed class JobSourceFixture : IDisposable
         var jobs = new JobRepository(Context);
         var fingerprints = new JobFingerprintService();
         var ingestion = new JobIngestionService(jobs, new CompanyManagementRepository(Context), new CategoryManagementRepository(Context),
-            new JobDeduplicationService(jobs, fingerprints, new UrlCanonicalizer()), fingerprints, new UnitOfWork(Context), new FixedClock());
+            new JobDeduplicationService(jobs, fingerprints, new UrlCanonicalizer()), fingerprints, new UnitOfWork(Context), new FixedClock(), Locks, new UrlCanonicalizer());
         Runner = new(Repository, [Provider], ingestion, new UnitOfWork(Context), new FixedClock(), Resolver, new ExternalJobNormalizer());
         Service = CreateService();
     }
@@ -487,7 +489,7 @@ internal sealed class JobSourceFixture : IDisposable
     public JobSourceManagementService CreateService(IJobSourceRunner? runner = null, IUnitOfWork? unitOfWork = null) =>
         new(Repository, new CompanyManagementRepository(Context), new CategoryManagementRepository(Context), Resolver,
             runner ?? Runner, Guard, unitOfWork ?? new UnitOfWork(Context), Audit,
-            new SaveJobSourceRequestValidator(), new JobSourceSearchQueryValidator());
+            new SaveJobSourceRequestValidator(), new JobSourceSearchQueryValidator(), Locks);
 
     public void Map(string? value)
     {

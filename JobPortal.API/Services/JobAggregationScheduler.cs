@@ -22,6 +22,10 @@ public sealed class JobAggregationScheduler(
         LogLevel.Warning, new EventId(4304, nameof(SourceFailed)), "Scheduled aggregation failed for {JobSourceId}; other sources will continue.");
     private static readonly Action<ILogger, Exception?> IterationFailed = LoggerMessage.Define(
         LogLevel.Error, new EventId(4305, nameof(IterationFailed)), "Job aggregation iteration failed; retrying on the next poll.");
+    private static readonly Action<ILogger, Guid, Exception?> SourceBusy = LoggerMessage.Define<Guid>(
+        LogLevel.Information, new EventId(4306, nameof(SourceBusy)), "Skipping aggregation {JobSourceId}: distributed execution lock busy.");
+    private static readonly Action<ILogger, Guid, int, Exception?> SourceReceived = LoggerMessage.Define<Guid, int>(
+        LogLevel.Information, new EventId(4307, nameof(SourceReceived)), "Aggregation {JobSourceId} received {Received} records.");
 
     public async Task RunOnceAsync(CancellationToken cancellationToken = default)
     {
@@ -64,6 +68,9 @@ public sealed class JobAggregationScheduler(
             try
             {
                 await using var scope = scopes.CreateAsyncScope();
+                await using var distributed = await scope.ServiceProvider.GetRequiredService<IJobSourceExecutionLock>()
+                    .TryAcquireAsync(sourceId, cancellationToken);
+                if (distributed is null) { SourceBusy(logger, sourceId, null); return; }
                 // A manual run or edit may have finished since the due query. Recheck
                 // after acquiring the SAME guard used by admin runs/updates/deletes.
                 var source = await scope.ServiceProvider.GetRequiredService<IJobSourceRepository>()
@@ -77,6 +84,7 @@ public sealed class JobAggregationScheduler(
                 var result = await scope.ServiceProvider.GetRequiredService<IJobSourceRunner>()
                     .RunAsync(sourceId, cancellationToken);
                 SourceCompleted(logger, sourceId, result.Created, result.Matched, result.Skipped, result.Failed, result.Succeeded, null);
+                SourceReceived(logger, sourceId, result.TotalReceived, null);
                 if (!result.Succeeded) SourceFailed(logger, sourceId, null);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }

@@ -201,6 +201,9 @@ public sealed class JobConfiguration : IEntityTypeConfiguration<Job>
         builder.Property(x => x.Requirements).HasMaxLength(8000);
         builder.Property(x => x.Benefits).HasMaxLength(4000);
         builder.Property(x => x.ApplicationUrl).HasMaxLength(2048).IsRequired();
+        builder.Property(x => x.CanonicalApplicationUrlHash).HasMaxLength(64);
+        builder.HasIndex(x => x.CanonicalApplicationUrlHash)
+            .HasFilter("\"IsDeleted\" = FALSE AND \"CanonicalApplicationUrlHash\" IS NOT NULL");
         builder.Property(x => x.Location).HasMaxLength(250);
         builder.Property(x => x.MinimumSalary).HasPrecision(18, 2);
         builder.Property(x => x.MaximumSalary).HasPrecision(18, 2);
