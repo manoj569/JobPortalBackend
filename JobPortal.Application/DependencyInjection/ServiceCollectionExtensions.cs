@@ -36,6 +36,7 @@ using JobPortal.Application.Features.Referrals;
 using JobPortal.Application.Features.PublicJobs;
 using JobPortal.Application.Features.Settings;
 using JobPortal.Application.Services;
+using JobPortal.Application.Features.JobAggregation;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace JobPortal.Application;
@@ -93,6 +94,9 @@ public static class ServiceCollectionExtensions
         // Job Aggregation Phase 2
         services.AddScoped<IJobIngestionService, JobIngestionService>();
         services.AddScoped<IJobSourceRunner, JobSourceRunner>();
+        services.AddScoped<IJobSourceCategoryResolver, JobSourceCategoryResolver>();
+        services.AddScoped<IJobSourceManagementService, JobSourceManagementService>();
+        services.AddSingleton<JobSourceRunGuard>();
 
         return services;
     }

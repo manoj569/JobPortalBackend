@@ -2,6 +2,7 @@ using JobPortal.Application.Abstractions.Authentication;
 using JobPortal.Application.Abstractions.Candidates;
 using JobPortal.Application.Abstractions.Payments;
 using JobPortal.Application.Abstractions.Jobs;
+using JobPortal.Application.Features.JobAggregation;
 using JobPortal.Infrastructure.Authentication;
 using JobPortal.Infrastructure.Payments;
 using JobPortal.Infrastructure.Services;
@@ -53,6 +54,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IExternalJobSourceProvider, AdzunaJobSourceProvider>();
 
         // Public ATS aggregation is separate from Adzuna and AI Apply adapters.
+        services.Configure<JobAggregationOptions>(configuration.GetSection(JobAggregationOptions.SectionName));
         services.AddHttpClient(GreenhouseExternalJobProvider.HttpClientName, client =>
         {
             client.BaseAddress = new Uri("https://boards-api.greenhouse.io/");

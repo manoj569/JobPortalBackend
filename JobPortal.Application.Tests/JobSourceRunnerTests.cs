@@ -41,7 +41,8 @@ public class JobSourceRunnerTests
             [_provider],
             _ingestion,
             _unitOfWork,
-            TimeProvider.System);
+            TimeProvider.System,
+            new UnmappedCategoryResolver());
     }
 
     [Fact]
@@ -269,6 +270,12 @@ public class JobSourceRunnerTests
         CompanyName = "Acme Corp",
         ApplicationUrl = "https://example.com/" + title
     };
+
+    private sealed class UnmappedCategoryResolver : IJobSourceCategoryResolver
+    {
+        public Task<Guid?> ResolveCategoryIdAsync(JobSource source, CancellationToken cancellationToken = default) =>
+            Task.FromResult<Guid?>(null);
+    }
 
     private sealed class TestJobSourceRepository :
         IJobSourceRepository

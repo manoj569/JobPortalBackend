@@ -8,7 +8,8 @@ public sealed class JobSourceRunner(
     IEnumerable<IExternalJobProvider> providers,
     IJobIngestionService ingestionService,
     IUnitOfWork unitOfWork,
-    TimeProvider timeProvider) : IJobSourceRunner
+    TimeProvider timeProvider,
+    IJobSourceCategoryResolver categoryResolver) : IJobSourceRunner
 {
     public async Task<JobSourceRunResult> RunAsync(
         Guid jobSourceId,
@@ -61,6 +62,7 @@ public sealed class JobSourceRunner(
             var rawJobs = await provider.FetchJobsAsync(
                 source,
                 cancellationToken);
+            var categoryId = await categoryResolver.ResolveCategoryIdAsync(source, cancellationToken);
 
             var created = 0;
             var matched = 0;
@@ -74,7 +76,7 @@ public sealed class JobSourceRunner(
                 try
                 {
                     var result = await ingestionService.IngestAsync(
-                        rawJob,
+                        rawJob with { CategoryId = categoryId },
                         cancellationToken);
 
                     switch (result.Outcome)
