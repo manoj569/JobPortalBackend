@@ -33,6 +33,7 @@ public sealed class JobAggregationDependencyInjectionTests
 
         AssertScoped<IJobIngestionService, JobIngestionService>(services);
         AssertScoped<IJobSourceRunner, JobSourceRunner>(services);
+        AssertScoped<IExternalJobNormalizer, ExternalJobNormalizer>(services);
         AssertScoped<IJobSourceRepository, JobSourceRepository>(services);
         Assert.Single(services, x => x.ServiceType == typeof(IJobRepository));
         Assert.Single(services, x => x.ServiceType == typeof(TimeProvider));
@@ -43,9 +44,10 @@ public sealed class JobAggregationDependencyInjectionTests
         Assert.IsType<JobIngestionService>(scope.ServiceProvider.GetRequiredService<IJobIngestionService>());
         Assert.IsType<JobSourceRunner>(scope.ServiceProvider.GetRequiredService<IJobSourceRunner>());
         var providers = scope.ServiceProvider.GetServices<IExternalJobProvider>().ToArray();
-        Assert.Equal(2, providers.Length);
+        Assert.Equal(3, providers.Length);
         Assert.Contains(providers, x => x is GreenhouseExternalJobProvider);
         Assert.Contains(providers, x => x is LeverExternalJobProvider);
+        Assert.Contains(providers, x => x is AshbyExternalJobProvider);
         Assert.DoesNotContain(providers, x => x.AtsType == AtsType.Custom);
 
         var clients = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
@@ -53,6 +55,8 @@ public sealed class JobAggregationDependencyInjectionTests
         using var lever = clients.CreateClient(LeverExternalJobProvider.HttpClientName);
         Assert.Equal(new Uri("https://boards-api.greenhouse.io/"), greenhouse.BaseAddress);
         Assert.Equal(new Uri("https://api.lever.co/"), lever.BaseAddress);
+        using var ashby = clients.CreateClient(AshbyExternalJobProvider.HttpClientName);
+        Assert.Equal(new Uri("https://api.ashbyhq.com/"), ashby.BaseAddress);
     }
 
     private static void AssertScoped<TService, TImplementation>(IServiceCollection services)

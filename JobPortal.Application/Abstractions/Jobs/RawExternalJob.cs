@@ -14,6 +14,11 @@ public sealed record RawExternalJob
     public string? ApplicationUrl { get; init; }
     public string? ExternalId { get; init; }
     public EmploymentType? EmploymentType { get; init; }
+    public WorkplaceType? WorkplaceType { get; init; }
+    public string? EmploymentTypeText { get; init; }
+    public string? WorkplaceTypeText { get; init; }
+    public string? ExternalCategory { get; init; }
+    public bool DescriptionIsHtml { get; init; }
     public decimal? SalaryMin { get; init; }
     public decimal? SalaryMax { get; init; }
 

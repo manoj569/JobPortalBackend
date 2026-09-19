@@ -173,6 +173,7 @@ public sealed class JobIngestionService(
             MaximumSalary = rawJob.SalaryMax,
 
             EmploymentType = rawJob.EmploymentType ?? default,
+            WorkplaceType = rawJob.WorkplaceType ?? default,
 
             CompanyId = company.Id,
             Company = company,
