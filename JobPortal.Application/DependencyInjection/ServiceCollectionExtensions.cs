@@ -35,6 +35,7 @@ using JobPortal.Application.Features.Portfolios;
 using JobPortal.Application.Features.Referrals;
 using JobPortal.Application.Features.PublicJobs;
 using JobPortal.Application.Features.Settings;
+using JobPortal.Application.Services;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace JobPortal.Application;
@@ -83,6 +84,12 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IJobDiscoveryService, JobDiscoveryService>();
         services.AddScoped<ICompanyManagementService, CompanyManagementService>();
         services.AddScoped<ICategoryManagementService, CategoryManagementService>();
+
+        // Job Aggregation & Deduplication (Phase 1)
+        services.AddScoped<IUrlCanonicalizer, UrlCanonicalizer>();
+        services.AddScoped<IJobFingerprintService, JobFingerprintService>();
+        services.AddScoped<IJobDeduplicationService, JobDeduplicationService>();
+
         return services;
     }
 }

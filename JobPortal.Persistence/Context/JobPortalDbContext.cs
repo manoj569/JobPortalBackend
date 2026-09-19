@@ -68,6 +68,7 @@ public sealed class JobPortalDbContext(DbContextOptions<JobPortalDbContext> opti
     public DbSet<ExternalJobSiteSession> ExternalJobSiteSessions => Set<ExternalJobSiteSession>();
     public DbSet<AIApplyWorkerInstance> AIApplyWorkerInstances => Set<AIApplyWorkerInstance>();
     public DbSet<AIApplySiteOperationalState> AIApplySiteOperationalStates => Set<AIApplySiteOperationalState>();
+    public DbSet<JobSource> JobSources => Set<JobSource>();
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
