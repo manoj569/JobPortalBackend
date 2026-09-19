@@ -1,13 +1,38 @@
 using JobPortal.Application.Abstractions.Persistence;
+using JobPortal.Application.Features.JobAggregation;
 using JobPortal.Domain.Entities;
+using JobPortal.Domain.Enums;
 using JobPortal.Persistence.Context;
 using Microsoft.EntityFrameworkCore;
 
 namespace JobPortal.Persistence.Repositories;
 
 public sealed class JobSourceRepository(JobPortalDbContext context)
-    : IJobSourceRepository
+    : IJobSourceManagementRepository
 {
+    public async Task<(IReadOnlyCollection<JobSource> Items, int TotalCount)> SearchAsync(
+        JobSourceSearchQuery query, CancellationToken cancellationToken = default)
+    {
+        var items = context.JobSources.AsNoTracking().Include(x => x.Company).AsQueryable();
+        if (query.CompanyId.HasValue) items = items.Where(x => x.CompanyId == query.CompanyId);
+        if (query.AtsType.HasValue) items = items.Where(x => x.AtsType == query.AtsType);
+        if (query.IsActive.HasValue) items = items.Where(x => x.IsActive == query.IsActive);
+        var count = await items.CountAsync(cancellationToken);
+        var page = await items.OrderByDescending(x => x.CreatedAtUtc).ThenBy(x => x.Id)
+            .Skip((query.PageNumber - 1) * query.PageSize).Take(query.PageSize).ToArrayAsync(cancellationToken);
+        return (page, count);
+    }
+
+    public Task<bool> ConfigurationExistsAsync(Guid companyId, AtsType atsType, string? atsIdentifier,
+        Guid? excludingId = null, CancellationToken cancellationToken = default) =>
+        context.JobSources.AnyAsync(x => x.CompanyId == companyId && x.AtsType == atsType &&
+            x.AtsIdentifier == atsIdentifier && (!excludingId.HasValue || x.Id != excludingId), cancellationToken);
+
+    public Task AddAsync(JobSource source, CancellationToken cancellationToken = default) =>
+        context.JobSources.AddAsync(source, cancellationToken).AsTask();
+
+    public void Remove(JobSource source) => context.JobSources.Remove(source);
+
     public Task<JobSource?> GetByIdAsync(
         Guid id,
         CancellationToken cancellationToken = default) =>
