@@ -40,6 +40,7 @@ public static class ServiceCollectionExtensions
             AuthenticationChallengeRepository>();
         services.AddScoped<IRegistrationEmailOutbox, RegistrationEmailOutbox>();
         services.AddScoped<IJobRepository, JobRepository>();
+        services.AddScoped<IJobSourceRepository, JobSourceRepository>();
         services.AddScoped<IJobReferralRepository, JobReferralRepository>();
         services.AddScoped<IPublicJobRepository, PublicJobRepository>();
         services.AddScoped<IMembershipRepository, MembershipRepository>();
