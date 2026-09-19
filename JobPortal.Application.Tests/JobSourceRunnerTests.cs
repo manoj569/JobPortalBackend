@@ -42,7 +42,7 @@ public class JobSourceRunnerTests
             _ingestion,
             _unitOfWork,
             TimeProvider.System,
-            new UnmappedCategoryResolver());
+            new UnmappedCategoryResolver(), new ExternalJobNormalizer());
     }
 
     [Fact]
@@ -277,6 +277,8 @@ public class JobSourceRunnerTests
 
     private sealed class UnmappedCategoryResolver : IJobSourceCategoryResolver
     {
+        public Task<Guid?> ResolveCategoryIdAsync(JobSource source, RawExternalJob rawJob, CancellationToken cancellationToken = default) =>
+            Task.FromResult<Guid?>(null);
         public Task<Guid?> ResolveCategoryIdAsync(JobSource source, CancellationToken cancellationToken = default) =>
             Task.FromResult<Guid?>(null);
     }

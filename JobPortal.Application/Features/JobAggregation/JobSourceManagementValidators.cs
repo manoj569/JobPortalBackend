@@ -15,7 +15,7 @@ public sealed class SaveJobSourceRequestValidator : AbstractValidator<SaveJobSou
         RuleFor(x => x.AtsType).IsInEnum();
         RuleFor(x => x.AtsIdentifier).MaximumLength(255);
         RuleFor(x => x.AtsIdentifier).NotEmpty()
-            .When(x => x.AtsType is AtsType.Greenhouse or AtsType.Lever);
+            .When(x => x.AtsType is AtsType.Greenhouse or AtsType.Lever or AtsType.Ashby);
         RuleFor(x => x.ScanIntervalMinutes).InclusiveBetween(1, 10080);
     }
 }

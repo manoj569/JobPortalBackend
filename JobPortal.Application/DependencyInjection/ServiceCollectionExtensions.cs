@@ -94,6 +94,7 @@ public static class ServiceCollectionExtensions
         // Job Aggregation Phase 2
         services.AddScoped<IJobIngestionService, JobIngestionService>();
         services.AddScoped<IJobSourceRunner, JobSourceRunner>();
+        services.AddScoped<IExternalJobNormalizer, ExternalJobNormalizer>();
         services.AddScoped<IJobSourceCategoryResolver, JobSourceCategoryResolver>();
         services.AddScoped<IJobSourceManagementService, JobSourceManagementService>();
         services.AddSingleton<JobSourceRunGuard>();

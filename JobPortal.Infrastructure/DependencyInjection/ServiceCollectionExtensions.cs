@@ -72,6 +72,12 @@ public static class ServiceCollectionExtensions
             client.Timeout = TimeSpan.FromSeconds(10);
         });
         services.AddScoped<IExternalJobProvider, LeverExternalJobProvider>();
+        services.AddHttpClient(AshbyExternalJobProvider.HttpClientName, client =>
+        {
+            client.BaseAddress = new Uri("https://api.ashbyhq.com/");
+            client.Timeout = TimeSpan.FromSeconds(10);
+        });
+        services.AddScoped<IExternalJobProvider, AshbyExternalJobProvider>();
 
         services.Configure<AiExtractionOptions>(configuration.GetSection(AiExtractionOptions.SectionName));
         services.AddHttpClient(ClaudeJobUrlExtractionService.PageFetchClientName, client =>

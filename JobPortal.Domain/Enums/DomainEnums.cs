@@ -86,4 +86,4 @@ public enum OtpPurpose { Registration = 1, Login }
 public enum JobReferralApprovalStatus { Pending = 1, Approved, Rejected }
 
 // Job Aggregation & Deduplication (Phase 1)
-public enum AtsType { Custom = 0, Greenhouse = 1, Lever = 2 }
+public enum AtsType { Custom = 0, Greenhouse = 1, Lever = 2, Ashby = 3 }

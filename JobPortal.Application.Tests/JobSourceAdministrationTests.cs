@@ -480,7 +480,7 @@ internal sealed class JobSourceFixture : IDisposable
         var fingerprints = new JobFingerprintService();
         var ingestion = new JobIngestionService(jobs, new CompanyManagementRepository(Context), new CategoryManagementRepository(Context),
             new JobDeduplicationService(jobs, fingerprints, new UrlCanonicalizer()), fingerprints, new UnitOfWork(Context), new FixedClock());
-        Runner = new(Repository, [Provider], ingestion, new UnitOfWork(Context), new FixedClock(), Resolver);
+        Runner = new(Repository, [Provider], ingestion, new UnitOfWork(Context), new FixedClock(), Resolver, new ExternalJobNormalizer());
         Service = CreateService();
     }
 
@@ -492,6 +492,12 @@ internal sealed class JobSourceFixture : IDisposable
     public void Map(string? value)
     {
         configuration[$"JobAggregation:SourceCategories:{Source.Id:D}"] = value;
+        configuration.Reload();
+    }
+
+    public void MapExternal(string key, string? value)
+    {
+        configuration[$"JobAggregation:CategoryMappings:{key}"] = value;
         configuration.Reload();
     }
 
@@ -512,7 +518,7 @@ internal sealed class JobSourceFixture : IDisposable
         public AtsType AtsType => AtsType.Greenhouse;
         public Exception? Exception { get; set; }
         public int Calls { get; private set; }
-        public IReadOnlyCollection<RawExternalJob> Jobs { get; } =
+        public IReadOnlyCollection<RawExternalJob> Jobs { get; set; } =
             [new() { Title = "Software Engineer", CompanyName = "Acme", Location = "Pune", ApplicationUrl = "https://example.test/jobs/1" }];
         public Task<IReadOnlyCollection<RawExternalJob>> FetchJobsAsync(JobSource source, CancellationToken cancellationToken = default)
         {

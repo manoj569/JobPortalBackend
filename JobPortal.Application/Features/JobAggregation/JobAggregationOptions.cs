@@ -6,6 +6,7 @@ public sealed class JobAggregationOptions
 
     // String values deliberately allow invalid operator input to fail closed.
     public Dictionary<string, string?> SourceCategories { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, string?> CategoryMappings { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public JobAggregationSchedulerOptions Scheduler { get; set; } = new();
 }
 
