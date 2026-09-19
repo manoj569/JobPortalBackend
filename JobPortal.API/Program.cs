@@ -135,6 +135,8 @@ builder.Services.AddOutputCache(options =>
         .Tag("public-jobs"));
 });
 builder.Services.AddHostedService<JobExpiryHostedService>();
+builder.Services.AddSingleton<JobAggregationScheduler>();
+builder.Services.AddHostedService<JobAggregationSchedulerHostedService>();
 builder.Services.Configure<JobDiscoveryOptions>(builder.Configuration.GetSection(JobDiscoveryOptions.SectionName));
 builder.Services.AddHostedService<JobDiscoveryHostedService>();
 builder.Services.AddHostedService<RegistrationEmailHostedService>();

@@ -54,7 +54,12 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IExternalJobSourceProvider, AdzunaJobSourceProvider>();
 
         // Public ATS aggregation is separate from Adzuna and AI Apply adapters.
-        services.Configure<JobAggregationOptions>(configuration.GetSection(JobAggregationOptions.SectionName));
+        services.AddOptions<JobAggregationOptions>()
+            .Bind(configuration.GetSection(JobAggregationOptions.SectionName))
+            .Validate(options => options.Scheduler is
+                { PollIntervalSeconds: >= 10 and <= 3600, BatchSize: >= 1 and <= 100, MaxConcurrentSources: >= 1 and <= 10 },
+                "JobAggregation scheduler requires PollIntervalSeconds 10–3600, BatchSize 1–100 and MaxConcurrentSources 1–10.")
+            .ValidateOnStart();
         services.AddHttpClient(GreenhouseExternalJobProvider.HttpClientName, client =>
         {
             client.BaseAddress = new Uri("https://boards-api.greenhouse.io/");

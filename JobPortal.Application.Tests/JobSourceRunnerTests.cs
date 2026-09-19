@@ -244,7 +244,11 @@ public class JobSourceRunnerTests
             result.Error);
 
         Assert.Equal(0, _provider.FetchCalls);
-        Assert.Equal(0, _unitOfWork.SaveCalls);
+        Assert.Equal(1, _unitOfWork.SaveCalls);
+        Assert.NotNull(_source.LastRunAtUtc);
+        Assert.Null(_source.LastSuccessfulRunAtUtc);
+        Assert.Equal(1, _source.ConsecutiveFailures);
+        Assert.Equal(result.Error, _source.LastError);
     }
 
     [Fact]
@@ -280,6 +284,10 @@ public class JobSourceRunnerTests
     private sealed class TestJobSourceRepository :
         IJobSourceRepository
     {
+        public Task<IReadOnlyCollection<JobSource>> GetDueSourcesAsync(
+            DateTime nowUtc, int maxResults, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyCollection<JobSource>>([]);
+
         public JobSource? Source { get; set; }
         public int UpdateCalls { get; private set; }
 

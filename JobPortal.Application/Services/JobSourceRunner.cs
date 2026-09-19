@@ -46,11 +46,18 @@ public sealed class JobSourceRunner(
 
         if (provider is null)
         {
+            // Unsupported configurations are failed attempts too: automatic polling
+            // must respect their ScanIntervalMinutes rather than retry every poll.
+            source.LastRunAtUtc = timeProvider.GetUtcNow().UtcDateTime;
+            source.LastError = $"No provider is registered for ATS type '{source.AtsType}'.";
+            source.ConsecutiveFailures++;
+            sources.Update(source);
+            await unitOfWork.SaveChangesAsync(cancellationToken);
             return new JobSourceRunResult
             {
                 JobSourceId = source.Id,
                 Succeeded = false,
-                Error = $"No provider is registered for ATS type '{source.AtsType}'."
+                Error = source.LastError
             };
         }
 
