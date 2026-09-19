@@ -19,6 +19,7 @@ using JobPortal.Application.Abstractions.Auditing;
 using JobPortal.Application.Abstractions.Authentication;
 using JobPortal.Infrastructure;
 using JobPortal.Persistence;
+using JobPortal.Persistence.Postgres;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.DataProtection;
 using System.Security.Cryptography.X509Certificates;
@@ -376,6 +377,7 @@ builder.Services.AddSingleton<IAuthorizationMiddlewareResultHandler, InterviewIn
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddPersistence(builder.Configuration);
+builder.Services.AddPostgresAggregationLocks();
 builder.Services.AddScoped<AdminBootstrapInitializer>();
 
 var app = builder.Build();

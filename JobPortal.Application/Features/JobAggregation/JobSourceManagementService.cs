@@ -21,7 +21,8 @@ public sealed class JobSourceManagementService(
     IUnitOfWork unitOfWork,
     IAuditWriter audit,
     IValidator<SaveJobSourceRequest> saveValidator,
-    IValidator<JobSourceSearchQuery> searchValidator) : IJobSourceManagementService
+    IValidator<JobSourceSearchQuery> searchValidator,
+    IJobSourceExecutionLock executionLock) : IJobSourceManagementService
 {
     public async Task<PagedResponse<JobSourceResponse>> SearchAsync(
         JobSourceSearchQuery query, CancellationToken cancellationToken = default)
@@ -54,6 +55,7 @@ public sealed class JobSourceManagementService(
     public async Task<JobSourceResponse> UpdateAsync(Guid id, SaveJobSourceRequest request, CancellationToken cancellationToken = default)
     {
         using var lease = runGuard.Acquire(id);
+        await using var distributed = await AcquireExecutionAsync(id, cancellationToken);
         await saveValidator.ValidateAndThrowAsync(request, cancellationToken);
         var source = await RequiredSourceAsync(id, cancellationToken);
         var company = await RequiredCompanyAsync(request.CompanyId, cancellationToken);
@@ -69,6 +71,7 @@ public sealed class JobSourceManagementService(
     public async Task DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
         using var lease = runGuard.Acquire(id);
+        await using var distributed = await AcquireExecutionAsync(id, cancellationToken);
         var source = await RequiredSourceAsync(id, cancellationToken);
         source.IsActive = false;
         sources.Remove(source); // DbContext converts deletion into BaseEntity soft-delete.
@@ -79,6 +82,7 @@ public sealed class JobSourceManagementService(
     public async Task<JobSourceRunResult> RunAsync(Guid id, CancellationToken cancellationToken = default)
     {
         using var lease = runGuard.Acquire(id);
+        await using var distributed = await AcquireExecutionAsync(id, cancellationToken);
         _ = await RequiredSourceAsync(id, cancellationToken);
         await audit.AppendAsync(new(AuditAction.Submit, "JobSource", id.ToString(),
             new Dictionary<string, string?> { ["result"] = "manual_run_requested" }), cancellationToken);
@@ -86,7 +90,15 @@ public sealed class JobSourceManagementService(
         await unitOfWork.SaveChangesAsync(cancellationToken);
         var result = await runner.RunAsync(id, cancellationToken);
         await audit.AppendAsync(new(AuditAction.Update, "JobSource", id.ToString(),
-            new Dictionary<string, string?> { ["result"] = result.Succeeded ? "manual_run_succeeded" : "manual_run_failed" }), cancellationToken);
+            new Dictionary<string, string?>
+            {
+                ["result"] = result.Succeeded ? "manual_run_succeeded" : "manual_run_failed",
+                ["received"] = result.TotalReceived.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["created"] = result.Created.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["matched"] = result.Matched.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["skipped"] = result.Skipped.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["failed"] = result.Failed.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            }), cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
         return result;
     }
@@ -94,6 +106,10 @@ public sealed class JobSourceManagementService(
     private async Task<JobSource> RequiredSourceAsync(Guid id, CancellationToken cancellationToken) =>
         await sources.GetByIdAsync(id, cancellationToken)
         ?? throw new NotFoundException($"Job source '{id}' was not found.");
+
+    private async Task<IAsyncDisposable> AcquireExecutionAsync(Guid id, CancellationToken token) =>
+        await executionLock.TryAcquireAsync(id, token)
+        ?? throw new ConflictException("Job source is already running or being updated.", "job_source_busy");
 
     private async Task<Company> RequiredCompanyAsync(Guid id, CancellationToken cancellationToken) =>
         await companies.GetByIdAsync(id, cancellationToken)

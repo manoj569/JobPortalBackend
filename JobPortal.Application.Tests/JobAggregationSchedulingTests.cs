@@ -378,12 +378,13 @@ internal sealed class SchedulerFixture : IDisposable
     public SafeLogger Logger { get; } = new();
     public JobAggregationScheduler Scheduler { get; }
 
-    public SchedulerFixture(bool enabled = true, int batchSize = 25, int concurrency = 3, JobSourceRunGuard? guard = null)
+    public SchedulerFixture(bool enabled = true, int batchSize = 25, int concurrency = 3, JobSourceRunGuard? guard = null, IJobSourceExecutionLock? executionLock = null)
     {
         Guard = guard ?? new();
         options = Options.Create(new JobAggregationOptions { Scheduler = new() { Enabled = enabled, BatchSize = batchSize, MaxConcurrentSources = concurrency } });
         var services = new ServiceCollection();
         services.AddSingleton(Store);
+        services.AddSingleton<IJobSourceExecutionLock>(executionLock ?? new TestAggregationLocks());
         services.AddScoped<ScopeMarker>();
         services.AddScoped<IJobSourceRepository, ScopedRepository>();
         services.AddScoped<IJobSourceRunner, ScopedRunner>();

@@ -6,6 +6,7 @@ using JobPortal.Domain.Enums;
 using JobPortal.Infrastructure;
 using JobPortal.Infrastructure.Services;
 using JobPortal.Persistence;
+using JobPortal.Persistence.Postgres;
 using JobPortal.Persistence.Repositories;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -25,10 +26,12 @@ public sealed class JobAggregationDependencyInjectionTests
                 ["ConnectionStrings:DefaultConnection"] = "Host=localhost;Database=di_only"
             }).Build();
         var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(configuration);
         services.AddLogging();
         services.AddSingleton(TimeProvider.System);
         services.AddApplication();
         services.AddPersistence(configuration);
+        services.AddPostgresAggregationLocks();
         services.AddInfrastructure(configuration);
 
         AssertScoped<IJobIngestionService, JobIngestionService>(services);
@@ -43,6 +46,8 @@ public sealed class JobAggregationDependencyInjectionTests
         using var scope = provider.CreateScope();
         Assert.IsType<JobIngestionService>(scope.ServiceProvider.GetRequiredService<IJobIngestionService>());
         Assert.IsType<JobSourceRunner>(scope.ServiceProvider.GetRequiredService<IJobSourceRunner>());
+        Assert.IsType<PostgresJobSourceExecutionLock>(provider.GetRequiredService<IJobSourceExecutionLock>());
+        Assert.IsType<PostgresExternalJobCreationLock>(provider.GetRequiredService<IExternalJobCreationLock>());
         var providers = scope.ServiceProvider.GetServices<IExternalJobProvider>().ToArray();
         Assert.Equal(3, providers.Length);
         Assert.Contains(providers, x => x is GreenhouseExternalJobProvider);

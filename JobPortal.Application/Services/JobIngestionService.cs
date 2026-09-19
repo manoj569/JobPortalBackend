@@ -13,7 +13,9 @@ public sealed class JobIngestionService(
     IJobDeduplicationService deduplicationService,
     IJobFingerprintService fingerprintService,
     IUnitOfWork unitOfWork,
-    TimeProvider timeProvider) : IJobIngestionService
+    TimeProvider timeProvider,
+    IExternalJobCreationLock creationLock,
+    IUrlCanonicalizer canonicalizer) : IJobIngestionService
 {
     public async Task<JobIngestionResult> IngestAsync(
         RawExternalJob rawJob,
@@ -82,6 +84,17 @@ public sealed class JobIngestionService(
             cancellationToken);
 
         var now = timeProvider.GetUtcNow().UtcDateTime;
+
+        await using var creationLease = duplicate.IsDuplicate ? null : await creationLock.AcquireAsync(
+            applicationUrl is null ? null : canonicalizer.Canonicalize(applicationUrl),
+            fingerprintService.GenerateFingerprint(title, company.Name, location), cancellationToken);
+        if (creationLease is not null)
+        {
+            // Another instance may have committed between the initial read and lock.
+            duplicate = await deduplicationService.FindDuplicateAsync(title, company.Name, location,
+                applicationUrl, company.Id, cancellationToken);
+            now = timeProvider.GetUtcNow().UtcDateTime;
+        }
 
         if (duplicate.IsDuplicate && duplicate.MatchedJob is not null)
         {
