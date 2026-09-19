@@ -90,6 +90,10 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IJobFingerprintService, JobFingerprintService>();
         services.AddScoped<IJobDeduplicationService, JobDeduplicationService>();
 
+        // Job Aggregation Phase 2
+        services.AddScoped<IJobIngestionService, JobIngestionService>();
+        services.AddScoped<IJobSourceRunner, JobSourceRunner>();
+
         return services;
     }
 }

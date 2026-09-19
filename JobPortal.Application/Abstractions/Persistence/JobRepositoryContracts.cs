@@ -21,3 +21,12 @@ public interface IJobRepository
     Task<Job?> FindByFingerprintHashAsync(string fingerprintHash, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<Job>> FindCandidatesForFuzzyMatchAsync(Guid companyId, string title, string location, int maxResults, CancellationToken cancellationToken = default);
 }
+
+public interface IJobSourceRepository
+{
+    Task<JobSource?> GetByIdAsync(
+        Guid id,
+        CancellationToken cancellationToken = default);
+
+    void Update(JobSource source);
+}

@@ -1,6 +1,7 @@
 using JobPortal.Application.Abstractions.Authentication;
 using JobPortal.Application.Abstractions.Candidates;
 using JobPortal.Application.Abstractions.Payments;
+using JobPortal.Application.Abstractions.Jobs;
 using JobPortal.Infrastructure.Authentication;
 using JobPortal.Infrastructure.Payments;
 using JobPortal.Infrastructure.Services;
@@ -50,6 +51,20 @@ public static class ServiceCollectionExtensions
             client.Timeout = TimeSpan.FromSeconds(10);
         });
         services.AddScoped<IExternalJobSourceProvider, AdzunaJobSourceProvider>();
+
+        // Public ATS aggregation is separate from Adzuna and AI Apply adapters.
+        services.AddHttpClient(GreenhouseExternalJobProvider.HttpClientName, client =>
+        {
+            client.BaseAddress = new Uri("https://boards-api.greenhouse.io/");
+            client.Timeout = TimeSpan.FromSeconds(10);
+        });
+        services.AddScoped<IExternalJobProvider, GreenhouseExternalJobProvider>();
+        services.AddHttpClient(LeverExternalJobProvider.HttpClientName, client =>
+        {
+            client.BaseAddress = new Uri("https://api.lever.co/");
+            client.Timeout = TimeSpan.FromSeconds(10);
+        });
+        services.AddScoped<IExternalJobProvider, LeverExternalJobProvider>();
 
         services.Configure<AiExtractionOptions>(configuration.GetSection(AiExtractionOptions.SectionName));
         services.AddHttpClient(ClaudeJobUrlExtractionService.PageFetchClientName, client =>
