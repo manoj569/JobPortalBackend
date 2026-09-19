@@ -10,6 +10,22 @@ namespace JobPortal.Persistence.Repositories;
 public sealed class JobSourceRepository(JobPortalDbContext context)
     : IJobSourceManagementRepository
 {
+    public async Task<IReadOnlyCollection<JobSource>> GetDueSourcesAsync(
+        DateTime nowUtc, int maxResults, CancellationToken cancellationToken = default) =>
+        await DueSourcesQuery(nowUtc, maxResults).ToArrayAsync(cancellationToken);
+
+    internal IQueryable<JobSource> DueSourcesQuery(DateTime nowUtc, int maxResults)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxResults, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(maxResults, 100);
+        return context.JobSources.AsNoTracking()
+            .Where(x => x.IsActive && !x.IsDeleted &&
+                (x.LastRunAtUtc == null || x.LastRunAtUtc.Value.AddMinutes(x.ScanIntervalMinutes) <= nowUtc))
+            .OrderBy(x => x.LastRunAtUtc.HasValue)
+            .ThenBy(x => x.LastRunAtUtc).ThenBy(x => x.Id)
+            .Take(maxResults);
+    }
+
     public async Task<(IReadOnlyCollection<JobSource> Items, int TotalCount)> SearchAsync(
         JobSourceSearchQuery query, CancellationToken cancellationToken = default)
     {

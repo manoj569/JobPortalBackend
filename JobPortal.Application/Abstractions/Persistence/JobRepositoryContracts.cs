@@ -24,6 +24,9 @@ public interface IJobRepository
 
 public interface IJobSourceRepository
 {
+    Task<IReadOnlyCollection<JobSource>> GetDueSourcesAsync(
+        DateTime nowUtc, int maxResults, CancellationToken cancellationToken = default);
+
     Task<JobSource?> GetByIdAsync(
         Guid id,
         CancellationToken cancellationToken = default);
