@@ -43,4 +43,9 @@ public sealed class Job : BaseEntity
     public ICollection<JobApplication> Applications { get; set; } = new List<JobApplication>();
     public JobRecruiterContact? RecruiterContact { get; set; }
     public JobReferral? Referral { get; set; }
+
+    // Job Aggregation & Deduplication fields (Phase 1)
+    public string? FingerprintHash { get; set; }
+    public DateTime? FirstSeenAtUtc { get; set; }
+    public DateTime? LastSeenAtUtc { get; set; }
 }

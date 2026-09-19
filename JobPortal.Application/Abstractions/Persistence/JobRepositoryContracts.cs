@@ -15,4 +15,9 @@ public interface IJobRepository
     void Update(Job job);
     void Remove(Job job);
     Task DeletePermanentlyAsync(Guid id, CancellationToken cancellationToken = default);
+
+    // Job Aggregation & Deduplication (Phase 1)
+    Task<Job?> FindByExternalUrlAsync(string externalUrl, CancellationToken cancellationToken = default);
+    Task<Job?> FindByFingerprintHashAsync(string fingerprintHash, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<Job>> FindCandidatesForFuzzyMatchAsync(Guid companyId, string title, string location, int maxResults, CancellationToken cancellationToken = default);
 }

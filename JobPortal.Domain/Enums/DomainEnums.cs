@@ -84,3 +84,6 @@ public enum DesiredOpportunity { Internship = 1, FresherJob, ExperiencedJob }
 public enum WorkPreference { Remote = 1, Hybrid, OnSite }
 public enum OtpPurpose { Registration = 1, Login }
 public enum JobReferralApprovalStatus { Pending = 1, Approved, Rejected }
+
+// Job Aggregation & Deduplication (Phase 1)
+public enum AtsType { Custom = 0, Greenhouse = 1, Lever = 2 }

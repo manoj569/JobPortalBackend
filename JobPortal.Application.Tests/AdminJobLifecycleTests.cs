@@ -304,6 +304,11 @@ new JobSearchQueryValidator(),
         public Task DeletePermanentlyAsync(
             Guid id, CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
+
+        public Task<Job?> FindByExternalUrlAsync(string externalUrl, CancellationToken cancellationToken = default) => Task.FromResult<Job?>(null);
+        public Task<Job?> FindByFingerprintHashAsync(string fingerprintHash, CancellationToken cancellationToken = default) => Task.FromResult<Job?>(null);
+        public Task<IReadOnlyList<Job>> FindCandidatesForFuzzyMatchAsync(Guid companyId, string title, string location, int maxResults, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<Job>>(Array.Empty<Job>());
     }
 
     private sealed class UnitOfWorkFake : IUnitOfWork
@@ -678,6 +683,11 @@ public sealed class AutomaticJobExpiryTests
         public Task DeletePermanentlyAsync(
             Guid id, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
+
+        public Task<Job?> FindByExternalUrlAsync(string externalUrl, CancellationToken cancellationToken = default) => Task.FromResult<Job?>(null);
+        public Task<Job?> FindByFingerprintHashAsync(string fingerprintHash, CancellationToken cancellationToken = default) => Task.FromResult<Job?>(null);
+        public Task<IReadOnlyList<Job>> FindCandidatesForFuzzyMatchAsync(Guid companyId, string title, string location, int maxResults, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<Job>>(Array.Empty<Job>());
     }
 
     private sealed class FixedTimeProvider(DateTime utcNow) : TimeProvider

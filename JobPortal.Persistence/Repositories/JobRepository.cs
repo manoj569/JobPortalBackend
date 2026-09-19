@@ -73,6 +73,32 @@ public sealed class JobRepository(JobPortalDbContext context) : IJobRepository
     public async Task DeletePermanentlyAsync(Guid id, CancellationToken cancellationToken = default) =>
         _ = await context.Jobs.IgnoreQueryFilters().Where(x => x.Id == id).ExecuteDeleteAsync(cancellationToken);
 
+    // Job Aggregation & Deduplication (Phase 1)
+    public Task<Job?> FindByExternalUrlAsync(string externalUrl, CancellationToken cancellationToken = default) =>
+        context.Jobs
+            .AsNoTracking()
+            .Include(x => x.Company)
+            .Include(x => x.Category)
+            .FirstOrDefaultAsync(x => x.ApplicationUrl == externalUrl && !x.IsDeleted, cancellationToken);
+
+    public Task<Job?> FindByFingerprintHashAsync(string fingerprintHash, CancellationToken cancellationToken = default) =>
+        context.Jobs
+            .AsNoTracking()
+            .Include(x => x.Company)
+            .Include(x => x.Category)
+            .FirstOrDefaultAsync(x => x.FingerprintHash == fingerprintHash && !x.IsDeleted, cancellationToken);
+
+    public async Task<IReadOnlyList<Job>> FindCandidatesForFuzzyMatchAsync(
+        Guid companyId, string title, string location, int maxResults, CancellationToken cancellationToken = default)
+    {
+        return await context.Jobs
+            .AsNoTracking()
+            .Where(x => x.CompanyId == companyId && x.Status == JobStatus.Published && !x.IsDeleted)
+            .OrderByDescending(x => x.PublishedAtUtc)
+            .Take(maxResults)
+            .ToListAsync(cancellationToken);
+    }
+
     private static IQueryable<Job> ApplySorting(IQueryable<Job> source, string sortBy, bool descending) =>
         (sortBy.ToLowerInvariant(), descending) switch
         {
