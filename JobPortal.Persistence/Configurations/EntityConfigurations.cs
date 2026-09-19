@@ -208,6 +208,7 @@ public sealed class JobConfiguration : IEntityTypeConfiguration<Job>
         builder.Property(x => x.Department).HasMaxLength(150);
         builder.Property(x => x.RoleCategory).HasMaxLength(150);
         builder.Property(x => x.EducationRequirement).HasMaxLength(200);
+        builder.Property(x => x.FingerprintHash).HasMaxLength(64);
         builder.HasIndex(x => x.ReferenceNumber).IsUnique().HasFilter("\"IsDeleted\" = FALSE");
         builder.HasIndex(x => x.Slug).IsUnique().HasFilter("\"IsDeleted\" = FALSE");
         builder.HasIndex(x => new { x.CompanyId, x.Status, x.PublishedAtUtc });
@@ -220,6 +221,10 @@ public sealed class JobConfiguration : IEntityTypeConfiguration<Job>
         builder.HasIndex(x => x.RoleCategory);
         builder.HasIndex(x => x.ExpiresAtUtc);
         builder.HasIndex(x => x.CreatedAtUtc);
+        builder.HasIndex(x => x.FingerprintHash)
+            .HasFilter("\"IsDeleted\" = FALSE AND \"FingerprintHash\" IS NOT NULL");
+        builder.HasIndex(x => x.FirstSeenAtUtc);
+        builder.HasIndex(x => x.LastSeenAtUtc);
         builder.HasOne(x => x.Company).WithMany(x => x.Jobs).HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(x => x.Category).WithMany(x => x.Jobs).HasForeignKey(x => x.CategoryId).OnDelete(DeleteBehavior.Restrict);
     }
@@ -596,5 +601,31 @@ public sealed class SettingConfiguration : IEntityTypeConfiguration<Setting>
                 .HasForeignKey(x => x.UserId)
                 .OnDelete(DeleteBehavior.Restrict);
         }
+    }
+
+}
+
+public sealed class JobSourceConfiguration : IEntityTypeConfiguration<JobSource>
+{
+    public void Configure(EntityTypeBuilder<JobSource> builder)
+    {
+        builder.ToTable("JobSources");
+        builder.ConfigureBaseEntity();
+
+        builder.Property(x => x.CareerPageUrl).HasMaxLength(2048).IsRequired();
+        builder.Property(x => x.AtsIdentifier).HasMaxLength(255);
+        builder.Property(x => x.LastError).HasMaxLength(2048);
+
+        builder.HasOne(x => x.Company)
+            .WithMany()
+            .HasForeignKey(x => x.CompanyId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasIndex(x => x.CompanyId);
+        builder.HasIndex(x => x.IsActive);
+        builder.HasIndex(x => new { x.CompanyId, x.AtsType, x.AtsIdentifier })
+            .IsUnique()
+            .HasFilter("\"IsDeleted\" = FALSE");
+        builder.HasIndex(x => new { x.IsActive, x.LastRunAtUtc });
     }
 }
