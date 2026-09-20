@@ -32,6 +32,7 @@ public static class ServiceCollectionExtensions
             }), poolSize: 128);
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<JobPortal.Application.Features.CareerGuidance.ICareerGuidanceRepository, CareerGuidanceRepository>();
+        services.AddScoped<JobPortal.Application.Features.CareerGuidance.ICareerSchedulingRepository, CareerSchedulingRepository>();
         services.AddScoped<IAdminImportRepository, AdminImportRepository>();
         services.AddScoped<JobPortal.Application.Features.JobDiscovery.IJobDiscoveryRepository, JobDiscoveryRepository>();
         services.AddScoped<IAuditLogRepository, AuditLogRepository>();

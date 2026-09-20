@@ -29,6 +29,8 @@ public sealed class CareerConsultant : BaseEntity
     public DateTime TermsAcceptedAtUtc { get; set; }
     public string PolicyVersion { get; set; } = "";
     public Guid Revision { get; set; } = Guid.NewGuid();
+    public string? TimeZoneId { get; set; }
+    public bool IsAcceptingBookings { get; set; }
     public ICollection<CareerConsultantTag> Tags { get; set; } = new List<CareerConsultantTag>();
     public ICollection<CareerConsultantService> Services { get; set; } = new List<CareerConsultantService>();
 }

@@ -25,6 +25,7 @@ public sealed class CareerConsultantConfiguration : IEntityTypeConfiguration<Car
         builder.Property(x => x.VerificationReason).HasMaxLength(1000);
         builder.Property(x => x.PolicyVersion).HasMaxLength(50).IsRequired();
         builder.Property(x => x.Revision).IsConcurrencyToken();
+        builder.Property(x => x.TimeZoneId).HasMaxLength(100);
         builder.HasIndex(x => new { x.VerificationStatus, x.CreatedAtUtc, x.Id });
         builder.HasIndex(x => new { x.ProfessionalType, x.YearsOfExperience });
     }

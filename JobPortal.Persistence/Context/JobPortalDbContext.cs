@@ -9,6 +9,9 @@ namespace JobPortal.Persistence.Context;
 public sealed class JobPortalDbContext(DbContextOptions<JobPortalDbContext> options) : DbContext(options)
 {
     public DbSet<CareerConsultant> CareerConsultants => Set<CareerConsultant>();
+    public DbSet<CareerConsultantAvailability> CareerConsultantAvailability => Set<CareerConsultantAvailability>();
+    public DbSet<CareerConsultantAvailabilityException> CareerConsultantAvailabilityExceptions => Set<CareerConsultantAvailabilityException>();
+    public DbSet<CareerGuidanceBooking> CareerGuidanceBookings => Set<CareerGuidanceBooking>();
     public DbSet<CareerConsultantTag> CareerConsultantTags => Set<CareerConsultantTag>();
     public DbSet<CareerConsultantService> CareerConsultantServices => Set<CareerConsultantService>();
     public DbSet<User> Users => Set<User>();
@@ -91,6 +94,7 @@ public sealed class JobPortalDbContext(DbContextOptions<JobPortalDbContext> opti
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(JobPortalDbContext).Assembly);
+        if (Database.IsNpgsql()) modelBuilder.HasPostgresExtension("btree_gist");
 
         // ✅ Configure Notifications table
         modelBuilder.Entity<Notification>()
