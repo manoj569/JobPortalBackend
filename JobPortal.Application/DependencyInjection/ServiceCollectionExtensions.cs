@@ -48,6 +48,8 @@ public static class ServiceCollectionExtensions
         services.AddValidatorsFromAssembly(typeof(ServiceCollectionExtensions).Assembly);
         services.AddScoped<JobPortal.Application.Features.CareerGuidance.ICareerGuidanceService,
             JobPortal.Application.Features.CareerGuidance.CareerGuidanceService>();
+        services.AddScoped<JobPortal.Application.Features.CareerGuidance.ICareerSchedulingService,
+            JobPortal.Application.Features.CareerGuidance.CareerSchedulingService>();
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IAIApplyService, AIApplyService>();
         services.AddScoped<IAIApplyAuthorizationService, AIApplyAuthorizationService>();

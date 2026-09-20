@@ -208,7 +208,8 @@ public sealed class CareerGuidanceService(ICareerGuidanceRepository profiles, IU
         p.Bio, p.CompanyId, p.CompanyName, p.CurrentRole, p.YearsOfExperience, p.ProfessionalType,
         p.Tags.Where(t => !t.IsDeleted && t.Kind == ConsultantTagKind.Language).Select(t => t.Value).Order().ToArray(),
         p.Tags.Where(t => !t.IsDeleted && t.Kind == ConsultantTagKind.Expertise).Select(t => t.Value).Order().ToArray(),
-        false, Disclaimer, p.Services.Where(s => !s.IsDeleted && s.IsActive).OrderBy(s => s.Id).Select(Service).ToArray());
+        p.IsAcceptingBookings && p.VerificationStatus == ConsultantVerificationStatus.Verified, Disclaimer,
+        p.Services.Where(s => !s.IsDeleted && s.IsActive).OrderBy(s => s.Id).Select(Service).ToArray());
     private static ConsultantPrivateResponse Private(CareerConsultant p) => new(Public(p), p.UserId, p.LinkedInUrl,
         p.VerificationStatus, p.VerificationMethod, p.VerificationReason, p.ReviewedByUserId, p.ReviewedAtUtc, p.VerifiedAtUtc,
         p.TermsAcceptedAtUtc, p.PolicyVersion, p.Revision, p.Services.Where(s => !s.IsDeleted).OrderBy(s => s.Id).Select(Service).ToArray());

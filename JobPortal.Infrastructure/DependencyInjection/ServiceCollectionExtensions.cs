@@ -62,6 +62,9 @@ public static class ServiceCollectionExtensions
                 { PollIntervalSeconds: >= 10 and <= 3600, BatchSize: >= 1 and <= 100, MaxConcurrentSources: >= 1 and <= 10 },
                 "JobAggregation scheduler requires PollIntervalSeconds 10–3600, BatchSize 1–100 and MaxConcurrentSources 1–10.")
             .ValidateOnStart();
+        services.AddOptions<JobPortal.Application.Features.CareerGuidance.CareerGuidanceSchedulingOptions>()
+            .Bind(configuration.GetSection(JobPortal.Application.Features.CareerGuidance.CareerGuidanceSchedulingOptions.SectionName))
+            .Validate(value => value.IsValid(), "Invalid Career Guidance scheduling limits.").ValidateOnStart();
         services.AddHttpClient(GreenhouseExternalJobProvider.HttpClientName, client =>
         {
             client.BaseAddress = new Uri("https://boards-api.greenhouse.io/");
