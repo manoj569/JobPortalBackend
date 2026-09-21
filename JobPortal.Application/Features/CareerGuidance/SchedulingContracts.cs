@@ -33,7 +33,7 @@ public sealed record BookingQuery(int PageNumber = 1, int PageSize = 20);
 public sealed record CareerBookingResponse(Guid Id, Guid ConsultantId, Guid ServiceId, DateTime StartUtc, DateTime EndUtc,
     string ConsultantTimeZone, string ServiceTitle, string ServiceType, int DurationMinutes, decimal Price, string Currency,
     CareerBookingStatus Status, Questionnaire Questionnaire, string? CancellationReason, Guid? CancelledByUserId,
-    DateTime? CancelledAtUtc, DateTime? CompletedAtUtc, Guid Revision);
+    DateTime? CancelledAtUtc, DateTime? CompletedAtUtc, Guid Revision, bool RequiresPayment = false);
 
 public interface ICareerSchedulingRepository
 {

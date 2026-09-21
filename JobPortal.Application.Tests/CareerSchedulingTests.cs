@@ -183,6 +183,9 @@ public sealed class CareerSchedulingTests
     {
         using var f = new Fixture();
         var b = await f.Book();
+        // Existing pre-payment Phase 2 bookings retain their manual confirmation lifecycle.
+        (await f.Db.CareerGuidanceBookings.SingleAsync()).RequiresPayment = false;
+        await f.Db.SaveChangesAsync();
         await Assert.ThrowsAsync<NotFoundException>(() => f.Service.SetStatusAsync(f.Candidate.Id, b.Id, new(b.Revision, CareerBookingStatus.Completed), default));
         await Assert.ThrowsAsync<ConflictException>(() => f.Service.SetStatusAsync(f.Owner.Id, b.Id, new(b.Revision, CareerBookingStatus.Completed), default));
         b = await f.Service.SetStatusAsync(f.Owner.Id, b.Id, new(b.Revision, CareerBookingStatus.Confirmed), default);

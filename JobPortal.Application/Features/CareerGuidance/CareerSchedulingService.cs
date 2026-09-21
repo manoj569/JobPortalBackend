@@ -114,6 +114,7 @@ public sealed class CareerSchedulingService(ICareerSchedulingRepository reposito
         var q = request.Questionnaire;
         var booking = new CareerGuidanceBooking
         {
+            RequiresPayment = true,
             CandidateUserId = actor, ConsultantId = p.Id, ConsultantServiceId = service.Id,
             StartUtc = slot.StartUtc, EndUtc = slot.EndUtc, ConsultantTimeZoneSnapshot = p.TimeZoneId!,
             ServiceTitleSnapshot = service.Title, ServiceTypeSnapshot = service.ServiceType, DurationMinutesSnapshot = service.DurationMinutes,
@@ -163,6 +164,7 @@ public sealed class CareerSchedulingService(ICareerSchedulingRepository reposito
         if (!valid) throw new ConflictException("Invalid booking status transition.");
         if (request.Status == CareerBookingStatus.Confirmed)
         {
+            if (b.RequiresPayment) throw new ConflictException("This booking requires verified payment capture before confirmation.");
             var p = await repository.ProfileAsync(b.ConsultantId, ct) ?? throw new NotFoundException("Consultant not found.");
             RequireVerified(p);
             Touch(p);
@@ -230,5 +232,5 @@ public sealed class CareerSchedulingService(ICareerSchedulingRepository reposito
     private static CareerBookingResponse BookingDto(CareerGuidanceBooking b) => new(b.Id, b.ConsultantId, b.ConsultantServiceId, b.StartUtc, b.EndUtc,
         b.ConsultantTimeZoneSnapshot, b.ServiceTitleSnapshot, b.ServiceTypeSnapshot, b.DurationMinutesSnapshot, b.PriceSnapshot, b.CurrencySnapshot,
         b.Status, new(b.TargetCompany, b.TargetRole, b.YearsOfExperience, b.CurrentRoleOrStatus, b.SessionGoal, b.Questions, b.Notes),
-        b.CancellationReason, b.CancelledByUserId, b.CancelledAtUtc, b.CompletedAtUtc, b.Revision);
+        b.CancellationReason, b.CancelledByUserId, b.CancelledAtUtc, b.CompletedAtUtc, b.Revision, b.RequiresPayment);
 }

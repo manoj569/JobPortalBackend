@@ -110,33 +110,6 @@ public sealed class PaymentsController(IPaymentService paymentService) : Control
         Ok(new ApiResponse<PaymentStatusResponse>(
             await paymentService.GetStatusAsync(User.GetRequiredUserId(), cancellationToken)));
 
-    [AllowAnonymous]
-    [HttpPost("razorpay/webhook")]
-    [Consumes("application/json")]
-    [RequestSizeLimit(1024 * 1024)]
-    public async Task<ActionResult<ApiResponse<RazorpayWebhookResponse>>> Webhook(
-        CancellationToken cancellationToken)
-    {
-        const int maximumBytes = 1024 * 1024;
-        if (Request.ContentLength > maximumBytes)
-            return StatusCode(StatusCodes.Status413PayloadTooLarge);
-        await using var body = new MemoryStream();
-        var buffer = new byte[81920];
-        while (true)
-        {
-            var read = await Request.Body.ReadAsync(buffer, cancellationToken);
-            if (read == 0) break;
-            if (body.Length + read > maximumBytes)
-                return StatusCode(StatusCodes.Status413PayloadTooLarge);
-            await body.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
-        }
-        var result = await paymentService.ProcessWebhookAsync(
-            new(body.ToArray(), Request.Headers["X-Razorpay-Signature"].ToString(),
-                Request.Headers["X-Razorpay-Event-Id"].FirstOrDefault()),
-            cancellationToken);
-        return Ok(new ApiResponse<RazorpayWebhookResponse>(result));
-    }
-
     [HttpGet]
     public async Task<ActionResult<ApiResponse<PagedResponse<PaymentResponse>>>> Payments(
         [FromQuery] HistoryQuery query, CancellationToken cancellationToken) =>

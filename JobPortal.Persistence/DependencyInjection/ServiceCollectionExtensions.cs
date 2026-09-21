@@ -33,6 +33,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<JobPortal.Application.Features.CareerGuidance.ICareerGuidanceRepository, CareerGuidanceRepository>();
         services.AddScoped<JobPortal.Application.Features.CareerGuidance.ICareerSchedulingRepository, CareerSchedulingRepository>();
+        services.AddScoped<JobPortal.Application.Features.CareerGuidance.ICareerFinanceRepository, CareerFinanceRepository>();
         services.AddScoped<IAdminImportRepository, AdminImportRepository>();
         services.AddScoped<JobPortal.Application.Features.JobDiscovery.IJobDiscoveryRepository, JobDiscoveryRepository>();
         services.AddScoped<IAuditLogRepository, AuditLogRepository>();
