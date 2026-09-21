@@ -24,6 +24,13 @@ public sealed class CareerGuidanceRepository(JobPortalDbContext db) : ICareerGui
 
     public Task AddAsync(CareerConsultant profile, CancellationToken ct) => db.Set<CareerConsultant>().AddAsync(profile, ct).AsTask();
 
+    public async Task<IReadOnlyDictionary<Guid, CareerRatingSummary>> RatingsAsync(Guid[] consultantIds, CancellationToken ct)
+    {
+        var rows = await CareerTrustRepository.Published(db).Where(r => consultantIds.Contains(r.ConsultantId))
+            .GroupBy(r => r.ConsultantId).Select(g => new { Id = g.Key, Sum = g.Sum(r => (decimal)r.Rating), Count = g.Count() }).ToArrayAsync(ct);
+        return rows.ToDictionary(r => r.Id, r => new CareerRatingSummary(r.Id, decimal.Round(r.Sum / r.Count, 2, MidpointRounding.AwayFromZero), r.Count));
+    }
+
     public async Task<(IReadOnlyCollection<CareerConsultant> Items, int Total)> AdminSearchAsync(ConsultantAdminQuery query, CancellationToken ct)
     {
         var rows = db.Set<CareerConsultant>().AsNoTracking();

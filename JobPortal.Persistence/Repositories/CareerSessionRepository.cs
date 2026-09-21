@@ -33,7 +33,7 @@ public sealed class CareerSessionRepository(JobPortalDbContext db) : ICareerSess
     public void Add(CareerGuidanceSession session) => db.Add(session);
     public async Task SaveAsync(CancellationToken ct)
     {
-        try { await db.SaveChangesAsync(ct); }
+        try { await CareerTrustConsistency.SynchronizeAsync(db, ct); await db.SaveChangesAsync(ct); }
         catch (DbUpdateConcurrencyException) { db.ChangeTracker.Clear(); throw new ConflictException("Session state changed. Reload and retry.", "session_concurrency"); }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: "23505" or "23P01" })
         { db.ChangeTracker.Clear(); throw new ConflictException("Session operation conflicts with an existing record. Reload and retry.", "session_conflict"); }
