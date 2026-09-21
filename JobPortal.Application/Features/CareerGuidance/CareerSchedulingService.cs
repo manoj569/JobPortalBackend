@@ -162,6 +162,8 @@ public sealed class CareerSchedulingService(ICareerSchedulingRepository reposito
             request.Status is CareerBookingStatus.Completed or CareerBookingStatus.NoShowCandidate or CareerBookingStatus.NoShowConsultant &&
             b.Status == CareerBookingStatus.Confirmed && b.EndUtc <= Now;
         if (!valid) throw new ConflictException("Invalid booking status transition.");
+        if (b.RequiresPayment && request.Status != CareerBookingStatus.Confirmed)
+            throw new ConflictException("Use the paid session lifecycle to complete or mark no-show.");
         if (request.Status == CareerBookingStatus.Confirmed)
         {
             if (b.RequiresPayment) throw new ConflictException("This booking requires verified payment capture before confirmation.");

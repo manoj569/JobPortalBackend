@@ -101,6 +101,17 @@ public static class ServiceCollectionExtensions
         });
         services.AddScoped<IJobUrlExtractionService, ClaudeJobUrlExtractionService>();
         services.AddSingleton<IRazorpayGateway, RazorpayGateway>();
+        services.AddScoped<JobPortal.Application.Features.CareerGuidance.ICareerMeetingProvider, JobPortal.Infrastructure.CareerGuidance.ManualCareerMeetingProvider>();
+        services.AddScoped<JobPortal.Application.Features.CareerGuidance.ICareerMeetingProtector, JobPortal.Infrastructure.CareerGuidance.CareerMeetingProtector>();
+        services.AddOptions<JobPortal.Application.Features.CareerGuidance.CareerSessionOptions>()
+            .Configure(o =>
+            {
+                var section = configuration.GetSection("CareerGuidance");
+                // Binder appends to preinitialized arrays; explicit configuration must replace defaults.
+                if (section.GetSection("ReminderOffsetsMinutes").GetChildren().Any()) o.ReminderOffsetsMinutes = [];
+                if (section.GetSection("AllowedMeetingHosts").GetChildren().Any()) o.AllowedMeetingHosts = [];
+                section.Bind(o);
+            }).Validate(o => o.IsValid(), "Invalid career session settings.").ValidateOnStart();
         services.AddOptions<JobPortal.Application.Features.CareerGuidance.CareerFinanceOptions>()
             .Bind(configuration.GetSection("CareerGuidance"))
             .Validate(o => o.IsValid(), "Career Guidance commission must be explicitly configured from 0 to 100 before enabling payments.").ValidateOnStart();

@@ -25,7 +25,7 @@ public sealed class CareerFinanceRepository(JobPortalDbContext db) : ICareerFina
     public void Add(CareerGuidancePaymentEvent item) => db.Add(item);
     public async Task SaveAsync(CancellationToken ct)
     {
-        try { await db.SaveChangesAsync(ct); }
+        try { await CareerSessionConsistency.SynchronizeAsync(db, ct); await db.SaveChangesAsync(ct); }
         catch (DbUpdateConcurrencyException) { db.ChangeTracker.Clear(); throw new ConflictException("Financial state changed. Reload and retry.", "finance_concurrency"); }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: "23505" or "23P01" })
         { db.ChangeTracker.Clear(); throw new ConflictException("Financial operation conflicts with an existing record. Reload and retry.", "finance_conflict"); }
