@@ -27,6 +27,7 @@ public enum CareerBookingStatus { Pending = 1, Confirmed, CancelledByCandidate, 
 
 public sealed class CareerGuidanceBooking : BaseEntity
 {
+    public bool RequiresPayment { get; set; }
     public Guid CandidateUserId { get; set; }
     public User Candidate { get; set; } = null!;
     public Guid ConsultantId { get; set; }

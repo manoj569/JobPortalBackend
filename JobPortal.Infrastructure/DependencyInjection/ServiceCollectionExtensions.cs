@@ -101,6 +101,14 @@ public static class ServiceCollectionExtensions
         });
         services.AddScoped<IJobUrlExtractionService, ClaudeJobUrlExtractionService>();
         services.AddSingleton<IRazorpayGateway, RazorpayGateway>();
+        services.AddOptions<JobPortal.Application.Features.CareerGuidance.CareerFinanceOptions>()
+            .Bind(configuration.GetSection("CareerGuidance"))
+            .Validate(o => o.IsValid(), "Career Guidance commission must be explicitly configured from 0 to 100 before enabling payments.").ValidateOnStart();
+        services.AddHttpClient<JobPortal.Application.Features.CareerGuidance.ICareerPaymentGateway, CareerRazorpayGateway>(client =>
+        {
+            client.BaseAddress = new Uri("https://api.razorpay.com/v1/");
+            client.Timeout = TimeSpan.FromSeconds(15);
+        }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
         services.AddSingleton<PhonePeAccessTokenCache>();
         services.AddHttpClient<IPhonePeGateway, PhonePeGateway>(client =>
         {
