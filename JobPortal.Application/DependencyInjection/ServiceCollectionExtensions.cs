@@ -51,6 +51,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<JobPortal.Application.Features.CareerGuidance.ICareerSchedulingService,
             JobPortal.Application.Features.CareerGuidance.CareerSchedulingService>();
         services.AddScoped<JobPortal.Application.Features.CareerGuidance.CareerSessionService>();
+        services.AddScoped<JobPortal.Application.Features.CareerGuidance.CareerTrustService>();
         services.AddScoped<JobPortal.Application.Features.CareerGuidance.CareerSessionReminderProcessor>();
         services.AddScoped<JobPortal.Application.Features.CareerGuidance.ICareerFinanceService,
             JobPortal.Application.Features.CareerGuidance.CareerFinanceService>();

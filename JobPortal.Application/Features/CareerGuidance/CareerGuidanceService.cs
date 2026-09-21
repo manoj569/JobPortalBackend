@@ -21,11 +21,18 @@ public sealed class CareerGuidanceService(ICareerGuidanceRepository profiles, IU
     {
         await searchValidator.ValidateAndThrowAsync(query, ct);
         var (items, total) = await profiles.SearchAsync(query, ct);
-        return new(items.Select(Public).ToArray(), query.PageNumber, query.PageSize, total);
+        var ratings = await profiles.RatingsAsync(items.Select(p => p.Id).ToArray(), ct);
+        return new(items.Select(p => WithRating(p, ratings.GetValueOrDefault(p.Id))).ToArray(), query.PageNumber, query.PageSize, total);
     }
 
-    public async Task<ConsultantPublicResponse> GetAsync(Guid id, CancellationToken ct) =>
-        Public(await profiles.FindAsync(id, true, ct) ?? throw new NotFoundException("Consultant not found."));
+    public async Task<ConsultantPublicResponse> GetAsync(Guid id, CancellationToken ct)
+    {
+        var profile = await profiles.FindAsync(id, true, ct) ?? throw new NotFoundException("Consultant not found.");
+        var ratings = await profiles.RatingsAsync([id], ct);
+        return WithRating(profile, ratings.GetValueOrDefault(id));
+    }
+    private static ConsultantPublicResponse WithRating(CareerConsultant profile, CareerRatingSummary? rating) =>
+        Public(profile) with { AverageRating = rating?.AverageRating, ReviewCount = rating?.ReviewCount ?? 0 };
 
     public async Task<ConsultantPrivateResponse> MineAsync(Guid actor, CancellationToken ct) => Private(await Own(actor, ct));
 

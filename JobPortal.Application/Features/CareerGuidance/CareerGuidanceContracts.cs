@@ -21,7 +21,7 @@ public sealed record ConsultantServiceResponse(Guid Id, string ServiceType, stri
 public sealed record ConsultantPublicResponse(Guid Id, string DisplayName, string ProfessionalHeadline, string Bio,
     Guid? CompanyId, string CompanyName, string CurrentRole, decimal YearsOfExperience, CareerProfessionalType ProfessionalType,
     string[] Languages, string[] Expertise, bool IsAcceptingBookings, string GuidanceDisclaimer,
-    IReadOnlyCollection<ConsultantServiceResponse> Services);
+    IReadOnlyCollection<ConsultantServiceResponse> Services, decimal? AverageRating = null, int ReviewCount = 0);
 public sealed record ConsultantPrivateResponse(ConsultantPublicResponse Profile, Guid UserId, string LinkedInUrl,
     ConsultantVerificationStatus VerificationStatus, string? VerificationMethod, string? VerificationReason,
     Guid? ReviewedByUserId, DateTime? ReviewedAtUtc, DateTime? VerifiedAtUtc, DateTime TermsAcceptedAtUtc,
@@ -34,6 +34,7 @@ public interface ICareerGuidanceRepository
     Task<(IReadOnlyCollection<CareerConsultant> Items, int Total)> SearchAsync(ConsultantSearchQuery query, CancellationToken ct);
     Task<(IReadOnlyCollection<CareerConsultant> Items, int Total)> AdminSearchAsync(ConsultantAdminQuery query, CancellationToken ct);
     Task AddAsync(CareerConsultant profile, CancellationToken ct);
+    Task<IReadOnlyDictionary<Guid, CareerRatingSummary>> RatingsAsync(Guid[] consultantIds, CancellationToken ct);
 }
 
 public interface ICareerGuidanceService

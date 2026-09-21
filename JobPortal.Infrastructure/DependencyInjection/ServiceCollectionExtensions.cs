@@ -103,6 +103,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IRazorpayGateway, RazorpayGateway>();
         services.AddScoped<JobPortal.Application.Features.CareerGuidance.ICareerMeetingProvider, JobPortal.Infrastructure.CareerGuidance.ManualCareerMeetingProvider>();
         services.AddScoped<JobPortal.Application.Features.CareerGuidance.ICareerMeetingProtector, JobPortal.Infrastructure.CareerGuidance.CareerMeetingProtector>();
+        services.AddOptions<JobPortal.Application.Features.CareerGuidance.CareerTrustOptions>()
+            .Bind(configuration.GetSection("CareerGuidance")).Validate(o => o.IsValid(), "Invalid career trust settings.").ValidateOnStart();
         services.AddOptions<JobPortal.Application.Features.CareerGuidance.CareerSessionOptions>()
             .Configure(o =>
             {

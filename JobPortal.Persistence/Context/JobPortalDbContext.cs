@@ -80,6 +80,7 @@ public sealed class JobPortalDbContext(DbContextOptions<JobPortalDbContext> opti
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         EnsureFinancialHistory();
+        EnsureTrustHistory();
         EnsureAuditLogsAreAppendOnly();
         ApplyAuditAndSoftDelete();
         return base.SaveChanges(acceptAllChangesOnSuccess);
@@ -88,6 +89,7 @@ public sealed class JobPortalDbContext(DbContextOptions<JobPortalDbContext> opti
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
         EnsureFinancialHistory();
+        EnsureTrustHistory();
         EnsureAuditLogsAreAppendOnly();
         ApplyAuditAndSoftDelete();
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
@@ -146,6 +148,26 @@ public sealed class JobPortalDbContext(DbContextOptions<JobPortalDbContext> opti
                 entry.State is EntityState.Modified or EntityState.Deleted))
             throw new InvalidOperationException(
                 "Audit logs are append-only and cannot be updated or deleted.");
+    }
+
+    private void EnsureTrustHistory()
+    {
+        foreach (var entry in ChangeTracker.Entries().Where(e => e.Entity is CareerGuidanceReview or CareerGuidanceDispute or CareerGuidanceDisputeEvidence))
+        {
+            if (entry.State == EntityState.Deleted || entry.State == EntityState.Modified && entry.Entity is CareerGuidanceDisputeEvidence)
+                throw new InvalidOperationException("Trust records cannot be deleted; evidence is append-only.");
+            if (entry.State != EntityState.Modified) continue;
+            foreach (var property in entry.Properties.Where(p => p.IsModified))
+            {
+                var allowed = property.Metadata.Name is "UpdatedAtUtc" or "Revision" || entry.Entity switch
+                {
+                    CareerGuidanceReview => property.Metadata.Name is "Rating" or "Title" or "Comment" or "ModerationStatus" or "ModerationReason" or "IsPublished" or "IsDeleted" or "DeletedAtUtc",
+                    CareerGuidanceDispute => property.Metadata.Name is "Status" or "Resolution" or "AdminNotes" or "ResolvedAtUtc" or "ResolvedByUserId",
+                    _ => false
+                };
+                if (!allowed) throw new InvalidOperationException("Trust identity and original submission are immutable.");
+            }
+        }
     }
 
     private void EnsureFinancialHistory()
