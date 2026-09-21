@@ -143,6 +143,7 @@ builder.Services.AddHostedService<JobDiscoveryHostedService>();
 builder.Services.AddHostedService<RegistrationEmailHostedService>();
 builder.Services.AddScoped<RegistrationEmailDispatcher>();
 builder.Services.AddHostedService<InterviewScheduleNotificationHostedService>();
+builder.Services.AddHostedService<CareerSessionReminderHostedService>();
 builder.Services.AddOptions<AIApplyOptions>()
     .Bind(builder.Configuration.GetSection(AIApplyOptions.SectionName))
     .ValidateOnStart();

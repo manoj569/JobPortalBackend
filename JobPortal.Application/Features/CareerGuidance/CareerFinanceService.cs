@@ -194,6 +194,7 @@ public sealed class CareerFinanceService(ICareerFinanceRepository repository, IU
                 ConsultantId = p.ConsultantId, Amount = p.AmountGross, Currency = p.Currency, ReasonCode = request.Reason,
                 RequestedByUserId = actor, RequestedAtUtc = Now };
             p.Status = CareerPaymentStatus.RefundPending;
+            p.Earning!.AvailableAtUtc = null; p.Earning.Revision = Guid.NewGuid();
             if (p.Booking.Status is CareerBookingStatus.Pending or CareerBookingStatus.Confirmed)
             {
                 p.Booking.Status = CareerBookingStatus.CancelledByConsultant;
@@ -226,7 +227,7 @@ public sealed class CareerFinanceService(ICareerFinanceRepository repository, IU
             case "processed":
                 r.Status = CareerRefundStatus.Processed; r.ProcessedAtUtc = Now;
                 p.Status = CareerPaymentStatus.Refunded; p.RequiresRefundReview = false;
-                p.Earning!.Status = CareerEarningStatus.Reversed; p.Earning.ReversedAtUtc = Now; p.Earning.Revision = Guid.NewGuid();
+                p.Earning!.Status = CareerEarningStatus.Reversed; p.Earning.ReversedAtUtc = Now; p.Earning.AvailableAtUtc = null; p.Earning.Revision = Guid.NewGuid();
                 await Audit(p.Id, "refund_processed", actor, ct); await Audit(p.Id, "earning_reversed", actor, ct);
                 break;
             case "failed":

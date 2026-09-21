@@ -43,7 +43,7 @@ public sealed class CareerSchedulingRepository(JobPortalDbContext db) : ICareerS
         { InnerException: PostgresException { SqlState: "23P01", ConstraintName: "EX_CareerGuidanceBookings_NoOverlap" } };
     public async Task SaveAsync(CancellationToken ct)
     {
-        try { await db.SaveChangesAsync(ct); }
+        try { await CareerSessionConsistency.SynchronizeAsync(db, ct); await db.SaveChangesAsync(ct); }
         catch (DbUpdateException ex) when (IsOverlapConflict(ex))
         { db.ChangeTracker.Clear(); throw new ConflictException("This time slot is no longer available.", "booking_overlap"); }
         catch (DbUpdateConcurrencyException)
