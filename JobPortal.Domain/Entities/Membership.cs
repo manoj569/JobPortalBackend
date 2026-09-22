@@ -5,6 +5,7 @@ namespace JobPortal.Domain.Entities;
 
 public sealed class Membership : BaseEntity
 {
+    public string PlanCode { get; set; } = string.Empty;
     public string PlanName { get; set; } = string.Empty;
     public MembershipStatus Status { get; set; } = MembershipStatus.Pending;
     public DateTime StartsAtUtc { get; set; }

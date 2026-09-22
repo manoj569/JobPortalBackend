@@ -376,12 +376,28 @@ public sealed class MembershipConfiguration : IEntityTypeConfiguration<Membershi
     {
         builder.ToTable("Memberships");
         builder.ConfigureBaseEntity();
-        builder.Property(x => x.PlanName).HasMaxLength(100).IsRequired();
+
+        builder.Property(x => x.PlanCode)
+            .HasMaxLength(50)
+            .IsRequired();
+
+        builder.Property(x => x.PlanName)
+            .HasMaxLength(100)
+            .IsRequired();
+
         builder.Ignore(x => x.RowVersion);
         builder.Property<uint>("xmin").HasColumnName("xmin").IsRowVersion();
-        builder.HasIndex(x => x.UserId).IsUnique().HasFilter("\"IsDeleted\" = FALSE");
+
+        builder.HasIndex(x => new { x.UserId, x.PlanCode })
+            .IsUnique()
+            .HasFilter("\"IsDeleted\" = FALSE");
+
         builder.HasIndex(x => new { x.Status, x.EndsAtUtc });
-        builder.HasOne(x => x.User).WithMany(x => x.Memberships).HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(x => x.User)
+            .WithMany(x => x.Memberships)
+            .HasForeignKey(x => x.UserId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }
 

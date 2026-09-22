@@ -16,6 +16,8 @@ public sealed record JobReferralResponse(
     Guid Id,
     Guid JobId,
     string JobTitle,
+    string CompanyName,
+    string? Location,
     Guid ReferrerUserId,
     string ReferrerName,
     string? SourceUrl,
@@ -27,7 +29,6 @@ public sealed record JobReferralResponse(
     DateTime CreatedAtUtc,
     DateTime? ReviewedAtUtc,
     DateTime? ApprovedAtUtc = null);
-
 public sealed record ReviewJobReferralRequest(
     JobReferralApprovalStatus Decision,
     string? RejectionReason);

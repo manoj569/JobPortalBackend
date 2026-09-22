@@ -1,3 +1,6 @@
+using System.Text.Json.Serialization;
+
+
 namespace JobPortal.Domain.Enums;
 
 public enum UserStatus { Pending = 1, Active, Suspended, Inactive }
@@ -78,7 +81,12 @@ public enum ApplicationQuotaPeriod
 }
 public enum SettingScope { Global = 1, User, Company }
 public enum JobApplicationStatus { Submitted = 1, Reviewed, Shortlisted, Rejected, Withdrawn, ExternalApplicationStarted }
-public enum ApplicationMethod { Portal = 1, External }
+[JsonConverter(typeof(JsonStringEnumConverter<ApplicationMethod>))]
+public enum ApplicationMethod
+{
+    Portal = 1,
+    External
+}
 public enum CareerStage { Student = 1, Fresher, Experienced }
 public enum DesiredOpportunity { Internship = 1, FresherJob, ExperiencedJob }
 public enum WorkPreference { Remote = 1, Hybrid, OnSite }

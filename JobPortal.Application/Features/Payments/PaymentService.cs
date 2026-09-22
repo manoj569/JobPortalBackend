@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Numerics;
 using System.Security.Cryptography;
 using System.Text.Json;
 using FluentValidation;
@@ -30,6 +31,41 @@ public sealed class PaymentService(
 {
     private const int MaximumWebhookBytes = 1024 * 1024;
 
+    private const string CareerHarborMembershipPlanCode = "CareerHarborMembership";
+    private const string ReferralContactAccessPlanCode = "ReferralContactAccess";
+    private const string AIApplyPlanCode = "AIApply";
+    private const string AIApplyProPlanCode = "AIApplyPro";
+
+    private static bool IsAIApplyPlan(string planCode) =>
+        string.Equals(planCode, AIApplyPlanCode, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(planCode, AIApplyProPlanCode, StringComparison.OrdinalIgnoreCase);
+
+    private async Task<Membership?> GetMembershipForCheckoutAsync(
+        Guid userId,
+        MembershipPlan plan,
+        CancellationToken cancellationToken)
+    {
+        if (!IsAIApplyPlan(plan.Code))
+        {
+            return await memberships.GetMembershipForUserAndPlanAsync(
+                userId,
+                plan.Code,
+                cancellationToken);
+        }
+
+        var aiApply = await memberships.GetMembershipForUserAndPlanAsync(
+            userId,
+            AIApplyPlanCode,
+            cancellationToken);
+
+        var aiApplyPro = await memberships.GetMembershipForUserAndPlanAsync(
+            userId,
+            AIApplyProPlanCode,
+            cancellationToken);
+
+        return aiApplyPro ?? aiApply;
+    }
+
     public IReadOnlyList<MembershipPlanResponse> GetPlans() => plans.GetPlans().Where(x => x.IsActive).Select(x =>
         new MembershipPlanResponse(x.Code, x.Name, x.Amount, x.CurrencyCode, x.DurationDays, true, x.AIApplyEnabled, x.AIApplyProEnabled)).ToList();
 
@@ -50,7 +86,10 @@ public sealed class PaymentService(
         await RequiredCandidateAsync(userId, cancellationToken);
         var utcNow = UtcNow;
         var plan = plans.GetRequired(request.PlanCode);
-        var membership = await memberships.GetPortalMembershipForUserAsync(userId, cancellationToken);
+        var membership = await GetMembershipForCheckoutAsync(
+            userId,
+            plan,
+            cancellationToken);
         await ExpireMembershipIfNeededAsync(membership, userId, cancellationToken);
         if (membership is { Status: MembershipStatus.Active } && membership.StartsAtUtc <= utcNow &&
             (!membership.EndsAtUtc.HasValue || membership.EndsAtUtc > utcNow))
@@ -63,8 +102,11 @@ public sealed class PaymentService(
         {
             membership = new Membership
             {
-                UserId = userId, PlanName = plan.Name,
-                Status = MembershipStatus.Pending, StartsAtUtc = utcNow
+                UserId = userId,
+                PlanCode = plan.Code,
+                PlanName = plan.Name,
+                Status = MembershipStatus.Pending,
+                StartsAtUtc = utcNow
             };
             membership.History.Add(NewMembershipHistory(
                 membership, null, MembershipStatus.Pending, userId, "Payment initiated."));
@@ -333,7 +375,10 @@ public sealed class PaymentService(
         await RequiredCandidateAsync(userId, cancellationToken);
         var utcNow = UtcNow;
         var plan = plans.GetRequired(request.PlanCode);
-        var membership = await memberships.GetPortalMembershipForUserAsync(userId, cancellationToken);
+        var membership = await GetMembershipForCheckoutAsync(
+    userId,
+    plan,
+    cancellationToken);
         await ExpireMembershipIfNeededAsync(membership, userId, cancellationToken);
         await ThrowPendingCheckoutConflictAsync(userId, cancellationToken);
 
@@ -343,6 +388,7 @@ public sealed class PaymentService(
             membership = new Membership
             {
                 UserId = userId,
+                PlanCode = plan.Code,
                 PlanName = plan.Name,
                 Status = MembershipStatus.Pending,
                 StartsAtUtc = utcNow
@@ -530,7 +576,10 @@ public sealed class PaymentService(
         Guid userId, CancellationToken cancellationToken = default)
     {
         await RequiredCandidateAsync(userId, cancellationToken);
-        var membership = await memberships.GetPortalMembershipForUserAsync(userId, cancellationToken);
+        var membership = await memberships.GetMembershipForUserAndPlanAsync(
+     userId,
+     CareerHarborMembershipPlanCode,
+     cancellationToken);
         await ExpireMembershipIfNeededAsync(membership, userId, cancellationToken);
         var latestPayment = await payments.GetLatestForUserAsync(userId, cancellationToken);
         return new(
@@ -672,6 +721,7 @@ public sealed class PaymentService(
         if (membership.Status != MembershipStatus.Active)
             membership.StartsAtUtc = utcNow;
         membership.Status = MembershipStatus.Active;
+        membership.PlanCode = purchasedPlan.Code;
         membership.PlanName = purchasedPlan.Name;
         membership.EndsAtUtc = extensionStart.AddDays(purchasedPlan.DurationDays);
         membership.History.Add(NewMembershipHistory(
@@ -928,3 +978,4 @@ public sealed class PaymentService(
 
     private DateTime UtcNow => timeProvider.GetUtcNow().UtcDateTime;
 }
+

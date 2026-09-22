@@ -125,18 +125,94 @@ public sealed class RazorpayGateway : IRazorpayGateway
     }
 }
 
-public sealed class ConfigurationMembershipPlanProvider(IConfiguration configuration) : IMembershipPlanProvider
+public sealed class ConfigurationMembershipPlanProvider(IConfiguration configuration)
+    : IMembershipPlanProvider
 {
-    public MembershipPlan GetDefaultPlan() => GetRequired("CareerHarborMembership");
-    public MembershipPlan GetRequired(string planCode) => GetPlans().SingleOrDefault(x => string.Equals(x.Code, planCode, StringComparison.OrdinalIgnoreCase) && x.IsActive)
-        ?? throw new JobPortal.Application.Common.Exceptions.NotFoundException("Membership plan was not found.");
-    public MembershipPlan GetByPayment(decimal amount, string currencyCode) => GetPlans().SingleOrDefault(x => x.Amount == amount && string.Equals(x.CurrencyCode, currencyCode, StringComparison.OrdinalIgnoreCase))
-        ?? throw new InvalidOperationException("Payment does not match a configured membership plan.");
-    public MembershipPlan? FindByName(string planName) => GetPlans().SingleOrDefault(x => string.Equals(x.Name, planName, StringComparison.OrdinalIgnoreCase));
+    private const string CareerHarborMembershipPlanCode = "CareerHarborMembership";
+    private const string ReferralContactAccessPlanCode = "ReferralContactAccess";
+    private const string AIApplyPlanCode = "AIApply";
+    private const string AIApplyProPlanCode = "AIApplyPro";
+
+    public MembershipPlan GetDefaultPlan() =>
+        GetRequired(CareerHarborMembershipPlanCode);
+
+    public MembershipPlan GetRequired(string planCode) =>
+        GetPlans().SingleOrDefault(x =>
+            string.Equals(
+                x.Code,
+                planCode,
+                StringComparison.OrdinalIgnoreCase) &&
+            x.IsActive)
+        ?? throw new JobPortal.Application.Common.Exceptions.NotFoundException(
+            "Membership plan was not found.");
+
+    public MembershipPlan GetByPayment(
+        decimal amount,
+        string currencyCode) =>
+        GetPlans().SingleOrDefault(x =>
+            x.Amount == amount &&
+            string.Equals(
+                x.CurrencyCode,
+                currencyCode,
+                StringComparison.OrdinalIgnoreCase))
+        ?? throw new InvalidOperationException(
+            "Payment does not match a configured membership plan.");
+
+    public MembershipPlan? FindByName(string planName) =>
+        GetPlans().SingleOrDefault(x =>
+            string.Equals(
+                x.Name,
+                planName,
+                StringComparison.OrdinalIgnoreCase));
+
     public IReadOnlyList<MembershipPlan> GetPlans()
     {
-        var plans = configuration.GetSection("Membership:Plans").GetChildren().Select(x => new MembershipPlan(x.Key, x["DisplayName"] ?? "", decimal.Parse(x["Price"] ?? "0", System.Globalization.CultureInfo.InvariantCulture), x["Currency"] ?? "", int.Parse(x["DurationDays"] ?? "0", System.Globalization.CultureInfo.InvariantCulture), !bool.TryParse(x["IsActive"], out var active) || active, bool.TryParse(x["AIApplyEnabled"], out var ai) && ai, bool.TryParse(x["AIApplyProEnabled"], out var pro) && pro)).ToList();
-        if (plans.Count != 3 || plans.Any(x => string.IsNullOrWhiteSpace(x.Name) || x.CurrencyCode != "INR" || x.DurationDays != 30) || plans.Single(x => x.Code == "CareerHarborMembership").Amount != 99m || plans.Single(x => x.Code == "AIApply").Amount != 999m || plans.Single(x => x.Code == "AIApplyPro").Amount != 1499m) throw new InvalidOperationException("Membership plan configuration is invalid.");
+        var plans = configuration
+            .GetSection("Membership:Plans")
+            .GetChildren()
+            .Select(x => new MembershipPlan(
+                x.Key,
+                x["DisplayName"] ?? "",
+                decimal.Parse(
+                    x["Price"] ?? "0",
+                    System.Globalization.CultureInfo.InvariantCulture),
+                x["Currency"] ?? "",
+                int.Parse(
+                    x["DurationDays"] ?? "0",
+                    System.Globalization.CultureInfo.InvariantCulture),
+                !bool.TryParse(x["IsActive"], out var active) || active,
+                bool.TryParse(x["AIApplyEnabled"], out var ai) && ai,
+                bool.TryParse(x["AIApplyProEnabled"], out var pro) && pro))
+            .ToList();
+
+        if (plans.Count != 4 ||
+            plans.Any(x =>
+                string.IsNullOrWhiteSpace(x.Name) ||
+                !string.Equals(
+                    x.CurrencyCode,
+                    "INR",
+                    StringComparison.OrdinalIgnoreCase) ||
+                x.DurationDays != 30) ||
+            GetConfiguredPlan(plans, CareerHarborMembershipPlanCode).Amount != 99m ||
+            GetConfiguredPlan(plans, ReferralContactAccessPlanCode).Amount != 299m ||
+            GetConfiguredPlan(plans, AIApplyPlanCode).Amount != 999m ||
+            GetConfiguredPlan(plans, AIApplyProPlanCode).Amount != 1499m)
+        {
+            throw new InvalidOperationException(
+                "Membership plan configuration is invalid.");
+        }
+
         return plans;
     }
+
+    private static MembershipPlan GetConfiguredPlan(
+        IReadOnlyCollection<MembershipPlan> plans,
+        string planCode) =>
+        plans.SingleOrDefault(x =>
+            string.Equals(
+                x.Code,
+                planCode,
+                StringComparison.OrdinalIgnoreCase))
+        ?? throw new InvalidOperationException(
+            $"Required membership plan '{planCode}' is missing.");
 }

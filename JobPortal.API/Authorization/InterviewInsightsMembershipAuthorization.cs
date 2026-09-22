@@ -10,35 +10,54 @@ public static class InterviewInsightsMembershipPolicy
 {
     public const string Name = "ActiveInterviewInsightsMembership";
     public const string ErrorCode = "membership_required";
-    public const string ErrorMessage = "An active membership is required to use Interview Insights.";
+    public const string ErrorMessage =
+        "An active Job Application Access membership is required to use Interview Insights.";
+
+    public const string RequiredPlanCode = "CareerHarborMembership";
 }
 
 public sealed class ActiveInterviewInsightsMembershipRequirement : IAuthorizationRequirement;
 
-public sealed class ActiveInterviewInsightsMembershipHandler(IMembershipRepository memberships) :
+public sealed class ActiveInterviewInsightsMembershipHandler(
+    IMembershipRepository memberships) :
     AuthorizationHandler<ActiveInterviewInsightsMembershipRequirement>
 {
     protected override async Task HandleRequirementAsync(
         AuthorizationHandlerContext context,
         ActiveInterviewInsightsMembershipRequirement requirement)
     {
-        if (context.User.Identity?.IsAuthenticated != true || !context.User.IsInRole("Candidate"))
+        if (context.User.Identity?.IsAuthenticated != true ||
+            !context.User.IsInRole("Candidate"))
         {
             context.Succeed(requirement);
             return;
         }
 
         var value = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
+
         var cancellationToken = context.Resource is HttpContext httpContext
             ? httpContext.RequestAborted
             : CancellationToken.None;
-        if (Guid.TryParse(value, out var userId) &&
-            await memberships.GetActiveForUserAsync(userId, cancellationToken) is not null)
+
+        if (!Guid.TryParse(value, out var userId))
+        {
+            return;
+        }
+
+        var membership = await memberships.GetActiveForUserAsync(
+            userId,
+            InterviewInsightsMembershipPolicy.RequiredPlanCode,
+            cancellationToken);
+
+        if (membership is not null)
+        {
             context.Succeed(requirement);
+        }
     }
 }
 
-public sealed class InterviewInsightsAuthorizationResultHandler : IAuthorizationMiddlewareResultHandler
+public sealed class InterviewInsightsAuthorizationResultHandler :
+    IAuthorizationMiddlewareResultHandler
 {
     private readonly AuthorizationMiddlewareResultHandler fallback = new();
 
@@ -48,18 +67,28 @@ public sealed class InterviewInsightsAuthorizationResultHandler : IAuthorization
         AuthorizationPolicy policy,
         PolicyAuthorizationResult authorizeResult)
     {
-        if (authorizeResult.Forbidden && context.User.IsInRole("Candidate") &&
+        if (authorizeResult.Forbidden &&
+            context.User.IsInRole("Candidate") &&
             authorizeResult.AuthorizationFailure?.FailedRequirements
-                .OfType<ActiveInterviewInsightsMembershipRequirement>().Any() == true)
+                .OfType<ActiveInterviewInsightsMembershipRequirement>()
+                .Any() == true)
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             context.Response.ContentType = "application/json";
-            await context.Response.WriteAsJsonAsync(new ApiError(
-                InterviewInsightsMembershipPolicy.ErrorCode,
-                InterviewInsightsMembershipPolicy.ErrorMessage), context.RequestAborted);
+
+            await context.Response.WriteAsJsonAsync(
+                new ApiError(
+                    InterviewInsightsMembershipPolicy.ErrorCode,
+                    InterviewInsightsMembershipPolicy.ErrorMessage),
+                context.RequestAborted);
+
             return;
         }
 
-        await fallback.HandleAsync(next, context, policy, authorizeResult);
+        await fallback.HandleAsync(
+            next,
+            context,
+            policy,
+            authorizeResult);
     }
 }

@@ -265,31 +265,73 @@ public sealed class JobReferralServiceTests
 
     private sealed class MembershipRepositoryFake : IMembershipRepository
     {
+        private const string ReferralContactPlanCode = "ReferralContactAccess";
+
         public Guid? ActiveMembershipUserId { get; set; }
 
-        public Task<Membership?> GetActiveForUserAsync(Guid userId, CancellationToken cancellationToken = default) =>
-            Task.FromResult(userId == ActiveMembershipUserId
-                ? new Membership { UserId = userId, Status = MembershipStatus.Active, StartsAtUtc = Now }
-                : null);
+        public Task<Membership?> GetActiveForUserAsync(
+            Guid userId,
+            string planCode,
+            CancellationToken cancellationToken = default)
+        {
+            var hasReferralMembership =
+                userId == ActiveMembershipUserId &&
+                string.Equals(
+                    planCode,
+                    ReferralContactPlanCode,
+                    StringComparison.OrdinalIgnoreCase);
 
-        public Task<AvailableJobAccess?> GetAvailableJobAsync(string slug, CancellationToken cancellationToken = default) =>
+            return Task.FromResult(
+                hasReferralMembership
+                    ? new Membership
+                    {
+                        UserId = userId,
+                        PlanCode = ReferralContactPlanCode,
+                        PlanName = "Referral Contact Access",
+                        Status = MembershipStatus.Active,
+                        StartsAtUtc = Now
+                    }
+                    : null);
+        }
+
+        public Task<Membership?> GetMembershipForUserAndPlanAsync(
+            Guid userId,
+            string planCode,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<Membership?>(null);
+
+        public Task<AvailableJobAccess?> GetAvailableJobAsync(
+            string slug,
+            CancellationToken cancellationToken = default) =>
             throw new NotImplementedException();
-        public Task<Membership?> GetPortalMembershipForUserAsync(Guid userId, CancellationToken cancellationToken = default) =>
+
+        public Task<Membership?> GetByIdAsync(
+            Guid id,
+            CancellationToken cancellationToken = default) =>
             throw new NotImplementedException();
-        public Task<Membership?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+
+        public Task AddAsync(
+            Membership membership,
+            CancellationToken cancellationToken = default) =>
             throw new NotImplementedException();
-        public Task AddAsync(Membership membership, CancellationToken cancellationToken = default) =>
-            throw new NotImplementedException();
+
         public Task<IReadOnlyCollection<MembershipResponse>> GetMembershipsForUserAsync(
-            Guid userId, CancellationToken cancellationToken = default) =>
+            Guid userId,
+            CancellationToken cancellationToken = default) =>
             throw new NotImplementedException();
+
         public Task<(IReadOnlyCollection<MembershipHistoryResponse> Items, int TotalCount)> GetHistoryAsync(
-            Guid userId, HistoryQuery query, CancellationToken cancellationToken = default) =>
+            Guid userId,
+            HistoryQuery query,
+            CancellationToken cancellationToken = default) =>
             throw new NotImplementedException();
-        public Task RecordApplicationAsync(Guid userId, Guid jobId, CancellationToken cancellationToken = default) =>
+
+        public Task RecordApplicationAsync(
+            Guid userId,
+            Guid jobId,
+            CancellationToken cancellationToken = default) =>
             throw new NotImplementedException();
     }
-
     /// <summary>Minimal in-memory store — one referral at a time is all these tests need,
     /// keyed loosely since each test creates its own fixture/job.</summary>
     private sealed class JobReferralRepositoryFake(User referrer) : IJobReferralRepository

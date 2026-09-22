@@ -24,7 +24,13 @@ public sealed class PortalMembershipTests
     {
         var repository = new FakeMembershipRepository
         {
-            Membership = new Membership { UserId = UserId, Status = MembershipStatus.Active },
+            Membership = new Membership
+            {
+                UserId = UserId,
+                PlanCode = "CareerHarborMembership",
+                PlanName = "Job Application Access",
+                Status = MembershipStatus.Active
+            },
             Jobs =
             {
                 ["first"] = new(Guid.NewGuid(), "https://example.test/first"),
@@ -91,6 +97,8 @@ public sealed class PortalMembershipTests
         fixture.Memberships.Membership = new Membership
         {
             UserId = UserId,
+            PlanCode = "CareerHarborMembership",
+            PlanName = "Job Application Access",
             Status = MembershipStatus.Active,
             StartsAtUtc = Now,
             EndsAtUtc = Now.AddDays(1)
@@ -119,11 +127,43 @@ public sealed class PortalMembershipTests
     [Fact]
     public async Task VerifiedProUpgradeActivatesProAndPreservesRemainingTerm()
     {
-        var fixture = CreatePaymentFixture(); fixture.Memberships.Membership = new Membership { UserId = UserId, PlanName = "AI Apply", Status = MembershipStatus.Active, StartsAtUtc = Now.AddDays(-5), EndsAtUtc = Now.AddDays(10) };
-        var order = await fixture.Service.CreateOrderAsync(UserId, new("AIApplyPro"));
-        fixture.Gateway.ReconciliationState = new(RazorpayPaymentStateKind.Paid, "pay_pro", 149900, "INR");
-        await fixture.Service.ConfirmAsync(UserId, order.PaymentId, new(order.ProviderOrderId, "pay_pro", new('a', 64)));
-        Assert.Equal("AI Apply Pro", fixture.Memberships.Membership.PlanName); Assert.Equal(Now.AddDays(40), fixture.Memberships.Membership.EndsAtUtc);
+        var fixture = CreatePaymentFixture();
+
+        fixture.Memberships.Membership = new Membership
+        {
+            UserId = UserId,
+            PlanCode = "AIApply",
+            PlanName = "AI Apply",
+            Status = MembershipStatus.Active,
+            StartsAtUtc = Now.AddDays(-5),
+            EndsAtUtc = Now.AddDays(10)
+        };
+
+        var order = await fixture.Service.CreateOrderAsync(
+            UserId,
+            new("AIApplyPro"));
+
+        fixture.Gateway.ReconciliationState = new(
+            RazorpayPaymentStateKind.Paid,
+            "pay_pro",
+            149900,
+            "INR");
+
+        await fixture.Service.ConfirmAsync(
+            UserId,
+            order.PaymentId,
+            new(
+                order.ProviderOrderId,
+                "pay_pro",
+                new('a', 64)));
+
+        Assert.Equal(
+            "AI Apply Pro",
+            fixture.Memberships.Membership.PlanName);
+
+        Assert.Equal(
+            Now.AddDays(40),
+            fixture.Memberships.Membership.EndsAtUtc);
     }
 
     [Fact]
@@ -689,43 +729,102 @@ public sealed class PortalMembershipTests
     {
         public Dictionary<string, AvailableJobAccess> Jobs { get; init; } = [];
         public List<Guid> RecordedApplications { get; } = [];
-        public Membership? Membership { get; set; }
+        public List<Membership> Memberships { get; } = [];
+
+        public Membership? Membership
+        {
+            get => Memberships.LastOrDefault();
+            set
+            {
+                Memberships.Clear();
+
+                if (value is not null)
+                {
+                    Memberships.Add(value);
+                }
+            }
+        }
 
         public Task<AvailableJobAccess?> GetAvailableJobAsync(
-            string slug, CancellationToken cancellationToken = default) =>
+            string slug,
+            CancellationToken cancellationToken = default) =>
             Task.FromResult(Jobs.GetValueOrDefault(slug));
+
         public Task<Membership?> GetActiveForUserAsync(
-            Guid userId, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Membership is { Status: MembershipStatus.Active } membership &&
-                membership.StartsAtUtc <= Now &&
-                (!membership.EndsAtUtc.HasValue || membership.EndsAtUtc > Now)
-                    ? membership
-                    : null);
-        public Task<Membership?> GetPortalMembershipForUserAsync(
-            Guid userId, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Membership?.UserId == userId ? Membership : null);
-        public Task<Membership?> GetByIdAsync(
-            Guid id, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Membership?.Id == id ? Membership : null);
-        public Task AddAsync(Membership membership, CancellationToken cancellationToken = default)
+            Guid userId,
+            string planCode,
+            CancellationToken cancellationToken = default)
         {
-            Membership = membership;
+            var membership = Memberships.SingleOrDefault(x =>
+                x.UserId == userId &&
+                string.Equals(x.PlanCode, planCode, StringComparison.OrdinalIgnoreCase) &&
+                x.Status == MembershipStatus.Active &&
+                x.StartsAtUtc <= Now &&
+                (!x.EndsAtUtc.HasValue || x.EndsAtUtc > Now));
+
+            return Task.FromResult(membership);
+        }
+
+        public Task<Membership?> GetMembershipForUserAndPlanAsync(
+            Guid userId,
+            string planCode,
+            CancellationToken cancellationToken = default)
+        {
+            var membership = Memberships.SingleOrDefault(x =>
+                x.UserId == userId &&
+                string.Equals(x.PlanCode, planCode, StringComparison.OrdinalIgnoreCase));
+
+            return Task.FromResult(membership);
+        }
+
+        public Task<Membership?> GetByIdAsync(
+            Guid id,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(
+                Memberships.SingleOrDefault(x => x.Id == id));
+
+        public Task AddAsync(
+            Membership membership,
+            CancellationToken cancellationToken = default)
+        {
+            Memberships.Add(membership);
             return Task.CompletedTask;
         }
+
         public Task<IReadOnlyCollection<MembershipResponse>> GetMembershipsForUserAsync(
-            Guid userId, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyCollection<MembershipResponse>>([]);
+            Guid userId,
+            CancellationToken cancellationToken = default)
+        {
+            IReadOnlyCollection<MembershipResponse> result = Memberships
+                .Where(x => x.UserId == userId)
+                .Select(x => new MembershipResponse(
+                    x.Id,
+                    x.PlanName,
+                    x.Status,
+                    x.StartsAtUtc,
+                    x.EndsAtUtc,
+                    x.AutoRenew))
+                .ToArray();
+
+            return Task.FromResult(result);
+        }
+
         public Task<(IReadOnlyCollection<MembershipHistoryResponse> Items, int TotalCount)> GetHistoryAsync(
-            Guid userId, HistoryQuery query, CancellationToken cancellationToken = default) =>
-            Task.FromResult(((IReadOnlyCollection<MembershipHistoryResponse>)[], 0));
+            Guid userId,
+            HistoryQuery query,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(
+                ((IReadOnlyCollection<MembershipHistoryResponse>)[], 0));
+
         public Task RecordApplicationAsync(
-            Guid userId, Guid jobId, CancellationToken cancellationToken = default)
+            Guid userId,
+            Guid jobId,
+            CancellationToken cancellationToken = default)
         {
             RecordedApplications.Add(jobId);
             return Task.CompletedTask;
         }
     }
-
     private sealed class FakePaymentRepository : IPaymentRepository
     {
         public Payment? Payment { get; private set; }
