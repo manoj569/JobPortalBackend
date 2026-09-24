@@ -42,6 +42,71 @@ public sealed class CareerGuidanceOwnerController(ICareerGuidanceService service
     [HttpDelete("services/{id:guid}")]
     public async Task<ActionResult<ApiResponse<ConsultantPrivateResponse>>> DeleteService(Guid id, [FromQuery] Guid revision, CancellationToken ct) =>
         Ok(new ApiResponse<ConsultantPrivateResponse>(await service.DeleteServiceAsync(User.GetRequiredUserId(), id, revision, ct)));
+    [HttpPost("onboarding")]
+    public async Task<ActionResult<ApiResponse<OnboardingResponse>>> StartOnboarding(CancellationToken ct) =>
+    StatusCode(StatusCodes.Status201Created,
+        new ApiResponse<OnboardingResponse>(
+            await service.StartOnboardingAsync(User.GetRequiredUserId(), ct)));
+
+    [HttpGet("onboarding")]
+    public async Task<ActionResult<ApiResponse<OnboardingResponse>>> GetOnboarding(CancellationToken ct) =>
+        Ok(new ApiResponse<OnboardingResponse>(
+            await service.OnboardingAsync(User.GetRequiredUserId(), ct)));
+
+    [HttpPatch("onboarding/basic")]
+    public async Task<ActionResult<ApiResponse<OnboardingResponse>>> SaveOnboardingBasic(
+        OnboardingBasicRequest request,
+        CancellationToken ct) =>
+        Ok(new ApiResponse<OnboardingResponse>(
+            await service.SaveBasicAsync(User.GetRequiredUserId(), request, ct)));
+
+    [HttpPatch("onboarding/professional")]
+    public async Task<ActionResult<ApiResponse<OnboardingResponse>>> SaveOnboardingProfessional(
+        OnboardingProfessionalRequest request,
+        CancellationToken ct) =>
+        Ok(new ApiResponse<OnboardingResponse>(
+            await service.SaveProfessionalAsync(User.GetRequiredUserId(), request, ct)));
+
+    [HttpPatch("onboarding/expertise")]
+    public async Task<ActionResult<ApiResponse<OnboardingResponse>>> SaveOnboardingExpertise(
+        OnboardingExpertiseRequest request,
+        CancellationToken ct) =>
+        Ok(new ApiResponse<OnboardingResponse>(
+            await service.SaveExpertiseAsync(User.GetRequiredUserId(), request, ct)));
+
+    [HttpPut("onboarding/education")]
+    public async Task<ActionResult<ApiResponse<OnboardingResponse>>> SaveOnboardingEducation(
+        OnboardingEducationRequest request,
+        CancellationToken ct) =>
+        Ok(new ApiResponse<OnboardingResponse>(
+            await service.SaveEducationAsync(User.GetRequiredUserId(), request, ct)));
+
+    [HttpPut("onboarding/work-experience")]
+    public async Task<ActionResult<ApiResponse<OnboardingResponse>>> SaveOnboardingWorkExperience(
+        OnboardingExperienceRequest request,
+        CancellationToken ct) =>
+        Ok(new ApiResponse<OnboardingResponse>(
+            await service.SaveExperienceAsync(User.GetRequiredUserId(), request, ct)));
+
+    [HttpGet("onboarding/import-options")]
+    public async Task<ActionResult<ApiResponse<OnboardingImportOptions>>> GetOnboardingImportOptions(
+        CancellationToken ct) =>
+        Ok(new ApiResponse<OnboardingImportOptions>(
+            await service.ImportOptionsAsync(User.GetRequiredUserId(), ct)));
+
+    [HttpPost("onboarding/import")]
+    public async Task<ActionResult<ApiResponse<OnboardingResponse>>> ImportOnboarding(
+        OnboardingImportRequest request,
+        CancellationToken ct) =>
+        Ok(new ApiResponse<OnboardingResponse>(
+            await service.ImportAsync(User.GetRequiredUserId(), request, ct)));
+
+    [HttpPost("onboarding/submit")]
+    public async Task<ActionResult<ApiResponse<OnboardingResponse>>> SubmitOnboarding(
+        OnboardingSubmitRequest request,
+        CancellationToken ct) =>
+        Ok(new ApiResponse<OnboardingResponse>(
+            await service.SubmitOnboardingAsync(User.GetRequiredUserId(), request, ct)));
 }
 
 [ApiController]

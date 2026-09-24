@@ -27,7 +27,9 @@ public sealed class CareerAnalyticsRepository(JobPortalDbContext db, TimeProvide
 
     public Task<CareerGuidanceAdminAnalytics> AdminAsync(DateTime from, DateTime to, CancellationToken ct) => Snapshot(async () =>
     {
-        var consultants = db.Set<CareerConsultant>().Where(x => x.CreatedAtUtc >= from && x.CreatedAtUtc < to);
+        // Legacy applications have no submission timestamp. Never count unsubmitted drafts.
+        var consultants = db.Set<CareerConsultant>().Where(x => x.VerificationStatus != ConsultantVerificationStatus.Draft &&
+            (x.SubmittedAtUtc ?? x.CreatedAtUtc) >= from && (x.SubmittedAtUtc ?? x.CreatedAtUtc) < to);
         var bookings = db.Set<CareerGuidanceBooking>().Where(x => x.CreatedAtUtc >= from && x.CreatedAtUtc < to);
         var payments = db.Set<CareerGuidancePayment>().Where(x => !x.IsDeleted && x.CreatedAtUtc >= from && x.CreatedAtUtc < to);
         var sessions = db.Set<CareerGuidanceSession>().Where(x => x.CreatedAtUtc >= from && x.CreatedAtUtc < to);

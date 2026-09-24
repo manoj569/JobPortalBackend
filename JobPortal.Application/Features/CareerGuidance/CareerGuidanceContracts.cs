@@ -19,12 +19,21 @@ public sealed record ConsultantAdminQuery(int PageNumber = 1, int PageSize = 20,
 public sealed record ConsultantServiceResponse(Guid Id, string ServiceType, string Title, string Description,
     int DurationMinutes, decimal Price, string Currency, bool IsActive);
 public sealed record ConsultantPublicResponse(Guid Id, string DisplayName, string ProfessionalHeadline, string Bio,
-    Guid? CompanyId, string CompanyName, string CurrentRole, decimal YearsOfExperience, CareerProfessionalType ProfessionalType,
+    Guid? CompanyId, string CompanyName, string CurrentRole, decimal? YearsOfExperience, CareerProfessionalType? ProfessionalType,
     string[] Languages, string[] Expertise, bool IsAcceptingBookings, string GuidanceDisclaimer,
-    IReadOnlyCollection<ConsultantServiceResponse> Services, decimal? AverageRating = null, int ReviewCount = 0);
+    IReadOnlyCollection<ConsultantServiceResponse> Services, decimal? AverageRating = null, int ReviewCount = 0)
+{
+    public string? ProfileImageUrl { get; init; }
+    public string? Location { get; init; }
+    public string? Industry { get; init; }
+    public string? FunctionalArea { get; init; }
+    public IReadOnlyList<ConsultantEducationItem> Education { get; init; } = [];
+    public IReadOnlyList<ConsultantExperienceItem> WorkExperience { get; init; } = [];
+    public string? ApprovalLabel { get; init; }
+}
 public sealed record ConsultantPrivateResponse(ConsultantPublicResponse Profile, Guid UserId, string LinkedInUrl,
     ConsultantVerificationStatus VerificationStatus, string? VerificationMethod, string? VerificationReason,
-    Guid? ReviewedByUserId, DateTime? ReviewedAtUtc, DateTime? VerifiedAtUtc, DateTime TermsAcceptedAtUtc,
+    Guid? ReviewedByUserId, DateTime? ReviewedAtUtc, DateTime? VerifiedAtUtc, DateTime? TermsAcceptedAtUtc,
     string PolicyVersion, Guid Revision, IReadOnlyCollection<ConsultantServiceResponse> Services);
 
 public interface ICareerGuidanceRepository
@@ -35,10 +44,23 @@ public interface ICareerGuidanceRepository
     Task<(IReadOnlyCollection<CareerConsultant> Items, int Total)> AdminSearchAsync(ConsultantAdminQuery query, CancellationToken ct);
     Task AddAsync(CareerConsultant profile, CancellationToken ct);
     Task<IReadOnlyDictionary<Guid, CareerRatingSummary>> RatingsAsync(Guid[] consultantIds, CancellationToken ct);
+    Task<bool> HasProtectedBookingsAsync(Guid consultantId, DateTime now, CancellationToken ct);
+    Task<IReadOnlyList<CareerConsultantAvailability>> OnboardingWindowsAsync(Guid consultantId, CancellationToken ct);
+    Task<OnboardingImportOptions> ImportOptionsAsync(Guid ownerId, CancellationToken ct);
 }
 
 public interface ICareerGuidanceService
 {
+    Task<OnboardingResponse> StartOnboardingAsync(Guid actor, CancellationToken ct);
+    Task<OnboardingResponse> OnboardingAsync(Guid actor, CancellationToken ct);
+    Task<OnboardingResponse> SaveBasicAsync(Guid actor, OnboardingBasicRequest request, CancellationToken ct);
+    Task<OnboardingResponse> SaveProfessionalAsync(Guid actor, OnboardingProfessionalRequest request, CancellationToken ct);
+    Task<OnboardingResponse> SaveExpertiseAsync(Guid actor, OnboardingExpertiseRequest request, CancellationToken ct);
+    Task<OnboardingResponse> SaveEducationAsync(Guid actor, OnboardingEducationRequest request, CancellationToken ct);
+    Task<OnboardingResponse> SaveExperienceAsync(Guid actor, OnboardingExperienceRequest request, CancellationToken ct);
+    Task<OnboardingImportOptions> ImportOptionsAsync(Guid actor, CancellationToken ct);
+    Task<OnboardingResponse> ImportAsync(Guid actor, OnboardingImportRequest request, CancellationToken ct);
+    Task<OnboardingResponse> SubmitOnboardingAsync(Guid actor, OnboardingSubmitRequest request, CancellationToken ct);
     Task<PagedResponse<ConsultantPublicResponse>> SearchAsync(ConsultantSearchQuery query, CancellationToken ct);
     Task<ConsultantPublicResponse> GetAsync(Guid id, CancellationToken ct);
     Task<ConsultantPrivateResponse> MineAsync(Guid actor, CancellationToken ct);

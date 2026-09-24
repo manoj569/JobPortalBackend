@@ -12,7 +12,30 @@ public sealed class CareerGuidanceRepository(JobPortalDbContext db) : ICareerGui
         .Where(p => p.VerificationStatus == ConsultantVerificationStatus.Verified && !p.User.IsDeleted && p.User.Status == UserStatus.Active);
 
     private static IQueryable<CareerConsultant> IncludeDetails(IQueryable<CareerConsultant> query) =>
-        query.Include(p => p.Tags).Include(p => p.Services.Where(s => !s.IsDeleted)).AsSplitQuery();
+        query.Include(p => p.Tags).Include(p => p.Services.Where(s => !s.IsDeleted))
+            .Include(p => p.Education.Where(s => !s.IsDeleted)).Include(p => p.WorkExperience.Where(s => !s.IsDeleted)).AsSplitQuery();
+
+    public Task<bool> HasProtectedBookingsAsync(Guid consultantId, DateTime now, CancellationToken ct) =>
+        db.Set<CareerGuidancePayment>().AnyAsync(p => p.ConsultantId == consultantId && p.PaidAtUtc != null &&
+            p.Booking.Status == CareerBookingStatus.Confirmed && p.Booking.EndUtc > now, ct);
+
+    public async Task<IReadOnlyList<CareerConsultantAvailability>> OnboardingWindowsAsync(Guid consultantId, CancellationToken ct) =>
+        await db.Set<CareerConsultantAvailability>().AsNoTracking().Where(w => w.ConsultantId == consultantId).ToArrayAsync(ct);
+
+    public async Task<OnboardingImportOptions> ImportOptionsAsync(Guid ownerId, CancellationToken ct)
+    {
+        var source = await db.Users.AsNoTracking().Where(u => u.Id == ownerId)
+            .Select(u => new { u.ProfileImageUrl, u.Location }).SingleAsync(ct);
+        var education = await db.CandidateEducation.AsNoTracking().Where(e => e.UserId == ownerId)
+            .OrderBy(e => e.DisplayOrder).ThenBy(e => e.Id).Take(101)
+            .Select(e => new EducationImportOption(e.Id, new(e.Qualification, e.Institution, e.FieldOfStudy,
+                e.StartYear, e.EndYear, e.IsCurrentlyStudying, e.DisplayOrder))).ToArrayAsync(ct);
+        var experience = await db.CandidateExperiences.AsNoTracking().Where(e => e.UserId == ownerId)
+            .OrderBy(e => e.DisplayOrder).ThenBy(e => e.Id).Take(101)
+            .Select(e => new ExperienceImportOption(e.Id, new(e.JobTitle, e.CompanyName, e.StartDate,
+                e.EndDate, e.IsCurrent, e.Description, e.DisplayOrder))).ToArrayAsync(ct);
+        return new(source.ProfileImageUrl, source.Location, education, experience);
+    }
 
     public Task<CareerConsultant?> FindAsync(Guid id, bool publicOnly, CancellationToken ct) =>
         IncludeDetails(publicOnly ? PublicQuery() : db.Set<CareerConsultant>().IgnoreQueryFilters().Where(p => !p.IsDeleted))

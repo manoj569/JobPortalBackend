@@ -26,8 +26,49 @@ public sealed class CareerConsultantConfiguration : IEntityTypeConfiguration<Car
         builder.Property(x => x.PolicyVersion).HasMaxLength(50).IsRequired();
         builder.Property(x => x.Revision).IsConcurrencyToken();
         builder.Property(x => x.TimeZoneId).HasMaxLength(100);
+        builder.Property(x => x.ProfileImageUrl).HasMaxLength(2048);
+        builder.Property(x => x.Location).HasMaxLength(200);
+        builder.Property(x => x.ProfessionalEmail).HasMaxLength(254);
+        builder.Property(x => x.Industry).HasMaxLength(120);
+        builder.Property(x => x.FunctionalArea).HasMaxLength(120);
         builder.HasIndex(x => new { x.VerificationStatus, x.CreatedAtUtc, x.Id });
         builder.HasIndex(x => new { x.ProfessionalType, x.YearsOfExperience });
+    }
+}
+
+public sealed class CareerConsultantEducationConfiguration : IEntityTypeConfiguration<CareerConsultantEducation>
+{
+    public void Configure(EntityTypeBuilder<CareerConsultantEducation> builder)
+    {
+        builder.ToTable("CareerConsultantEducation", t =>
+        {
+            t.HasCheckConstraint("CK_CareerConsultantEducation_Years", "(\"StartYear\" IS NULL OR \"StartYear\" BETWEEN 1900 AND 2100) AND (\"EndYear\" IS NULL OR \"EndYear\" BETWEEN 1900 AND 2100) AND (\"StartYear\" IS NULL OR \"EndYear\" IS NULL OR \"EndYear\" >= \"StartYear\") AND (NOT \"IsCurrentlyStudying\" OR \"EndYear\" IS NULL)");
+            t.HasCheckConstraint("CK_CareerConsultantEducation_Order", "\"DisplayOrder\" >= 0");
+        });
+        builder.ConfigureBaseEntity();
+        builder.HasOne(x => x.Consultant).WithMany(x => x.Education).HasForeignKey(x => x.ConsultantId).OnDelete(DeleteBehavior.Restrict);
+        builder.Property(x => x.Qualification).HasMaxLength(200).IsRequired();
+        builder.Property(x => x.Institution).HasMaxLength(200).IsRequired();
+        builder.Property(x => x.FieldOfStudy).HasMaxLength(200);
+        builder.HasIndex(x => new { x.ConsultantId, x.DisplayOrder });
+    }
+}
+
+public sealed class CareerConsultantExperienceConfiguration : IEntityTypeConfiguration<CareerConsultantExperience>
+{
+    public void Configure(EntityTypeBuilder<CareerConsultantExperience> builder)
+    {
+        builder.ToTable("CareerConsultantExperience", t =>
+        {
+            t.HasCheckConstraint("CK_CareerConsultantExperience_Dates", "(\"EndDate\" IS NULL OR \"EndDate\" >= \"StartDate\") AND (NOT \"IsCurrent\" OR \"EndDate\" IS NULL)");
+            t.HasCheckConstraint("CK_CareerConsultantExperience_Order", "\"DisplayOrder\" >= 0");
+        });
+        builder.ConfigureBaseEntity();
+        builder.HasOne(x => x.Consultant).WithMany(x => x.WorkExperience).HasForeignKey(x => x.ConsultantId).OnDelete(DeleteBehavior.Restrict);
+        builder.Property(x => x.JobTitle).HasMaxLength(160).IsRequired();
+        builder.Property(x => x.CompanyName).HasMaxLength(200).IsRequired();
+        builder.Property(x => x.Description).HasMaxLength(4000);
+        builder.HasIndex(x => new { x.ConsultantId, x.DisplayOrder });
     }
 }
 

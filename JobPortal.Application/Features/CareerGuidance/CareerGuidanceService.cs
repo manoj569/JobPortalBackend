@@ -8,7 +8,7 @@ using JobPortal.Shared.Models;
 
 namespace JobPortal.Application.Features.CareerGuidance;
 
-public sealed class CareerGuidanceService(ICareerGuidanceRepository profiles, IUserRepository users,
+public sealed partial class CareerGuidanceService(ICareerGuidanceRepository profiles, IUserRepository users,
     ICompanyManagementRepository companies, IUnitOfWork unitOfWork, IAuditWriter audit, TimeProvider clock,
     IValidator<ConsultantProfileRequest> profileValidator, IValidator<ConsultantServiceRequest> serviceValidator,
     IValidator<ConsultantSearchQuery> searchValidator, IValidator<ConsultantReviewRequest> reviewValidator,
@@ -41,7 +41,7 @@ public sealed class CareerGuidanceService(ICareerGuidanceRepository profiles, IU
         await RequireActor(actor, false, ct);
         await profileValidator.ValidateAndThrowAsync(request, ct);
         if (await profiles.FindByUserAsync(actor, ct) is not null) throw new ConflictException("A consultant profile already exists.");
-        var profile = new CareerConsultant { UserId = actor };
+        var profile = new CareerConsultant { UserId = actor, SubmittedAtUtc = clock.GetUtcNow().UtcDateTime };
         await ApplyProfile(profile, request, ct);
         await profiles.AddAsync(profile, ct);
         await Save(profile, AuditAction.Submit, "application_submitted", ct);
@@ -53,6 +53,7 @@ public sealed class CareerGuidanceService(ICareerGuidanceRepository profiles, IU
         var profile = await Own(actor, ct);
         await profileValidator.ValidateAndThrowAsync(request, ct);
         CheckMutable(profile, request.Revision);
+        await GuardMaterialEdit(profile, ct);
         await ApplyProfile(profile, request, ct);
         // Approval of an older claim must not carry across identity/employment/profile changes.
         profile.VerificationStatus = ConsultantVerificationStatus.Pending;
@@ -72,6 +73,10 @@ public sealed class CareerGuidanceService(ICareerGuidanceRepository profiles, IU
         CheckMutable(profile, request.Revision);
         var service = id.HasValue ? profile.Services.SingleOrDefault(x => x.Id == id && !x.IsDeleted)
             ?? throw new NotFoundException("Service not found.") : new CareerConsultantService { ConsultantId = profile.Id };
+        if ((!id.HasValue || service.DurationMinutes != request.DurationMinutes) && request.DurationMinutes is not (15 or 30 or 60))
+            throw new BadRequestException("New or changed durations must be 15, 30 or 60 minutes.");
+        if ((!id.HasValue || service.Currency != request.Currency) && request.Currency != "INR")
+            throw new BadRequestException("New offerings use INR only.");
         if (!id.HasValue)
         {
             if (profile.Services.Count(x => !x.IsDeleted) >= 20) throw new ConflictException("At most 20 services are allowed.");
@@ -121,6 +126,9 @@ public sealed class CareerGuidanceService(ICareerGuidanceRepository profiles, IU
         var profile = await profiles.FindAsync(id, false, ct) ?? throw new NotFoundException("Consultant not found.");
         if (profile.UserId == actor) throw new AppException("Self-verification is not allowed.", 403, "self_verification");
         CheckRevision(profile, request.Revision);
+        if (request.Action == ConsultantReviewAction.Approve && profile.PublicProfileConsentAtUtc.HasValue &&
+            Missing(profile, await profiles.OnboardingWindowsAsync(profile.Id, ct)).Count > 0)
+            throw new ConflictException("The submitted onboarding profile is incomplete. The owner must resubmit.");
         var previous = profile.VerificationStatus;
         profile.VerificationStatus = (request.Action, previous) switch
         {
@@ -216,7 +224,16 @@ public sealed class CareerGuidanceService(ICareerGuidanceRepository profiles, IU
         p.Tags.Where(t => !t.IsDeleted && t.Kind == ConsultantTagKind.Language).Select(t => t.Value).Order().ToArray(),
         p.Tags.Where(t => !t.IsDeleted && t.Kind == ConsultantTagKind.Expertise).Select(t => t.Value).Order().ToArray(),
         p.IsAcceptingBookings && p.VerificationStatus == ConsultantVerificationStatus.Verified, Disclaimer,
-        p.Services.Where(s => !s.IsDeleted && s.IsActive).OrderBy(s => s.Id).Select(Service).ToArray());
+        p.Services.Where(s => !s.IsDeleted && s.IsActive).OrderBy(s => s.Id).Select(Service).ToArray())
+        {
+            ProfileImageUrl = p.PublicProfileConsentAtUtc.HasValue ? p.ProfileImageUrl : null,
+            Location = p.PublicProfileConsentAtUtc.HasValue ? p.Location : null,
+            Industry = p.PublicProfileConsentAtUtc.HasValue ? p.Industry : null,
+            FunctionalArea = p.PublicProfileConsentAtUtc.HasValue ? p.FunctionalArea : null,
+            Education = p.PublicProfileConsentAtUtc.HasValue ? Education(p) : [],
+            WorkExperience = p.PublicProfileConsentAtUtc.HasValue ? Experience(p) : [],
+            ApprovalLabel = p.VerificationStatus == ConsultantVerificationStatus.Verified ? "Approved by CareerHarbor" : null
+        };
     private static ConsultantPrivateResponse Private(CareerConsultant p) => new(Public(p), p.UserId, p.LinkedInUrl,
         p.VerificationStatus, p.VerificationMethod, p.VerificationReason, p.ReviewedByUserId, p.ReviewedAtUtc, p.VerifiedAtUtc,
         p.TermsAcceptedAtUtc, p.PolicyVersion, p.Revision, p.Services.Where(s => !s.IsDeleted).OrderBy(s => s.Id).Select(Service).ToArray());

@@ -256,17 +256,43 @@ public sealed class CareerSchedulingTests
     }
 
     [Fact]
-    public async Task UnverifiedOwnerCannotManageAvailabilityAndWrongServiceCannotBeBooked()
+    public async Task UnverifiedOwnerCanPrepareAvailabilityButCannotBecomeBookable()
     {
         using var f = new Fixture();
-        await Assert.ThrowsAsync<ConflictException>(() => f.Service.CreateAsync(f.Candidate.Id, f.Request() with { ServiceId = Guid.NewGuid() }, default));
-        f.Profile.VerificationStatus = ConsultantVerificationStatus.Pending;
-        await f.Db.SaveChangesAsync();
-        var forbidden = await Assert.ThrowsAsync<AppException>(() => f.Service.SaveAvailabilityAsync(f.Owner.Id,
-            new("Asia/Kolkata", true, [], f.Profile.Revision), default));
-        Assert.Equal(403, forbidden.StatusCode);
-    }
 
+        await Assert.ThrowsAsync<ConflictException>(() =>
+            f.Service.CreateAsync(
+                f.Candidate.Id,
+                f.Request() with { ServiceId = Guid.NewGuid() },
+                default));
+
+        f.Profile.VerificationStatus = ConsultantVerificationStatus.Pending;
+        f.Profile.IsAcceptingBookings = false;
+        await f.Db.SaveChangesAsync();
+
+        var saved = await f.Service.SaveAvailabilityAsync(
+            f.Owner.Id,
+            new SaveAvailabilityRequest(
+                "Asia/Kolkata",
+                true,
+                [
+    new(
+        DayOfWeek.Monday,
+        new TimeOnly(9, 0),
+        new TimeOnly(12, 0))
+],
+                f.Profile.Revision),
+            default);
+
+        Assert.False(saved.IsAcceptingBookings);
+        Assert.Single(saved.Windows);
+
+        // Pending consultants may prepare availability,
+        // but their slots must not be publicly bookable.
+        Assert.Empty((await f.Slots()).Slots);
+
+        await Assert.ThrowsAsync<ConflictException>(() => f.Book());
+    }
     private sealed class FailingContextFactory(Exception error)
     {
         public JobPortalDbContext Create() => new(new DbContextOptionsBuilder<JobPortalDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).AddInterceptors(new Failure(error)).Options);
