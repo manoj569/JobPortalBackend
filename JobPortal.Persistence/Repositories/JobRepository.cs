@@ -67,7 +67,30 @@ public sealed class JobRepository(JobPortalDbContext context) : IJobRepository
                 .SetProperty(x => x.IsFeatured, false)
                 .SetProperty(x => x.UpdatedAtUtc, utcNow), cancellationToken);
     public Task AddAsync(Job job, CancellationToken cancellationToken = default) =>
-        context.Jobs.AddAsync(job, cancellationToken).AsTask();
+     context.Jobs.AddAsync(job, cancellationToken).AsTask();
+
+    public async Task<IReadOnlyCollection<Skill>> GetSkillsByNormalizedNamesAsync(
+        IReadOnlyCollection<string> normalizedNames,
+        CancellationToken cancellationToken = default)
+    {
+        if (normalizedNames.Count == 0)
+            return Array.Empty<Skill>();
+
+        return await context.Skills
+            .Where(x => normalizedNames.Contains(x.NormalizedName))
+            .ToArrayAsync(cancellationToken);
+    }
+
+    public async Task AddSkillsAsync(
+        IReadOnlyCollection<Skill> skills,
+        CancellationToken cancellationToken = default)
+    {
+        if (skills.Count == 0)
+            return;
+
+        await context.Skills.AddRangeAsync(skills, cancellationToken);
+    }
+
     public void Update(Job job) => context.Jobs.Update(job);
     public void Remove(Job job) => context.Jobs.Remove(job);
     public async Task DeletePermanentlyAsync(Guid id, CancellationToken cancellationToken = default) =>

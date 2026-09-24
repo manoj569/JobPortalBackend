@@ -17,6 +17,95 @@ public sealed class JobReferralServiceTests
 {
     private static readonly DateTime Now = new(2026, 9, 17, 12, 0, 0, DateTimeKind.Utc);
 
+    [Theory]
+    [InlineData(0, 0)]
+    [InlineData(2, 5)]
+    [InlineData(4, null)]
+    public async Task PublicCardsMapSkillsAndExperienceWithoutLeakingContacts(int minimum, int? maximum)
+    {
+        var fixture = CreateFixture();
+        var job = fixture.Jobs.Job!;
+        job.MinimumExperienceYears = minimum;
+        job.MaximumExperienceYears = maximum;
+        foreach (var name in Enumerable.Range(1, 25).Select(x => $"Skill {x}").Concat([" C# ", "c#", " "]))
+            job.JobSkills.Add(new JobSkill { Skill = new Skill { Name = name } });
+        var submitted = await fixture.Service.SubmitAsync(fixture.ReferrerUserId,
+            new(new(new("Test")), null, true, true, true));
+        await fixture.Service.ReviewAsync(submitted.Id, fixture.AdminUserId, new(JobReferralApprovalStatus.Approved, null));
+
+        var card = Assert.Single((await fixture.Service.GetApprovedPublicAsync(1, 20)).Items);
+        Assert.Equal(minimum, card.MinimumExperienceYears);
+        Assert.Equal(maximum, card.MaximumExperienceYears);
+        Assert.Equal(26, card.Skills.Count);
+        Assert.Single(
+            card.Skills,
+            x => x.Equals("C#", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(job.ApplicationUrl, card.ApplicationUrl);
+        Assert.Equal(job.Company.Name, card.CompanyName);
+        Assert.Equal(ReferralUnlockStatus.LoginRequired, card.ContactAccessStatus);
+        Assert.True(card.IsContactLocked);
+        Assert.Null(card.ReferrerCurrentRole);
+        Assert.Null(card.ReferrerCompanyName);
+        Assert.Null(card.ReferrerCompletedYearsAtCompany);
+        var json = System.Text.Json.JsonSerializer.Serialize(card);
+        Assert.DoesNotContain(fixture.Referrer.Email, json);
+        Assert.DoesNotContain(fixture.Referrer.PhoneNumber!, json);
+        Assert.DoesNotContain(fixture.Referrer.LinkedInUrl!, json);
+    }
+
+    [Theory]
+    [InlineData("CareerHarborMembership", 30, ReferralUnlockStatus.MembershipRequired)]
+    [InlineData("ReferralContactAccess", 30, ReferralUnlockStatus.Granted)]
+    [InlineData("ReferralContactAccess", 0, ReferralUnlockStatus.MembershipRequired)]
+    public async Task CardsAndUnlockUseSamePlanAndExpiryRules(string plan, int days, ReferralUnlockStatus expected)
+    {
+        var fixture = CreateFixture();
+        var submitted = await fixture.Service.SubmitAsync(fixture.ReferrerUserId,
+            new(new(new("Test")), null, true, false, false));
+        await fixture.Service.ReviewAsync(submitted.Id, fixture.AdminUserId, new(JobReferralApprovalStatus.Approved, null));
+        var seeker = Guid.NewGuid();
+        fixture.Memberships.ActiveMembershipUserId = seeker;
+        fixture.Memberships.ReturnedPlanCode = plan;
+        fixture.Memberships.EndsAtUtc = Now.AddDays(days);
+        var card = Assert.Single((await fixture.Service.GetApprovedPublicAsync(1, 20, seekerUserId: seeker)).Items);
+        var unlock = await fixture.Service.UnlockContactAsync(seeker, fixture.ComposedJobId);
+        Assert.Equal(expected, card.ContactAccessStatus);
+        Assert.Equal(expected, unlock.Status);
+        if (expected == ReferralUnlockStatus.Granted)
+        {
+            Assert.Equal(fixture.Referrer.LinkedInUrl, unlock.Contact!.LinkedInUrl);
+            Assert.Null(unlock.Contact.Email);
+            Assert.Null(unlock.Contact.PhoneNumber);
+        }
+        else Assert.Null(unlock.Contact);
+    }
+
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task PublicWorkHistoryRequiresPublishedPortfolioAndVisibleSection(bool published, bool visible)
+    {
+        var fixture = CreateFixture();
+        fixture.Referrer.CandidatePortfolio = new CandidatePortfolio
+        {
+            Status = published ? CandidatePortfolioStatus.Published : CandidatePortfolioStatus.Draft,
+            SectionSettings = [new PortfolioSectionSetting { SectionType = PortfolioSectionType.Experience, IsVisible = visible }]
+        };
+        fixture.Referrer.CandidateExperiences.Add(new CandidateExperience
+        {
+            JobTitle = "Test role", CompanyName = "Referrer employer", IsCurrent = true,
+            StartDate = new DateOnly(2023, 9, 18)
+        });
+        var submitted = await fixture.Service.SubmitAsync(fixture.ReferrerUserId,
+            new(new(new("Test")), null, true, false, false));
+        await fixture.Service.ReviewAsync(submitted.Id, fixture.AdminUserId, new(JobReferralApprovalStatus.Approved, null));
+        var card = Assert.Single((await fixture.Service.GetApprovedPublicAsync(1, 20)).Items);
+        Assert.Equal(published && visible ? "Test role" : null, card.ReferrerCurrentRole);
+        Assert.Equal(published && visible ? "Referrer employer" : null, card.ReferrerCompanyName);
+        Assert.Equal(published && visible ? (int?)2 : null, card.ReferrerCompletedYearsAtCompany);
+    }
+
     [Fact]
     public async Task SubmitComposesJobAndCreatesPendingReferral()
     {
@@ -115,6 +204,34 @@ public sealed class JobReferralServiceTests
             () => fixture.Service.UnlockContactAsync(Guid.NewGuid(), fixture.ComposedJobId));
     }
 
+    [Fact]
+    public async Task GetMySubmissionsReturnsPagedResults()
+    {
+        var fixture = CreateFixture();
+
+        await fixture.Service.SubmitAsync(
+            fixture.ReferrerUserId,
+            new SubmitJobReferralRequest(
+                new ComposeJobRequest(new ComposeJobDraftRequest("Software Engineer")),
+                null,
+                ShowLinkedIn: true,
+                ShowEmail: false,
+                ShowPhone: false));
+
+        var result = await fixture.Service.GetMySubmissionsAsync(
+            fixture.ReferrerUserId,
+            search: null,
+            status: null,
+            pageNumber: 1,
+            pageSize: 10);
+
+        Assert.Single(result.Items);
+        Assert.Equal(1, result.TotalCount);
+        Assert.Equal(1, result.PageNumber);
+        Assert.Equal(10, result.PageSize);
+        Assert.Equal("Placeholder", result.Items.Single().JobTitle);
+    }
+
     private static Fixture CreateFixture()
     {
         var referrerUserId = Guid.NewGuid();
@@ -159,7 +276,7 @@ public sealed class JobReferralServiceTests
 
         var jobRepository = new JobRepositoryFake { Job = job };
         var jobService = new JobServiceFake(composedJobId);
-        var referralRepository = new JobReferralRepositoryFake(referrer);
+        var referralRepository = new JobReferralRepositoryFake(referrer, job);
         var memberships = new MembershipRepositoryFake();
         var audit = new AuditWriterTestDouble();
         var unitOfWork = new UnitOfWorkFake();
@@ -252,7 +369,10 @@ public sealed class JobReferralServiceTests
             Task.FromResult(true);
         public Task<int> ExpireOverduePublishedAsync(DateTime utcNow, CancellationToken cancellationToken = default) =>
             Task.FromResult(0);
-        public Task AddAsync(Job job, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task AddAsync(
+     Job job,
+     CancellationToken cancellationToken = default) =>
+     Task.CompletedTask;
         public void Update(Job job) { }
         public void Remove(Job job) => job.IsDeleted = true;
         public Task DeletePermanentlyAsync(Guid id, CancellationToken cancellationToken = default) =>
@@ -268,6 +388,8 @@ public sealed class JobReferralServiceTests
         private const string ReferralContactPlanCode = "ReferralContactAccess";
 
         public Guid? ActiveMembershipUserId { get; set; }
+        public string ReturnedPlanCode { get; set; } = ReferralContactPlanCode;
+        public DateTime? EndsAtUtc { get; set; }
 
         public Task<Membership?> GetActiveForUserAsync(
             Guid userId,
@@ -286,7 +408,8 @@ public sealed class JobReferralServiceTests
                     ? new Membership
                     {
                         UserId = userId,
-                        PlanCode = ReferralContactPlanCode,
+                        PlanCode = ReturnedPlanCode,
+                        EndsAtUtc = EndsAtUtc,
                         PlanName = "Referral Contact Access",
                         Status = MembershipStatus.Active,
                         StartsAtUtc = Now
@@ -334,14 +457,21 @@ public sealed class JobReferralServiceTests
     }
     /// <summary>Minimal in-memory store — one referral at a time is all these tests need,
     /// keyed loosely since each test creates its own fixture/job.</summary>
-    private sealed class JobReferralRepositoryFake(User referrer) : IJobReferralRepository
+    private sealed class JobReferralRepositoryFake(
+        User referrer,
+        Job job) : IJobReferralRepository
     {
         private readonly List<JobReferral> _referrals = [];
 
-        public Task AddAsync(JobReferral referral, CancellationToken cancellationToken = default)
+        public Task AddAsync(
+     JobReferral referral,
+     CancellationToken cancellationToken = default)
         {
             referral.ReferrerUser = referrer;
+            referral.Job = job;
+
             _referrals.Add(referral);
+
             return Task.CompletedTask;
         }
 
@@ -356,13 +486,49 @@ public sealed class JobReferralServiceTests
             throw new NotImplementedException();
 
         public Task<(IReadOnlyCollection<JobReferral> Items, int TotalCount)> GetApprovedAsync(
-            int pageNumber, int pageSize, CancellationToken cancellationToken = default) =>
-            throw new NotImplementedException();
+            int pageNumber, int pageSize, CancellationToken cancellationToken = default)
+        {
+            var approved = _referrals.Where(x => x.ApprovalStatus == JobReferralApprovalStatus.Approved).ToArray();
+            return Task.FromResult(((IReadOnlyCollection<JobReferral>)approved.Skip((pageNumber - 1) * pageSize).Take(pageSize).ToArray(), approved.Length));
+        }
 
-        public Task<IReadOnlyCollection<JobReferral>> GetByReferrerAsync(
-            Guid referrerUserId, CancellationToken cancellationToken = default) =>
-            throw new NotImplementedException();
+        public Task<(IReadOnlyCollection<JobReferral> Items, int TotalCount)> GetByReferrerAsync(
+    Guid referrerUserId,
+    string? search,
+    JobReferralApprovalStatus? status,
+    int pageNumber,
+    int pageSize,
+    CancellationToken cancellationToken = default)
+        {
+            IEnumerable<JobReferral> query =
+                _referrals.Where(x => x.ReferrerUserId == referrerUserId);
 
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                var searchTerm = search.Trim();
+
+                query = query.Where(x =>
+                    x.Job.Title.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
+                    (!string.IsNullOrWhiteSpace(x.Job.Location) &&
+                     x.Job.Location.Contains(searchTerm, StringComparison.OrdinalIgnoreCase)));
+            }
+
+            if (status.HasValue)
+            {
+                query = query.Where(x => x.ApprovalStatus == status.Value);
+            }
+
+            query = query.OrderByDescending(x => x.CreatedAtUtc);
+
+            var totalCount = query.Count();
+
+            IReadOnlyCollection<JobReferral> items = query
+                .Skip((pageNumber - 1) * pageSize)
+                .Take(pageSize)
+                .ToList();
+
+            return Task.FromResult((items, totalCount));
+        }
         public Task RecordUnlockAsync(Guid jobReferralId, Guid seekerUserId, CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
     }

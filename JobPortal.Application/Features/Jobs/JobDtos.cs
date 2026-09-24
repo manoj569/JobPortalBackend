@@ -5,11 +5,24 @@ namespace JobPortal.Application.Features.Jobs;
 
 public sealed record CreateJobRequest(string Title, string Description, Guid CompanyId, Guid CategoryId, string ApplicationUrl, string? Responsibilities, string? Requirements, string? Benefits, string? Location, decimal? MinimumSalary, decimal? MaximumSalary, string CurrencyCode, EmploymentType EmploymentType, WorkplaceType WorkplaceType, ExperienceLevel ExperienceLevel, DateTime? ExpiresAtUtc, int? MinimumExperienceYears = null, int? MaximumExperienceYears = null, int? InternshipDurationMonths = null, bool IsFlexibleDuration = false, string? Department = null, string? RoleCategory = null, string? EducationRequirement = null, PostedByType? PostedByType = null);
 public sealed record UpdateJobRequest(string Title, string Description, Guid CompanyId, Guid CategoryId, string ApplicationUrl, string? Responsibilities, string? Requirements, string? Benefits, string? Location, decimal? MinimumSalary, decimal? MaximumSalary, string CurrencyCode, EmploymentType EmploymentType, WorkplaceType WorkplaceType, ExperienceLevel ExperienceLevel, DateTime? ExpiresAtUtc, int? MinimumExperienceYears = null, int? MaximumExperienceYears = null, int? InternshipDurationMonths = null, bool IsFlexibleDuration = false, string? Department = null, string? RoleCategory = null, string? EducationRequirement = null, PostedByType? PostedByType = null);
-public sealed record ComposeJobDraftRequest(string Title, string? Description = null, string? ApplicationUrl = null,
-    EmploymentType? EmploymentType = null, WorkplaceType? WorkplaceType = null,
-    ExperienceLevel? ExperienceLevel = null, string? Location = null, decimal? MinimumSalary = null,
-    decimal? MaximumSalary = null, string? CurrencyCode = null, DateTime? ExpiresAtUtc = null,
-    string? Responsibilities = null, string? Requirements = null, string? Benefits = null);
+public sealed record ComposeJobDraftRequest(
+    string Title,
+    string? Description = null,
+    string? ApplicationUrl = null,
+    EmploymentType? EmploymentType = null,
+    WorkplaceType? WorkplaceType = null,
+    ExperienceLevel? ExperienceLevel = null,
+    string? Location = null,
+    decimal? MinimumSalary = null,
+    decimal? MaximumSalary = null,
+    string? CurrencyCode = null,
+    DateTime? ExpiresAtUtc = null,
+    string? Responsibilities = null,
+    string? Requirements = null,
+    string? Benefits = null,
+    int? MinimumExperienceYears = null,
+    int? MaximumExperienceYears = null,
+    IReadOnlyCollection<string>? Skills = null);
 public sealed record ComposeRelationRequest<T>(Guid? ExistingId = null, T? New = default);
 public sealed record ComposeJobRequest(ComposeJobDraftRequest Job,
     ComposeRelationRequest<CreateInlineCompanyRequest>? Company = null,

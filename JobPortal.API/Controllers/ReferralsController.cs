@@ -41,28 +41,53 @@ public sealed class ReferralsController(
             new ApiResponse<JobReferralResponse>(result, "Referral submitted for admin approval."));
     }
 
-    /// <summary>Public listing of approved referral jobs for the "Referral jobs" browse tab. No contact details.</summary>
+    /// <summary>
+    /// Public listing of approved referral jobs for the "Referral jobs" browse tab.
+    /// No contact details.
+    /// </summary>
     [HttpGet("public")]
     [AllowAnonymous]
-    [ProducesResponseType(typeof(ApiResponse<PagedResponse<PublicReferralJobResponse>>), StatusCodes.Status200OK)]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    [ProducesResponseType(
+        typeof(ApiResponse<PagedResponse<PublicReferralJobResponse>>),
+        StatusCodes.Status200OK)]
     public async Task<ActionResult<ApiResponse<PagedResponse<PublicReferralJobResponse>>>> GetApprovedPublic(
-        [FromQuery] int pageNumber = 1, [FromQuery] int pageSize = 20,
+        [FromQuery] int pageNumber = 1,
+        [FromQuery] int pageSize = 20,
         CancellationToken cancellationToken = default)
     {
-        var result = await referralService.GetApprovedPublicAsync(pageNumber, pageSize, cancellationToken);
+        var result = await referralService.GetApprovedPublicAsync(
+            pageNumber,
+            pageSize,
+            User.TryGetUserId(),
+            cancellationToken);
+
         return Ok(new ApiResponse<PagedResponse<PublicReferralJobResponse>>(result));
     }
-
-    /// <summary>Referrer's own past submissions, with status.</summary>
+    /// <summary>
+    /// Referrer's own past submissions with search, status filtering, and pagination.
+    /// </summary>
     [HttpGet("mine")]
     [Authorize]
-    [ProducesResponseType(typeof(ApiResponse<IReadOnlyCollection<JobReferralResponse>>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<ApiResponse<IReadOnlyCollection<JobReferralResponse>>>> GetMine(
-        CancellationToken cancellationToken)
+    [ProducesResponseType(typeof(ApiResponse<PagedResponse<JobReferralResponse>>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<ApiResponse<PagedResponse<JobReferralResponse>>>> GetMine(
+        [FromQuery] string? search = null,
+        [FromQuery] JobReferralApprovalStatus? status = null,
+        [FromQuery] int pageNumber = 1,
+        [FromQuery] int pageSize = 10,
+        CancellationToken cancellationToken = default)
     {
         var referrerUserId = User.GetRequiredUserId();
-        var result = await referralService.GetMySubmissionsAsync(referrerUserId, cancellationToken);
-        return Ok(new ApiResponse<IReadOnlyCollection<JobReferralResponse>>(result));
+
+        var result = await referralService.GetMySubmissionsAsync(
+            referrerUserId,
+            search,
+            status,
+            pageNumber,
+            pageSize,
+            cancellationToken);
+
+        return Ok(new ApiResponse<PagedResponse<JobReferralResponse>>(result));
     }
 
     /// <summary>Admin queue of referrals awaiting approval.</summary>
@@ -107,6 +132,7 @@ public sealed class ReferralsController(
     /// from "please subscribe" — access itself is still gated inside the service.</summary>
     [HttpGet("unlock/{jobId:guid}")]
     [AllowAnonymous]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
     [ProducesResponseType(typeof(ApiResponse<ReferralUnlockResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiError), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<ApiResponse<ReferralUnlockResponse>>> UnlockContact(

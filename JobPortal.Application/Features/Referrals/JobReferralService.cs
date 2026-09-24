@@ -204,12 +204,23 @@ public sealed class JobReferralService(
             cancellationToken);
     }
 
-    public async Task<IReadOnlyCollection<JobReferralResponse>> GetMySubmissionsAsync(
-        Guid referrerUserId,
-        CancellationToken cancellationToken = default)
+    public async Task<PagedResponse<JobReferralResponse>> GetMySubmissionsAsync(
+    Guid referrerUserId,
+    string? search,
+    JobReferralApprovalStatus? status,
+    int pageNumber,
+    int pageSize,
+    CancellationToken cancellationToken = default)
     {
-        var items = await referrals.GetByReferrerAsync(
+        pageNumber = Math.Max(1, pageNumber);
+        pageSize = Math.Clamp(pageSize, 1, 50);
+
+        var (items, totalCount) = await referrals.GetByReferrerAsync(
             referrerUserId,
+            search,
+            status,
+            pageNumber,
+            pageSize,
             cancellationToken);
 
         var responses = new List<JobReferralResponse>(items.Count);
@@ -223,27 +234,28 @@ public sealed class JobReferralService(
                     cancellationToken));
         }
 
-        return responses;
+        return new PagedResponse<JobReferralResponse>(
+            responses,
+            pageNumber,
+            pageSize,
+            totalCount);
     }
 
     public async Task<PagedResponse<PublicReferralJobResponse>> GetApprovedPublicAsync(
-        int pageNumber,
-        int pageSize,
-        CancellationToken cancellationToken = default)
+     int pageNumber,
+     int pageSize,
+     Guid? seekerUserId = null,
+     CancellationToken cancellationToken = default)
     {
+        if (pageNumber is < 1 or > 1000000 || pageSize is < 1 or > 100)
+            throw new BadRequestException("Invalid pagination.");
         var (items, totalCount) = await referrals.GetApprovedAsync(
             pageNumber,
             pageSize,
             cancellationToken);
 
-        var responses = items
-            .Select(referral => new PublicReferralJobResponse(
-                referral.JobId,
-                referral.Job.Title,
-                referral.Job.Company.Name,
-                referral.Job.Location,
-                $"{referral.ReferrerUser.FirstName} {referral.ReferrerUser.LastName}".Trim()))
-            .ToList();
+        var access = await ContactAccessAsync(seekerUserId, cancellationToken);
+        var responses = items.Select(referral => ToPublicResponse(referral, access)).ToList();
 
         return new PagedResponse<PublicReferralJobResponse>(
             responses,
@@ -263,25 +275,23 @@ public sealed class JobReferralService(
             ?? throw new NotFoundException(
                 "This job has no referral attached.");
 
-        if (referral.ApprovalStatus != JobReferralApprovalStatus.Approved)
+        if (referral.ApprovalStatus != JobReferralApprovalStatus.Approved || referral.Job.Status != JobStatus.Published ||
+            referral.Job.IsDeleted || referral.Job.IsHidden || referral.Job.ExpiresAtUtc <= UtcNow ||
+            referral.ReferrerUser.IsDeleted || referral.ReferrerUser.Status != UserStatus.Active)
         {
             throw new NotFoundException(
                 "This job has no referral attached.");
         }
 
-        if (!seekerUserId.HasValue)
+        var access = await ContactAccessAsync(seekerUserId, cancellationToken);
+        if (access == ReferralUnlockStatus.LoginRequired)
         {
             return new ReferralUnlockResponse(
                 ReferralUnlockStatus.LoginRequired,
                 "Please log in to continue.");
         }
 
-        var membership = await memberships.GetActiveForUserAsync(
-            seekerUserId.Value,
-            ReferralContactPlanCode,
-            cancellationToken);
-
-        if (membership is null)
+        if (access != ReferralUnlockStatus.Granted)
         {
             return new ReferralUnlockResponse(
                 ReferralUnlockStatus.MembershipRequired,
@@ -290,7 +300,7 @@ public sealed class JobReferralService(
 
         await referrals.RecordUnlockAsync(
             referral.Id,
-            seekerUserId.Value,
+            seekerUserId!.Value,
             cancellationToken);
 
         await unitOfWork.SaveChangesAsync(cancellationToken);
@@ -314,6 +324,51 @@ public sealed class JobReferralService(
             ReferralUnlockStatus.Granted,
             "Contact details unlocked.",
             contact);
+    }
+
+    private async Task<ReferralUnlockStatus> ContactAccessAsync(Guid? seekerUserId, CancellationToken ct)
+    {
+        if (!seekerUserId.HasValue) return ReferralUnlockStatus.LoginRequired;
+        var membership = await memberships.GetActiveForUserAsync(seekerUserId.Value, ReferralContactPlanCode, ct);
+        return membership is not null && !membership.IsDeleted && membership.UserId == seekerUserId &&
+            membership.PlanCode == ReferralContactPlanCode && membership.Status == MembershipStatus.Active &&
+            membership.StartsAtUtc <= UtcNow && (!membership.EndsAtUtc.HasValue || membership.EndsAtUtc > UtcNow)
+            ? ReferralUnlockStatus.Granted : ReferralUnlockStatus.MembershipRequired;
+    }
+
+    private PublicReferralJobResponse ToPublicResponse(JobReferral referral, ReferralUnlockStatus access)
+    {
+        var job = referral.Job;
+        var user = referral.ReferrerUser;
+        var portfolio = user.CandidatePortfolio;
+        var published = !user.IsDeleted && user.Status == UserStatus.Active &&
+            portfolio is { IsDeleted: false, Status: CandidatePortfolioStatus.Published };
+        var today = DateOnly.FromDateTime(UtcNow);
+        // Work history is private unless the existing public portfolio explicitly exposes it.
+        var experience = published && portfolio!.SectionSettings.Any(x => !x.IsDeleted && x.SectionType == PortfolioSectionType.Experience && x.IsVisible)
+            ? user.CandidateExperiences.Where(x => !x.IsDeleted && x.IsCurrent && x.EndDate == null && x.StartDate <= today)
+                .OrderByDescending(x => x.StartDate).ThenBy(x => x.Id).FirstOrDefault() : null;
+        int? years = null;
+        if (experience is not null)
+        {
+            years = today.Year - experience.StartDate.Year;
+            if (experience.StartDate.AddYears(years.Value) > today) years--;
+        }
+        return new(job.Id, job.Title, job.Company.Name, job.Location, $"{user.FirstName} {user.LastName}".Trim())
+        {
+            ReferralId = referral.Id, CompanyId = job.CompanyId, CompanyLogoUrl = job.Company.LogoUrl,
+            CompanyIsVerified = job.Company.IsVerified, JobSlug = job.Slug, ApplicationUrl = job.ApplicationUrl,
+            EmploymentType = job.EmploymentType, WorkplaceType = job.WorkplaceType,
+            MinimumExperienceYears = job.MinimumExperienceYears, MaximumExperienceYears = job.MaximumExperienceYears,
+            Skills = job.JobSkills.Where(x => !x.IsDeleted && !x.Skill.IsDeleted).Select(x => x.Skill.Name)
+                .Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()).Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToArray(),
+            ApprovalStatus = referral.ApprovalStatus, ReferralAvailable = referral.ApprovalStatus == JobReferralApprovalStatus.Approved,
+            ReferrerCurrentRole = experience?.JobTitle, ReferrerCompanyName = experience?.CompanyName,
+            ReferrerCompanyStartDate = experience?.StartDate, ReferrerCompletedYearsAtCompany = years,
+            ReferrerProfileImageUrl = published ? user.ProfileImageUrl : null,
+            ContactAccessStatus = access
+        };
     }
 
     private static Task<JobReferralResponse> ToResponseAsync(

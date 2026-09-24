@@ -42,11 +42,16 @@ public sealed class JobReferralRepository(JobPortalDbContext context) : IJobRefe
         int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
         var query = WithIncludes()
+            .AsNoTracking().AsSplitQuery()
+            .Include(x => x.Job).ThenInclude(x => x.JobSkills).ThenInclude(x => x.Skill)
+            .Include(x => x.ReferrerUser).ThenInclude(x => x.CandidatePortfolio).ThenInclude(x => x!.SectionSettings)
+            .Include(x => x.ReferrerUser).ThenInclude(x => x.CandidateExperiences)
             .Where(x => x.ApprovalStatus == JobReferralApprovalStatus.Approved &&
+                !x.ReferrerUser.IsDeleted && x.ReferrerUser.Status == UserStatus.Active &&
                 x.Job.Status == JobStatus.Published &&
                 !x.Job.IsHidden && !x.Job.IsDeleted &&
                 (!x.Job.ExpiresAtUtc.HasValue || x.Job.ExpiresAtUtc > DateTime.UtcNow))
-            .OrderByDescending(x => x.CreatedAtUtc);
+            .OrderByDescending(x => x.CreatedAtUtc).ThenBy(x => x.Id);
 
         var totalCount = await query.CountAsync(cancellationToken);
         var items = await query
@@ -57,12 +62,43 @@ public sealed class JobReferralRepository(JobPortalDbContext context) : IJobRefe
         return (items, totalCount);
     }
 
-    public async Task<IReadOnlyCollection<JobReferral>> GetByReferrerAsync(
-        Guid referrerUserId, CancellationToken cancellationToken = default) =>
-        await WithIncludes()
-            .Where(x => x.ReferrerUserId == referrerUserId)
-            .OrderByDescending(x => x.CreatedAtUtc)
+    public async Task<(IReadOnlyCollection<JobReferral> Items, int TotalCount)> GetByReferrerAsync(
+        Guid referrerUserId,
+        string? search,
+        JobReferralApprovalStatus? status,
+        int pageNumber,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        var query = WithIncludes()
+            .Where(x => x.ReferrerUserId == referrerUserId);
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var searchTerm = search.Trim();
+
+            query = query.Where(x =>
+                EF.Functions.ILike(x.Job.Title, $"%{searchTerm}%") ||
+                (x.Job.Location != null &&
+                 EF.Functions.ILike(x.Job.Location, $"%{searchTerm}%")));
+        }
+
+        if (status.HasValue)
+        {
+            query = query.Where(x => x.ApprovalStatus == status.Value);
+        }
+
+        query = query.OrderByDescending(x => x.CreatedAtUtc);
+
+        var totalCount = await query.CountAsync(cancellationToken);
+
+        var items = await query
+            .Skip((pageNumber - 1) * pageSize)
+            .Take(pageSize)
             .ToListAsync(cancellationToken);
+
+        return (items, totalCount);
+    }
 
     public async Task RecordUnlockAsync(
         Guid jobReferralId, Guid seekerUserId, CancellationToken cancellationToken = default)

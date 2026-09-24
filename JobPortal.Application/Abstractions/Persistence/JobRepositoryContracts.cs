@@ -12,6 +12,17 @@ public interface IJobRepository
     Task<int> ExpireOverduePublishedAsync(
         DateTime utcNow, CancellationToken cancellationToken = default);
     Task AddAsync(Job job, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyCollection<Skill>> GetSkillsByNormalizedNamesAsync(
+        IReadOnlyCollection<string> normalizedNames,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyCollection<Skill>>(Array.Empty<Skill>());
+
+    Task AddSkillsAsync(
+        IReadOnlyCollection<Skill> skills,
+        CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
+
     void Update(Job job);
     void Remove(Job job);
     Task DeletePermanentlyAsync(Guid id, CancellationToken cancellationToken = default);

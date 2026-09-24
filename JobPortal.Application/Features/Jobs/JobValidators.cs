@@ -166,12 +166,40 @@ public sealed class ComposeJobRequestValidator : AbstractValidator<ComposeJobReq
     public ComposeJobRequestValidator()
     {
         RuleFor(x => x.Job).NotNull();
-        RuleFor(x => x.Job.Title).NotEmpty().MaximumLength(250).When(x => x.Job is not null);
+
+        RuleFor(x => x.Job.Title)
+            .NotEmpty()
+            .MaximumLength(250)
+            .When(x => x.Job is not null);
+
+        RuleFor(x => x.Job.MinimumExperienceYears)
+            .GreaterThanOrEqualTo(0)
+            .When(x => x.Job?.MinimumExperienceYears.HasValue == true);
+
+        RuleFor(x => x.Job.MaximumExperienceYears)
+            .GreaterThanOrEqualTo(0)
+            .When(x => x.Job?.MaximumExperienceYears.HasValue == true);
+
+        RuleFor(x => x.Job)
+            .Must(job =>
+                job is null ||
+                !job.MinimumExperienceYears.HasValue ||
+                !job.MaximumExperienceYears.HasValue ||
+                job.MaximumExperienceYears.Value >= job.MinimumExperienceYears.Value)
+            .WithMessage("Maximum experience must be greater than or equal to minimum experience.");
+
+        RuleForEach(x => x.Job.Skills)
+            .Must(skill => string.IsNullOrWhiteSpace(skill) || skill.Trim().Length <= 150)
+            .WithMessage("Skill names cannot exceed 150 characters.")
+            .When(x => x.Job?.Skills is { Count: > 0 });
+
         RuleFor(x => x.Category)
             .Must(x => x is not null && (x.ExistingId.HasValue ^ x.New is not null))
             .WithMessage("Provide exactly one category: existingId or new.");
+
         RuleFor(x => x.Category!.New!.Name)
-            .NotEmpty().MaximumLength(100)
+            .NotEmpty()
+            .MaximumLength(100)
             .When(x => x.Category?.New is not null)
             .WithMessage("New category name is required and cannot exceed 100 characters.");
     }

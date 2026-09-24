@@ -46,7 +46,30 @@ public sealed record PublicReferralJobResponse(
     string JobTitle,
     string CompanyName,
     string? Location,
-    string ReferrerName);
+    string ReferrerName)
+{
+    public Guid ReferralId { get; init; }
+    public Guid CompanyId { get; init; }
+    public string? CompanyLogoUrl { get; init; }
+    public bool CompanyIsVerified { get; init; }
+    public string JobSlug { get; init; } = "";
+    public string ApplicationUrl { get; init; } = "";
+    public EmploymentType EmploymentType { get; init; }
+    public WorkplaceType WorkplaceType { get; init; }
+    public int? MinimumExperienceYears { get; init; }
+    public int? MaximumExperienceYears { get; init; }
+    public IReadOnlyCollection<string> Skills { get; init; } = Array.Empty<string>();
+    public JobReferralApprovalStatus ApprovalStatus { get; init; }
+    public bool ReferralAvailable { get; init; }
+    public string? ReferrerCurrentRole { get; init; }
+    public string? ReferrerCompanyName { get; init; }
+    public DateOnly? ReferrerCompanyStartDate { get; init; }
+    public int? ReferrerCompletedYearsAtCompany { get; init; }
+    public string? ReferrerProfileImageUrl { get; init; }
+    public ReferralUnlockStatus ContactAccessStatus { get; init; } = ReferralUnlockStatus.LoginRequired;
+    public bool CanViewReferrerContact => ContactAccessStatus == ReferralUnlockStatus.Granted;
+    public bool IsContactLocked => !CanViewReferrerContact;
+}
 
 public enum ReferralUnlockStatus { Granted = 1, LoginRequired, MembershipRequired }
 

@@ -31,6 +31,9 @@ public sealed class JobService(
             throw new BadRequestException("Job title is required.", "validation_error");
         if (request.Job.Title.Trim().Length > 250)
             throw new BadRequestException("Job title cannot exceed 250 characters.", "validation_error");
+        if (request.Job.MinimumExperienceYears < 0 || request.Job.MaximumExperienceYears < 0 ||
+            request.Job.MinimumExperienceYears > request.Job.MaximumExperienceYears)
+            throw new BadRequestException("Experience must be nonnegative and maximum experience must be greater than or equal to minimum experience.", "validation_error");
         ValidateRelation(request.Company?.ExistingId, request.Company?.New, "company");
         ValidateRelation(request.Category?.ExistingId, request.Category?.New, "category");
         if (request.Company is null || (!request.Company.ExistingId.HasValue && request.Company.New is null))
@@ -63,9 +66,10 @@ public sealed class JobService(
             EmploymentType = request.Job.EmploymentType ?? default,
             WorkplaceType = request.Job.WorkplaceType ?? default,
             ExperienceLevel = request.Job.ExperienceLevel ?? default,
+            MinimumExperienceYears = request.Job.MinimumExperienceYears,
+            MaximumExperienceYears = request.Job.MaximumExperienceYears,
             Location = TextNormalizer.TrimOrNull(request.Job.Location),
             MinimumSalary = request.Job.MinimumSalary,
-            MaximumSalary = request.Job.MaximumSalary,
             CurrencyCode = TextNormalizer.TrimOrNull(request.Job.CurrencyCode)?.ToUpperInvariant() ?? "USD",
             ExpiresAtUtc = request.Job.ExpiresAtUtc,
             Responsibilities = TextNormalizer.TrimOrNull(request.Job.Responsibilities),
@@ -89,6 +93,60 @@ public sealed class JobService(
                 IsSharingApproved = recruiterRequest.IsSharingApproved
             };
         }
+        if (request.Job.Skills is { Count: > 0 })
+        {
+            var skillNames = request.Job.Skills
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Select(x => x.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            var normalizedNames = skillNames
+                .Select(x => x.ToUpperInvariant())
+                .ToArray();
+
+            if (skillNames.Any(x => x.Length > 150))
+                throw new BadRequestException("Skill names cannot exceed 150 characters.", "validation_error");
+
+            var existingSkills = await jobs.GetSkillsByNormalizedNamesAsync(
+                normalizedNames,
+                cancellationToken);
+
+            var existingByName = existingSkills.ToDictionary(
+                x => x.NormalizedName,
+                StringComparer.OrdinalIgnoreCase);
+
+            var newSkills = new List<Skill>();
+
+            foreach (var skillName in skillNames)
+            {
+                var normalizedName = skillName.ToUpperInvariant();
+
+                if (!existingByName.TryGetValue(normalizedName, out var skill))
+                {
+                    skill = new Skill
+                    {
+                        Name = skillName,
+                        NormalizedName = normalizedName
+                    };
+
+                    newSkills.Add(skill);
+                    existingByName[normalizedName] = skill;
+                }
+
+                job.JobSkills.Add(new JobSkill
+                {
+                    JobId = job.Id,
+                    Skill = skill,
+                    SkillId = skill.Id,
+                    IsRequired = true,
+                    ProficiencyLevel = 0
+                });
+            }
+
+            await jobs.AddSkillsAsync(newSkills, cancellationToken);
+        }
+
         await jobs.AddAsync(job, cancellationToken);
         if (companyCreated) await auditWriter.AppendAsync(new(AuditAction.Create, "Company", company!.Id.ToString()), cancellationToken);
         if (categoryCreated) await auditWriter.AppendAsync(new(AuditAction.Create, "Category", category!.Id.ToString()), cancellationToken);
