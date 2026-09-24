@@ -42,7 +42,7 @@ public interface ICareerSchedulingRepository
     Task<IReadOnlyList<CareerConsultantAvailability>> WindowsAsync(Guid consultantId, CancellationToken ct);
     Task<IReadOnlyList<CareerConsultantAvailabilityException>> ExceptionsAsync(Guid consultantId, DateOnly from, DateOnly to, CancellationToken ct);
     Task<CareerConsultantAvailabilityException?> ExceptionAsync(Guid consultantId, Guid id, CancellationToken ct);
-    Task<IReadOnlyList<CareerGuidanceBooking>> OccupiedAsync(Guid consultantId, DateTime from, DateTime to, CancellationToken ct);
+    Task<IReadOnlyList<CareerGuidanceBooking>> OccupiedAsync(Guid consultantId, DateTime from, DateTime to, DateTime nowUtc, CancellationToken ct);
     Task<CareerGuidanceBooking?> BookingAsync(Guid id, Guid actor, bool consultant, bool admin, CancellationToken ct);
     Task<PagedResponse<CareerGuidanceBooking>> BookingsAsync(Guid actor, bool consultant, bool admin, BookingQuery query, CancellationToken ct);
     void AddWindows(IEnumerable<CareerConsultantAvailability> windows);

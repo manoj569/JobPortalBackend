@@ -32,12 +32,18 @@ public sealed class CareerFinanceService(ICareerFinanceRepository repository, IU
         gateway.ValidateConfiguration();
         var booking = await repository.BookingAsync(bookingId, ct);
         if (booking is null || booking.CandidateUserId != actor || booking.IsDeleted) throw new NotFoundException("Booking not found.");
+        var payment = await repository.ForBookingAsync(bookingId, ct);
+        if (CareerReservationPolicy.ExpireIfDue(booking, payment, Now))
+        {
+            await Audit(booking.Id, "reservation_expired", actor, ct);
+            await repository.SaveAsync(ct);
+            throw new ConflictException("The unpaid booking reservation has expired.", "reservation_expired");
+        }
         if (booking.Consultant.UserId == actor || booking.Status != CareerBookingStatus.Pending || booking.StartUtc <= Now ||
             booking.Consultant.IsDeleted || booking.Consultant.VerificationStatus != ConsultantVerificationStatus.Verified ||
             booking.Consultant.User.IsDeleted || booking.Consultant.User.Status != UserStatus.Active || booking.Service.IsDeleted || !booking.Service.IsActive)
             throw new ConflictException("Booking is not eligible for checkout.");
         if (booking.CurrencySnapshot != "INR") throw new BadRequestException("Career Guidance checkout currently supports INR only.");
-        var payment = await repository.ForBookingAsync(bookingId, ct);
         var firstDispatch = payment is null;
         if (payment is null)
         {
@@ -110,6 +116,8 @@ public sealed class CareerFinanceService(ICareerFinanceRepository repository, IU
         Validate(p, state);
         if (p.ProviderPaymentId is not null && p.ProviderPaymentId != state.Id) throw new ConflictException("Provider payment is already bound.");
         if (p.PaidAtUtc.HasValue) return;
+        if (CareerReservationPolicy.ExpireIfDue(p.Booking, p, Now))
+            await Audit(p.BookingId, "reservation_expired", actor, ct);
         p.ProviderPaymentId = state.Id; p.PaidAtUtc = Now; p.Status = CareerPaymentStatus.Captured; p.FailureCode = null;
         var b = p.Booking;
         // Late capture is a financial fact, not permission to resurrect cancelled/expired capacity.

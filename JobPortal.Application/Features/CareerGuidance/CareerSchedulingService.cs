@@ -31,7 +31,7 @@ public sealed class CareerSchedulingService(ICareerSchedulingRepository reposito
         Revision(p.Revision, request.Revision);
         await availabilityValidator.ValidateAndThrowAsync(request, ct);
         _ = CareerSlotGenerator.TimeZone(request.TimeZoneId);
-        if (p.TimeZoneId != request.TimeZoneId && (await repository.OccupiedAsync(p.Id, Now, DateTime.SpecifyKind(DateTime.MaxValue, DateTimeKind.Utc), ct)).Count > 0)
+        if (p.TimeZoneId != request.TimeZoneId && (await repository.OccupiedAsync(p.Id, Now, DateTime.SpecifyKind(DateTime.MaxValue, DateTimeKind.Utc), Now, ct)).Count > 0)
             throw new ConflictException("Timezone cannot change while future bookings exist.");
         var windows = await repository.WindowsAsync(p.Id, ct);
         foreach (var window in windows) { window.IsDeleted = true; window.DeletedAtUtc = Now; }
@@ -98,7 +98,7 @@ public sealed class CareerSchedulingService(ICareerSchedulingRepository reposito
 
     public async Task<CareerBookingResponse> CreateAsync(Guid actor, CreateCareerBookingRequest request, CancellationToken ct)
     {
-        await Actor(actor, false, ct);
+        await Actor(actor, false, ct, candidate: true);
         await bookingValidator.ValidateAndThrowAsync(request, ct);
         var p = await repository.ProfileAsync(request.ConsultantId, ct) ?? throw new NotFoundException("Consultant not found.");
         if (p.UserId == actor) throw new BadRequestException("You cannot book yourself.");
@@ -187,7 +187,7 @@ public sealed class CareerSchedulingService(ICareerSchedulingRepository reposito
         var exceptions = await repository.ExceptionsAsync(p.Id, query.From, query.To, ct);
         // UTC envelope safely covers all IANA offsets, including DST/date-line zones.
         var bookings = await repository.OccupiedAsync(p.Id, query.From.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc).AddDays(-1),
-            query.To.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc).AddDays(2), ct);
+            query.To.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc).AddDays(2), Now, ct);
         return new(p.TimeZoneId!, CareerSlotGenerator.Generate(zone, query.From, query.To, service.DurationMinutes, windows, exceptions, bookings, Settings, Now));
     }
 
@@ -196,11 +196,12 @@ public sealed class CareerSchedulingService(ICareerSchedulingRepository reposito
         await Actor(actor, false, ct);
         return await repository.OwnedProfileAsync(actor, ct) ?? throw new NotFoundException("Consultant profile not found.");
     }
-    private async Task Actor(Guid actor, bool admin, CancellationToken ct)
+    private async Task Actor(Guid actor, bool admin, CancellationToken ct, bool candidate = false)
     {
         var user = await users.GetByIdWithRoleAsync(actor, ct);
         if (user is null || user.IsDeleted || user.Status != UserStatus.Active) throw new UnauthorizedException();
         if (admin && user.Role.Name != "Administrator") throw new AppException("Administrator access required.", 403, "forbidden");
+        if (candidate && user.Role.Name != "Candidate") throw new AppException("Candidate access required.", 403, "forbidden");
     }
     private async Task<CareerGuidanceBooking> RequiredBooking(Guid actor, Guid id, bool consultant, bool admin, CancellationToken ct)
     {

@@ -41,7 +41,7 @@ public sealed class CareerBookingConfiguration : IEntityTypeConfiguration<Career
         b.ToTable("CareerGuidanceBookings", t =>
         {
             t.HasCheckConstraint("CK_CareerBooking_Time", "\"StartUtc\" < \"EndUtc\"");
-            t.HasCheckConstraint("CK_CareerBooking_Status", "\"Status\" BETWEEN 1 AND 7");
+            t.HasCheckConstraint("CK_CareerBooking_Status", "\"Status\" BETWEEN 1 AND 8");
             t.HasCheckConstraint("CK_CareerBooking_Price", "\"PriceSnapshot\" > 0");
             t.HasCheckConstraint("CK_CareerBooking_Duration", "\"DurationMinutesSnapshot\" BETWEEN 15 AND 180");
         });

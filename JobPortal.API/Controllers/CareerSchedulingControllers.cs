@@ -32,6 +32,7 @@ public sealed class CareerSlotsController(ICareerSchedulingService service) : Co
 public sealed class CareerBookingsController(ICareerSchedulingService service) : ControllerBase
 {
     [HttpPost]
+    [Authorize(Roles = "Candidate")]
     public async Task<ActionResult<ApiResponse<CareerBookingResponse>>> Create(CreateCareerBookingRequest request, CancellationToken ct) => StatusCode(201, new ApiResponse<CareerBookingResponse>(await service.CreateAsync(User.GetRequiredUserId(), request, ct)));
     [HttpGet("mine")]
     public async Task<ActionResult<ApiResponse<PagedResponse<CareerBookingResponse>>>> Mine([FromQuery] BookingQuery query, CancellationToken ct) => Ok(new ApiResponse<PagedResponse<CareerBookingResponse>>(await service.BookingsAsync(User.GetRequiredUserId(), false, false, query, ct)));

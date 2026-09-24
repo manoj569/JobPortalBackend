@@ -23,7 +23,7 @@ public sealed class CareerConsultantAvailabilityException : BaseEntity
     public TimeOnly? EndTime { get; set; }
 }
 
-public enum CareerBookingStatus { Pending = 1, Confirmed, CancelledByCandidate, CancelledByConsultant, Completed, NoShowCandidate, NoShowConsultant }
+public enum CareerBookingStatus { Pending = 1, Confirmed, CancelledByCandidate, CancelledByConsultant, Completed, NoShowCandidate, NoShowConsultant, Expired = 8 }
 
 public sealed class CareerGuidanceBooking : BaseEntity
 {
