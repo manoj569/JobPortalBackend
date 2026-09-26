@@ -124,30 +124,63 @@ public sealed class AuthenticationTests
     }
 
     [Fact]
-    public async Task DuplicateIdentityResponseIsPrivateAndConcurrentConflictCreatesNoDuplicateUser()
+    public async Task RegistrationRejectsExistingEmailWithSpecificConflict()
     {
-        var duplicate = CreateFixture();
-        duplicate.Users.Items.Add(NewUser());
+        var fixture = CreateFixture();
 
-        var response = await duplicate.Service.RegisterAsync(ValidRegistration());
+        fixture.Users.Items.Add(
+     NewUser(
+         email: "user@example.com",
+         phone: "+919999999999"));
+        var exception = await Assert.ThrowsAsync<ConflictException>(() =>
+            fixture.Service.RegisterAsync(ValidRegistration()));
 
-        Assert.Equal("Registration successful. Please log in.", response.Message);
-        Assert.Single(duplicate.Users.Items);
-        Assert.Contains(duplicate.Logger.Messages, message =>
-            message.Contains("send_skipped_existing_user", StringComparison.Ordinal));
-        Assert.DoesNotContain(
-            "user@example.com",
-            JsonSerializer.Serialize(response),
-            StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("registration_email_exists", exception.Code);
+        Assert.Equal(
+            "An account already exists with this email. Please log in.",
+            exception.Message);
 
-        var concurrent = CreateFixture();
-        concurrent.UnitOfWork.ExceptionToThrow =
-            new UniqueConstraintException("duplicate");
-        concurrent.UnitOfWork.OnFailure = concurrent.Users.Items.Clear;
-        var concurrentResponse = await concurrent.Service.RegisterAsync(
-            ValidRegistration());
-        Assert.Equal(response.Message, concurrentResponse.Message);
-        Assert.Empty(concurrent.Users.Items);
+        Assert.Single(fixture.Users.Items);
+        Assert.Empty(fixture.RegistrationEmails.Items);
+    }
+
+    [Fact]
+    public async Task RegistrationRejectsExistingMobileWithSpecificConflict()
+    {
+        var fixture = CreateFixture();
+
+        fixture.Users.Items.Add(
+     NewUser(
+         email: "different@example.com",
+         phone: "+919876543210"));
+        var exception = await Assert.ThrowsAsync<ConflictException>(() =>
+            fixture.Service.RegisterAsync(ValidRegistration()));
+
+        Assert.Equal("registration_phone_exists", exception.Code);
+        Assert.Equal(
+            "An account already exists with this mobile number. Please log in.",
+            exception.Message);
+
+        Assert.Single(fixture.Users.Items);
+        Assert.Empty(fixture.RegistrationEmails.Items);
+    }
+
+    [Fact]
+    public async Task RegistrationRejectsExistingEmailAndMobileWithIdentityConflict()
+    {
+        var fixture = CreateFixture();
+        fixture.Users.Items.Add(NewUser());
+
+        var exception = await Assert.ThrowsAsync<ConflictException>(() =>
+            fixture.Service.RegisterAsync(ValidRegistration()));
+
+        Assert.Equal("registration_identity_exists", exception.Code);
+        Assert.Equal(
+            "An account already exists with these details. Please log in.",
+            exception.Message);
+
+        Assert.Single(fixture.Users.Items);
+        Assert.Empty(fixture.RegistrationEmails.Items);
     }
 
     [Fact]
@@ -212,6 +245,34 @@ public sealed class AuthenticationTests
                 new("user@example.com", "wrong-password"),
                 null));
         Assert.Equal(missing.Message, wrong.Message);
+    }
+
+    [Fact]
+    public async Task RegistrationRaceConflictRechecksIdentityAndReturnsSpecificConflict()
+    {
+        var fixture = CreateFixture();
+
+        fixture.UnitOfWork.ExceptionToThrow =
+            new UniqueConstraintException("duplicate");
+
+        fixture.UnitOfWork.OnFailure = () =>
+        {
+            fixture.Users.Items.Clear();
+            fixture.Users.Items.Add(
+                NewUser(
+                    email: "user@example.com",
+                    phone: "+919876543210"));
+        };
+
+        var exception = await Assert.ThrowsAsync<ConflictException>(() =>
+            fixture.Service.RegisterAsync(ValidRegistration()));
+
+        Assert.Equal("registration_identity_exists", exception.Code);
+        Assert.Equal(
+            "An account already exists with these details. Please log in.",
+            exception.Message);
+
+        Assert.Single(fixture.Users.Items);
     }
 
     [Fact]

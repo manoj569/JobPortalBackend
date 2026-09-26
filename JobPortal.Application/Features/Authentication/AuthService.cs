@@ -75,19 +75,21 @@ public sealed class AuthService(
         _ = PersonalName.TrySplit(request.FullName, out var firstName, out var lastName);
         var normalizedEmail = NormalizeEmail(request.Email);
         _ = IndianMobileNumber.TryNormalizeTenDigit(request.PhoneNumber, out var normalizedPhoneNumber);
-
         stageStarted = Stopwatch.GetTimestamp();
-        var identityExists = await users.RegistrationIdentityExistsAsync(
+
+        var existingEmailUser = await users.GetByNormalizedEmailAsync(
             normalizedEmail,
+            cancellationToken);
+
+        var existingPhoneUser = await users.GetByNormalizedPhoneAsync(
             normalizedPhoneNumber,
             cancellationToken);
+
         LogRegistrationTiming("duplicate_identity_lookup", stageStarted);
-        if (identityExists)
-        {
-            LogAuthenticationEvent("send_skipped_existing_user", "skipped");
-            LogRegistrationTiming("total", totalStarted);
-            return new(RegistrationSuccessMessage);
-        }
+
+        ThrowRegistrationIdentityConflict(
+    existingEmailUser is not null,
+    existingPhoneUser is not null);
 
         stageStarted = Stopwatch.GetTimestamp();
         var passwordHash = passwordHasher.Hash(request.Password);
@@ -144,9 +146,30 @@ public sealed class AuthService(
         }
         catch (UniqueConstraintException exception)
         {
-            LogAuthenticationEvent("registration_identity_checked", "uniqueness_conflict", exception);
+            LogAuthenticationEvent(
+                "registration_identity_checked",
+                "uniqueness_conflict",
+                exception);
+
+            unitOfWork.ResetAfterFailure();
+
+            var raceEmailUser = await users.GetByNormalizedEmailAsync(
+      normalizedEmail,
+      cancellationToken);
+
+            var racePhoneUser = await users.GetByNormalizedPhoneAsync(
+                normalizedPhoneNumber,
+                cancellationToken);
+
             LogRegistrationTiming("total", totalStarted);
-            return new(RegistrationSuccessMessage);
+
+            ThrowRegistrationIdentityConflict(
+    raceEmailUser is not null,
+    racePhoneUser is not null);
+
+            throw new ConflictException(
+                "An account with these details already exists.",
+                "registration_identity_exists");
         }
 
         LogAuthenticationEvent("registration_completed", "created");
@@ -408,6 +431,32 @@ public sealed class AuthService(
         catch (FormatException)
         {
             return false;
+        }
+    }
+
+    private static void ThrowRegistrationIdentityConflict(
+    bool emailExists,
+    bool phoneExists)
+    {
+        if (emailExists && phoneExists)
+        {
+            throw new ConflictException(
+                "An account already exists with these details. Please log in.",
+                "registration_identity_exists");
+        }
+
+        if (emailExists)
+        {
+            throw new ConflictException(
+                "An account already exists with this email. Please log in.",
+                "registration_email_exists");
+        }
+
+        if (phoneExists)
+        {
+            throw new ConflictException(
+                "An account already exists with this mobile number. Please log in.",
+                "registration_phone_exists");
         }
     }
 
