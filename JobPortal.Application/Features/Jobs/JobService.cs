@@ -140,7 +140,7 @@ public sealed class JobService(
                     Skill = skill,
                     SkillId = skill.Id,
                     IsRequired = true,
-                    ProficiencyLevel = 0
+                    ProficiencyLevel = JobSkill.DefaultProficiencyLevel
                 });
             }
 

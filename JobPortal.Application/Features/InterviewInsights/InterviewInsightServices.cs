@@ -21,17 +21,28 @@ public sealed class InterviewInsightService(
 {
     private DateTime Now => timeProvider.GetUtcNow().UtcDateTime;
 
-    public async Task<InterviewInsightResponse> CreateAsync(Guid candidateId, CreateInterviewInsightRequest request, CancellationToken ct = default)
+    public async Task<InterviewInsightResponse> CreateAsync(
+    Guid candidateId,
+    CreateInterviewInsightRequest request,
+    CancellationToken ct = default)
     {
         await createValidator.ValidateAndThrowAsync(request, ct);
         await RequireCandidateAsync(candidateId, ct);
         await ValidateCompanyJobAsync(request.CompanyId, request.JobId, ct);
+
         if (request.InterviewDateMonth > DateOnly.FromDateTime(Now))
-            throw new BadRequestException("Interview month cannot be in the future.", "future_interview_month");
-        if (!await EligibleToAuthorAsync(candidateId, request.CompanyId, ct))
-            throw new BadRequestException("An application or a past interview schedule at this company is required.", "interview_experience_not_established");
-        if (await repository.CountInsightsSinceAsync(candidateId, Now.AddDays(-1), ct) >= 2)
-            throw new AppException("You can share at most two interview insights per day.", 429, "insight_daily_limit");
+            throw new BadRequestException(
+                "Interview month cannot be in the future.",
+                "future_interview_month");
+
+        if (await repository.CountInsightsSinceAsync(
+                candidateId,
+                Now.AddDays(-1),
+                ct) >= 2)
+            throw new AppException(
+                "You can share at most two interview insights per day.",
+                429,
+                "insight_daily_limit");
 
         var insight = new InterviewInsight
         {
