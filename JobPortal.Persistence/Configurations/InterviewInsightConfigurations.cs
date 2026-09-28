@@ -48,7 +48,11 @@ public sealed class CandidateInterviewScheduleConfiguration : IEntityTypeConfigu
 {
     public void Configure(EntityTypeBuilder<CandidateInterviewSchedule> builder)
     {
-        builder.ToTable("CandidateInterviewSchedules");
+        builder.ToTable("CandidateInterviewSchedules", t => t.HasCheckConstraint(
+            "CK_CandidateInterviewSchedules_ReminderOffset", "\"ReminderOffsetMinutes\" IN (15, 30, 60, 1440)"));
+        builder.Property(x => x.ReminderOffsetMinutes).HasDefaultValue(30);
+        builder.Property(x => x.TimeZoneId).HasMaxLength(100).IsRequired().HasDefaultValue("UTC");
+        builder.Property(x => x.ReminderRevision).IsConcurrencyToken();
         builder.HasKey(x => x.Id);
         builder.Property(x => x.RoleTitle).HasMaxLength(160);
         builder.Property(x => x.ExpectedRoundTypes).HasMaxLength(160);

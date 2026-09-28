@@ -52,6 +52,7 @@ public sealed class JobPortalDbContext(DbContextOptions<JobPortalDbContext> opti
 
     // ✅ Notifications Table
     public DbSet<Notification> Notifications => Set<Notification>();
+    public DbSet<NotificationDelivery> NotificationDeliveries => Set<NotificationDelivery>();
 
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<Setting> Setting => Set<Setting>();

@@ -215,7 +215,7 @@ public sealed class CareerReservationExpiryTests
         await new CareerSchedulingRepository(f.Db).OccupiedAsync(f.Scheduling.Profile.Id, response.StartUtc, response.EndUtc,
             f.Scheduling.Clock.Utc.AddMinutes(10), default);
         var service = new CareerFinanceService(staleRepository, new UserRepository(staleDb), f.Gateway, new AuditWriterTestDouble(),
-            f.Scheduling.Clock, Microsoft.Extensions.Options.Options.Create(f.Options));
+            f.Scheduling.Clock, Microsoft.Extensions.Options.Options.Create(f.Options), NotificationTestSupport.Outbox(staleDb, f.Scheduling.Clock));
         await Assert.ThrowsAsync<ConflictException>(() => service.VerifyAsync(f.Candidate, response.Id,
             new(order.OrderId, "pay_test", "accepted"), default));
         using var check = new JobPortalDbContext(f.Scheduling.Options);

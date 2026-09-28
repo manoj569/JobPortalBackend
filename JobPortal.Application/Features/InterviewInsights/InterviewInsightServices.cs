@@ -2,6 +2,7 @@ using FluentValidation;
 using JobPortal.Application.Abstractions.Auditing;
 using JobPortal.Application.Abstractions.InterviewInsights;
 using JobPortal.Application.Common.Exceptions;
+using JobPortal.Application.Features.Notifications;
 using JobPortal.Domain.Entities;
 using JobPortal.Domain.Enums;
 using JobPortal.Shared.Models;
@@ -17,6 +18,7 @@ public sealed class InterviewInsightService(
     IValidator<UpdateInterviewScheduleRequest> updateScheduleValidator,
     IValidator<CreateInsightFeedbackRequest> feedbackValidator,
     IValidator<CreateInsightReportRequest> reportValidator,
+    NotificationOutbox notificationOutbox,
     TimeProvider timeProvider) : IInterviewInsightService
 {
     private DateTime Now => timeProvider.GetUtcNow().UtcDateTime;
@@ -62,23 +64,86 @@ public sealed class InterviewInsightService(
         return Map(loaded, true, candidateId == loaded.AuthorCandidateId);
     }
 
-    public async Task<PagedResponse<InterviewInsightCardResponse>> SearchAsync(Guid candidateId, InterviewInsightQuery query, CancellationToken ct = default)
+    public async Task<PagedResponse<InterviewInsightCardResponse>> SearchAsync(
+        Guid candidateId,
+        InterviewInsightQuery query,
+        CancellationToken ct = default)
     {
         await RequireCandidateAsync(candidateId, ct);
         ValidatePage(query.PageNumber, query.PageSize);
-        if (!Enum.TryParse<InterviewInsightSort>(query.Sort, true, out _)) throw new BadRequestException("Sort must be MostHelpful, Newest, or MostRounds.", "invalid_sort");
-        if (query.Company?.Trim().Length > 160) throw new BadRequestException("Company search must not exceed 160 characters.", "invalid_company");
-        if (query.Role?.Trim().Length > 160) throw new BadRequestException("Role must not exceed 160 characters.", "invalid_role");
-        if (query.ExperienceLevel?.Trim().Length > 80) throw new BadRequestException("ExperienceLevel must not exceed 80 characters.", "invalid_experience_level");
-        if (query.FromMonth.HasValue != query.FromYear.HasValue) throw new BadRequestException("FromMonth and FromYear must be supplied together.", "invalid_from_month");
-        if (query.FromMonth is < 1 or > 12 || query.FromYear is < 2000 or > 9999) throw new BadRequestException("FromMonth must be 1-12 and FromYear must be 2000-9999.", "invalid_from_month");
-        if (query.RecencyMonths is < 1 or > 120) throw new BadRequestException("RecencyMonths must be between 1 and 120.", "invalid_recency_months");
-        if (query.RecencyMonths.HasValue && query.FromMonth.HasValue) throw new BadRequestException("Use either FromMonth/FromYear or RecencyMonths, not both.", "conflicting_date_filters");
-        DateOnly? fromMonth = query.FromMonth.HasValue ? new(query.FromYear!.Value, query.FromMonth.Value, 1)
-            : query.RecencyMonths.HasValue ? new DateOnly(Now.Year, Now.Month, 1).AddMonths(1 - query.RecencyMonths.Value) : null;
-        var cleaned = query with { Company = Clean(query.Company), Role = Clean(query.Role), ExperienceLevel = Clean(query.ExperienceLevel) };
-        var result = await repository.SearchPublishedAsync(candidateId, cleaned, fromMonth, ct);
-        return new(result.Items, query.PageNumber, query.PageSize, result.Total);
+
+        if (!Enum.TryParse<InterviewInsightSort>(query.Sort, true, out _))
+            throw new BadRequestException(
+                "Sort must be MostHelpful, Newest, or MostRounds.",
+                "invalid_sort");
+
+        if (query.Company?.Trim().Length > 160)
+            throw new BadRequestException(
+                "Company search must not exceed 160 characters.",
+                "invalid_company");
+
+        if (query.Role?.Trim().Length > 160)
+            throw new BadRequestException(
+                "Role must not exceed 160 characters.",
+                "invalid_role");
+
+        if (query.ExperienceLevel?.Trim().Length > 80)
+            throw new BadRequestException(
+                "ExperienceLevel must not exceed 80 characters.",
+                "invalid_experience_level");
+
+        if (query.FromMonth.HasValue != query.FromYear.HasValue)
+            throw new BadRequestException(
+                "FromMonth and FromYear must be supplied together.",
+                "invalid_from_month");
+
+        if (query.FromMonth is < 1 or > 12 ||
+            query.FromYear is < 2000 or > 9999)
+            throw new BadRequestException(
+                "FromMonth must be 1-12 and FromYear must be 2000-9999.",
+                "invalid_from_month");
+
+        if (query.RecencyMonths is < 1 or > 120)
+            throw new BadRequestException(
+                "RecencyMonths must be between 1 and 120.",
+                "invalid_recency_months");
+
+        if (query.RecencyMonths.HasValue &&
+            query.FromMonth.HasValue)
+            throw new BadRequestException(
+                "Use either FromMonth/FromYear or RecencyMonths, not both.",
+                "conflicting_date_filters");
+
+        DateOnly? fromMonth =
+            query.FromMonth.HasValue
+                ? new DateOnly(
+                    query.FromYear!.Value,
+                    query.FromMonth.Value,
+                    1)
+                : query.RecencyMonths.HasValue
+                    ? new DateOnly(Now.Year, Now.Month, 1)
+                        .AddMonths(1 - query.RecencyMonths.Value)
+                    : null;
+
+        var cleaned = query with
+        {
+            Company = Clean(query.Company),
+            Role = Clean(query.Role),
+            ExperienceLevel = Clean(query.ExperienceLevel)
+        };
+
+        var result =
+            await repository.SearchPublishedAsync(
+                candidateId,
+                cleaned,
+                fromMonth,
+                ct);
+
+        return new(
+            result.Items,
+            query.PageNumber,
+            query.PageSize,
+            result.Total);
     }
 
     public async Task<IReadOnlyCollection<InterviewInsightCompanyResponse>> SearchCompaniesAsync(Guid candidateId, string query, int limit, CancellationToken ct = default)
@@ -131,23 +196,66 @@ public sealed class InterviewInsightService(
         await repository.SaveAsync(ct);
     }
 
-    public async Task<InterviewScheduleResponse> CreateScheduleAsync(Guid candidateId, CreateInterviewScheduleRequest request, CancellationToken ct = default)
+    public async Task<InterviewScheduleResponse> CreateScheduleAsync(
+        Guid candidateId,
+        CreateInterviewScheduleRequest request,
+        CancellationToken ct = default)
     {
         await scheduleValidator.ValidateAndThrowAsync(request, ct);
         await RequireCandidateAsync(candidateId, ct);
-        await ValidateCompanyJobAsync(request.CompanyId, request.JobId, ct);
+
+        await ValidateCompanyJobAsync(
+            request.CompanyId,
+            request.JobId,
+            ct);
+
+        var interviewAtUtc =
+            RequireUtc(request.InterviewAtUtc);
+
+        ValidateReminderDueTime(
+            request.ReminderRequested,
+            interviewAtUtc,
+            request.ReminderOffsetMinutes);
+
         var schedule = new CandidateInterviewSchedule
         {
-            CandidateId = candidateId, CompanyId = request.CompanyId, JobId = request.JobId,
-            RoleTitle = Clean(request.RoleTitle), InterviewAtUtc = Utc(request.InterviewAtUtc),
-            ConfirmFeedbackAvailableAtUtc = Utc(request.InterviewAtUtc), Status = InterviewScheduleStatus.Scheduled,
-            InterviewFormat = request.InterviewFormat, ApproximateTimeOfDay = request.ApproximateTimeOfDay,
-            ExpectedRoundTypes = SerializeRoundTypes(request.ExpectedRoundTypes), PreparationStatus = request.PreparationStatus,
-            ReminderRequested = request.ReminderRequested
+            CandidateId = candidateId,
+            CompanyId = request.CompanyId,
+            JobId = request.JobId,
+            RoleTitle = Clean(request.RoleTitle),
+            InterviewAtUtc = interviewAtUtc,
+            ConfirmFeedbackAvailableAtUtc = interviewAtUtc,
+            Status = InterviewScheduleStatus.Scheduled,
+            InterviewFormat = request.InterviewFormat,
+            ApproximateTimeOfDay =
+                request.ApproximateTimeOfDay,
+            ExpectedRoundTypes =
+                SerializeRoundTypes(
+                    request.ExpectedRoundTypes),
+            PreparationStatus =
+                request.PreparationStatus,
+            ReminderRequested =
+                request.ReminderRequested,
+            ReminderOffsetMinutes =
+                request.ReminderOffsetMinutes,
+            TimeZoneId =
+                request.TimeZoneId.Trim(),
+            ReminderRevision =
+                Guid.NewGuid()
         };
-        await repository.AddScheduleAsync(schedule, ct);
+
+        await repository.AddScheduleAsync(
+            schedule,
+            ct);
+
+        if (schedule.ReminderRequested)
+            EnqueueInterviewReminder(schedule);
+
         await repository.SaveAsync(ct);
-        return await ScheduleResponseAsync(schedule, ct);
+
+        return await ScheduleResponseAsync(
+            schedule,
+            ct);
     }
 
     public async Task<IReadOnlyCollection<InterviewScheduleResponse>> GetSchedulesAsync(Guid candidateId, CancellationToken ct = default)
@@ -156,62 +264,242 @@ public sealed class InterviewInsightService(
         return (await repository.GetSchedulesAsync(candidateId, ct)).Select(MapSchedule).ToArray();
     }
 
-    public async Task<InterviewScheduleResponse> UpdateScheduleAsync(Guid candidateId, Guid id, UpdateInterviewScheduleRequest request, CancellationToken ct = default)
+    public async Task<InterviewScheduleResponse> UpdateScheduleAsync(
+        Guid candidateId,
+        Guid id,
+        UpdateInterviewScheduleRequest request,
+        CancellationToken ct = default)
     {
-        await updateScheduleValidator.ValidateAndThrowAsync(request, ct);
+        await updateScheduleValidator.ValidateAndThrowAsync(
+            request,
+            ct);
+
         await RequireCandidateAsync(candidateId, ct);
-        var schedule = await repository.GetScheduleAsync(candidateId, id, true, ct) ?? throw new NotFoundException("Interview schedule was not found.");
-        schedule.RoleTitle = Clean(request.RoleTitle);
-        schedule.InterviewAtUtc = Utc(request.InterviewAtUtc);
-        schedule.ConfirmFeedbackAvailableAtUtc = schedule.InterviewAtUtc;
-        schedule.Status = request.Status;
-        schedule.InterviewFormat = request.InterviewFormat;
-        schedule.ApproximateTimeOfDay = request.ApproximateTimeOfDay;
-        schedule.ExpectedRoundTypes = SerializeRoundTypes(request.ExpectedRoundTypes);
-        schedule.PreparationStatus = request.PreparationStatus;
-        schedule.ReminderRequested = request.ReminderRequested;
+
+        var schedule =
+            await repository.GetScheduleAsync(
+                candidateId,
+                id,
+                true,
+                ct)
+            ?? throw new NotFoundException(
+                "Interview schedule was not found.");
+
+        var interviewAtUtc =
+            RequireUtc(request.InterviewAtUtc);
+
+        var timeZoneId =
+            request.TimeZoneId.Trim();
+
+        // Only reminder-relevant changes create a new generation.
+        // This prevents duplicate reminders when an unrelated field
+        // is edited or the same request is submitted again.
+        var reminderChanged =
+            schedule.InterviewAtUtc != interviewAtUtc ||
+            schedule.ReminderRequested != request.ReminderRequested ||
+            schedule.ReminderOffsetMinutes != request.ReminderOffsetMinutes ||
+            !string.Equals(
+                schedule.TimeZoneId,
+                timeZoneId,
+                StringComparison.Ordinal) ||
+            schedule.Status != request.Status;
+
+        if (reminderChanged && request.Status == InterviewScheduleStatus.Scheduled)
+            ValidateReminderDueTime(request.ReminderRequested, interviewAtUtc, request.ReminderOffsetMinutes);
+
+        schedule.RoleTitle =
+            Clean(request.RoleTitle);
+
+        schedule.InterviewAtUtc =
+            interviewAtUtc;
+
+        schedule.ConfirmFeedbackAvailableAtUtc =
+            interviewAtUtc;
+
+        schedule.Status =
+            request.Status;
+
+        schedule.InterviewFormat =
+            request.InterviewFormat;
+
+        schedule.ApproximateTimeOfDay =
+            request.ApproximateTimeOfDay;
+
+        schedule.ExpectedRoundTypes =
+            SerializeRoundTypes(
+                request.ExpectedRoundTypes);
+
+        schedule.PreparationStatus =
+            request.PreparationStatus;
+
+        schedule.ReminderRequested =
+            request.ReminderRequested;
+
+        schedule.ReminderOffsetMinutes =
+            request.ReminderOffsetMinutes;
+
+        schedule.TimeZoneId =
+            timeZoneId;
+
+        if (reminderChanged)
+        {
+            // Old deliveries remain durable, but they become ineligible
+            // because their SourceRevision no longer matches this schedule.
+            schedule.ReminderRevision =
+                Guid.NewGuid();
+
+            if (schedule.Status ==
+                    InterviewScheduleStatus.Scheduled &&
+                schedule.ReminderRequested)
+            {
+                EnqueueInterviewReminder(schedule);
+            }
+        }
+
         await repository.SaveAsync(ct);
         return MapSchedule(schedule);
     }
 
-    public async Task<InsightFeedbackResponse> AddFeedbackAsync(Guid candidateId, Guid insightId, CreateInsightFeedbackRequest request, CancellationToken ct = default)
+    public async Task<InsightFeedbackResponse> AddFeedbackAsync(
+        Guid candidateId,
+        Guid insightId,
+        CreateInsightFeedbackRequest request,
+        CancellationToken ct = default)
     {
-        await feedbackValidator.ValidateAndThrowAsync(request, ct);
+        await feedbackValidator.ValidateAndThrowAsync(
+            request,
+            ct);
+
         await RequireCandidateAsync(candidateId, ct);
-        if (await repository.CountFeedbackSinceAsync(candidateId, Now.AddDays(-1), ct) >= 10)
-            throw new AppException("You can submit at most ten feedback responses per day.", 429, "feedback_daily_limit");
-        var insight = await repository.GetInsightAsync(insightId, true, ct) ?? throw new NotFoundException("Interview insight was not found.");
-        if (insight.Status != InterviewInsightStatus.Published) throw new NotFoundException("Interview insight was not found.");
-        if (insight.AuthorCandidateId == candidateId) throw new BadRequestException("You cannot provide feedback on your own insight.", "self_feedback");
-        var schedule = await repository.GetScheduleAsync(candidateId, request.CandidateInterviewScheduleId, false, ct)
-            ?? throw new NotFoundException("Interview schedule was not found.");
-        if (schedule.CompanyId != insight.CompanyId) throw new BadRequestException("The interview schedule is for another company.", "schedule_company_mismatch");
-        if (schedule.Status == InterviewScheduleStatus.Cancelled || schedule.InterviewAtUtc > Now)
-            throw new BadRequestException("Feedback is available only after your scheduled interview.", "feedback_not_available");
-        if (await repository.FeedbackExistsAsync(candidateId, insightId, ct))
-            throw new ConflictException("Feedback has already been submitted for this insight.", "duplicate_insight_feedback");
-        var previousHelped = insight.HelpfulConfirmedCount;
-        var feedback = new InsightHelpfulnessFeedback
-        {
-            InsightId = insightId, CandidateId = candidateId,
-            CandidateInterviewScheduleId = schedule.Id, Helpfulness = request.Helpfulness,
-            InterviewMatch = request.InterviewMatch, Feedback = Clean(request.Feedback)
-        };
-        if (request.Helpfulness == InsightHelpfulness.Helped) insight.HelpfulConfirmedCount++;
-        insight.QualityScore += request.Helpfulness switch { InsightHelpfulness.Helped => 3, InsightHelpfulness.PartlyHelped => 1, _ => 0 };
-        await repository.AddFeedbackAsync(feedback, ct);
-        if (request.Helpfulness == InsightHelpfulness.Helped && IsMilestone(previousHelped, insight.HelpfulConfirmedCount))
-            await repository.AddNotificationAsync(new Notification
+
+        if (await repository.CountFeedbackSinceAsync(
+                candidateId,
+                Now.AddDays(-1),
+                ct) >= 10)
+            throw new AppException(
+                "You can submit at most ten feedback responses per day.",
+                429,
+                "feedback_daily_limit");
+
+        var insight =
+            await repository.GetInsightAsync(
+                insightId,
+                true,
+                ct)
+            ?? throw new NotFoundException(
+                "Interview insight was not found.");
+
+        if (insight.Status !=
+            InterviewInsightStatus.Published)
+            throw new NotFoundException(
+                "Interview insight was not found.");
+
+        if (insight.AuthorCandidateId == candidateId)
+            throw new BadRequestException(
+                "You cannot provide feedback on your own insight.",
+                "self_feedback");
+
+        var schedule =
+            await repository.GetScheduleAsync(
+                candidateId,
+                request.CandidateInterviewScheduleId,
+                false,
+                ct)
+            ?? throw new NotFoundException(
+                "Interview schedule was not found.");
+
+        if (schedule.CompanyId != insight.CompanyId)
+            throw new BadRequestException(
+                "The interview schedule is for another company.",
+                "schedule_company_mismatch");
+
+        if (schedule.Status ==
+                InterviewScheduleStatus.Cancelled ||
+            schedule.InterviewAtUtc > Now)
+            throw new BadRequestException(
+                "Feedback is available only after your scheduled interview.",
+                "feedback_not_available");
+
+        if (await repository.FeedbackExistsAsync(
+                candidateId,
+                insightId,
+                ct))
+            throw new ConflictException(
+                "Feedback has already been submitted for this insight.",
+                "duplicate_insight_feedback");
+
+        var previousHelped =
+            insight.HelpfulConfirmedCount;
+
+        var feedback =
+            new InsightHelpfulnessFeedback
             {
-                UserId = insight.AuthorCandidateId, Type = NotificationType.Profile,
-                Title = "Your insight helped candidates",
-                Message = $"Your Interview Insight has now helped {insight.HelpfulConfirmedCount} candidate{(insight.HelpfulConfirmedCount == 1 ? string.Empty : "s")}.",
-                ActionUrl = "/dashboard/interview-insights/my-contributions"
-            }, ct);
-        try { await repository.SaveAsync(ct); }
-        catch (UniqueConstraintException) { throw new ConflictException("Feedback has already been submitted for this insight.", "duplicate_insight_feedback"); }
-        return new(feedback.Id, feedback.Helpfulness, feedback.InterviewMatch, feedback.CreatedAtUtc,
-            insight.HelpfulConfirmedCount, insight.QualityScore);
+                InsightId = insightId,
+                CandidateId = candidateId,
+                CandidateInterviewScheduleId =
+                    schedule.Id,
+                Helpfulness = request.Helpfulness,
+                InterviewMatch = request.InterviewMatch,
+                Feedback = Clean(request.Feedback)
+            };
+
+        if (request.Helpfulness ==
+            InsightHelpfulness.Helped)
+            insight.HelpfulConfirmedCount++;
+
+        insight.QualityScore +=
+            request.Helpfulness switch
+            {
+                InsightHelpfulness.Helped => 3,
+                InsightHelpfulness.PartlyHelped => 1,
+                _ => 0
+            };
+
+        await repository.AddFeedbackAsync(
+            feedback,
+            ct);
+
+        if (request.Helpfulness ==
+                InsightHelpfulness.Helped &&
+            IsMilestone(
+                previousHelped,
+                insight.HelpfulConfirmedCount))
+        {
+            await repository.AddNotificationAsync(
+                new Notification
+                {
+                    UserId =
+                        insight.AuthorCandidateId,
+                    Type =
+                        NotificationType.Profile,
+                    Title =
+                        "Your insight helped candidates",
+                    Message =
+                        $"Your Interview Insight has now helped {insight.HelpfulConfirmedCount} candidate{(insight.HelpfulConfirmedCount == 1 ? string.Empty : "s")}.",
+                    ActionUrl =
+                        "/dashboard/interview-insights/my-contributions"
+                },
+                ct);
+        }
+
+        try
+        {
+            await repository.SaveAsync(ct);
+        }
+        catch (UniqueConstraintException)
+        {
+            throw new ConflictException(
+                "Feedback has already been submitted for this insight.",
+                "duplicate_insight_feedback");
+        }
+
+        return new(
+            feedback.Id,
+            feedback.Helpfulness,
+            feedback.InterviewMatch,
+            feedback.CreatedAtUtc,
+            insight.HelpfulConfirmedCount,
+            insight.QualityScore);
     }
 
     public async Task<InsightReportResponse> ReportAsync(Guid candidateId, Guid insightId, CreateInsightReportRequest request, CancellationToken ct = default)
@@ -251,31 +539,64 @@ public sealed class InterviewInsightService(
     {
         if (!await repository.IsCandidateAsync(id, ct)) throw new UnauthorizedException("An active Candidate account is required.");
     }
+
     private async Task<bool> EligibleForCompanyAsync(Guid id, Guid companyId, CancellationToken ct) =>
         await repository.HasApplicationAtCompanyAsync(id, companyId, ct) || await repository.HasScheduleAtCompanyAsync(id, companyId, ct);
+
     private async Task<bool> EligibleToAuthorAsync(Guid id, Guid companyId, CancellationToken ct) =>
         await repository.HasApplicationAtCompanyAsync(id, companyId, ct) || await repository.HasPastScheduleAtCompanyAsync(id, companyId, Now, ct);
+
     private async Task ValidateCompanyJobAsync(Guid companyId, Guid? jobId, CancellationToken ct)
     {
         if (!await repository.CompanyExistsAsync(companyId, ct)) throw new NotFoundException("Company was not found.");
         if (jobId.HasValue && !await repository.JobBelongsToCompanyAsync(jobId.Value, companyId, ct))
             throw new BadRequestException("The selected job does not belong to this company.", "job_company_mismatch");
     }
-    private static void Apply(InterviewInsight item, string role, string? level, DateOnly month,
-        InterviewDifficulty difficulty, string summary, string tips, InterviewOutcome? outcome,
-        bool anonymous, IReadOnlyCollection<InterviewRoundRequest> rounds, InterviewFormat? format)
+
+    private static void Apply(
+        InterviewInsight item,
+        string role,
+        string? level,
+        DateOnly month,
+        InterviewDifficulty difficulty,
+        string summary,
+        string tips,
+        InterviewOutcome? outcome,
+        bool anonymous,
+        IReadOnlyCollection<InterviewRoundRequest> rounds,
+        InterviewFormat? format)
     {
-        item.RoleTitle = role.Trim(); item.ExperienceLevel = Clean(level); item.InterviewDateMonth = month;
-        item.OverallDifficulty = difficulty; item.ProcessSummary = summary.Trim(); item.PreparationTips = tips.Trim();
-        item.Outcome = outcome; item.IsAnonymous = anonymous; item.InterviewFormat = format;
+        item.RoleTitle = role.Trim();
+        item.ExperienceLevel = Clean(level);
+        item.InterviewDateMonth = month;
+        item.OverallDifficulty = difficulty;
+        item.ProcessSummary = summary.Trim();
+        item.PreparationTips = tips.Trim();
+        item.Outcome = outcome;
+        item.IsAnonymous = anonymous;
+        item.InterviewFormat = format;
+
         var sequence = 1;
-        foreach (var round in rounds) item.Rounds.Add(new InterviewRound
+
+        foreach (var round in rounds)
         {
-            Sequence = sequence++, RoundType = round.RoundType, RoundTitle = Clean(round.RoundTitle),
-            DurationMinutes = round.DurationMinutes, QuestionsOrTopics = round.QuestionsOrTopics.Trim(),
-            CandidateAdvice = Clean(round.CandidateAdvice)
-        });
+            item.Rounds.Add(
+                new InterviewRound
+                {
+                    Sequence = sequence++,
+                    RoundType = round.RoundType,
+                    RoundTitle =
+                        Clean(round.RoundTitle),
+                    DurationMinutes =
+                        round.DurationMinutes,
+                    QuestionsOrTopics =
+                        round.QuestionsOrTopics.Trim(),
+                    CandidateAdvice =
+                        Clean(round.CandidateAdvice)
+                });
+        }
     }
+
     internal static InterviewInsightResponse Map(InterviewInsight x, bool full, bool owner) => new(
         x.Id, x.CompanyId, x.Company?.Name ?? string.Empty, x.Company?.LogoUrl, x.JobId, x.RoleTitle,
         x.ExperienceLevel, x.InterviewDateMonth.Month, x.InterviewDateMonth.Year, x.OverallDifficulty,
@@ -286,19 +607,120 @@ public sealed class InterviewInsightService(
         full ? x.Rounds.OrderBy(r => r.Sequence).Select(r => new InterviewRoundResponse(r.Id, r.Sequence,
             r.RoundType, r.RoundTitle, r.DurationMinutes, r.QuestionsOrTopics, r.CandidateAdvice)).ToArray() : [],
         x.InterviewFormat);
+
     private async Task<InterviewScheduleResponse> ScheduleResponseAsync(CandidateInterviewSchedule s, CancellationToken ct) =>
         MapSchedule(await repository.GetScheduleAsync(s.CandidateId, s.Id, false, ct) ?? s);
-    private InterviewScheduleResponse MapSchedule(CandidateInterviewSchedule s) => new(s.Id, s.CompanyId,
-        s.Company?.Name ?? string.Empty, s.JobId, s.RoleTitle, s.InterviewAtUtc, s.Status,
-        s.ConfirmFeedbackAvailableAtUtc, s.Status != InterviewScheduleStatus.Cancelled && s.InterviewAtUtc <= Now,
-        s.InterviewFormat, s.ApproximateTimeOfDay, ParseRoundTypes(s.ExpectedRoundTypes), s.PreparationStatus, s.ReminderRequested);
+
+    private InterviewScheduleResponse MapSchedule(
+        CandidateInterviewSchedule s) =>
+        new(
+            s.Id,
+            s.CompanyId,
+            s.Company?.Name ?? string.Empty,
+            s.JobId,
+            s.RoleTitle,
+            s.InterviewAtUtc,
+            s.Status,
+            s.ConfirmFeedbackAvailableAtUtc,
+            s.Status !=
+                InterviewScheduleStatus.Cancelled &&
+            s.InterviewAtUtc <= Now,
+            s.InterviewFormat,
+            s.ApproximateTimeOfDay,
+            ParseRoundTypes(
+                s.ExpectedRoundTypes),
+            s.PreparationStatus,
+            s.ReminderRequested,
+            s.ReminderOffsetMinutes,
+            s.TimeZoneId);
+
+    private void ValidateReminderDueTime(
+        bool reminderRequested,
+        DateTime interviewAtUtc,
+        int reminderOffsetMinutes)
+    {
+        if (!reminderRequested)
+            return;
+
+        if (interviewAtUtc <= Now)
+            throw new BadRequestException("The selected reminder time has already passed.", "interview_reminder_time_passed");
+
+        var reminderAtUtc =
+            interviewAtUtc.AddMinutes(
+                -reminderOffsetMinutes);
+
+        if (reminderAtUtc <= Now)
+        {
+            throw new BadRequestException(
+                "The selected reminder time has already passed. Choose a later interview time, a shorter reminder offset, or disable the reminder.",
+                "interview_reminder_time_passed");
+        }
+    }
+
+    private void EnqueueInterviewReminder(
+        CandidateInterviewSchedule schedule)
+    {
+        var reminderAtUtc =
+            schedule.InterviewAtUtc.AddMinutes(
+                -schedule.ReminderOffsetMinutes);
+
+        notificationOutbox.Enqueue(
+            NotificationSource.InterviewReminder,
+            schedule.Id,
+            schedule.ReminderRevision,
+            schedule.CandidateId,
+            $"interview-reminder:{schedule.Id:D}:{schedule.ReminderRevision:D}",
+            "Interview reminder",
+            BuildInterviewReminderMessage(schedule),
+            "/dashboard/interview-insights",
+            reminderAtUtc);
+    }
+
+    private static string BuildInterviewReminderMessage(
+        CandidateInterviewSchedule schedule)
+    {
+        var role =
+            Clean(schedule.RoleTitle);
+
+        var local = TimeZoneInfo.ConvertTime(new DateTimeOffset(schedule.InterviewAtUtc), TimeZoneInfo.FindSystemTimeZoneById(schedule.TimeZoneId));
+        var subject = role is null ? "Your interview" : $"Your {role} interview";
+        return FormattableString.Invariant($"{subject} is scheduled for {local:yyyy-MM-dd HH:mm zzz} ({schedule.TimeZoneId}). This is your {FormatReminderOffset(schedule.ReminderOffsetMinutes)} reminder. Good luck with your preparation.");
+    }
+
+    private static string FormatReminderOffset(
+        int minutes) =>
+        minutes switch
+        {
+            15 => "15 minutes",
+            30 => "30 minutes",
+            60 => "1 hour",
+            1440 => "1 day",
+            _ => $"{minutes} minutes"
+        };
+
+    private static DateTime RequireUtc(
+        DateTime value)
+    {
+        if (value.Kind != DateTimeKind.Utc)
+        {
+            throw new BadRequestException(
+                "InterviewAtUtc must be an explicit UTC timestamp.",
+                "invalid_interview_timestamp");
+        }
+
+        return value;
+    }
+
     private static string? SerializeRoundTypes(IReadOnlyCollection<InterviewRoundType>? values) =>
         values is null || values.Count == 0 ? null : string.Join(',', values.Distinct().Select(x => x.ToString()));
+
     private static InterviewRoundType[] ParseRoundTypes(string? value) =>
         string.IsNullOrWhiteSpace(value) ? [] : value.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(x => Enum.Parse<InterviewRoundType>(x)).ToArray();
+
     private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-    private static DateTime Utc(DateTime value) => value.Kind == DateTimeKind.Utc ? value : value.ToUniversalTime();
+
     private static bool IsMilestone(int before, int after) => (before < 1 && after >= 1) || (before < 10 && after >= 10) || (before < 50 && after >= 50);
+
     private static void ValidatePage(int page, int size)
     {
         if (page < 1 || size is < 1 or > 100) throw new BadRequestException("PageNumber must be positive and PageSize must be between 1 and 100.");
@@ -313,6 +735,7 @@ public sealed class AdminInterviewInsightService(IInterviewInsightRepository rep
         var x = await repository.SearchAdminAsync(query, ct);
         return new(x.Items.Select(i => InterviewInsightService.Map(i, true, false)).ToArray(), query.PageNumber, query.PageSize, x.Total);
     }
+
     public async Task<InterviewInsightResponse> ModerateAsync(Guid administratorId, Guid id, ModerateInterviewInsightRequest request, CancellationToken ct = default)
     {
         if (request.Status is not (InterviewInsightStatus.Published or InterviewInsightStatus.Rejected or InterviewInsightStatus.Hidden))
@@ -328,12 +751,14 @@ public sealed class AdminInterviewInsightService(IInterviewInsightRepository rep
         await repository.SaveAsync(ct);
         return InterviewInsightService.Map(item, true, false);
     }
+
     public async Task<PagedResponse<AdminInsightReportResponse>> ReportsAsync(AdminInsightReportQuery query, CancellationToken ct = default)
     {
         ValidatePage(query.PageNumber, query.PageSize);
         var x = await repository.SearchReportsAsync(query, ct);
         return new(x.Items.Select(MapReport).ToArray(), query.PageNumber, query.PageSize, x.Total);
     }
+
     public async Task<AdminInsightReportResponse> ModerateReportAsync(Guid administratorId, Guid id, ModerateInsightReportRequest request, CancellationToken ct = default)
     {
         if (request.Status == InsightReportStatus.Open) throw new BadRequestException("Select a completed report status.");
@@ -349,6 +774,8 @@ public sealed class AdminInterviewInsightService(IInterviewInsightRepository rep
         await repository.SaveAsync(ct);
         return MapReport(report);
     }
+
     private static AdminInsightReportResponse MapReport(InsightReport x) => new(x.Id, x.InsightId, x.Reason, x.Details, x.Status, x.CreatedAtUtc);
+
     private static void ValidatePage(int page, int size) { if (page < 1 || size is < 1 or > 100) throw new BadRequestException("Invalid pagination."); }
 }

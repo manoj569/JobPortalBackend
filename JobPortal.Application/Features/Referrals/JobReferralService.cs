@@ -17,6 +17,7 @@ public sealed class JobReferralService(
     IAuditWriter auditWriter,
     IUnitOfWork unitOfWork,
     TimeProvider timeProvider,
+    JobPortal.Application.Features.Notifications.NotificationOutbox outbox,
     IDashboardRepository? dashboard = null) : IJobReferralService
 {
     private const string ReferralContactPlanCode = "ReferralContactAccess";
@@ -128,6 +129,9 @@ public sealed class JobReferralService(
                 "This referral has already been reviewed.");
         }
 
+        if (request.Decision is not (JobReferralApprovalStatus.Approved or JobReferralApprovalStatus.Rejected))
+            throw new BadRequestException("Choose an approval or rejection decision.", "validation_error");
+
         if (request.Decision == JobReferralApprovalStatus.Rejected &&
             string.IsNullOrWhiteSpace(request.RejectionReason))
         {
@@ -150,6 +154,7 @@ public sealed class JobReferralService(
             cancellationToken)
             ?? throw new NotFoundException("Job was not found.");
 
+        Guid? approvalNotificationId = null;
         if (request.Decision == JobReferralApprovalStatus.Approved)
         {
             job.Status = JobStatus.Published;
@@ -164,9 +169,11 @@ public sealed class JobReferralService(
                     referral.Id,
                     cancellationToken))
             {
+                approvalNotificationId = Guid.NewGuid();
                 await dashboard.AddNotificationAsync(
                     new Notification
                     {
+                        Id = approvalNotificationId.Value,
                         UserId = referral.ReferrerUserId,
                         Type = NotificationType.ReferralApproved,
                         ReferralId = referral.Id,
@@ -180,6 +187,13 @@ public sealed class JobReferralService(
                     cancellationToken);
             }
         }
+
+        var approved = request.Decision == JobReferralApprovalStatus.Approved;
+        outbox.Enqueue(approved ? NotificationSource.ReferralApproved : NotificationSource.ReferralRejected,
+            referral.Id, Guid.Empty, referral.ReferrerUserId, $"referral:{referral.Id:D}:{request.Decision}",
+            approved ? "Referred job approved" : "Update on your CareerHarbor referral",
+            approved ? $"Your referred job \"{job.Title}\" was approved successfully." : "Your referral was reviewed and was not approved. Open your referral details for the review outcome.",
+            "/dashboard/referrals", notificationId: approvalNotificationId);
 
         await auditWriter.AppendAsync(
             new(

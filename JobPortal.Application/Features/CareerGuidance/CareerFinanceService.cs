@@ -11,7 +11,8 @@ using Microsoft.Extensions.Options;
 namespace JobPortal.Application.Features.CareerGuidance;
 
 public sealed class CareerFinanceService(ICareerFinanceRepository repository, IUserRepository users,
-    ICareerPaymentGateway gateway, IAuditWriter audit, TimeProvider clock, IOptions<CareerFinanceOptions> options) : ICareerFinanceService
+    ICareerPaymentGateway gateway, IAuditWriter audit, TimeProvider clock, IOptions<CareerFinanceOptions> options,
+    JobPortal.Application.Features.Notifications.NotificationOutbox notifications) : ICareerFinanceService
 {
     private DateTime Now => clock.GetUtcNow().UtcDateTime;
 
@@ -126,6 +127,10 @@ public sealed class CareerFinanceService(ICareerFinanceRepository repository, IU
         {
             b.Status = CareerBookingStatus.Confirmed;
             b.Consultant.Revision = Guid.NewGuid();
+            foreach (var recipient in new[] { b.CandidateUserId, b.Consultant.UserId }.Distinct())
+                notifications.Enqueue(NotificationSource.CareerConfirmation, b.Id, Guid.Empty, recipient,
+                    $"career-confirmation:{b.Id:D}", "Career guidance booking confirmed",
+                    $"Your Career Guidance booking is confirmed for {b.StartUtc:yyyy-MM-dd HH:mm} UTC. Open your authenticated booking details to prepare.");
         }
         else p.RequiresRefundReview = true;
         b.Revision = Guid.NewGuid();

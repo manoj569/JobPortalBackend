@@ -39,22 +39,48 @@ public sealed record InterviewInsightCardResponse(Guid Id, Guid CompanyId, strin
     bool CanReadFull, bool CanGiveFeedback, bool IsAnonymous, string? AuthorLabel);
 public sealed record InterviewInsightCompanyResponse(Guid Id, string CompanyName);
 
-public sealed record CreateInterviewScheduleRequest(Guid CompanyId, Guid? JobId,
-    string? RoleTitle, DateTime InterviewAtUtc, InterviewFormat? InterviewFormat = null,
+public sealed record CreateInterviewScheduleRequest(
+    Guid CompanyId,
+    Guid? JobId,
+    string? RoleTitle,
+    DateTime InterviewAtUtc,
+    InterviewFormat? InterviewFormat = null,
     InterviewTimeOfDay? ApproximateTimeOfDay = null,
     IReadOnlyCollection<InterviewRoundType>? ExpectedRoundTypes = null,
-    InterviewPreparationStatus? PreparationStatus = null, bool ReminderRequested = false);
-public sealed record UpdateInterviewScheduleRequest(string? RoleTitle, DateTime InterviewAtUtc,
-    InterviewScheduleStatus Status, InterviewFormat? InterviewFormat = null,
+    InterviewPreparationStatus? PreparationStatus = null,
+    bool ReminderRequested = false,
+    int ReminderOffsetMinutes = 30,
+    string TimeZoneId = "UTC");
+
+public sealed record UpdateInterviewScheduleRequest(
+    string? RoleTitle,
+    DateTime InterviewAtUtc,
+    InterviewScheduleStatus Status,
+    InterviewFormat? InterviewFormat = null,
     InterviewTimeOfDay? ApproximateTimeOfDay = null,
     IReadOnlyCollection<InterviewRoundType>? ExpectedRoundTypes = null,
-    InterviewPreparationStatus? PreparationStatus = null, bool ReminderRequested = false);
-public sealed record InterviewScheduleResponse(Guid Id, Guid CompanyId, string CompanyName,
-    Guid? JobId, string? RoleTitle, DateTime InterviewAtUtc, InterviewScheduleStatus Status,
-    DateTime ConfirmFeedbackAvailableAtUtc, bool FeedbackAvailable,
-    InterviewFormat? InterviewFormat = null, InterviewTimeOfDay? ApproximateTimeOfDay = null,
+    InterviewPreparationStatus? PreparationStatus = null,
+    bool ReminderRequested = false,
+    int ReminderOffsetMinutes = 30,
+    string TimeZoneId = "UTC");
+
+public sealed record InterviewScheduleResponse(
+    Guid Id,
+    Guid CompanyId,
+    string CompanyName,
+    Guid? JobId,
+    string? RoleTitle,
+    DateTime InterviewAtUtc,
+    InterviewScheduleStatus Status,
+    DateTime ConfirmFeedbackAvailableAtUtc,
+    bool FeedbackAvailable,
+    InterviewFormat? InterviewFormat = null,
+    InterviewTimeOfDay? ApproximateTimeOfDay = null,
     IReadOnlyCollection<InterviewRoundType>? ExpectedRoundTypes = null,
-    InterviewPreparationStatus? PreparationStatus = null, bool ReminderRequested = false);
+    InterviewPreparationStatus? PreparationStatus = null,
+    bool ReminderRequested = false,
+    int ReminderOffsetMinutes = 30,
+    string TimeZoneId = "UTC");
 
 public sealed record CreateInsightFeedbackRequest(Guid CandidateInterviewScheduleId,
     InsightHelpfulness Helpfulness, InterviewMatch InterviewMatch, string? Feedback);

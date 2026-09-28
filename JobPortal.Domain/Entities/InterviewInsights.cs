@@ -60,6 +60,9 @@ public sealed class CandidateInterviewSchedule : BaseEntity
     public string? ExpectedRoundTypes { get; set; }
     public InterviewPreparationStatus? PreparationStatus { get; set; }
     public bool ReminderRequested { get; set; }
+    public int ReminderOffsetMinutes { get; set; } = 30;
+    public string TimeZoneId { get; set; } = "UTC";
+    public Guid ReminderRevision { get; set; } = Guid.NewGuid();
 }
 
 public sealed class InsightHelpfulnessFeedback : BaseEntity

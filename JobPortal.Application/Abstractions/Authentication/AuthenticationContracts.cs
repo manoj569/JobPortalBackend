@@ -80,6 +80,9 @@ public interface IJwtTokenService
 }
 public interface IEmailService
 {
+    // Default keeps legacy adapters compatible; production Brevo implements this explicitly.
+    Task<EmailDeliveryResult> SendNotificationAsync(User user, Notification notification,
+        CancellationToken cancellationToken = default) => Task.FromResult(EmailDeliveryResult.Disabled);
     Task<EmailDeliveryResult> SendPasswordResetAsync(
         User user,
         string rawToken,
@@ -90,4 +93,4 @@ public interface IEmailService
     Task<EmailDeliveryResult> SendRegistrationVerificationAsync(
         User user, string rawToken, CancellationToken cancellationToken = default);
 }
-public enum EmailDeliveryResult { Sent, Disabled, Failed }
+public enum EmailDeliveryResult { Sent, Disabled, Failed, PermanentFailure }

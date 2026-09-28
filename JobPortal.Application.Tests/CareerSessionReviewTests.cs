@@ -87,7 +87,7 @@ public sealed class CareerSessionReviewTests
         await f.Db.SaveChangesAsync();
         f.Clock.Utc = s.ScheduledStartUtc.AddMinutes(-10);
         using var scope = new JobPortalDbContext(f.Finance.Scheduling.Options);
-        var processor = new CareerSessionReminderProcessor(new CareerSessionRepository(scope), new DashboardRepository(scope, f.Clock), f.Clock);
+        var processor = new CareerSessionReminderProcessor(new CareerSessionRepository(scope), new DashboardRepository(scope, f.Clock), f.Clock, NotificationTestSupport.Outbox(scope, f.Clock));
         Assert.Equal(0, await processor.ProcessAsync(default));
         Assert.Empty(await scope.Notifications.ToArrayAsync());
         Assert.All(await scope.Set<CareerGuidanceSessionReminder>().IgnoreQueryFilters().ToArrayAsync(), r => Assert.Equal(CareerReminderStatus.Cancelled, r.Status));
@@ -138,11 +138,11 @@ public sealed class CareerSessionReviewTests
         using var f = new CareerSessionTests.Fixture(); var s = await f.Setup();
         f.Clock.Utc = s.ScheduledStartUtc.AddMinutes(-60);
         using var winner = new JobPortalDbContext(f.Finance.Scheduling.Options);
-        var first = new CareerSessionReminderProcessor(new CareerSessionRepository(winner), new DashboardRepository(winner, f.Clock), f.Clock);
+        var first = new CareerSessionReminderProcessor(new CareerSessionRepository(winner), new DashboardRepository(winner, f.Clock), f.Clock, NotificationTestSupport.Outbox(winner, f.Clock));
         var interceptor = new BeforeSaveInterceptor(async () => Assert.Equal(2, await first.ProcessAsync(default)));
         using var loser = new JobPortalDbContext(new DbContextOptionsBuilder<JobPortalDbContext>(f.Finance.Scheduling.Options)
             .AddInterceptors(interceptor).Options);
-        var second = new CareerSessionReminderProcessor(new CareerSessionRepository(loser), new DashboardRepository(loser, f.Clock), f.Clock);
+        var second = new CareerSessionReminderProcessor(new CareerSessionRepository(loser), new DashboardRepository(loser, f.Clock), f.Clock, NotificationTestSupport.Outbox(loser, f.Clock));
         // Both workers have prepared the same pending rows before the winning commit.
         // InMemory can surface its duplicate primary key as ArgumentException; PostgreSQL
         // maps that uniqueness failure to ConflictException and rolls back the whole batch.
@@ -151,7 +151,7 @@ public sealed class CareerSessionReviewTests
         using var read = new JobPortalDbContext(f.Finance.Scheduling.Options);
         Assert.Equal(2, await read.Notifications.CountAsync());
         Assert.Equal(2, await read.Set<CareerGuidanceSessionReminder>().CountAsync(r => r.Status == CareerReminderStatus.Delivered));
-        var retry = new CareerSessionReminderProcessor(new CareerSessionRepository(read), new DashboardRepository(read, f.Clock), f.Clock);
+        var retry = new CareerSessionReminderProcessor(new CareerSessionRepository(read), new DashboardRepository(read, f.Clock), f.Clock, NotificationTestSupport.Outbox(read, f.Clock));
         Assert.Equal(0, await retry.ProcessAsync(default));
     }
 

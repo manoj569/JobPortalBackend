@@ -12,6 +12,37 @@ namespace JobPortal.Application.Tests;
 
 public sealed class BrevoEmailServiceTests
 {
+    [Theory]
+    [InlineData(HttpStatusCode.Created, EmailDeliveryResult.Sent)]
+    [InlineData(HttpStatusCode.BadRequest, EmailDeliveryResult.PermanentFailure)]
+    [InlineData(HttpStatusCode.TooManyRequests, EmailDeliveryResult.Failed)]
+    [InlineData(HttpStatusCode.ServiceUnavailable, EmailDeliveryResult.Failed)]
+    public async Task NotificationUsesExistingSenderRegisteredRecipientAndPlaintext(HttpStatusCode status, EmailDeliveryResult expected)
+    {
+        string? payload = null;
+        var logger = new CollectingLogger<BrevoEmailService>();
+        var service = CreateService(new DelegateHandler(async (request, ct) =>
+        { payload = await request.Content!.ReadAsStringAsync(ct); return new(status); }), logger, "test-only-key");
+        var user = new User { Email = "registered@example.test" };
+        var result = await service.SendNotificationAsync(user, new Notification { UserId = user.Id, Title = "Reminder\r\nSubject", Message = "Plain <b>text</b>", ActionUrl = "/dashboard/referrals" });
+        Assert.Equal(expected, result);
+        using var json = JsonDocument.Parse(payload!);
+        Assert.Equal("Career Harbor", json.RootElement.GetProperty("sender").GetProperty("name").GetString());
+        Assert.Equal("no-reply@careerharbor.in", json.RootElement.GetProperty("sender").GetProperty("email").GetString());
+        Assert.Equal(user.Email, json.RootElement.GetProperty("to")[0].GetProperty("email").GetString());
+        Assert.False(json.RootElement.TryGetProperty("htmlContent", out _));
+        Assert.DoesNotContain("\r", json.RootElement.GetProperty("subject").GetString());
+        Assert.DoesNotContain(logger.Messages, x => x.Contains(user.Email, StringComparison.Ordinal) || x.Contains("Plain", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task NotificationRejectsMismatchedRecipientAndUnsafeRouteWithoutHttp()
+    {
+        var service = CreateService(new DelegateHandler((_, _) => throw new InvalidOperationException("Must not send")), new CollectingLogger<BrevoEmailService>(), "test-only-key");
+        var user = new User();
+        Assert.Equal(EmailDeliveryResult.PermanentFailure, await service.SendNotificationAsync(user, new() { UserId = Guid.NewGuid() }));
+        Assert.Equal(EmailDeliveryResult.PermanentFailure, await service.SendNotificationAsync(user, new() { UserId = user.Id, ActionUrl = "https://evil.example" }));
+    }
     [Fact]
     public void PasswordResetUrlIsTokenOnlyAndProductionSafe()
     {

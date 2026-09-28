@@ -83,7 +83,7 @@ public sealed class InterviewInsightsMembershipAuthorizationTests
         http.Response.Body.Position = 0;
         var error = await JsonSerializer.DeserializeAsync<ApiError>(http.Response.Body, WebJson);
         Assert.Equal("membership_required", error?.Code);
-        Assert.Equal("An active membership is required to use Interview Insights.", error?.Message);
+        Assert.Equal(InterviewInsightsMembershipPolicy.ErrorMessage, error?.Message);
         var json = JsonSerializer.Serialize(error);
         Assert.DoesNotContain("membershipId", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("payment", json, StringComparison.OrdinalIgnoreCase);
@@ -125,10 +125,13 @@ public sealed class InterviewInsightsMembershipAuthorizationTests
 
     private static Membership Membership(Guid userId, MembershipStatus status, DateTime starts, DateTime ends) => new()
     {
-        UserId = userId, PlanName = "Career Harbor 30-Day Access", Status = status,
-        StartsAtUtc = starts, EndsAtUtc = ends
+        UserId = userId,
+        PlanCode = InterviewInsightsMembershipPolicy.RequiredPlanCode,
+        PlanName = "Job Application Access",
+        Status = status,
+        StartsAtUtc = starts,
+        EndsAtUtc = ends
     };
-
     private static JobPortalDbContext Db() => new(new DbContextOptionsBuilder<JobPortalDbContext>()
         .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
 

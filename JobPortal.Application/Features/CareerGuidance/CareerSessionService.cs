@@ -234,7 +234,7 @@ public sealed class CareerSessionService(ICareerSessionRepository repository, IU
     private static bool OpenPaidBooking(CareerGuidancePayment payment) => !payment.IsDeleted && payment.Status == CareerPaymentStatus.Captured &&
         payment.PaidAtUtc.HasValue && payment.Refund is null && payment.Earning is { IsDeleted: false, Status: CareerEarningStatus.Pending } &&
         !payment.Booking.IsDeleted && payment.Booking.Status == CareerBookingStatus.Confirmed;
-    internal static bool Eligible(CareerGuidancePayment payment) => OpenPaidBooking(payment) && !payment.RequiresRefundReview &&
+    public static bool Eligible(CareerGuidancePayment payment) => OpenPaidBooking(payment) && !payment.RequiresRefundReview &&
         payment.Booking.Candidate is { IsDeleted: false, Status: UserStatus.Active } &&
         payment.Booking.Consultant is { IsDeleted: false, VerificationStatus: ConsultantVerificationStatus.Verified, User.IsDeleted: false, User.Status: UserStatus.Active };
     private static void RequireEligible(CareerGuidancePayment payment)

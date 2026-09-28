@@ -141,6 +141,11 @@ builder.Services.AddHostedService<JobAggregationSchedulerHostedService>();
 builder.Services.Configure<JobDiscoveryOptions>(builder.Configuration.GetSection(JobDiscoveryOptions.SectionName));
 builder.Services.AddHostedService<JobDiscoveryHostedService>();
 builder.Services.AddHostedService<RegistrationEmailHostedService>();
+builder.Services.AddOptions<JobPortal.Application.Features.Notifications.NotificationDeliveryOptions>()
+    .BindConfiguration("NotificationDelivery").Validate(x => x.IsValid(), "Invalid notification delivery settings.").ValidateOnStart();
+builder.Services.AddScoped<JobPortal.Application.Features.Notifications.INotificationRealtime, JobPortal.API.Hubs.NotificationRealtime>();
+builder.Services.AddSingleton<Microsoft.AspNetCore.SignalR.IUserIdProvider, JobPortal.API.Hubs.NotificationUserIdProvider>();
+builder.Services.AddHostedService<NotificationDeliveryHostedService>();
 builder.Services.AddScoped<RegistrationEmailDispatcher>();
 builder.Services.AddHostedService<InterviewScheduleNotificationHostedService>();
 builder.Services.AddHostedService<CareerSessionReminderHostedService>();

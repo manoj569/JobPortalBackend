@@ -31,6 +31,8 @@ public static class ServiceCollectionExtensions
                     null);
             }), poolSize: 128);
         services.AddScoped<IUserRepository, UserRepository>();
+        services.AddScoped<JobPortal.Application.Features.Notifications.INotificationOutbox, NotificationOutboxRepository>();
+        services.AddScoped<JobPortal.Application.Features.Notifications.INotificationDeliveryRepository, NotificationDeliveryRepository>();
         services.AddScoped<JobPortal.Application.Features.CareerGuidance.ICareerGuidanceRepository, CareerGuidanceRepository>();
         services.AddScoped<JobPortal.Application.Features.CareerGuidance.ICareerSchedulingRepository, CareerSchedulingRepository>();
         services.AddScoped<JobPortal.Application.Features.CareerGuidance.ICareerFinanceRepository, CareerFinanceRepository>();

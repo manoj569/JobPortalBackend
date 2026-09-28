@@ -4,7 +4,8 @@ using JobPortal.Domain.Enums;
 
 namespace JobPortal.Application.Features.CareerGuidance;
 
-public sealed class CareerSessionReminderProcessor(ICareerSessionRepository repository, IDashboardRepository notifications, TimeProvider clock)
+public sealed class CareerSessionReminderProcessor(ICareerSessionRepository repository, IDashboardRepository notifications, TimeProvider clock,
+    JobPortal.Application.Features.Notifications.NotificationOutbox outbox)
 {
     public async Task<int> ProcessAsync(CancellationToken ct)
     {
@@ -27,6 +28,12 @@ public sealed class CareerSessionReminderProcessor(ICareerSessionRepository repo
                     Type = NotificationType.System
                 }, ct);
                 reminder.Status = CareerReminderStatus.Delivered; reminder.SentAtUtc = now; count++;
+                // Delivered continues to mean inbox committed. The existing reminder is the authoritative schedule.
+                // Reuse its notification ID; the InApp delivery only reuses that row and emits realtime.
+                outbox.Enqueue(NotificationSource.CareerReminder, reminder.Id, Guid.Empty, reminder.RecipientUserId,
+                    $"career-reminder:{reminder.Id:D}", "Career guidance session reminder",
+                    "Your career guidance session is approaching. Open your authenticated session details to prepare.",
+                    notificationId: reminder.Id);
                 CareerSessionService.TouchEligibility(payment);
             }
             session.Revision = Guid.NewGuid(); reminder.Revision = Guid.NewGuid();

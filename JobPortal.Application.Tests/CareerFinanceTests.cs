@@ -82,6 +82,14 @@ public sealed class CareerFinanceTests
         Assert.Equal(CareerBookingStatus.Confirmed, (await f.Db.CareerGuidanceBookings.SingleAsync()).Status);
         await f.Verify(b.Id, order);
         Assert.Single(await f.Db.Set<CareerGuidanceEarning>().ToArrayAsync());
+        var confirmations = await f.Db.NotificationDeliveries.Where(x => x.Source == NotificationSource.CareerConfirmation).ToArrayAsync();
+        Assert.Equal(4, confirmations.Length);
+        Assert.Equal(new[] { f.Candidate, f.Scheduling.Owner.Id }.Order(), confirmations.Select(x => x.UserId).Distinct().Order());
+        Assert.All(confirmations.GroupBy(x => x.UserId), group =>
+        {
+            Assert.Single(group, x => x.Channel == NotificationChannel.InApp);
+            Assert.Single(group, x => x.Channel == NotificationChannel.Email);
+        });
         f.Options.PlatformCommissionPercent = 50;
         Assert.Equal(10, (await f.Service.GetAsync(f.Candidate, b.Id, false, default)).CommissionPercent);
         var entity = await f.Db.Set<CareerGuidancePayment>().SingleAsync(); entity.AmountGross = 1;
@@ -161,6 +169,7 @@ public sealed class CareerFinanceTests
         var paid = await f.Verify(b.Id, o);
         Assert.True(paid.RequiresRefundReview);
         Assert.Equal(CareerBookingStatus.CancelledByCandidate, (await f.Db.CareerGuidanceBookings.SingleAsync()).Status);
+        Assert.Empty(await f.Db.NotificationDeliveries.Where(x => x.Source == NotificationSource.CareerConfirmation).ToArrayAsync());
     }
 
     [Fact]
@@ -261,7 +270,7 @@ public sealed class CareerFinanceTests
             var role = new Role { Name = "Administrator" }; Admin.Role = role; Admin.RoleId = role.Id;
             Db.AddRange(role, Admin); Db.SaveChanges();
             Service = new(new CareerFinanceRepository(Db), new UserRepository(Db), Gateway, new AuditWriterTestDouble(), Scheduling.Clock,
-                Microsoft.Extensions.Options.Options.Create(Options));
+                Microsoft.Extensions.Options.Options.Create(Options), NotificationTestSupport.Outbox(Db, Scheduling.Clock));
         }
         public Task<CareerBookingResponse> Setup() => Scheduling.Book();
         public Task<CareerCheckout> Order(Guid bookingId) => Service.OrderAsync(Candidate, bookingId, default);

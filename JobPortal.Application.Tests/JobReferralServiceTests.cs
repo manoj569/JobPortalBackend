@@ -15,6 +15,26 @@ namespace JobPortal.Application.Tests;
 
 public sealed class JobReferralServiceTests
 {
+    [Theory]
+    [InlineData(JobReferralApprovalStatus.Approved, NotificationSource.ReferralApproved)]
+    [InlineData(JobReferralApprovalStatus.Rejected, NotificationSource.ReferralRejected)]
+    public async Task DecisionsEnqueueExactlyTwoReferrerDeliveriesAndRetriesDoNotDuplicate(JobReferralApprovalStatus decision, NotificationSource source)
+    {
+        var f = CreateFixture();
+        var submitted = await f.Service.SubmitAsync(f.ReferrerUserId, new(new(new("Test")), null, true, false, false));
+        await f.Service.ReviewAsync(submitted.Id, f.AdminUserId, new(decision, "Admin-only text"));
+        Assert.Equal(2, f.Outbox.Deliveries.Count);
+        Assert.All(f.Outbox.Deliveries, d =>
+        {
+            Assert.Equal(f.ReferrerUserId, d.UserId); Assert.Equal(source, d.Source);
+            Assert.Equal("/dashboard/referrals", d.ActionUrl);
+            Assert.DoesNotContain("Admin-only", d.Message);
+        });
+        Assert.Single(f.Outbox.Deliveries, d => d.Channel == NotificationChannel.InApp);
+        Assert.Single(f.Outbox.Deliveries, d => d.Channel == NotificationChannel.Email);
+        await Assert.ThrowsAsync<ConflictException>(() => f.Service.ReviewAsync(submitted.Id, f.AdminUserId, new(decision, "Admin-only text")));
+        Assert.Equal(2, f.Outbox.Deliveries.Count);
+    }
     private static readonly DateTime Now = new(2026, 9, 17, 12, 0, 0, DateTimeKind.Utc);
 
     [Theory]
@@ -280,14 +300,15 @@ public sealed class JobReferralServiceTests
         var memberships = new MembershipRepositoryFake();
         var audit = new AuditWriterTestDouble();
         var unitOfWork = new UnitOfWorkFake();
+        var outbox = new RecordingNotificationOutbox();
 
         var service = new JobReferralService(
             referralRepository, jobRepository, jobService, memberships, audit, unitOfWork,
-            new FixedTimeProvider(Now));
+            new FixedTimeProvider(Now), new JobPortal.Application.Features.Notifications.NotificationOutbox(outbox, new FixedTimeProvider(Now)));
 
         return new Fixture(
             service, jobRepository, referralRepository, memberships, audit,
-            referrerUserId, adminUserId, composedJobId, referrer);
+            referrerUserId, adminUserId, composedJobId, referrer, outbox);
     }
 
     private sealed record Fixture(
@@ -299,7 +320,7 @@ public sealed class JobReferralServiceTests
         Guid ReferrerUserId,
         Guid AdminUserId,
         Guid ComposedJobId,
-        User Referrer);
+        User Referrer, RecordingNotificationOutbox Outbox);
 
     private sealed class FixedTimeProvider(DateTime utcNow) : TimeProvider
     {

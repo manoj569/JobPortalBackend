@@ -37,7 +37,8 @@ public sealed class ReferralJobSkillsTests
         if (submitReferral)
         {
             var referrals = new JobReferralService(new JobReferralRepository(db), new JobRepository(db), service,
-                new MembershipRepository(db, TimeProvider.System), new AuditWriterTestDouble(), new UnitOfWork(db), TimeProvider.System);
+                new MembershipRepository(db, TimeProvider.System), new AuditWriterTestDouble(), new UnitOfWork(db), TimeProvider.System,
+                NotificationTestSupport.Outbox(db, TimeProvider.System));
             var result = await referrals.SubmitAsync(referrer.Id, new(request, null, true, false, false));
             Assert.Equal(JobReferralApprovalStatus.Pending, result.ApprovalStatus);
             jobId = result.JobId;

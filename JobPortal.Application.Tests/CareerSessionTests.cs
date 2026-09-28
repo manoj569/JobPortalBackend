@@ -22,6 +22,30 @@ namespace JobPortal.Application.Tests;
 
 public sealed class CareerSessionTests
 {
+    [Theory]
+    [InlineData(1440)]
+    [InlineData(60)]
+    [InlineData(10)]
+    public async Task ExistingReminderOffsetsBridgeOnceForBothParticipants(int offset)
+    {
+        using var f = new Fixture();
+        var booking = await f.Finance.Scheduling.Book(new DateTimeOffset(f.Clock.Utc.AddDays(7).AddHours(3).AddMinutes(30)));
+        var order = await f.Finance.Order(booking.Id); await f.Finance.Verify(booking.Id, order);
+        var session = await f.Service.ProvisionAsync(f.Candidate, booking.Id, CareerSessionAudience.Candidate, default);
+        f.Clock.Utc = session.ScheduledStartUtc.AddMinutes(-offset);
+        var processor = new CareerSessionReminderProcessor(f.Repository, new DashboardRepository(f.Db, f.Clock), f.Clock, NotificationTestSupport.Outbox(f.Db, f.Clock));
+        await processor.ProcessAsync(default);
+        Assert.Equal(0, await processor.ProcessAsync(default));
+        var reminders = await f.Db.Set<CareerGuidanceSessionReminder>().Where(x => x.OffsetMinutes == offset).ToArrayAsync();
+        Assert.Equal(2, reminders.Length);
+        foreach (var reminder in reminders)
+        {
+            var intents = await f.Db.NotificationDeliveries.Where(x => x.Source == NotificationSource.CareerReminder && x.SourceId == reminder.Id).ToArrayAsync();
+            Assert.Equal(2, intents.Length);
+            Assert.All(intents, x => { Assert.Equal(reminder.Id, x.NotificationId); Assert.Equal(reminder.RecipientUserId, x.UserId); });
+            Assert.Equal(CareerReminderStatus.Delivered, reminder.Status);
+        }
+    }
     [Fact]
     public async Task UncertainProviderOutcomeIsSanitizedAndReconciledWithoutDuplicateCreate()
     {
@@ -44,7 +68,7 @@ public sealed class CareerSessionTests
         using var f = new Fixture(); var s = await f.Setup(true); f.Clock.Utc = s.ScheduledStartUtc.AddMinutes(-60);
         var payment = await f.Db.Set<CareerGuidancePayment>().SingleAsync(); payment.RequiresRefundReview = true;
         await f.Db.SaveChangesAsync();
-        var processor = new CareerSessionReminderProcessor(f.Repository, new DashboardRepository(f.Db, f.Clock), f.Clock);
+        var processor = new CareerSessionReminderProcessor(f.Repository, new DashboardRepository(f.Db, f.Clock), f.Clock, NotificationTestSupport.Outbox(f.Db, f.Clock));
         Assert.Equal(0, await processor.ProcessAsync(default)); Assert.Empty(await f.Db.Notifications.ToArrayAsync());
         Assert.Null((await f.Service.JoinAsync(f.Candidate, s.BookingId, CareerSessionAudience.Candidate, true, default)).JoinUrl);
     }
@@ -257,7 +281,7 @@ public sealed class CareerSessionTests
     public async Task RemindersDeliverOnceToExistingInboxWithoutMeetingSecrets()
     {
         using var f = new Fixture(); var s = await f.Setup(true); f.Clock.Utc = s.ScheduledStartUtc.AddMinutes(-60);
-        var processor = new CareerSessionReminderProcessor(f.Repository, new DashboardRepository(f.Db, f.Clock), f.Clock);
+        var processor = new CareerSessionReminderProcessor(f.Repository, new DashboardRepository(f.Db, f.Clock), f.Clock, NotificationTestSupport.Outbox(f.Db, f.Clock));
         Assert.Equal(2, await processor.ProcessAsync(default)); Assert.Equal(0, await processor.ProcessAsync(default));
         var notifications = await f.Db.Set<Notification>().ToArrayAsync(); Assert.Equal(2, notifications.Length);
         Assert.DoesNotContain("https", JsonSerializer.Serialize(notifications), StringComparison.OrdinalIgnoreCase);

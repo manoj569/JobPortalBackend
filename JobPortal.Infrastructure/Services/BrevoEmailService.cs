@@ -110,7 +110,7 @@ public sealed class BrevoEmailService(
 
     private async Task<EmailDeliveryResult> SendAsync(
         string recipient, string subject, string body, string messageType,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, bool classifyFailure = false)
     {
         if (!configuration.GetValue("Email:Enabled", false))
         {
@@ -133,11 +133,14 @@ public sealed class BrevoEmailService(
                 return EmailDeliveryResult.Sent;
 
             DeliveryFailed(logger, messageType, (int)response.StatusCode, CorrelationId, null);
+            if (classifyFailure && (int)response.StatusCode is >= 400 and < 500 &&
+                response.StatusCode is not (HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests))
+                return EmailDeliveryResult.PermanentFailure;
             return EmailDeliveryResult.Failed;
         }
         catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
         {
-            DeliveryFailed(logger, messageType, null, CorrelationId, exception);
+            DeliveryFailed(logger, messageType, null, CorrelationId, classifyFailure ? null : exception);
             return EmailDeliveryResult.Failed;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -146,13 +149,31 @@ public sealed class BrevoEmailService(
         }
         catch (Exception exception)
         {
-            DeliveryFailed(logger, messageType, null, CorrelationId, exception);
+            DeliveryFailed(logger, messageType, null, CorrelationId, classifyFailure ? null : exception);
             return EmailDeliveryResult.Failed;
         }
     }
 
     private static string SanitizeHeaderValue(string value) =>
         value.Replace('\r', ' ').Replace('\n', ' ').Trim();
+
+    public Task<EmailDeliveryResult> SendNotificationAsync(User user, Notification notification,
+        CancellationToken cancellationToken = default)
+    {
+        if (notification.UserId != user.Id ||
+            !JobPortal.Application.Features.Notifications.NotificationOutbox.IsSafeActionUrl(notification.ActionUrl))
+            return Task.FromResult(EmailDeliveryResult.PermanentFailure);
+        var body = notification.Message;
+        if (notification.ActionUrl is { } route)
+        {
+            if (!Uri.TryCreate(configuration["AppUrls:FrontendBaseUrl"], UriKind.Absolute, out var frontend) ||
+                frontend.Scheme is not ("https" or "http") || !string.IsNullOrEmpty(frontend.UserInfo))
+                return Task.FromResult(EmailDeliveryResult.PermanentFailure);
+            var link = new UriBuilder(frontend) { Path = frontend.AbsolutePath.TrimEnd('/') + route, Query = "", Fragment = "" };
+            body += $"{Environment.NewLine}{Environment.NewLine}{link.Uri.AbsoluteUri}";
+        }
+        return SendAsync(user.Email, SanitizeHeaderValue(notification.Title), body, "notification", cancellationToken, true);
+    }
 
     private string CorrelationId =>
         httpContextAccessor?.HttpContext?.TraceIdentifier ??

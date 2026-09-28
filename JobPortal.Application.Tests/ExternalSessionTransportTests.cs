@@ -126,7 +126,12 @@ public sealed class ExternalSessionTransportTests
     [Fact]
     public void HubIsCandidateAuthorizedAndHasNoBrowserInternalEscapeHatches()
     {
-        Assert.Equal("Candidate", typeof(ExternalSessionCaptureHub).GetCustomAttribute<AuthorizeAttribute>()?.Roles);
+        Assert.NotNull(typeof(ExternalSessionCaptureHub).GetCustomAttribute<AuthorizeAttribute>());
+        Assert.Null(typeof(ExternalSessionCaptureHub).GetCustomAttribute<AuthorizeAttribute>()!.Roles);
+        var controls = typeof(ExternalSessionCaptureHub).GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly)
+            .Where(x => x.Name != nameof(ExternalSessionCaptureHub.OnDisconnectedAsync)).ToArray();
+        Assert.Equal(9, controls.Length);
+        Assert.All(controls, method => Assert.Equal("Candidate", method.GetCustomAttribute<AuthorizeAttribute>()?.Roles));
         string[] forbidden = ["JavaScript", "Url", "Cdp", "Cookie", "Storage", "Playwright", "Clipboard", "Download"];
         Assert.DoesNotContain(typeof(ExternalSessionCaptureHub).GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly),
             method => forbidden.Any(value => method.Name.Contains(value, StringComparison.OrdinalIgnoreCase)));

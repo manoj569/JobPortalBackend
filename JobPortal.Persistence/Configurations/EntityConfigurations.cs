@@ -288,6 +288,7 @@ public sealed class JobReferralConfiguration : IEntityTypeConfiguration<JobRefer
 {
     public void Configure(EntityTypeBuilder<JobReferral> builder)
     {
+        builder.Property(x => x.ApprovalStatus).IsConcurrencyToken();
         builder.ToTable("JobReferrals");
         builder.ConfigureBaseEntity();
 
@@ -551,6 +552,8 @@ public sealed class NotificationConfiguration : IEntityTypeConfiguration<Notific
 {
     public void Configure(EntityTypeBuilder<Notification> builder)
     {
+        builder.Property(x => x.BusinessKey).HasMaxLength(220);
+        builder.HasIndex(x => new { x.UserId, x.BusinessKey }).IsUnique().HasFilter("\"BusinessKey\" IS NOT NULL");
         builder.ToTable("Notifications");
         builder.ConfigureBaseEntity();
         builder.Property(x => x.Title).HasMaxLength(250).IsRequired();

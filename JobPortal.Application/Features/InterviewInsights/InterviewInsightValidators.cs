@@ -6,110 +6,308 @@ internal static class InsightContentRules
 {
     private static readonly string[] Prohibited =
         ["password", "credential", "salary slip", "internal url", "answer key", "leaked assessment", "nda answer"];
-    public static bool IsSafe(string? value) => string.IsNullOrWhiteSpace(value) ||
+
+    public static bool IsSafe(string? value) =>
+        string.IsNullOrWhiteSpace(value) ||
         !Prohibited.Any(x => value.Contains(x, StringComparison.OrdinalIgnoreCase));
 }
 
-public sealed class InterviewRoundRequestValidator : AbstractValidator<InterviewRoundRequest>
+internal static class InterviewScheduleValidationRules
+{
+    public static bool IsSupportedReminderOffset(int minutes) =>
+        minutes is 15 or 30 or 60 or 1440;
+
+    public static bool IsValidTimeZone(string? timeZoneId)
+    {
+        if (string.IsNullOrWhiteSpace(timeZoneId))
+            return false;
+
+        try
+        {
+            _ = TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
+            return true;
+        }
+        catch (TimeZoneNotFoundException)
+        {
+            return false;
+        }
+        catch (InvalidTimeZoneException)
+        {
+            return false;
+        }
+    }
+
+    public static bool IsExplicitUtc(DateTime value) =>
+        value.Kind == DateTimeKind.Utc;
+}
+
+public sealed class InterviewRoundRequestValidator
+    : AbstractValidator<InterviewRoundRequest>
 {
     public InterviewRoundRequestValidator()
     {
-        RuleFor(x => x.RoundType).IsInEnum();
-        RuleFor(x => x.RoundTitle).MaximumLength(160);
-        RuleFor(x => x.DurationMinutes).InclusiveBetween(1, 1440).When(x => x.DurationMinutes.HasValue);
-        RuleFor(x => x.QuestionsOrTopics).NotEmpty().MaximumLength(3000).Must(InsightContentRules.IsSafe)
-            .WithMessage("Share paraphrased topics only; confidential or leaked assessment material is not allowed.");
-        RuleFor(x => x.CandidateAdvice).MaximumLength(2000).Must(InsightContentRules.IsSafe);
+        RuleFor(x => x.RoundType)
+            .IsInEnum();
+
+        RuleFor(x => x.RoundTitle)
+            .MaximumLength(160);
+
+        RuleFor(x => x.DurationMinutes)
+            .InclusiveBetween(1, 1440)
+            .When(x => x.DurationMinutes.HasValue);
+
+        RuleFor(x => x.QuestionsOrTopics)
+            .NotEmpty()
+            .MaximumLength(3000)
+            .Must(InsightContentRules.IsSafe)
+            .WithMessage(
+                "Share paraphrased topics only; confidential or leaked assessment material is not allowed.");
+
+        RuleFor(x => x.CandidateAdvice)
+            .MaximumLength(2000)
+            .Must(InsightContentRules.IsSafe);
     }
 }
 
-public sealed class CreateInterviewInsightRequestValidator : AbstractValidator<CreateInterviewInsightRequest>
+public sealed class CreateInterviewInsightRequestValidator
+    : AbstractValidator<CreateInterviewInsightRequest>
 {
     public CreateInterviewInsightRequestValidator()
     {
-        RuleFor(x => x.CompanyId).NotEmpty();
-        RuleFor(x => x.RoleTitle).NotEmpty().MaximumLength(160);
-        RuleFor(x => x.ExperienceLevel).MaximumLength(80);
-        RuleFor(x => x.InterviewDateMonth).Must(x => x.Day == 1).WithMessage("InterviewDateMonth must be the first day of its month.");
-        RuleFor(x => x.OverallDifficulty).IsInEnum();
-        RuleFor(x => x.InterviewFormat).IsInEnum().When(x => x.InterviewFormat.HasValue);
-        RuleFor(x => x.ProcessSummary).NotEmpty().MaximumLength(3000).Must(InsightContentRules.IsSafe);
-        RuleFor(x => x.PreparationTips).NotEmpty().MaximumLength(3000).Must(InsightContentRules.IsSafe);
-        RuleFor(x => x.Outcome).IsInEnum().When(x => x.Outcome.HasValue);
-        RuleFor(x => x.ContentGuidelinesAccepted).Equal(true)
-            .WithMessage("You must confirm that no confidential material, personal data, assessment leaks, or NDA-protected content is included.");
-        RuleFor(x => x.Rounds).NotEmpty().Must(x => x.Count <= 12);
-        RuleForEach(x => x.Rounds).SetValidator(new InterviewRoundRequestValidator());
+        RuleFor(x => x.CompanyId)
+            .NotEmpty();
+
+        RuleFor(x => x.RoleTitle)
+            .NotEmpty()
+            .MaximumLength(160);
+
+        RuleFor(x => x.ExperienceLevel)
+            .MaximumLength(80);
+
+        RuleFor(x => x.InterviewDateMonth)
+            .Must(x => x.Day == 1)
+            .WithMessage(
+                "InterviewDateMonth must be the first day of its month.");
+
+        RuleFor(x => x.OverallDifficulty)
+            .IsInEnum();
+
+        RuleFor(x => x.InterviewFormat)
+            .IsInEnum()
+            .When(x => x.InterviewFormat.HasValue);
+
+        RuleFor(x => x.ProcessSummary)
+            .NotEmpty()
+            .MaximumLength(3000)
+            .Must(InsightContentRules.IsSafe);
+
+        RuleFor(x => x.PreparationTips)
+            .NotEmpty()
+            .MaximumLength(3000)
+            .Must(InsightContentRules.IsSafe);
+
+        RuleFor(x => x.Outcome)
+            .IsInEnum()
+            .When(x => x.Outcome.HasValue);
+
+        RuleFor(x => x.ContentGuidelinesAccepted)
+            .Equal(true)
+            .WithMessage(
+                "You must confirm that no confidential material, personal data, assessment leaks, or NDA-protected content is included.");
+
+        RuleFor(x => x.Rounds)
+            .NotEmpty()
+            .Must(x => x.Count <= 12);
+
+        RuleForEach(x => x.Rounds)
+            .SetValidator(new InterviewRoundRequestValidator());
     }
 }
 
-public sealed class UpdateInterviewInsightRequestValidator : AbstractValidator<UpdateInterviewInsightRequest>
+public sealed class UpdateInterviewInsightRequestValidator
+    : AbstractValidator<UpdateInterviewInsightRequest>
 {
     public UpdateInterviewInsightRequestValidator()
     {
         Include(new UpdateRules());
     }
-    private sealed class UpdateRules : AbstractValidator<UpdateInterviewInsightRequest>
+
+    private sealed class UpdateRules
+        : AbstractValidator<UpdateInterviewInsightRequest>
     {
         public UpdateRules()
         {
-            RuleFor(x => x.RoleTitle).NotEmpty().MaximumLength(160);
-            RuleFor(x => x.ExperienceLevel).MaximumLength(80);
-            RuleFor(x => x.InterviewDateMonth).Must(x => x.Day == 1);
-            RuleFor(x => x.OverallDifficulty).IsInEnum();
-            RuleFor(x => x.InterviewFormat).IsInEnum().When(x => x.InterviewFormat.HasValue);
-            RuleFor(x => x.ProcessSummary).NotEmpty().MaximumLength(3000).Must(InsightContentRules.IsSafe);
-            RuleFor(x => x.PreparationTips).NotEmpty().MaximumLength(3000).Must(InsightContentRules.IsSafe);
-            RuleFor(x => x.ContentGuidelinesAccepted).Equal(true);
-            RuleFor(x => x.Rounds).NotEmpty().Must(x => x.Count <= 12);
-            RuleForEach(x => x.Rounds).SetValidator(new InterviewRoundRequestValidator());
+            RuleFor(x => x.RoleTitle)
+                .NotEmpty()
+                .MaximumLength(160);
+
+            RuleFor(x => x.ExperienceLevel)
+                .MaximumLength(80);
+
+            RuleFor(x => x.InterviewDateMonth)
+                .Must(x => x.Day == 1);
+
+            RuleFor(x => x.OverallDifficulty)
+                .IsInEnum();
+
+            RuleFor(x => x.InterviewFormat)
+                .IsInEnum()
+                .When(x => x.InterviewFormat.HasValue);
+
+            RuleFor(x => x.ProcessSummary)
+                .NotEmpty()
+                .MaximumLength(3000)
+                .Must(InsightContentRules.IsSafe);
+
+            RuleFor(x => x.PreparationTips)
+                .NotEmpty()
+                .MaximumLength(3000)
+                .Must(InsightContentRules.IsSafe);
+
+            RuleFor(x => x.ContentGuidelinesAccepted)
+                .Equal(true);
+
+            RuleFor(x => x.Rounds)
+                .NotEmpty()
+                .Must(x => x.Count <= 12);
+
+            RuleForEach(x => x.Rounds)
+                .SetValidator(new InterviewRoundRequestValidator());
         }
     }
 }
 
-public sealed class CreateInterviewScheduleRequestValidator : AbstractValidator<CreateInterviewScheduleRequest>
+public sealed class CreateInterviewScheduleRequestValidator
+    : AbstractValidator<CreateInterviewScheduleRequest>
 {
     public CreateInterviewScheduleRequestValidator()
     {
-        RuleFor(x => x.CompanyId).NotEmpty();
-        RuleFor(x => x.RoleTitle).MaximumLength(160);
-        RuleFor(x => x.InterviewAtUtc).NotEmpty();
-        RuleFor(x => x.InterviewFormat).IsInEnum().When(x => x.InterviewFormat.HasValue);
-        RuleFor(x => x.ApproximateTimeOfDay).IsInEnum().When(x => x.ApproximateTimeOfDay.HasValue);
-        RuleFor(x => x.PreparationStatus).IsInEnum().When(x => x.PreparationStatus.HasValue);
-        RuleFor(x => x.ExpectedRoundTypes).Must(x => x is null || x.Count <= 12).WithMessage("ExpectedRoundTypes cannot contain more than 12 values.");
-        RuleForEach(x => x.ExpectedRoundTypes).IsInEnum();
+        RuleFor(x => x.CompanyId)
+            .NotEmpty();
+
+        RuleFor(x => x.RoleTitle)
+            .MaximumLength(160);
+
+        RuleFor(x => x.InterviewAtUtc)
+            .NotEmpty()
+            .Must(InterviewScheduleValidationRules.IsExplicitUtc)
+            .WithMessage(
+                "InterviewAtUtc must be an explicit UTC timestamp.");
+
+        RuleFor(x => x.InterviewFormat)
+            .IsInEnum()
+            .When(x => x.InterviewFormat.HasValue);
+
+        RuleFor(x => x.ApproximateTimeOfDay)
+            .IsInEnum()
+            .When(x => x.ApproximateTimeOfDay.HasValue);
+
+        RuleFor(x => x.PreparationStatus)
+            .IsInEnum()
+            .When(x => x.PreparationStatus.HasValue);
+
+        RuleFor(x => x.ExpectedRoundTypes)
+            .Must(x => x is null || x.Count <= 12)
+            .WithMessage(
+                "ExpectedRoundTypes cannot contain more than 12 values.");
+
+        RuleForEach(x => x.ExpectedRoundTypes)
+            .IsInEnum();
+
+        RuleFor(x => x.ReminderOffsetMinutes)
+            .Must(InterviewScheduleValidationRules.IsSupportedReminderOffset)
+            .WithMessage(
+                "ReminderOffsetMinutes must be 15, 30, 60, or 1440.");
+
+        RuleFor(x => x.TimeZoneId)
+            .NotEmpty()
+            .MaximumLength(100)
+            .Must(InterviewScheduleValidationRules.IsValidTimeZone)
+            .WithMessage(
+                "TimeZoneId must be a valid time zone.");
     }
 }
-public sealed class UpdateInterviewScheduleRequestValidator : AbstractValidator<UpdateInterviewScheduleRequest>
+
+public sealed class UpdateInterviewScheduleRequestValidator
+    : AbstractValidator<UpdateInterviewScheduleRequest>
 {
     public UpdateInterviewScheduleRequestValidator()
     {
-        RuleFor(x => x.RoleTitle).MaximumLength(160);
-        RuleFor(x => x.InterviewAtUtc).NotEmpty();
-        RuleFor(x => x.Status).IsInEnum();
-        RuleFor(x => x.InterviewFormat).IsInEnum().When(x => x.InterviewFormat.HasValue);
-        RuleFor(x => x.ApproximateTimeOfDay).IsInEnum().When(x => x.ApproximateTimeOfDay.HasValue);
-        RuleFor(x => x.PreparationStatus).IsInEnum().When(x => x.PreparationStatus.HasValue);
-        RuleFor(x => x.ExpectedRoundTypes).Must(x => x is null || x.Count <= 12).WithMessage("ExpectedRoundTypes cannot contain more than 12 values.");
-        RuleForEach(x => x.ExpectedRoundTypes).IsInEnum();
+        RuleFor(x => x.RoleTitle)
+            .MaximumLength(160);
+
+        RuleFor(x => x.InterviewAtUtc)
+            .NotEmpty()
+            .Must(InterviewScheduleValidationRules.IsExplicitUtc)
+            .WithMessage(
+                "InterviewAtUtc must be an explicit UTC timestamp.");
+
+        RuleFor(x => x.Status)
+            .IsInEnum();
+
+        RuleFor(x => x.InterviewFormat)
+            .IsInEnum()
+            .When(x => x.InterviewFormat.HasValue);
+
+        RuleFor(x => x.ApproximateTimeOfDay)
+            .IsInEnum()
+            .When(x => x.ApproximateTimeOfDay.HasValue);
+
+        RuleFor(x => x.PreparationStatus)
+            .IsInEnum()
+            .When(x => x.PreparationStatus.HasValue);
+
+        RuleFor(x => x.ExpectedRoundTypes)
+            .Must(x => x is null || x.Count <= 12)
+            .WithMessage(
+                "ExpectedRoundTypes cannot contain more than 12 values.");
+
+        RuleForEach(x => x.ExpectedRoundTypes)
+            .IsInEnum();
+
+        RuleFor(x => x.ReminderOffsetMinutes)
+            .Must(InterviewScheduleValidationRules.IsSupportedReminderOffset)
+            .WithMessage(
+                "ReminderOffsetMinutes must be 15, 30, 60, or 1440.");
+
+        RuleFor(x => x.TimeZoneId)
+            .NotEmpty()
+            .MaximumLength(100)
+            .Must(InterviewScheduleValidationRules.IsValidTimeZone)
+            .WithMessage(
+                "TimeZoneId must be a valid time zone.");
     }
 }
-public sealed class CreateInsightFeedbackRequestValidator : AbstractValidator<CreateInsightFeedbackRequest>
+
+public sealed class CreateInsightFeedbackRequestValidator
+    : AbstractValidator<CreateInsightFeedbackRequest>
 {
     public CreateInsightFeedbackRequestValidator()
     {
-        RuleFor(x => x.CandidateInterviewScheduleId).NotEmpty();
-        RuleFor(x => x.Helpfulness).IsInEnum();
-        RuleFor(x => x.InterviewMatch).IsInEnum();
-        RuleFor(x => x.Feedback).MaximumLength(500).Must(InsightContentRules.IsSafe);
+        RuleFor(x => x.CandidateInterviewScheduleId)
+            .NotEmpty();
+
+        RuleFor(x => x.Helpfulness)
+            .IsInEnum();
+
+        RuleFor(x => x.InterviewMatch)
+            .IsInEnum();
+
+        RuleFor(x => x.Feedback)
+            .MaximumLength(500)
+            .Must(InsightContentRules.IsSafe);
     }
 }
-public sealed class CreateInsightReportRequestValidator : AbstractValidator<CreateInsightReportRequest>
+
+public sealed class CreateInsightReportRequestValidator
+    : AbstractValidator<CreateInsightReportRequest>
 {
     public CreateInsightReportRequestValidator()
     {
-        RuleFor(x => x.Reason).IsInEnum();
-        RuleFor(x => x.Details).MaximumLength(500);
+        RuleFor(x => x.Reason)
+            .IsInEnum();
+
+        RuleFor(x => x.Details)
+            .MaximumLength(500);
     }
 }
