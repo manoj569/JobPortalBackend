@@ -62,6 +62,10 @@ public sealed class NotificationDeliveryRepository(JobPortalDbContext db) : INot
 
         switch (delivery.Source)
         {
+            case NotificationSource.MembershipPurchase:
+                return await db.Payments.AnyAsync(p => p.Id == delivery.SourceId &&
+                    p.UserId == delivery.UserId && p.Status == PaymentStatus.Paid && p.PaidAtUtc != null &&
+                    p.MembershipId != null, ct);
             case NotificationSource.InterviewReminder:
                 return await db.CandidateInterviewSchedules.AnyAsync(x =>
                     x.Id == delivery.SourceId &&

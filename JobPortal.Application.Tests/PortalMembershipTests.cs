@@ -6,6 +6,7 @@ using JobPortal.Application.Abstractions.Persistence;
 using JobPortal.Application.Common.Exceptions;
 using JobPortal.Application.Features.Memberships;
 using JobPortal.Application.Features.Payments;
+using JobPortal.Application.Features.Notifications;
 using JobPortal.Domain.Common;
 using JobPortal.Domain.Entities;
 using JobPortal.Domain.Enums;
@@ -696,6 +697,140 @@ public sealed class PortalMembershipTests
         Assert.Equal("pending_membership_checkout", error.Code);
     }
 
+    [Theory]
+    [InlineData("CareerHarborMembership", 99, 17.82, 11682)]
+    [InlineData("ReferralContactAccess", 299, 53.82, 35282)]
+    public async Task GstPurchaseSnapshotsTotalAndConfirmsOnce(string code, decimal baseAmount, decimal tax, long total)
+    {
+        var f = CreatePaymentFixture();
+        f.Plans.GstRate = 18m;
+        var path = "/dashboard/jobs/referral/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/contact";
+        var checkout = await f.Service.CreatePhonePeCheckoutAsync(UserId, new(code), path);
+        Assert.Equal(total, f.PhonePe.RequestedAmount);
+        Assert.Equal(new MembershipPricing(baseAmount, 18m, tax, total / 100m), checkout.Pricing);
+        var payment = f.Payments.Payment!;
+        Assert.Equal(baseAmount, payment.BaseAmount);
+        Assert.Equal(tax, payment.TaxAmount);
+        Assert.Equal(18m, payment.TaxRate);
+        Assert.NotEqual(MembershipStatus.Active, payment.Membership!.Status);
+        f.Plans.StandardPrice = 199m;
+        f.Plans.StandardDuration = 90;
+        f.Plans.GstRate = 5m;
+        f.Plans.DisabledPlanCode = code;
+        f.PhonePe.VerificationState = new(PhonePeOrderStateKind.Completed, checkout.MerchantOrderId, "verified", total);
+        var result = await f.Service.GetPhonePeStatusAsync(UserId, checkout.MerchantOrderId);
+        var webhook = new PhonePeWebhookRequest("success"u8.ToArray(), "valid");
+        await f.Service.ProcessPhonePeWebhookAsync(webhook);
+        await f.Service.ProcessPhonePeWebhookAsync(webhook);
+        await f.Service.ReconcileAsync(UserId, payment.Id);
+        Assert.Equal(PhonePeBrowserPaymentStatus.Completed, result.Status);
+        Assert.Equal(path, result.ReturnTo);
+        Assert.Equal(code, result.Payment!.PlanCode);
+        Assert.Equal(checkout.Pricing, result.Payment.Pricing);
+        Assert.Equal(Now.AddDays(30), result.MembershipEndUtc);
+        Assert.Single(f.Memberships.Memberships);
+        Assert.Equal(2, f.Notifications.Deliveries.Count);
+        Assert.Single(f.Notifications.Deliveries, x => x.Channel == NotificationChannel.Email);
+        Assert.Single(f.Notifications.Deliveries, x => x.Channel == NotificationChannel.InApp);
+        Assert.All(f.Notifications.Deliveries, x => Assert.Equal(UserId, x.UserId));
+    }
+
+    [Theory]
+    [InlineData("CareerHarborMembership", "ReferralContactAccess")]
+    [InlineData("ReferralContactAccess", "CareerHarborMembership")]
+    public async Task DifferentPlansCanBePendingThenActiveIndependently(string first, string second)
+    {
+        var f = CreatePaymentFixture();
+        f.Plans.GstRate = 18m;
+        var a = await f.Service.CreatePhonePeCheckoutAsync(UserId, new(first), null);
+        var b = await f.Service.CreatePhonePeCheckoutAsync(UserId, new(second), null);
+        await Assert.ThrowsAsync<PendingMembershipCheckoutException>(() =>
+            f.Service.CreatePhonePeCheckoutAsync(UserId, new(first), null));
+        foreach (var checkout in new[] { a, b })
+        {
+            f.PhonePe.VerificationState = new(PhonePeOrderStateKind.Completed, checkout.MerchantOrderId,
+                checkout.MerchantOrderId + "_txn", checkout.AmountInMinorUnits);
+            await f.Service.GetPhonePeStatusAsync(UserId, checkout.MerchantOrderId);
+        }
+        Assert.Equal(2, f.Memberships.Memberships.Count);
+        Assert.All(f.Memberships.Memberships, x => Assert.Equal(MembershipStatus.Active, x.Status));
+        Assert.Equal(4, f.Notifications.Deliveries.Count);
+    }
+
+    [Fact]
+    public async Task FailedPhonePeAttemptAllowsRetryWithoutActivating()
+    {
+        var f = CreatePaymentFixture();
+        var checkout = await f.Service.CreatePhonePeCheckoutAsync(UserId);
+        f.PhonePe.VerificationState = new(PhonePeOrderStateKind.Failed, checkout.MerchantOrderId, AmountInMinorUnits: 9900);
+        await f.Service.GetPhonePeStatusAsync(UserId, checkout.MerchantOrderId);
+        Assert.Empty(f.Notifications.Deliveries);
+        Assert.NotEqual(MembershipStatus.Active, f.Memberships.Membership!.Status);
+        var retry = await f.Service.CreatePhonePeCheckoutAsync(UserId);
+        Assert.NotEqual(checkout.MerchantOrderId, retry.MerchantOrderId);
+    }
+
+    [Fact]
+    public async Task LateFailureFromOlderAttemptDoesNotCancelRetryMembership()
+    {
+        var f = CreatePaymentFixture();
+        var first = await f.Service.CreatePhonePeCheckoutAsync(UserId);
+        f.PhonePe.VerificationState = new(PhonePeOrderStateKind.Failed, first.MerchantOrderId, AmountInMinorUnits: 9900);
+        await f.Service.GetPhonePeStatusAsync(UserId, first.MerchantOrderId);
+        await f.Service.CreatePhonePeCheckoutAsync(UserId);
+        await f.Service.GetPhonePeStatusAsync(UserId, first.MerchantOrderId);
+        Assert.Equal(MembershipStatus.Pending, f.Memberships.Membership!.Status);
+    }
+
+    [Fact]
+    public async Task PendingAndStatusResponsesIdentifyTheCorrectPlan()
+    {
+        var f = CreatePaymentFixture();
+        await f.Service.CreatePhonePeCheckoutAsync(UserId, new("CareerHarborMembership"), null);
+        await f.Service.CreatePhonePeCheckoutAsync(UserId, new("ReferralContactAccess"), null);
+        var pending = await f.Service.GetPendingMembershipCheckoutAsync(UserId, "CareerHarborMembership");
+        Assert.Equal("CareerHarborMembership", pending!.PlanCode);
+        var status = await f.Service.GetStatusAsync(UserId);
+        Assert.Equal("ReferralContactAccess", status.Membership!.PlanCode);
+        Assert.Equal(status.Membership.PlanCode, status.LatestPayment!.PlanCode);
+        Assert.Equal(2, status.Memberships!.Count);
+    }
+
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(101)]
+    public void InvalidGstRateFailsClosed(decimal rate)
+    {
+        Assert.Throws<InvalidOperationException>(() => MembershipPricing.Calculate(
+            new MembershipPlan("Job Application Access", 99m, "INR", 30), rate));
+    }
+
+    [Fact]
+    public void GstRoundingUsesDecimalAwayFromZero()
+    {
+        Assert.Equal(0.01m, MembershipPricing.Calculate(new("Plan", 0.05m, "INR", 30), 10m).TaxAmount);
+    }
+
+    [Fact]
+    public async Task LegacyPurchaseDoesNotInventGstOrUseChangedConfiguration()
+    {
+        var f = CreatePaymentFixture();
+        var checkout = await f.Service.CreatePhonePeCheckoutAsync(UserId);
+        var payment = f.Payments.Payment!;
+        payment.BaseAmount = payment.TaxRate = payment.TaxAmount = null;
+        payment.PlanName = null;
+        payment.DurationDays = null;
+        f.Plans.GstRate = 18m;
+        f.Plans.StandardPrice = 199m;
+        f.Plans.StandardDuration = 90;
+        f.PhonePe.VerificationState = new(PhonePeOrderStateKind.Completed, checkout.MerchantOrderId, "legacy", 9900);
+        var result = await f.Service.GetPhonePeStatusAsync(UserId, checkout.MerchantOrderId);
+        Assert.Null(result.Payment!.Pricing);
+        Assert.Equal(99m, result.Payment.Amount);
+        Assert.Equal(Now.AddDays(30), result.MembershipEndUtc);
+    }
+
     private static PaymentFixture CreatePaymentFixture()
     {
         var memberships = AvailableRepository();
@@ -706,12 +841,13 @@ public sealed class PortalMembershipTests
         var unitOfWork = new FakeUnitOfWork();
         var audit = new AuditWriterTestDouble();
         var plans = new FakePlanProvider();
+        var notifications = new RecordingNotificationOutbox();
         var service = new PaymentService(
             payments, memberships, users, gateway, phonePe, plans, unitOfWork,
             audit,
             new CreatePaymentOrderRequestValidator(), new ConfirmRazorpayPaymentRequestValidator(),
-            new FixedTimeProvider(Now));
-        return new(service, memberships, payments, users, gateway, phonePe, plans, unitOfWork, audit);
+            new FixedTimeProvider(Now), new NotificationOutbox(notifications, new FixedTimeProvider(Now)));
+        return new(service, memberships, payments, users, gateway, phonePe, plans, unitOfWork, audit, notifications);
     }
 
     private sealed record PaymentFixture(
@@ -723,7 +859,7 @@ public sealed class PortalMembershipTests
         FakePhonePeGateway PhonePe,
         FakePlanProvider Plans,
         FakeUnitOfWork UnitOfWork,
-        AuditWriterTestDouble Audit);
+        AuditWriterTestDouble Audit, RecordingNotificationOutbox Notifications);
 
     private sealed class FakeMembershipRepository : IMembershipRepository
     {
@@ -803,7 +939,7 @@ public sealed class PortalMembershipTests
                     x.Status,
                     x.StartsAtUtc,
                     x.EndsAtUtc,
-                    x.AutoRenew))
+                    x.AutoRenew, x.PlanCode))
                 .ToArray();
 
             return Task.FromResult(result);
@@ -827,29 +963,29 @@ public sealed class PortalMembershipTests
     }
     private sealed class FakePaymentRepository : IPaymentRepository
     {
+        public List<Payment> Payments { get; } = [];
         public Payment? Payment { get; private set; }
         public Task AddAsync(Payment payment, CancellationToken cancellationToken = default)
         {
             Payment = payment;
+            Payments.Add(payment);
             payment.MembershipId = payment.Membership?.Id;
             return Task.CompletedTask;
         }
         public Task<Payment?> GetOwnedAsync(
             Guid id, Guid userId, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Payment?.Id == id && Payment.UserId == userId ? Payment : null);
+            Task.FromResult(Payments.SingleOrDefault(x => x.Id == id && x.UserId == userId));
         public Task<Payment?> GetByProviderOrderIdAsync(
             string providerOrderId, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Payment?.ProviderOrderId == providerOrderId ? Payment : null);
+            Task.FromResult(Payments.LastOrDefault(x => x.ProviderOrderId == providerOrderId));
         public Task<Payment?> GetOwnedByProviderOrderIdAsync(
             string providerOrderId, Guid userId, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Payment?.ProviderOrderId == providerOrderId && Payment.UserId == userId ? Payment : null);
+            Task.FromResult(Payments.LastOrDefault(x => x.ProviderOrderId == providerOrderId && x.UserId == userId));
         public Task<Payment?> GetLatestUnresolvedMembershipAsync(
-            Guid userId, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Payment?.UserId == userId && Payment.MembershipId is not null &&
-                Payment.ProviderOrderId is not null &&
-                Payment.Status is PaymentStatus.Created or PaymentStatus.Pending or PaymentStatus.Authorized
-                    ? Payment
-                    : null);
+            Guid userId, string? planCode = null, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Payments.LastOrDefault(x => x.UserId == userId && x.MembershipId is not null &&
+                (planCode == null || x.PlanCode == planCode) &&
+                x.Status is PaymentStatus.Created or PaymentStatus.Pending or PaymentStatus.Authorized));
         public Task<Payment?> GetLatestForUserAsync(
             Guid userId, CancellationToken cancellationToken = default) =>
             Task.FromResult(Payment?.UserId == userId ? Payment : null);
@@ -965,11 +1101,17 @@ public sealed class PortalMembershipTests
 
     private sealed class FakePlanProvider : IMembershipPlanProvider
     {
+        // Existing fixtures deliberately exercise a configured zero-tax policy; GST scenarios opt in below.
+        public decimal GstRate { get; set; }
+        public decimal GetGstRate() => GstRate;
+        public decimal StandardPrice { get; set; } = 99m;
+        public int StandardDuration { get; set; } = 30;
         public string? DisabledPlanCode { get; set; }
         public MembershipPlan GetDefaultPlan() =>
-            new("Job Application Access", 99m, "INR", 30);
+            new("Job Application Access", StandardPrice, "INR", StandardDuration);
         public IReadOnlyList<MembershipPlan> GetPlans() => [
             GetDefaultPlan() with { IsActive = DisabledPlanCode != "CareerHarborMembership" },
+            new("ReferralContactAccess", "Referral Contact Access", 299m, "INR", 30, true, false, false),
             new("AIApply", "AI Apply", 999m, "INR", 30, DisabledPlanCode != "AIApply", true, false),
             new("AIApplyPro", "AI Apply Pro", 1499m, "INR", 30, DisabledPlanCode != "AIApplyPro", true, true)];
         public MembershipPlan GetRequired(string planCode) => GetPlans().SingleOrDefault(x =>

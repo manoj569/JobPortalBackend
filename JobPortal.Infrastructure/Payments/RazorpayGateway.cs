@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using JobPortal.Application.Abstractions.Payments;
+using JobPortal.Application.Features.Payments;
 using Microsoft.Extensions.Configuration;
 
 namespace JobPortal.Infrastructure.Payments;
@@ -128,6 +129,8 @@ public sealed class RazorpayGateway : IRazorpayGateway
 public sealed class ConfigurationMembershipPlanProvider(IConfiguration configuration)
     : IMembershipPlanProvider
 {
+    public decimal GetGstRate() => configuration.GetValue<decimal?>("Membership:Tax:GstRate")
+        ?? MembershipPricing.DefaultGstRate;
     private const string CareerHarborMembershipPlanCode = "CareerHarborMembership";
     private const string ReferralContactAccessPlanCode = "ReferralContactAccess";
     private const string AIApplyPlanCode = "AIApply";

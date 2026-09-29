@@ -9,7 +9,7 @@ public sealed record ApplicationAccessResponse(
     ApplicationAccessStatus Status, string Message, string? ApplicationUrl = null);
 public sealed record MembershipResponse(
     Guid Id, string PlanName, MembershipStatus Status, DateTime StartsAtUtc,
-    DateTime? EndsAtUtc, bool AutoRenew);
+    DateTime? EndsAtUtc, bool AutoRenew, string? PlanCode = null);
 public sealed record MembershipHistoryResponse(
     Guid Id, Guid MembershipId, MembershipStatus? PreviousStatus,
     MembershipStatus CurrentStatus, DateTime OccurredAtUtc, string? Reason);

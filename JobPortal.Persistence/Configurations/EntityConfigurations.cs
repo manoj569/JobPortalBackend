@@ -406,9 +406,26 @@ public sealed class PaymentConfiguration : IEntityTypeConfiguration<Payment>
 {
     public void Configure(EntityTypeBuilder<Payment> builder)
     {
-        builder.ToTable("Payments", table => table.HasCheckConstraint("CK_Payments_Amount", "\"Amount\" >= 0"));
+        builder.ToTable("Payments", table =>
+        {
+            table.HasCheckConstraint("CK_Payments_Amount", "\"Amount\" >= 0");
+            table.HasCheckConstraint("CK_Payments_PurchaseSnapshot", """
+                ("BaseAmount" IS NULL AND "TaxRate" IS NULL AND "TaxAmount" IS NULL AND "PlanName" IS NULL AND "DurationDays" IS NULL)
+                OR ("BaseAmount" IS NOT NULL AND "TaxRate" IS NOT NULL AND "TaxAmount" IS NOT NULL AND "PlanName" IS NOT NULL AND "DurationDays" IS NOT NULL
+                    AND "PlanCode" IS NOT NULL AND "BaseAmount" > 0 AND "TaxRate" BETWEEN 0 AND 100 AND "TaxAmount" >= 0
+                    AND "DurationDays" > 0 AND "TaxAmount" = round("BaseAmount" * "TaxRate" / 100, 2) AND "Amount" = "BaseAmount" + "TaxAmount")
+                """);
+        });
         builder.ConfigureBaseEntity();
         builder.Property(x => x.Amount).HasPrecision(18, 2);
+        builder.Property(x => x.BaseAmount).HasPrecision(18, 2);
+        builder.Property(x => x.TaxRate).HasPrecision(7, 4);
+        builder.Property(x => x.TaxAmount).HasPrecision(18, 2);
+        builder.Property(x => x.PlanName).HasMaxLength(100);
+        builder.Property(x => x.ReturnTo).HasMaxLength(256);
+        builder.HasIndex(x => new { x.UserId, x.PlanCode })
+            .IsUnique().HasDatabaseName("UX_Payments_UnresolvedUserPlan")
+            .HasFilter("\"IsDeleted\" = FALSE AND \"MembershipId\" IS NOT NULL AND \"PlanCode\" IS NOT NULL AND \"Status\" IN (1, 2, 7)");
         builder.Ignore(x => x.RowVersion);
         builder.Property<uint>("xmin").HasColumnName("xmin").IsRowVersion();
         builder.Property(x => x.CurrencyCode).HasMaxLength(3).IsRequired();

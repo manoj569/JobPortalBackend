@@ -9,6 +9,7 @@ using JobPortal.Application.Abstractions.Persistence;
 using JobPortal.Application.Common.Exceptions;
 using JobPortal.Application.Common.Validation;
 using JobPortal.Application.Features.Memberships;
+using JobPortal.Application.Features.Notifications;
 using JobPortal.Domain.Common;
 using JobPortal.Domain.Entities;
 using JobPortal.Domain.Enums;
@@ -27,7 +28,8 @@ public sealed class PaymentService(
     IAuditWriter auditWriter,
     IValidator<CreatePaymentOrderRequest> createOrderValidator,
     IValidator<ConfirmRazorpayPaymentRequest> confirmValidator,
-    TimeProvider timeProvider) : IPaymentService
+    TimeProvider timeProvider,
+    NotificationOutbox outbox) : IPaymentService
 {
     private const int MaximumWebhookBytes = 1024 * 1024;
 
@@ -67,7 +69,9 @@ public sealed class PaymentService(
     }
 
     public IReadOnlyList<MembershipPlanResponse> GetPlans() => plans.GetPlans().Where(x => x.IsActive).Select(x =>
-        new MembershipPlanResponse(x.Code, x.Name, x.Amount, x.CurrencyCode, x.DurationDays, true, x.AIApplyEnabled, x.AIApplyProEnabled)).ToList();
+        new MembershipPlanResponse(x.Code, x.Name, x.Amount, x.CurrencyCode, x.DurationDays,
+            x.Code == CareerHarborMembershipPlanCode, x.AIApplyEnabled, x.AIApplyProEnabled,
+            MembershipPricing.Calculate(x, plans.GetGstRate()))).ToList();
 
     public async Task<PhonePeCheckoutResponse> CreatePhonePeCheckoutAsync(
         Guid userId, CancellationToken cancellationToken = default)
@@ -94,8 +98,7 @@ public sealed class PaymentService(
         if (membership is { Status: MembershipStatus.Active } && membership.StartsAtUtc <= utcNow &&
             (!membership.EndsAtUtc.HasValue || membership.EndsAtUtc > utcNow))
             throw new ConflictException("An active portal membership already exists.");
-        if (membership?.Status == MembershipStatus.Pending)
-            await ThrowPendingCheckoutConflictAsync(userId, cancellationToken);
+        await ThrowPendingCheckoutConflictAsync(userId, plan.Code, cancellationToken);
 
         var previousMembershipStatus = membership?.Status;
         if (membership is null)
@@ -127,6 +130,8 @@ public sealed class PaymentService(
             Status = PaymentStatus.Created
         };
         var merchantOrderId = $"ch_{payment.Id:N}";
+        CapturePurchase(payment, plan);
+        payment.ReturnTo = returnTo;
         payment.ProviderOrderId = merchantOrderId;
         payment.TransactionReference = merchantOrderId;
         payment.ProviderReceipt = merchantOrderId;
@@ -152,16 +157,12 @@ public sealed class PaymentService(
                 }, new(userId, "Candidate")), cancellationToken);
             await unitOfWork.SaveChangesAsync(cancellationToken);
             return new(merchantOrderId, checkout.RedirectUrl, checkout.ExpiresAtUtc,
-                plan.Name, amount, payment.CurrencyCode, plan.DurationDays, returnTo, plan.Code);
+                plan.Name, amount, payment.CurrencyCode, plan.DurationDays, returnTo, plan.Code, Pricing(payment));
         }
         catch
         {
-            payment.Status = PaymentStatus.Failed;
-            payment.History.Add(NewPaymentHistory(payment, PaymentStatus.Created, PaymentStatus.Failed,
-                userId, "PhonePe checkout creation failed."));
-            RestoreMembershipAfterFailedOrder(
-                membership, previousMembershipStatus, userId, "PhonePe checkout creation failed.");
-            await unitOfWork.SaveChangesAsync(CancellationToken.None);
+            // A timeout or a failed local save does not prove the provider rejected the order.
+            // Keep the durable Created intent available for server-side reconciliation.
             throw;
         }
     }
@@ -180,7 +181,7 @@ public sealed class PaymentService(
         var payment = await payments.GetOwnedByProviderOrderIdAsync(merchantOrderId, userId, cancellationToken);
         if (payment is null || payment.Provider != PaymentProvider.PhonePe)
             throw new NotFoundException("Payment was not found.");
-        if (payment.Status is PaymentStatus.Created or PaymentStatus.Pending)
+        if (payment.Status is not (PaymentStatus.Paid or PaymentStatus.Refunded))
             await ReconcilePhonePeAsync(payment, cancellationToken);
         var status = BrowserStatus(payment.Status);
         var membership = payment.Membership;
@@ -188,7 +189,8 @@ public sealed class PaymentService(
             membership is { Status: MembershipStatus.Active } &&
             membership.StartsAtUtc <= UtcNow &&
             (!membership.EndsAtUtc.HasValue || membership.EndsAtUtc > UtcNow);
-        return new(merchantOrderId, status, canReturn ? returnTo : null);
+        return new(merchantOrderId, status, canReturn ? payment.ReturnTo ?? returnTo : null,
+            ToResponse(payment), membership?.Status, membership?.StartsAtUtc, membership?.EndsAtUtc);
     }
 
     public async Task<PhonePeWebhookResponse> ProcessPhonePeWebhookAsync(
@@ -225,6 +227,7 @@ public sealed class PaymentService(
         Payment payment, PhonePeOrderState state, string? eventId,
         AuditActor actor, string source, CancellationToken cancellationToken)
     {
+        if (payment.Status == PaymentStatus.Refunded) return;
         switch (state.State)
         {
             case PhonePeOrderStateKind.Completed:
@@ -234,12 +237,6 @@ public sealed class PaymentService(
                     await CompletePaymentAsync(payment, state.TransactionId,
                         "PhonePe server verification confirmed completion.", eventId,
                         AuditAction.WebhookSuccess, source, actor, cancellationToken);
-                else if (eventId is not null)
-                {
-                    payment.History.Add(NewPaymentHistory(payment, PaymentStatus.Paid, PaymentStatus.Paid,
-                        payment.UserId, "Duplicate completion acknowledged.", eventId));
-                    await unitOfWork.SaveChangesAsync(cancellationToken);
-                }
                 break;
             case PhonePeOrderStateKind.Failed:
                 if (payment.Status != PaymentStatus.Paid)
@@ -277,9 +274,13 @@ public sealed class PaymentService(
 
     public async Task<PendingMembershipCheckoutResponse?> GetPendingMembershipCheckoutAsync(
         Guid userId, CancellationToken cancellationToken = default)
+        => await GetPendingMembershipCheckoutAsync(userId, null, cancellationToken);
+
+    public async Task<PendingMembershipCheckoutResponse?> GetPendingMembershipCheckoutAsync(
+        Guid userId, string? planCode, CancellationToken cancellationToken = default)
     {
         await RequiredCandidateAsync(userId, cancellationToken);
-        var payment = await payments.GetLatestUnresolvedMembershipAsync(userId, cancellationToken);
+        var payment = await payments.GetLatestUnresolvedMembershipAsync(userId, planCode, cancellationToken);
         return payment is null ? null : ToPendingCheckoutResponse(payment);
     }
 
@@ -380,7 +381,7 @@ public sealed class PaymentService(
     plan,
     cancellationToken);
         await ExpireMembershipIfNeededAsync(membership, userId, cancellationToken);
-        await ThrowPendingCheckoutConflictAsync(userId, cancellationToken);
+        await ThrowPendingCheckoutConflictAsync(userId, plan.Code, cancellationToken);
 
         var previousMembershipStatus = membership?.Status;
         if (membership is null)
@@ -417,6 +418,7 @@ public sealed class PaymentService(
             Status = PaymentStatus.Created
         };
         payment.ProviderReceipt = $"m_{payment.Id:N}";
+        CapturePurchase(payment, plan);
         payment.History.Add(NewPaymentHistory(
             payment, null, PaymentStatus.Created, userId, "Local order created."));
         await payments.AddAsync(payment, cancellationToken);
@@ -456,7 +458,7 @@ public sealed class PaymentService(
             await unitOfWork.SaveChangesAsync(cancellationToken);
             return new PaymentOrderResponse(
                 payment.Id, membership.Id, order.Id, razorpay.KeyId, order.Amount,
-                order.Currency, order.Receipt, plan.Name, plan.DurationDays, plan.Code);
+                order.Currency, order.Receipt, plan.Name, plan.DurationDays, plan.Code, Pricing(payment));
         }
         catch
         {
@@ -521,6 +523,12 @@ public sealed class PaymentService(
         await RequiredCandidateAsync(userId, cancellationToken);
         var payment = await payments.GetOwnedAsync(paymentId, userId, cancellationToken)
             ?? throw new NotFoundException("Payment was not found.");
+        if (payment.Provider == PaymentProvider.PhonePe)
+        {
+            if (payment.Status is not (PaymentStatus.Paid or PaymentStatus.Refunded))
+                await ReconcilePhonePeAsync(payment, cancellationToken);
+            return ToResponse(payment);
+        }
         if (payment.Status is PaymentStatus.Paid or PaymentStatus.Failed or
             PaymentStatus.Cancelled or PaymentStatus.Expired)
             return ToResponse(payment);
@@ -576,17 +584,18 @@ public sealed class PaymentService(
         Guid userId, CancellationToken cancellationToken = default)
     {
         await RequiredCandidateAsync(userId, cancellationToken);
+        var latestPayment = await payments.GetLatestForUserAsync(userId, cancellationToken);
         var membership = await memberships.GetMembershipForUserAndPlanAsync(
      userId,
-     CareerHarborMembershipPlanCode,
+     latestPayment?.PlanCode ?? CareerHarborMembershipPlanCode,
      cancellationToken);
         await ExpireMembershipIfNeededAsync(membership, userId, cancellationToken);
-        var latestPayment = await payments.GetLatestForUserAsync(userId, cancellationToken);
         return new(
             membership is null ? null : new MembershipResponse(
                 membership.Id, membership.PlanName, membership.Status,
-                membership.StartsAtUtc, membership.EndsAtUtc, membership.AutoRenew),
-            latestPayment is null ? null : ToResponse(latestPayment));
+                membership.StartsAtUtc, membership.EndsAtUtc, membership.AutoRenew, membership.PlanCode),
+            latestPayment is null ? null : ToResponse(latestPayment),
+            await memberships.GetMembershipsForUserAsync(userId, cancellationToken));
     }
 
     public async Task<RazorpayWebhookResponse> ProcessWebhookAsync(
@@ -700,7 +709,7 @@ public sealed class PaymentService(
         AuditActor auditActor,
         CancellationToken cancellationToken)
     {
-        if (payment.Status == PaymentStatus.Paid) return;
+        if (payment.Status is PaymentStatus.Paid or PaymentStatus.Refunded) return;
         var previousPaymentStatus = payment.Status;
         var utcNow = UtcNow;
         payment.Status = PaymentStatus.Paid;
@@ -727,6 +736,12 @@ public sealed class PaymentService(
         membership.History.Add(NewMembershipHistory(
             membership, previousMembershipStatus, MembershipStatus.Active,
             payment.UserId, $"Verified {payment.Provider} payment completed."));
+        var taxDescription = payment.BaseAmount.HasValue
+            ? FormattableString.Invariant($"Base: {payment.BaseAmount:F2}; GST ({payment.TaxRate:0.####}%): {payment.TaxAmount:F2}; ")
+            : "Legacy purchase: tax breakdown unavailable. ";
+        outbox.Enqueue(NotificationSource.MembershipPurchase, payment.Id, Guid.Empty, payment.UserId,
+            $"membership-purchase:{payment.Id:D}", "Membership purchase confirmed",
+            FormattableString.Invariant($"{purchasedPlan.Name} is active. {taxDescription}Total paid: {payment.Amount:F2} {payment.CurrencyCode}. Activation: {membership.StartsAtUtc:yyyy-MM-dd HH:mm} UTC. Expiry: {membership.EndsAtUtc:yyyy-MM-dd HH:mm} UTC."));
         await auditWriter.AppendAsync(new(
             paymentAuditAction,
             "Payment",
@@ -773,6 +788,9 @@ public sealed class PaymentService(
         Payment payment, PaymentStatus status, string? providerPaymentId, string reason,
         CancellationToken cancellationToken, string? providerEventId = null)
     {
+        // A replay from an older failed attempt must not cancel a newer pending membership intent.
+        if (payment.Status is PaymentStatus.Paid or PaymentStatus.Refunded or PaymentStatus.Failed or PaymentStatus.Cancelled or PaymentStatus.Expired)
+            return;
         var previous = payment.Status;
         payment.Status = status;
         if (!string.IsNullOrWhiteSpace(providerPaymentId))
@@ -806,9 +824,9 @@ public sealed class PaymentService(
     }
 
     private async Task ThrowPendingCheckoutConflictAsync(
-        Guid userId, CancellationToken cancellationToken)
+        Guid userId, string planCode, CancellationToken cancellationToken)
     {
-        var payment = await payments.GetLatestUnresolvedMembershipAsync(userId, cancellationToken);
+        var payment = await payments.GetLatestUnresolvedMembershipAsync(userId, planCode, cancellationToken);
         if (payment is null) return;
         var response = ToPendingCheckoutResponse(payment);
         throw new PendingMembershipCheckoutException(new(
@@ -828,9 +846,9 @@ public sealed class PaymentService(
         };
         var canCancel = status is MembershipCheckoutStatus.Created or MembershipCheckoutStatus.Pending;
         return new PendingMembershipCheckoutResponse(
-            payment.ProviderOrderId!, payment.Provider, status,
+            payment.ProviderOrderId ?? payment.Id.ToString("D"), payment.Provider, status,
             payment.Amount, payment.CurrencyCode, payment.CreatedAtUtc,
-            false, canCancel, null);
+            false, canCancel && payment.ProviderOrderId != null, null, payment.PlanCode);
     }
 
     private void RestoreMembershipAfterFailedOrder(
@@ -915,34 +933,60 @@ public sealed class PaymentService(
     private static long ToMinorUnits(decimal amount) =>
         checked((long)decimal.Round(amount * 100m, 0, MidpointRounding.AwayFromZero));
 
-    private PaymentResponse ToResponse(Payment x) => new(
+    private static PaymentResponse ToResponse(Payment x) => new(
         x.Id, x.Amount, x.CurrencyCode, x.Status, x.Provider, x.ProviderOrderId,
         x.ProviderPaymentId, x.PaidAtUtc, x.MembershipId, x.CreatedAtUtc,
-        x.ProviderOrderCreatedAtUtc, x.LastReconciledAtUtc, TryPlanCode(x));
+        x.ProviderOrderCreatedAtUtc, x.LastReconciledAtUtc, TryPlanCode(x), x.PlanName, x.DurationDays, Pricing(x));
 
-    private string? TryPlanCode(Payment payment)
+    private void CapturePurchase(Payment payment, MembershipPlan plan)
+    {
+        var pricing = MembershipPricing.Calculate(plan, plans.GetGstRate());
+        payment.PlanName = plan.Name;
+        payment.DurationDays = plan.DurationDays;
+        payment.BaseAmount = pricing.BaseAmount;
+        payment.TaxRate = pricing.TaxRate;
+        payment.TaxAmount = pricing.TaxAmount;
+        payment.Amount = pricing.TotalAmount;
+    }
+
+    private static MembershipPricing? Pricing(Payment payment) =>
+        payment.BaseAmount is { } amount && payment.TaxRate is { } rate && payment.TaxAmount is { } tax
+            ? new(amount, rate, tax, payment.Amount) : null;
+
+    private static string? TryPlanCode(Payment payment)
         => string.IsNullOrWhiteSpace(payment.PlanCode)
             ? TryPlanCode(payment.Amount, payment.CurrencyCode)
             : payment.PlanCode;
 
-    private MembershipPlan ResolvePurchasedPlan(Payment payment)
+    private static MembershipPlan ResolvePurchasedPlan(Payment payment)
     {
-        if (string.IsNullOrWhiteSpace(payment.PlanCode))
-            return plans.GetByPayment(payment.Amount, payment.CurrencyCode);
+        if (payment.PlanName is { } name && payment.DurationDays is > 0 && payment.PlanCode is { } code)
+            return new(code, name, payment.Amount, payment.CurrencyCode, payment.DurationDays.Value, true, false, false);
 
-        var plan = plans.GetPlans().SingleOrDefault(x =>
-            string.Equals(x.Code, payment.PlanCode, StringComparison.OrdinalIgnoreCase))
-            ?? throw new InvalidOperationException("Payment does not match a configured membership plan.");
-        if (plan.Amount != payment.Amount ||
-            !string.Equals(plan.CurrencyCode, payment.CurrencyCode, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Payment does not match its configured membership plan.");
-        return plan;
+        // Frozen pre-GST catalogue: the old provider enforced these INR amounts and 30-day terms.
+        // Do not consult mutable configuration or assign a retrospective GST breakdown.
+        var legacy = payment.Amount switch
+        {
+            99m => new MembershipPlan(CareerHarborMembershipPlanCode, "Job Application Access", 99m, "INR", 30, true, false, false),
+            299m => new MembershipPlan(ReferralContactAccessPlanCode, "Referral Contact Access", 299m, "INR", 30, true, false, false),
+            999m => new MembershipPlan(AIApplyPlanCode, "AI Apply", 999m, "INR", 30, true, true, false),
+            1499m => new MembershipPlan(AIApplyProPlanCode, "AI Apply Pro", 1499m, "INR", 30, true, true, true),
+            _ => throw new ConflictException("Legacy payment requires pricing review.")
+        };
+        if (!string.Equals(payment.CurrencyCode, "INR", StringComparison.OrdinalIgnoreCase) ||
+            (payment.PlanCode is not null && !string.Equals(payment.PlanCode, legacy.Code, StringComparison.OrdinalIgnoreCase)))
+            throw new ConflictException("Legacy payment requires pricing review.");
+        return legacy;
     }
 
-    private string? TryPlanCode(decimal amount, string currencyCode)
+    private static string? TryPlanCode(decimal amount, string currencyCode)
     {
-        try { return plans.GetByPayment(amount, currencyCode).Code; }
-        catch (InvalidOperationException) { return null; }
+        if (!string.Equals(currencyCode, "INR", StringComparison.OrdinalIgnoreCase)) return null;
+        return amount switch
+        {
+            99m => CareerHarborMembershipPlanCode, 299m => ReferralContactAccessPlanCode,
+            999m => AIApplyPlanCode, 1499m => AIApplyProPlanCode, _ => null
+        };
     }
 
     private PaymentHistory NewPaymentHistory(

@@ -43,10 +43,10 @@ public sealed class PaymentsController(IPaymentService paymentService) : Control
 
     [HttpGet("pending-membership-checkout")]
     public async Task<ActionResult<ApiResponse<PendingMembershipCheckoutResponse?>>> PendingMembershipCheckout(
-        CancellationToken cancellationToken) =>
+        [FromQuery] string? planCode, CancellationToken cancellationToken) =>
         Ok(new ApiResponse<PendingMembershipCheckoutResponse?>(
             await paymentService.GetPendingMembershipCheckoutAsync(
-                User.GetRequiredUserId(), cancellationToken)));
+                User.GetRequiredUserId(), planCode, cancellationToken)));
 
     [HttpPost("pending-membership-checkout/{publicReference}/cancel")]
     public async Task<ActionResult<ApiResponse<PendingMembershipCheckoutResponse>>> CancelPendingMembershipCheckout(

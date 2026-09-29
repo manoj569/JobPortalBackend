@@ -19,6 +19,7 @@ public interface IPaymentService
     Task<PhonePeReturnStatusResponse> GetPhonePeStatusAsync(Guid userId, string merchantOrderId, string? returnTo, CancellationToken cancellationToken = default);
     Task<PhonePeWebhookResponse> ProcessPhonePeWebhookAsync(PhonePeWebhookRequest request, CancellationToken cancellationToken = default);
     Task<PendingMembershipCheckoutResponse?> GetPendingMembershipCheckoutAsync(Guid userId, CancellationToken cancellationToken = default);
+    Task<PendingMembershipCheckoutResponse?> GetPendingMembershipCheckoutAsync(Guid userId, string? planCode, CancellationToken cancellationToken = default);
     Task<PendingMembershipCheckoutResponse> CancelPendingMembershipCheckoutAsync(Guid userId, string publicReference, CancellationToken cancellationToken = default);
     Task<RazorpayWebhookResponse> ProcessWebhookAsync(RazorpayWebhookRequest request, CancellationToken cancellationToken = default);
     Task<PagedResponse<PaymentResponse>> GetPaymentsAsync(Guid userId, HistoryQuery query, CancellationToken cancellationToken = default);
@@ -59,6 +60,7 @@ public sealed record RazorpayPaymentState(
 
 public interface IMembershipPlanProvider
 {
+    decimal GetGstRate() => MembershipPricing.DefaultGstRate;
     MembershipPlan GetDefaultPlan();
     MembershipPlan GetRequired(string planCode) => string.Equals(planCode, "CareerHarborMembership", StringComparison.OrdinalIgnoreCase) ? GetDefaultPlan() : throw new KeyNotFoundException();
     MembershipPlan GetByPayment(decimal amount, string currencyCode) { var plan = GetDefaultPlan(); return plan.Amount == amount && string.Equals(plan.CurrencyCode, currencyCode, StringComparison.OrdinalIgnoreCase) ? plan : throw new InvalidOperationException(); }

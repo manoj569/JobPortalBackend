@@ -6,33 +6,36 @@ using JobPortal.Shared.Models;
 namespace JobPortal.Application.Features.Payments;
 
 public sealed record CreatePaymentOrderRequest(string PlanCode = "CareerHarborMembership");
-public sealed record MembershipPlanResponse(string PlanCode, string DisplayName, decimal Price, string Currency, int DurationDays, bool CanUseStandardMembership, bool CanUseAIApply, bool CanUseAIApplyPro);
+public sealed record MembershipPlanResponse(string PlanCode, string DisplayName, decimal Price, string Currency, int DurationDays, bool CanUseStandardMembership, bool CanUseAIApply, bool CanUseAIApplyPro, MembershipPricing? Pricing = null);
 public sealed record PaymentOrderResponse(
     Guid PaymentId, Guid MembershipId, string ProviderOrderId, string KeyId,
-    long AmountInMinorUnits, string CurrencyCode, string Receipt, string PlanName, int DurationDays, string PlanCode = "CareerHarborMembership");
+    long AmountInMinorUnits, string CurrencyCode, string Receipt, string PlanName, int DurationDays, string PlanCode = "CareerHarborMembership", MembershipPricing? Pricing = null);
 public sealed record ConfirmRazorpayPaymentRequest(
     string RazorpayOrderId, string RazorpayPaymentId, string RazorpaySignature);
 public sealed record PaymentResponse(
     Guid Id, decimal Amount, string CurrencyCode, PaymentStatus Status,
     PaymentProvider Provider, string? ProviderOrderId, string? ProviderPaymentId,
     DateTime? PaidAtUtc, Guid? MembershipId, DateTime CreatedAtUtc,
-    DateTime? ProviderOrderCreatedAtUtc = null, DateTime? LastReconciledAtUtc = null, string? PlanCode = null);
+    DateTime? ProviderOrderCreatedAtUtc = null, DateTime? LastReconciledAtUtc = null, string? PlanCode = null,
+    string? PlanName = null, int? DurationDays = null, MembershipPricing? Pricing = null);
 public sealed record PaymentHistoryResponse(
     Guid Id, Guid PaymentId, PaymentStatus? PreviousStatus, PaymentStatus CurrentStatus,
     DateTime OccurredAtUtc, string? ProviderEventId, string? Reason);
 public sealed record PaymentHistoryPage(PagedResponse<PaymentHistoryResponse> Page);
 public sealed record PaymentStatusResponse(
-    MembershipResponse? Membership, PaymentResponse? LatestPayment);
+    MembershipResponse? Membership, PaymentResponse? LatestPayment, IReadOnlyCollection<MembershipResponse>? Memberships = null);
 public sealed record RazorpayWebhookRequest(
     ReadOnlyMemory<byte> RawBody, string Signature, string? EventId);
 public sealed record RazorpayWebhookResponse(string Outcome);
 public sealed record PhonePeCheckoutResponse(
     string MerchantOrderId, string RedirectUrl, DateTime? ExpiresAtUtc,
     string PlanName, long AmountInMinorUnits, string CurrencyCode, int DurationDays,
-    string? ReturnTo = null, string PlanCode = "CareerHarborMembership");
+    string? ReturnTo = null, string PlanCode = "CareerHarborMembership", MembershipPricing? Pricing = null);
 public enum PhonePeBrowserPaymentStatus { Pending = 1, Completed, Failed, Cancelled }
 public sealed record PhonePeReturnStatusResponse(
-    string MerchantOrderId, PhonePeBrowserPaymentStatus Status, string? ReturnTo = null);
+    string MerchantOrderId, PhonePeBrowserPaymentStatus Status, string? ReturnTo = null,
+    PaymentResponse? Payment = null, MembershipStatus? MembershipStatus = null,
+    DateTime? MembershipStartUtc = null, DateTime? MembershipEndUtc = null);
 public sealed record PhonePeWebhookRequest(ReadOnlyMemory<byte> RawBody, string Authorization);
 public sealed record PhonePeWebhookResponse(string Outcome);
 [JsonConverter(typeof(JsonStringEnumConverter<MembershipCheckoutStatus>))]
@@ -42,7 +45,7 @@ public sealed record PendingMembershipCheckoutResponse(
     [property: JsonConverter(typeof(JsonStringEnumConverter<PaymentProvider>))] PaymentProvider Provider,
     MembershipCheckoutStatus Status,
     decimal Amount, string Currency, DateTime CreatedAtUtc,
-    bool CanResume, bool CanCancel, string? RedirectUrl);
+    bool CanResume, bool CanCancel, string? RedirectUrl, string? PlanCode = null);
 public sealed record PendingMembershipCheckoutRecovery(
     [property: JsonConverter(typeof(JsonStringEnumConverter<PaymentProvider>))] PaymentProvider Provider,
     string PublicReference, MembershipCheckoutStatus Status,

@@ -84,7 +84,7 @@ public sealed class MembershipRepository(
                 x.Status,
                 x.StartsAtUtc,
                 x.EndsAtUtc,
-                x.AutoRenew))
+                x.AutoRenew, x.PlanCode))
             .ToArrayAsync(cancellationToken);
 
     public async Task<(IReadOnlyCollection<MembershipHistoryResponse> Items, int TotalCount)> GetHistoryAsync(
@@ -191,7 +191,7 @@ public sealed class PaymentRepository(JobPortalDbContext context) : IPaymentRepo
 
     public Task<Payment?> GetLatestUnresolvedMembershipAsync(
         Guid userId,
-        CancellationToken cancellationToken = default) =>
+        string? planCode = null, CancellationToken cancellationToken = default) =>
         context.Payments
             .Include(x => x.Membership!)
             .ThenInclude(x => x.History)
@@ -199,7 +199,8 @@ public sealed class PaymentRepository(JobPortalDbContext context) : IPaymentRepo
             .Where(x =>
                 x.UserId == userId &&
                 x.MembershipId != null &&
-                x.ProviderOrderId != null &&
+                (planCode == null || x.PlanCode == planCode ||
+                    (x.PlanCode == null && x.Membership!.PlanCode == planCode)) &&
                 (x.Status == PaymentStatus.Created ||
                  x.Status == PaymentStatus.Pending ||
                  x.Status == PaymentStatus.Authorized))
@@ -256,7 +257,10 @@ public sealed class PaymentRepository(JobPortalDbContext context) : IPaymentRepo
                 x.CreatedAtUtc,
                 x.ProviderOrderCreatedAtUtc,
                 x.LastReconciledAtUtc,
-                x.PlanCode))
+                x.PlanCode, x.PlanName, x.DurationDays,
+                x.BaseAmount.HasValue && x.TaxRate.HasValue && x.TaxAmount.HasValue
+                    ? new MembershipPricing(x.BaseAmount.Value, x.TaxRate.Value, x.TaxAmount.Value, x.Amount)
+                    : null))
             .ToArrayAsync(cancellationToken);
 
         return (items, count);

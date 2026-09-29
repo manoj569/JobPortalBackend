@@ -73,6 +73,9 @@ public sealed class GlobalExceptionMiddleware(
 
                 // Fixed: Concurrency & Constraint handling
                 DbUpdateConcurrencyException => (StatusCodes.Status409Conflict, (object)new ApiError("concurrency_conflict", "The resource was modified by another request.")),
+                DbUpdateException { InnerException: Npgsql.PostgresException { SqlState: "23505", ConstraintName:
+                    "UX_Payments_UnresolvedUserPlan" or "IX_Memberships_UserId_PlanCode" or "IX_PaymentHistory_ProviderEventId" } } =>
+                    (StatusCodes.Status409Conflict, (object)new ApiError("payment_state_conflict", "Payment state changed. Reload the payment status before retrying.")),
                 UniqueConstraintException => (StatusCodes.Status409Conflict, (object)new ApiError("data_conflict", "A resource with the same unique value already exists.")),
                 DbUpdateException { InnerException: SqlException { Number: 2601 or 2627 } } =>
                     (StatusCodes.Status409Conflict, (object)new ApiError("data_conflict", "A resource with the same unique value already exists.")),
