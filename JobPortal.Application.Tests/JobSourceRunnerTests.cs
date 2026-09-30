@@ -384,6 +384,139 @@ public class JobSourceRunnerTests
                 JobIngestionReasonCode.PersistenceError]);
     }
 
+
+    [Fact]
+    public async Task RunAsync_CreatedJob_InvokesAutoPublish()
+    {
+        var jobId = Guid.NewGuid();
+
+        _provider.Jobs =
+        [
+            CreateRawJob("Created Job")
+        ];
+
+        _ingestion.Results.Enqueue(new JobIngestionResult
+        {
+            Outcome = JobIngestionOutcome.Created,
+            JobId = jobId
+        });
+
+        var autoPublish = new TestAutoPublishService();
+
+        var runner = new JobSourceRunner(
+            _sources,
+            [_provider],
+            _ingestion,
+            _unitOfWork,
+            TimeProvider.System,
+            new UnmappedCategoryResolver(),
+            new ExternalJobNormalizer(),
+            logger: null,
+            autoPublishService: autoPublish);
+
+        var result = await runner.RunAsync(_source.Id);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(1, result.Created);
+
+        Assert.Equal(1, autoPublish.CallCount);
+        Assert.Equal(jobId, autoPublish.LastJobId);
+    }
+
+    [Fact]
+    public async Task RunAsync_DuplicateJob_DoesNotInvokeAutoPublish()
+    {
+        _provider.Jobs =
+        [
+            CreateRawJob("Duplicate Job")
+        ];
+
+        _ingestion.Results.Enqueue(new JobIngestionResult
+        {
+            Outcome = JobIngestionOutcome.MatchedByUrl,
+            JobId = Guid.NewGuid(),
+            ExplicitReasonCode =
+                JobIngestionReasonCode.DuplicateCanonicalUrl
+        });
+
+        var autoPublish = new TestAutoPublishService();
+
+        var runner = new JobSourceRunner(
+            _sources,
+            [_provider],
+            _ingestion,
+            _unitOfWork,
+            TimeProvider.System,
+            new UnmappedCategoryResolver(),
+            new ExternalJobNormalizer(),
+            logger: null,
+            autoPublishService: autoPublish);
+
+        var result = await runner.RunAsync(_source.Id);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(1, result.Matched);
+        Assert.Equal(0, result.Created);
+
+        Assert.Equal(0, autoPublish.CallCount);
+        Assert.Null(autoPublish.LastJobId);
+    }
+
+    [Fact]
+    public async Task RunAsync_AutoPublishFailure_IsolatedAndContinuesRemainingJobs()
+    {
+        var firstJobId = Guid.NewGuid();
+        var secondJobId = Guid.NewGuid();
+
+        _provider.Jobs =
+        [
+            CreateRawJob("First Job"),
+        CreateRawJob("Second Job")
+        ];
+
+        _ingestion.Results.Enqueue(new JobIngestionResult
+        {
+            Outcome = JobIngestionOutcome.Created,
+            JobId = firstJobId
+        });
+
+        _ingestion.Results.Enqueue(new JobIngestionResult
+        {
+            Outcome = JobIngestionOutcome.Created,
+            JobId = secondJobId
+        });
+
+        var autoPublish = new TestAutoPublishService
+        {
+            ThrowOnCall = 1
+        };
+
+        var runner = new JobSourceRunner(
+            _sources,
+            [_provider],
+            _ingestion,
+            _unitOfWork,
+            TimeProvider.System,
+            new UnmappedCategoryResolver(),
+            new ExternalJobNormalizer(),
+            logger: null,
+            autoPublishService: autoPublish);
+
+        var result = await runner.RunAsync(_source.Id);
+
+        Assert.True(result.Succeeded);
+
+        // Both jobs were successfully ingested as Draft jobs.
+        Assert.Equal(2, result.Created);
+
+        // First publication failed, but second job was still processed.
+        Assert.Equal(1, result.Failed);
+        Assert.Equal(2, _ingestion.CallCount);
+        Assert.Equal(2, autoPublish.CallCount);
+
+        // Per-item failure handling should reset tracked state.
+        Assert.Equal(1, _unitOfWork.ResetCalls);
+    }
     private static RawExternalJob CreateRawJob(string title) => new()
     {
         Title = title,
@@ -474,6 +607,37 @@ public class JobSourceRunnerTests
             }
 
             return Task.FromResult(Results.Dequeue());
+        }
+    }
+
+
+    private sealed class TestAutoPublishService :
+    IJobAutoPublishService
+    {
+        public int CallCount { get; private set; }
+
+        public Guid? LastJobId { get; private set; }
+
+        public int? ThrowOnCall { get; set; }
+
+        public Task<JobAutoPublishResult> TryPublishAsync(
+            Guid jobId,
+            CancellationToken cancellationToken = default)
+        {
+            CallCount++;
+            LastJobId = jobId;
+
+            if (ThrowOnCall == CallCount)
+            {
+                throw new InvalidOperationException(
+                    "Automatic publication failed.");
+            }
+
+            return Task.FromResult(
+                new JobAutoPublishResult
+                {
+                    Outcome = JobAutoPublishOutcome.Published
+                });
         }
     }
 

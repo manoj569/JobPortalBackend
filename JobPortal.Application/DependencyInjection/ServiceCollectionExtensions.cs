@@ -103,7 +103,15 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IJobDeduplicationService, JobDeduplicationService>();
 
         // Job Aggregation Phase 2
+        // Job Aggregation
+        // Job Aggregation
+        services.AddScoped<IUrlCanonicalizer, UrlCanonicalizer>();
+        services.AddScoped<IJobFingerprintService, JobFingerprintService>();
+        services.AddScoped<IJobDeduplicationService, JobDeduplicationService>();
+
         services.AddScoped<IJobIngestionService, JobIngestionService>();
+        services.AddScoped<IJobQualityGate, JobQualityGate>();
+        services.AddScoped<IJobAutoPublishService, JobAutoPublishService>();
         services.AddScoped<IJobSourceRunner, JobSourceRunner>();
         services.AddScoped<IExternalJobNormalizer, ExternalJobNormalizer>();
         services.AddScoped<IJobSourceCategoryResolver, JobSourceCategoryResolver>();

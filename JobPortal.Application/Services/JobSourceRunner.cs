@@ -12,7 +12,8 @@ public sealed class JobSourceRunner(
     TimeProvider timeProvider,
     IJobSourceCategoryResolver categoryResolver,
     IExternalJobNormalizer normalizer,
-    ILogger<JobSourceRunner>? logger = null) : IJobSourceRunner
+    ILogger<JobSourceRunner>? logger = null,
+    IJobAutoPublishService? autoPublishService = null) : IJobSourceRunner
 {
     private static readonly Action<ILogger, Guid, int, int, int, int, int, Exception?> RunCompleted =
         LoggerMessage.Define<Guid, int, int, int, int, int>(
@@ -123,6 +124,17 @@ public sealed class JobSourceRunner(
                     {
                         case JobIngestionOutcome.Created:
                             created++;
+
+                            // Only newly created aggregated jobs are considered.
+                            // Existing duplicates must never be republished here.
+                            if (result.JobId.HasValue &&
+                                autoPublishService is not null)
+                            {
+                                await autoPublishService.TryPublishAsync(
+                                    result.JobId.Value,
+                                    cancellationToken);
+                            }
+
                             break;
 
                         case JobIngestionOutcome.MatchedByUrl:
