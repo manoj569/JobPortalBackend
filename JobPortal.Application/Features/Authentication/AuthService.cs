@@ -17,6 +17,7 @@ namespace JobPortal.Application.Features.Authentication;
 
 public sealed class AuthService(
     IUserRepository users,
+    IUserExternalLoginRepository externalLogins,
     IRefreshTokenRepository refreshTokens,
     IUnitOfWork unitOfWork,
     IPasswordHasher passwordHasher,
@@ -87,9 +88,8 @@ public sealed class AuthService(
 
         LogRegistrationTiming("duplicate_identity_lookup", stageStarted);
 
-        ThrowRegistrationIdentityConflict(
-    existingEmailUser is not null,
-    existingPhoneUser is not null);
+        await ThrowRegistrationIdentityConflictAsync(
+            existingEmailUser, existingPhoneUser is not null, cancellationToken);
 
         stageStarted = Stopwatch.GetTimestamp();
         var passwordHash = passwordHasher.Hash(request.Password);
@@ -163,9 +163,8 @@ public sealed class AuthService(
 
             LogRegistrationTiming("total", totalStarted);
 
-            ThrowRegistrationIdentityConflict(
-    raceEmailUser is not null,
-    racePhoneUser is not null);
+            await ThrowRegistrationIdentityConflictAsync(
+                raceEmailUser, racePhoneUser is not null, cancellationToken);
 
             throw new ConflictException(
                 "An account with these details already exists.",
@@ -247,7 +246,7 @@ public sealed class AuthService(
             NormalizeEmail(request.Email),
             cancellationToken);
         if (user is not { Status: UserStatus.Active } ||
-            string.IsNullOrWhiteSpace(user.PasswordHash))
+            (string.IsNullOrWhiteSpace(user.PasswordHash) && !await IsGoogleOnlyAsync(user, cancellationToken)))
             return new(PasswordResetRequestedMessage);
 
         var rawToken = GeneratePasswordResetToken();
@@ -434,10 +433,16 @@ public sealed class AuthService(
         }
     }
 
-    private static void ThrowRegistrationIdentityConflict(
-    bool emailExists,
-    bool phoneExists)
+    private async Task<bool> IsGoogleOnlyAsync(User user, CancellationToken cancellationToken) =>
+        string.IsNullOrWhiteSpace(user.PasswordHash) &&
+        await externalLogins.GetByUserProviderAsync(user.Id, ExternalLoginProvider.Google, cancellationToken) is not null;
+
+    private async Task ThrowRegistrationIdentityConflictAsync(
+        User? emailUser, bool phoneExists, CancellationToken cancellationToken)
     {
+        if (emailUser is not null && await IsGoogleOnlyAsync(emailUser, cancellationToken))
+            throw new GoogleRegistrationConflictException();
+        var emailExists = emailUser is not null;
         if (emailExists && phoneExists)
         {
             throw new ConflictException(

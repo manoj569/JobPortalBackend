@@ -159,6 +159,25 @@ public sealed class GoogleAuthenticationTests
     }
 
     [Fact]
+    public async Task GoogleSignInStillUsesSameAccountAfterLocalPasswordIsAdded()
+    {
+        var fixture = CreateFixture();
+        var registered = await fixture.Service.AuthenticateAsync(
+            new(RawCredential, GoogleAuthenticationIntent.Register, true), null);
+        var user = Assert.Single(fixture.Users.Items);
+        Assert.Null(user.PasswordHash);
+        var linked = Assert.Single(fixture.ExternalLogins.Items);
+        user.PasswordHash = "local-password-hash-created-by-reset";
+        var loggedIn = await fixture.Service.AuthenticateAsync(
+            new(RawCredential, GoogleAuthenticationIntent.Login), null);
+        Assert.Equal(registered.User.Id, loggedIn.User.Id);
+        Assert.Same(user, Assert.Single(fixture.Users.Items));
+        Assert.Same(linked, Assert.Single(fixture.ExternalLogins.Items));
+        Assert.Equal(user.Id, linked.UserId);
+        Assert.Equal("local-password-hash-created-by-reset", user.PasswordHash);
+    }
+
+    [Fact]
     public async Task UnknownLoginIsRejectedButExistingLocalEmailIsLinked()
     {
         var login = CreateFixture();

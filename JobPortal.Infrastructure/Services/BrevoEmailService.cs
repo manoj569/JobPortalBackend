@@ -43,11 +43,14 @@ public sealed class BrevoEmailService(
         }
 
         var safeFirstName = SanitizeHeaderValue(user.FirstName);
+        var isPasswordSetup = string.IsNullOrWhiteSpace(user.PasswordHash);
         return SendAsync(
             user.Email,
-            "Reset your Career Portal password",
+            isPasswordSetup ? "Create your CareerHarbor password" : "Reset your Career Portal password",
             $"Hello {safeFirstName},{Environment.NewLine}{Environment.NewLine}" +
-            "Use the secure link below to reset your Career Portal password. " +
+            (isPasswordSetup
+                ? "You requested password access for your CareerHarbor account. Use the secure link below to create a password. "
+                : "Use the secure link below to reset your Career Portal password. ") +
             $"The link expires in 30 minutes.{Environment.NewLine}{Environment.NewLine}" +
             $"{resetUrl.AbsoluteUri}{Environment.NewLine}{Environment.NewLine}" +
             "If you did not request this change, you can ignore this email.",
