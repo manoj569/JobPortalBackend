@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using JobPortal.Application.Abstractions.Jobs;
 using JobPortal.Application.Abstractions.Persistence;
 
@@ -10,8 +11,37 @@ public sealed class JobSourceRunner(
     IUnitOfWork unitOfWork,
     TimeProvider timeProvider,
     IJobSourceCategoryResolver categoryResolver,
-    IExternalJobNormalizer normalizer) : IJobSourceRunner
+    IExternalJobNormalizer normalizer,
+    ILogger<JobSourceRunner>? logger = null) : IJobSourceRunner
 {
+    private static readonly Action<ILogger, Guid, int, int, int, int, int, Exception?> RunCompleted =
+        LoggerMessage.Define<Guid, int, int, int, int, int>(
+            LogLevel.Information,
+            new EventId(4320, nameof(RunCompleted)),
+            "Job source run {JobSourceId}: Discovered {Discovered}, Created {Created}, " +
+            "ExistingDuplicate {ExistingDuplicate}, Rejected {Rejected}, Failed {Failed}.");
+
+    private static readonly Action<ILogger, Guid, string, int, Exception?> RunReason =
+        LoggerMessage.Define<Guid, string, int>(
+            LogLevel.Debug,
+            new EventId(4321, nameof(RunReason)),
+            "Job source run {JobSourceId} reason {ReasonCode}: {Count}.");
+
+    private static readonly Action<ILogger, Guid, Exception?> ItemFailed =
+        LoggerMessage.Define<Guid>(
+            LogLevel.Warning,
+            new EventId(4322, nameof(ItemFailed)),
+            "Job source run {JobSourceId}: individual item failed and was isolated; remaining items continue.");
+
+    private static readonly Action<ILogger, Guid, Exception?> SourceRunFailed =
+        LoggerMessage.Define<Guid>(
+            LogLevel.Error,
+            new EventId(4323, nameof(SourceRunFailed)),
+            "Job source run {JobSourceId} failed at provider/infrastructure level; no raw exception text is persisted.");
+
+    // Optional so existing constructor callers (including tests) remain valid.
+    private readonly ILogger<JobSourceRunner>? _logger = logger;
+
     public async Task<JobSourceRunResult> RunAsync(
         Guid jobSourceId,
         CancellationToken cancellationToken = default)
@@ -75,6 +105,7 @@ public sealed class JobSourceRunner(
             var matched = 0;
             var skipped = 0;
             var failed = 0;
+            var reasonCounts = new Dictionary<JobIngestionReasonCode, int>();
 
             foreach (var rawJob in rawJobs)
             {
@@ -101,6 +132,9 @@ public sealed class JobSourceRunner(
                             break;
 
                         case JobIngestionOutcome.CompanyNotFound:
+                            skipped++;
+                            break;
+
                         case JobIngestionOutcome.Invalid:
                             skipped++;
                             break;
@@ -108,6 +142,13 @@ public sealed class JobSourceRunner(
                         default:
                             failed++;
                             break;
+                    }
+
+                    // Tally the machine-readable reason for every item result.
+                    if (result.ReasonCode != JobIngestionReasonCode.None)
+                    {
+                        reasonCounts[result.ReasonCode] =
+                            reasonCounts.GetValueOrDefault(result.ReasonCode) + 1;
                     }
                 }
                 catch (OperationCanceledException)
@@ -119,8 +160,17 @@ public sealed class JobSourceRunner(
                 {
                     // A malformed/problematic individual record must not
                     // abort processing of the remaining provider records.
+                    // Raw exception text may contain URLs or credentials and is
+                    // therefore never persisted; only the structured reason tally
+                    // records the failure classification.
                     unitOfWork.ResetAfterFailure();
                     failed++;
+                    reasonCounts[JobIngestionReasonCode.PersistenceError] =
+                        reasonCounts.GetValueOrDefault(JobIngestionReasonCode.PersistenceError) + 1;
+                    if (_logger is not null)
+                    {
+                        ItemFailed(_logger, source.Id, null);
+                    }
                 }
             }
 
@@ -134,7 +184,15 @@ public sealed class JobSourceRunner(
             sources.Update(source);
             await unitOfWork.SaveChangesAsync(cancellationToken);
 
-            return new JobSourceRunResult
+            // Provider-wide fetch failures never reach this per-item tally, but
+            // any explicitly failed ingestion results are counted too.
+            if (failed > 0 && !reasonCounts.ContainsKey(JobIngestionReasonCode.PersistenceError))
+            {
+                reasonCounts[JobIngestionReasonCode.Unknown] =
+                    reasonCounts.GetValueOrDefault(JobIngestionReasonCode.Unknown) + failed;
+            }
+
+            var runResult = new JobSourceRunResult
             {
                 JobSourceId = source.Id,
                 TotalReceived = rawJobs.Count,
@@ -142,8 +200,29 @@ public sealed class JobSourceRunner(
                 Matched = matched,
                 Skipped = skipped,
                 Failed = failed,
+                ReasonCounts = reasonCounts.Count == 0 ? null : reasonCounts,
                 Succeeded = true
             };
+
+            if (_logger is not null)
+            {
+                RunCompleted(
+                    _logger,
+                    source.Id,
+                    runResult.TotalReceived,
+                    runResult.Created,
+                    runResult.ExistingDuplicate,
+                    runResult.Rejected,
+                    runResult.Failed,
+                    null);
+
+                foreach (var (reason, count) in reasonCounts)
+                {
+                    RunReason(_logger, source.Id, reason.ToString(), count, null);
+                }
+            }
+
+            return runResult;
         }
         catch (OperationCanceledException)
             when (cancellationToken.IsCancellationRequested)
@@ -152,7 +231,15 @@ public sealed class JobSourceRunner(
         }
         catch (Exception)
         {
+            // Infrastructure/provider-wide failure: distinguishable from the
+            // per-item failures above. The raw exception is logged structurally
+            // but never persisted to source.LastError (which may leak secrets).
             unitOfWork.ResetAfterFailure();
+
+            if (_logger is not null)
+            {
+                SourceRunFailed(_logger, source.Id, null);
+            }
 
             var now = timeProvider.GetUtcNow().UtcDateTime;
 

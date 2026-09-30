@@ -395,6 +395,127 @@ public class JobIngestionServiceTests
         Assert.Equal(1, _unitOfWork.SaveCalls);
     }
 
+    [Fact]
+    public async Task IngestAsync_NewValidJob_ReturnsCreatedReasonCode()
+    {
+        var result = await _service.IngestAsync(CreateRawJob());
+
+        Assert.Equal(JobIngestionOutcome.Created, result.Outcome);
+        Assert.Equal(JobIngestionReasonCode.None, result.ReasonCode);
+    }
+
+    [Fact]
+    public async Task IngestAsync_UrlDuplicate_ReturnsCanonicalUrlReasonCode()
+    {
+        var existing = CreateExistingJob();
+
+        _deduplication.Result =
+            DeduplicationResult.SourceUrlMatch(existing);
+
+        var result = await _service.IngestAsync(CreateRawJob());
+
+        Assert.Equal(JobIngestionOutcome.MatchedByUrl, result.Outcome);
+        Assert.Equal(
+            JobIngestionReasonCode.DuplicateCanonicalUrl,
+            result.ReasonCode);
+        Assert.Equal(existing.Id, result.JobId);
+        Assert.Empty(_jobs.AddedJobs);
+    }
+
+    [Fact]
+    public async Task IngestAsync_FingerprintDuplicate_ReturnsFingerprintReasonCode()
+    {
+        var existing = CreateExistingJob();
+
+        _deduplication.Result =
+            DeduplicationResult.FingerprintMatch(existing);
+
+        var result = await _service.IngestAsync(CreateRawJob());
+
+        Assert.Equal(
+            JobIngestionReasonCode.DuplicateFingerprint,
+            result.ReasonCode);
+
+        Assert.Equal(existing.Id, result.JobId);
+        Assert.Empty(_jobs.AddedJobs);
+    }
+
+    [Fact]
+    public async Task IngestAsync_FuzzyDuplicate_ReturnsFuzzyReasonCode()
+    {
+        var existing = CreateExistingJob();
+
+        _deduplication.Result =
+            DeduplicationResult.FuzzyMatch(existing, 0.91);
+
+        var result = await _service.IngestAsync(CreateRawJob());
+
+        Assert.Equal(
+            JobIngestionReasonCode.DuplicateFuzzyMatch,
+            result.ReasonCode);
+
+        Assert.Equal(existing.Id, result.JobId);
+        Assert.Empty(_jobs.AddedJobs);
+    }
+
+    [Fact]
+    public async Task IngestAsync_CompanyNotFound_ReturnsCompanyNotFoundReasonCode()
+    {
+        _companies.Company = null;
+
+        var result = await _service.IngestAsync(CreateRawJob());
+
+        Assert.Equal(
+            JobIngestionOutcome.CompanyNotFound,
+            result.Outcome);
+
+        Assert.Equal(
+            JobIngestionReasonCode.CompanyNotFound,
+            result.ReasonCode);
+
+        Assert.Null(result.JobId);
+        Assert.Empty(_jobs.AddedJobs);
+    }
+
+    [Fact]
+    public async Task IngestAsync_MalformedApplicationUrl_ReturnsInvalidApplicationUrlReasonCode()
+    {
+        var raw = CreateRawJob() with
+        {
+            ApplicationUrl = "not-a-valid-url"
+        };
+
+        var result = await _service.IngestAsync(raw);
+
+        Assert.Equal(JobIngestionOutcome.Invalid, result.Outcome);
+
+        Assert.Equal(
+            JobIngestionReasonCode.InvalidApplicationUrl,
+            result.ReasonCode);
+
+        Assert.Empty(_jobs.AddedJobs);
+    }
+
+    [Fact]
+    public async Task IngestAsync_InvalidSalary_ReturnsInvalidSourceDataReasonCode()
+    {
+        var raw = CreateRawJob() with
+        {
+            SalaryMin = 100000,
+            SalaryMax = 50000
+        };
+
+        var result = await _service.IngestAsync(raw);
+
+        Assert.Equal(JobIngestionOutcome.Invalid, result.Outcome);
+
+        Assert.Equal(
+            JobIngestionReasonCode.InvalidSourceData,
+            result.ReasonCode);
+
+        Assert.Empty(_jobs.AddedJobs);
+    }
+
     private RawExternalJob CreateRawJob() => new()
     {
         Title = "Software Engineer",

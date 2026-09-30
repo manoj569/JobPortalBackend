@@ -268,6 +268,122 @@ public class JobSourceRunnerTests
         Assert.Equal(0, _unitOfWork.SaveCalls);
     }
 
+    [Fact]
+    public async Task RunAsync_Phase1Counters_GroupOutcomesCorrectly()
+    {
+        _provider.Jobs =
+        [
+            CreateRawJob("Created"),
+        CreateRawJob("Duplicate"),
+        CreateRawJob("Company missing"),
+        CreateRawJob("Invalid"),
+        CreateRawJob("Failed")
+        ];
+
+        _ingestion.Results.Enqueue(new JobIngestionResult
+        {
+            Outcome = JobIngestionOutcome.Created
+        });
+
+        _ingestion.Results.Enqueue(new JobIngestionResult
+        {
+            Outcome = JobIngestionOutcome.MatchedByUrl,
+            ExplicitReasonCode =
+                JobIngestionReasonCode.DuplicateCanonicalUrl
+        });
+
+        _ingestion.Results.Enqueue(new JobIngestionResult
+        {
+            Outcome = JobIngestionOutcome.CompanyNotFound,
+            ExplicitReasonCode =
+                JobIngestionReasonCode.CompanyNotFound
+        });
+
+        _ingestion.Results.Enqueue(new JobIngestionResult
+        {
+            Outcome = JobIngestionOutcome.Invalid,
+            ExplicitReasonCode =
+                JobIngestionReasonCode.InvalidSourceData
+        });
+
+        _ingestion.Results.Enqueue(new JobIngestionResult
+        {
+            Outcome = JobIngestionOutcome.Failed
+        });
+
+        var result = await _runner.RunAsync(_source.Id);
+
+        Assert.True(result.Succeeded);
+
+        Assert.Equal(5, result.TotalReceived);
+        Assert.Equal(1, result.Created);
+
+        Assert.Equal(1, result.Matched);
+        Assert.Equal(1, result.ExistingDuplicate);
+
+        Assert.Equal(2, result.Skipped);
+        Assert.Equal(2, result.Rejected);
+
+        Assert.Equal(1, result.Failed);
+
+        Assert.Equal(
+            result.TotalReceived,
+            result.Created +
+            result.ExistingDuplicate +
+            result.Rejected +
+            result.Failed);
+
+        Assert.NotNull(result.ReasonCounts);
+
+        Assert.Equal(
+            1,
+            result.ReasonCounts[
+                JobIngestionReasonCode.DuplicateCanonicalUrl]);
+
+        Assert.Equal(
+            1,
+            result.ReasonCounts[
+                JobIngestionReasonCode.CompanyNotFound]);
+
+        Assert.Equal(
+            1,
+            result.ReasonCounts[
+                JobIngestionReasonCode.InvalidSourceData]);
+    }
+
+    [Fact]
+    public async Task RunAsync_IndividualException_IsCountedAndRemainingJobContinues()
+    {
+        _provider.Jobs =
+        [
+            CreateRawJob("Bad"),
+        CreateRawJob("Good")
+        ];
+
+        _ingestion.ThrowOnCall = 1;
+
+        _ingestion.Results.Enqueue(new JobIngestionResult
+        {
+            Outcome = JobIngestionOutcome.Created
+        });
+
+        var result = await _runner.RunAsync(_source.Id);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(2, result.TotalReceived);
+        Assert.Equal(1, result.Created);
+        Assert.Equal(1, result.Failed);
+        Assert.Equal(2, _ingestion.CallCount);
+        Assert.Equal(1, _unitOfWork.ResetCalls);
+
+        Assert.NotNull(result.ReasonCounts);
+
+        Assert.Equal(
+            1,
+            result.ReasonCounts[
+                JobIngestionReasonCode.PersistenceError]);
+    }
+
     private static RawExternalJob CreateRawJob(string title) => new()
     {
         Title = title,

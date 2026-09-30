@@ -71,7 +71,8 @@ public sealed class JobIngestionService(
             return new JobIngestionResult
             {
                 Outcome = JobIngestionOutcome.CompanyNotFound,
-                Message = $"Company '{companyName}' was not found."
+                Message = $"Company '{companyName}' was not found.",
+                ExplicitReasonCode = JobIngestionReasonCode.CompanyNotFound
             };
         }
 
@@ -129,6 +130,7 @@ public sealed class JobIngestionService(
             await unitOfWork.SaveChangesAsync(cancellationToken);
             return new JobIngestionResult
             {
+                ExplicitReasonCode = ToReasonCode(duplicate.MatchTypeEnum),
                 Outcome = ToOutcome(duplicate.MatchTypeEnum),
                 JobId = matchedJob.Id,
                 Message = duplicate.MatchTypeEnum ==
@@ -213,15 +215,34 @@ public sealed class JobIngestionService(
         {
             Outcome = JobIngestionOutcome.Created,
             JobId = job.Id,
-            Message = "External job created as Draft."
+            Message = "External job created as Draft.",
+            ExplicitReasonCode = JobIngestionReasonCode.None
         };
     }
 
     private static JobIngestionResult Invalid(string message) => new()
     {
         Outcome = JobIngestionOutcome.Invalid,
-        Message = message
+        Message = message,
+        // Machine-readable classification of the existing validation paths:
+        // ApplicationUrl-specific messages are InvalidApplicationUrl, all other
+        // source-data validation failures are InvalidSourceData.
+        ExplicitReasonCode = JobIngestionReasonCodes.FromOutcome(
+            JobIngestionOutcome.Invalid, message)
     };
+
+    private static JobIngestionReasonCode ToReasonCode(
+        JobPortal.Application.Abstractions.Jobs.MatchType matchType) =>
+        matchType switch
+        {
+            JobPortal.Application.Abstractions.Jobs.MatchType.SourceUrl =>
+                JobIngestionReasonCode.DuplicateCanonicalUrl,
+            JobPortal.Application.Abstractions.Jobs.MatchType.Fingerprint =>
+                JobIngestionReasonCode.DuplicateFingerprint,
+            JobPortal.Application.Abstractions.Jobs.MatchType.Fuzzy =>
+                JobIngestionReasonCode.DuplicateFuzzyMatch,
+            _ => JobIngestionReasonCode.Unknown
+        };
 
     private static JobIngestionOutcome ToOutcome(
      JobPortal.Application.Abstractions.Jobs.MatchType matchType) =>

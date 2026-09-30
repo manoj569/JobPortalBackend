@@ -14,6 +14,26 @@ public sealed record JobSourceRunResult
 
     public int Failed { get; init; }
 
+    /// <summary>
+    /// Run-level counter grouping: every MatchedBy* outcome (URL/fingerprint/
+    /// fuzzy) means the job already existed, so it counts as an existing
+    /// duplicate here while the detailed Matched value is preserved for
+    /// existing callers.
+    /// </summary>
+    public int ExistingDuplicate => Matched;
+
+    /// <summary>
+    /// Run-level counter grouping: rejected items are the ones skipped by
+    /// validation/company resolution (Invalid + CompanyNotFound outcomes).
+    /// </summary>
+    public int Rejected => Skipped;
+
+    /// <summary>
+    /// Machine-readable reason-code tallies collected across all processed
+    /// items in this run (for example DuplicateCanonicalUrl = 15).
+    /// </summary>
+    public IReadOnlyDictionary<JobIngestionReasonCode, int>? ReasonCounts { get; init; }
+
     public bool Succeeded { get; init; }
 
     public string? Error { get; init; }
