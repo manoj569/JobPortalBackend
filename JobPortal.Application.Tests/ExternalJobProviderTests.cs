@@ -53,11 +53,13 @@ public sealed class ExternalJobProviderTests
             job.ApplicationUrl);
         Assert.Equal("12345", job.ExternalId);
 
-        Assert.NotNull(handler.LastRequestUri);
+        Assert.Equal(2, handler.CallCount);
+        Assert.Null(job.ExpiresAtUtc);
+        Assert.NotNull(handler.FirstRequestUri);
         Assert.Equal(
             "/v1/boards/acme/jobs",
-            handler.LastRequestUri.AbsolutePath);
-        Assert.Equal("?content=true", handler.LastRequestUri.Query);
+            handler.FirstRequestUri.AbsolutePath);
+        Assert.Equal("?content=true", handler.FirstRequestUri.Query);
     }
 
     [Fact]
@@ -103,6 +105,7 @@ public sealed class ExternalJobProviderTests
             "https://jobs.lever.co/acme/lever-123",
             job.ApplicationUrl);
         Assert.Equal("lever-123", job.ExternalId);
+        Assert.Null(job.ExpiresAtUtc);
 
         Assert.NotNull(handler.LastRequestUri);
         Assert.Equal(
@@ -240,6 +243,7 @@ public sealed class ExternalJobProviderTests
         public int CallCount { get; private set; }
 
         public Uri? LastRequestUri { get; private set; }
+        public Uri? FirstRequestUri { get; private set; }
 
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
@@ -247,6 +251,7 @@ public sealed class ExternalJobProviderTests
         {
             CallCount++;
             LastRequestUri = request.RequestUri;
+            FirstRequestUri ??= request.RequestUri;
 
             return Task.FromResult(
                 new HttpResponseMessage(statusCode)

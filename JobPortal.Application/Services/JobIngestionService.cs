@@ -236,6 +236,9 @@ public sealed class JobIngestionService(
                 applicationUrl ?? string.Empty,
 
             Location = location,
+            // Only new jobs receive source deadlines; duplicate/curated jobs stay unchanged.
+            ExpiresAtUtc = rawJob.ExpiresAtUtc is { Kind: DateTimeKind.Utc }
+                ? rawJob.ExpiresAtUtc : null,
 
             MinimumSalary =
                 rawJob.SalaryMin,

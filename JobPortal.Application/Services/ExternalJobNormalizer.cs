@@ -31,6 +31,9 @@ public sealed class ExternalJobNormalizer : IExternalJobNormalizer
 
             ApplicationUrl = Trim(rawJob.ApplicationUrl),
             ExternalId = Trim(rawJob.ExternalId),
+            // Never interpret an unspecified/source-local timestamp using the server timezone.
+            ExpiresAtUtc = rawJob.ExpiresAtUtc is { Kind: DateTimeKind.Utc }
+                ? rawJob.ExpiresAtUtc : null,
             ExternalCategory = NormalizeText(rawJob.ExternalCategory),
 
             EmploymentTypeText =

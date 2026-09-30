@@ -13,6 +13,18 @@ public sealed class ExternalJobNormalizationTests
     private readonly ExternalJobNormalizer normalizer = new();
 
     [Theory]
+    [InlineData(DateTimeKind.Utc)]
+    [InlineData(DateTimeKind.Local)]
+    [InlineData(DateTimeKind.Unspecified)]
+    public void ExpiryRequiresAnExplicitUtcInstant(DateTimeKind kind)
+    {
+        var expiry = new DateTime(2026, 12, 1, 12, 0, 0, kind);
+        var result = normalizer.Normalize(new() { ExpiresAtUtc = expiry });
+        Assert.Equal(kind == DateTimeKind.Utc ? expiry : (DateTime?)null, result.ExpiresAtUtc);
+        Assert.Null(normalizer.Normalize(new()).ExpiresAtUtc);
+    }
+
+    [Theory]
     [InlineData("  .NET   Developer  ", ".NET Developer")]
     [InlineData(" C#\tDeveloper ", "C# Developer")]
     [InlineData(" C++\nDeveloper ", "C++ Developer")]
