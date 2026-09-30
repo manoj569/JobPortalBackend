@@ -17,6 +17,11 @@ public sealed record RawExternalJob
     public WorkplaceType? WorkplaceType { get; init; }
     public string? EmploymentTypeText { get; init; }
     public string? WorkplaceTypeText { get; init; }
+
+    public ExperienceLevel? ExperienceLevel { get; init; }
+    public int? MinimumExperienceYears { get; init; }
+    public int? MaximumExperienceYears { get; init; }
+    public string? EducationRequirement { get; init; }
     public string? ExternalCategory { get; init; }
     public bool DescriptionIsHtml { get; init; }
     public decimal? SalaryMin { get; init; }
