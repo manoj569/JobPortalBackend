@@ -117,6 +117,21 @@ public sealed class JobSourceRunner(
             var processed = 0;
             if (_logger is not null) Progress(_logger, source.Id, "Enrichment and ingestion started", rawJobs.Count, 0, null);
 
+            // Normalize/enrich/category-resolve first, then let production ingestion
+            // prefetch canonical URL duplicates in one database round trip.
+            var preparedJobs = new List<RawExternalJob>(rawJobs.Count);
+            foreach (var rawJob in rawJobs)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var normalized = normalizer.Normalize(rawJob);
+                normalized = enricher?.Enrich(normalized) ?? normalized;
+                var categoryId = await categoryResolver.ResolveCategoryIdAsync(source, normalized, cancellationToken);
+                preparedJobs.Add(normalized with { CategoryId = categoryId });
+            }
+
+            if (ingestionService is IBulkJobIngestionService bulkIngestion)
+                await bulkIngestion.PrepareRunAsync(preparedJobs, cancellationToken);
+
             var created = 0;
             var matched = 0;
             var skipped = 0;
@@ -129,18 +144,15 @@ public sealed class JobSourceRunner(
             var qualityReasons = new Dictionary<JobQualityReasonCode, int>();
             var reasonCounts = new Dictionary<JobIngestionReasonCode, int>();
 
-            foreach (var rawJob in rawJobs)
+            foreach (var preparedJob in preparedJobs)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
                 var publicationAttempt = false;
                 try
                 {
-                    var normalized = normalizer.Normalize(rawJob);
-                    normalized = enricher?.Enrich(normalized) ?? normalized;
-                    var categoryId = await categoryResolver.ResolveCategoryIdAsync(source, normalized, cancellationToken);
                     var result = await ingestionService.IngestAsync(
-                        normalized with { CategoryId = categoryId },
+                        preparedJob,
                         cancellationToken);
 
                     switch (result.Outcome)
