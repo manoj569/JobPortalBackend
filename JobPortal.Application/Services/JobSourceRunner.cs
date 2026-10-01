@@ -117,20 +117,11 @@ public sealed class JobSourceRunner(
             var processed = 0;
             if (_logger is not null) Progress(_logger, source.Id, "Enrichment and ingestion started", rawJobs.Count, 0, null);
 
-            // Normalize/enrich/category-resolve first, then let production ingestion
-            // prefetch canonical URL duplicates in one database round trip.
-            var preparedJobs = new List<RawExternalJob>(rawJobs.Count);
-            foreach (var rawJob in rawJobs)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var normalized = normalizer.Normalize(rawJob);
-                normalized = enricher?.Enrich(normalized) ?? normalized;
-                var categoryId = await categoryResolver.ResolveCategoryIdAsync(source, normalized, cancellationToken);
-                preparedJobs.Add(normalized with { CategoryId = categoryId });
-            }
-
+            // Prefetch canonical URL duplicates in one database round trip.
+            // PrepareRunAsync only reads raw ApplicationUrl values, so normalization,
+            // enrichment and category resolution remain isolated per provider item below.
             if (ingestionService is IBulkJobIngestionService bulkIngestion)
-                await bulkIngestion.PrepareRunAsync(preparedJobs, cancellationToken);
+                await bulkIngestion.PrepareRunAsync(rawJobs, cancellationToken);
 
             var created = 0;
             var matched = 0;
@@ -144,13 +135,21 @@ public sealed class JobSourceRunner(
             var qualityReasons = new Dictionary<JobQualityReasonCode, int>();
             var reasonCounts = new Dictionary<JobIngestionReasonCode, int>();
 
-            foreach (var preparedJob in preparedJobs)
+            foreach (var rawJob in rawJobs)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
                 var publicationAttempt = false;
                 try
                 {
+                    var normalized = normalizer.Normalize(rawJob);
+                    normalized = enricher?.Enrich(normalized) ?? normalized;
+                    var categoryId = await categoryResolver.ResolveCategoryIdAsync(
+                        source,
+                        normalized,
+                        cancellationToken);
+                    var preparedJob = normalized with { CategoryId = categoryId };
+
                     var result = await ingestionService.IngestAsync(
                         preparedJob,
                         cancellationToken);

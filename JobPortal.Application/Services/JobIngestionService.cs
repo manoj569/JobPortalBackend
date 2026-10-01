@@ -76,7 +76,7 @@ public sealed class JobIngestionService(
         var ids = matches.Values.Select(x => x.Id).Distinct().ToArray();
         var touched = await jobs.TouchAggregationMetadataAsync(ids, now, cancellationToken);
 
-        if (touched >= 0)
+        if (touched == ids.Length)
         {
             foreach (var id in ids)
                 _bulkTouchedJobIds.Add(id);
