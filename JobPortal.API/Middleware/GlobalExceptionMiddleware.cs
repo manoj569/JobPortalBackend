@@ -60,6 +60,8 @@ public sealed class GlobalExceptionMiddleware(
                         quotaException.Message,
                         quotaException.RedirectToMembership)),
 
+                GoogleRegistrationConflictException google => (google.StatusCode,
+                    (object)new ApiError(google.Code, google.Message, LoginMethod: "google")),
                 AppException appException => (appException.StatusCode, (object)new ApiError(appException.Code, appException.Message)),
 
                 ValidationException validationException => (StatusCodes.Status400BadRequest, (object)new ApiError(

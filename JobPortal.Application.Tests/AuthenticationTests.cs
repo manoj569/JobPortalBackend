@@ -576,6 +576,135 @@ public sealed class AuthenticationTests
             }
         };
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    public async Task GoogleOnlyDuplicateRegistrationGuidesGoogleWithoutCreatingAnotherUser(string? passwordHash)
+    {
+        var f = CreateFixture();
+        var user = NewUser();
+        user.PasswordHash = passwordHash;
+        var link = AddGoogleLink(user);
+        f.Users.Items.Add(user);
+        var conflict = await Assert.ThrowsAsync<GoogleRegistrationConflictException>(() =>
+            f.Service.RegisterAsync(ValidRegistration() with { Email = " USER@EXAMPLE.COM " }));
+        Assert.Equal(409, conflict.StatusCode);
+        Assert.Equal("ACCOUNT_EXISTS_GOOGLE", conflict.Code);
+        Assert.Same(user, Assert.Single(f.Users.Items));
+        Assert.Same(link, Assert.Single(user.ExternalLogins));
+        Assert.Empty(f.RegistrationEmails.Items);
+    }
+
+    [Fact]
+    public async Task GoogleAndPasswordDuplicateKeepsExistingPasswordConflict()
+    {
+        var f = CreateFixture();
+        var user = NewUser(phone: "+919999999999");
+        AddGoogleLink(user);
+        f.Users.Items.Add(user);
+        var error = await Assert.ThrowsAsync<ConflictException>(() => f.Service.RegisterAsync(ValidRegistration()));
+        Assert.Equal("registration_email_exists", error.Code);
+        Assert.Single(f.Users.Items);
+    }
+
+    [Fact]
+    public async Task GoogleOnlyPasswordSetupKeepsIdentityAndLinkAndEnablesPasswordLogin()
+    {
+        var f = CreateFixture();
+        var user = NewUser();
+        user.PasswordHash = null;
+        var id = user.Id;
+        var link = AddGoogleLink(user);
+        f.Users.Items.Add(user);
+        var response = await f.Service.RequestPasswordResetAsync(new(" USER@EXAMPLE.COM "));
+        var unknown = await f.Service.RequestPasswordResetAsync(new("unknown@example.com"));
+        Assert.Equal(unknown, response);
+        Assert.Equal(1, f.Email.SendCount);
+        var token = f.Email.LastRawToken!;
+        Assert.NotEqual(token, user.PasswordResetTokenHash);
+        await f.Service.CompletePasswordResetAsync(new(token, "newpass"));
+        Assert.Equal(id, Assert.Single(f.Users.Items).Id);
+        Assert.Same(link, Assert.Single(user.ExternalLogins));
+        Assert.Equal(id, link.UserId);
+        Assert.True(f.Passwords.Verify("newpass", user.PasswordHash!));
+        Assert.True(f.RefreshTokens.RevokedForUser);
+        var loggedIn = await f.Service.LoginAsync(new(user.Email, "newpass"), null);
+        Assert.Equal(id, loggedIn.User.Id);
+        await Assert.ThrowsAsync<BadRequestException>(() => f.Service.CompletePasswordResetAsync(new(token, "again12")));
+        Assert.Equal(response, await f.Service.RequestPasswordResetAsync(new(user.Email)));
+        Assert.Equal(2, f.Email.SendCount);
+    }
+
+    [Fact]
+    public async Task GoogleOnlyLoginRetainsGenericInvalidCredentials()
+    {
+        var f = CreateFixture();
+        var user = NewUser(); user.PasswordHash = null;
+        AddGoogleLink(user); f.Users.Items.Add(user);
+        var google = await Assert.ThrowsAsync<UnauthorizedException>(() => f.Service.LoginAsync(new(user.Email, "wrongpass"), null));
+        var unknown = await Assert.ThrowsAsync<UnauthorizedException>(() => f.Service.LoginAsync(new("unknown@example.com", "wrongpass"), null));
+        Assert.Equal(unknown.Code, google.Code);
+        Assert.Equal(unknown.Message, google.Message);
+        Assert.Empty(f.RefreshTokens.Added);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GoogleSetupRejectsInvalidOrExpiredToken(bool expired)
+    {
+        var f = CreateFixture();
+        var user = NewUser(); user.PasswordHash = null;
+        AddGoogleLink(user); f.Users.Items.Add(user);
+        await f.Service.RequestPasswordResetAsync(new(user.Email));
+        if (expired) f.Time.Advance(TimeSpan.FromMinutes(31));
+        var error = await Assert.ThrowsAsync<BadRequestException>(() => f.Service.CompletePasswordResetAsync(
+            new(expired ? f.Email.LastRawToken! : "invalid-token", "newpass")));
+        Assert.Equal("invalid_password_reset", error.Code);
+        Assert.Null(user.PasswordHash);
+        Assert.Single(user.ExternalLogins);
+    }
+
+    [Fact]
+    public async Task UnlinkedPasswordlessOrInactiveGoogleAccountDoesNotReceiveResetEmail()
+    {
+        var f = CreateFixture();
+        var user = NewUser(); user.PasswordHash = null;
+        f.Users.Items.Add(user);
+        var unlinked = await f.Service.RequestPasswordResetAsync(new(user.Email));
+        AddGoogleLink(user); user.Status = UserStatus.Inactive;
+        var inactive = await f.Service.RequestPasswordResetAsync(new(user.Email));
+        Assert.Equal(unlinked, inactive);
+        Assert.Equal(0, f.Email.SendCount);
+    }
+
+    [Fact]
+    public async Task ConcurrentGoogleRegistrationWinnerReturnsSameGuidance()
+    {
+        var f = CreateFixture();
+        var winner = NewUser(); winner.PasswordHash = null;
+        AddGoogleLink(winner);
+        f.UnitOfWork.ExceptionToThrow = new UniqueConstraintException("Duplicate normalized email");
+        f.UnitOfWork.OnFailure = () =>
+        {
+            f.Users.Items.Clear();
+            f.Users.Items.Add(winner);
+        };
+        var error = await Assert.ThrowsAsync<GoogleRegistrationConflictException>(() => f.Service.RegisterAsync(ValidRegistration()));
+        Assert.Equal("ACCOUNT_EXISTS_GOOGLE", error.Code);
+        Assert.Same(winner, Assert.Single(f.Users.Items));
+        Assert.Single(winner.ExternalLogins);
+    }
+
+    private static UserExternalLogin AddGoogleLink(User user)
+    {
+        var link = new UserExternalLogin { UserId = user.Id, User = user,
+            Provider = ExternalLoginProvider.Google, ProviderSubject = "verified-subject", ProviderEmail = user.Email };
+        user.ExternalLogins.Add(link);
+        return link;
+    }
+
     private static Fixture CreateFixture()
     {
         var time = new MutableTimeProvider(Now);
@@ -589,6 +718,7 @@ public sealed class AuthenticationTests
         var registrationEmails = new RegistrationEmailQueueFake();
         var service = new AuthService(
             users,
+            new ExternalLoginRepositoryFake(users),
             refreshTokens,
             unitOfWork,
             passwords,
@@ -629,6 +759,22 @@ public sealed class AuthenticationTests
         RegistrationEmailQueueFake RegistrationEmails,
         MutableTimeProvider Time,
         TestLogger<AuthService> Logger);
+
+    private sealed class ExternalLoginRepositoryFake(UserRepositoryFake users) : IUserExternalLoginRepository
+    {
+        public Task<UserExternalLogin?> GetByUserProviderAsync(Guid userId, ExternalLoginProvider provider,
+            CancellationToken cancellationToken = default) => Task.FromResult(users.Items
+                .SingleOrDefault(x => x.Id == userId)?.ExternalLogins.SingleOrDefault(x => x.Provider == provider));
+        public Task<UserExternalLogin?> GetByProviderSubjectAsync(ExternalLoginProvider provider, string subject,
+            CancellationToken cancellationToken = default) => Task.FromResult(users.Items.SelectMany(x => x.ExternalLogins)
+                .SingleOrDefault(x => x.Provider == provider && x.ProviderSubject == subject));
+        public Task AddAsync(UserExternalLogin login, CancellationToken cancellationToken = default)
+        {
+            users.Items.Single(x => x.Id == login.UserId).ExternalLogins.Add(login);
+            return Task.CompletedTask;
+        }
+        public void Update(UserExternalLogin login) { }
+    }
 
     private sealed class UserRepositoryFake : IUserRepository
     {

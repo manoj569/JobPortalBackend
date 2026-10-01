@@ -13,6 +13,28 @@ namespace JobPortal.Application.Tests;
 public sealed class BrevoEmailServiceTests
 {
     [Theory]
+    [InlineData(null, "Create your CareerHarbor password", "create a password")]
+    [InlineData("existing-hash", "Reset your Career Portal password", "reset your Career Portal password")]
+    public async Task PasswordEmailUsesSetupOrResetWording(string? hash, string subject, string wording)
+    {
+        string? payload = null;
+        var logger = new CollectingLogger<BrevoEmailService>();
+        var service = CreateService(new DelegateHandler(async (request, ct) =>
+        {
+            payload = await request.Content!.ReadAsStringAsync(ct);
+            return new(HttpStatusCode.Created);
+        }), logger, "test-key");
+        var result = await service.SendPasswordResetAsync(new User
+        {
+            Email = "user@example.test", FirstName = "User", PasswordHash = hash
+        }, "secret-setup-token");
+        Assert.Equal(EmailDeliveryResult.Sent, result);
+        using var json = JsonDocument.Parse(payload!);
+        Assert.Equal(subject, json.RootElement.GetProperty("subject").GetString());
+        Assert.Contains(wording, json.RootElement.GetProperty("textContent").GetString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(logger.Messages, x => x.Contains("secret-setup-token", StringComparison.Ordinal));
+    }
+    [Theory]
     [InlineData(HttpStatusCode.Created, EmailDeliveryResult.Sent)]
     [InlineData(HttpStatusCode.BadRequest, EmailDeliveryResult.PermanentFailure)]
     [InlineData(HttpStatusCode.TooManyRequests, EmailDeliveryResult.Failed)]

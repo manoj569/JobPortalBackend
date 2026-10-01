@@ -12,6 +12,9 @@ public sealed class BadRequestException(string message, string code = "bad_reque
 public sealed class UnauthorizedException(string message = "Authentication failed.") : AppException(message, 401, "unauthorized");
 public sealed class NotFoundException(string message) : AppException(message, 404, "not_found");
 public sealed class ConflictException(string message, string code = "conflict") : AppException(message, 409, code);
+public sealed class GoogleRegistrationConflictException() : AppException(
+    "This email is already registered with Google. Please continue with Google to sign in.",
+    409, "ACCOUNT_EXISTS_GOOGLE");
 public sealed class PendingMembershipCheckoutException(PendingMembershipCheckoutRecovery recovery) :
     AppException("A portal membership payment order is already pending.", 409, "pending_membership_checkout")
 {
