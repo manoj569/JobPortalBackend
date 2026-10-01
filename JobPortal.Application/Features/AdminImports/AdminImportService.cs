@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using FluentValidation;
 using JobPortal.Application.Abstractions.AdminImports;
+using JobPortal.Application.Abstractions.Jobs;
 using JobPortal.Application.Abstractions.Auditing;
 using JobPortal.Application.Abstractions.Persistence;
 using JobPortal.Application.Common.Text;
@@ -899,8 +900,17 @@ public sealed class AdminImportService(
     private static string JobKey(
         Guid companyId,
         string title,
-        string applicationUrl) =>
-        $"{companyId:N}\u001F{title.Trim()}\u001F{applicationUrl.Trim()}";
+        string applicationUrl)
+    {
+        // Phase 1 improvement: when an application URL produces a canonical
+        // identity (same ApplicationUrlIdentity.Hash semantics as the ATS
+        // ingestion path), deduplicate on the canonical hash instead of the
+        // raw trimmed URL so tracking-parameter variants collapse to one key.
+        // Advisory-lock unification with the ATS creation lock is deferred.
+        var urlSegment = ApplicationUrlIdentity.Hash(applicationUrl)
+                         ?? applicationUrl.Trim();
+        return $"{companyId:N}\u001F{title.Trim()}\u001F{urlSegment}";
+    }
 
     private static string CompanyFieldName(string propertyName) => propertyName switch
     {

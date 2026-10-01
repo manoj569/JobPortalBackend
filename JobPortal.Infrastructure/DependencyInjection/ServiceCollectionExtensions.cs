@@ -58,6 +58,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<AggregationHttpRetryState>();
         services.AddOptions<JobAggregationOptions>()
             .Bind(configuration.GetSection(JobAggregationOptions.SectionName))
+            .Validate(options => options.GreenhouseDetailConcurrency is >= 1 and <= 4,
+                "Greenhouse detail concurrency must be between 1 and 4.")
             .Validate(options => options.Scheduler is
                 { PollIntervalSeconds: >= 10 and <= 3600, BatchSize: >= 1 and <= 100, MaxConcurrentSources: >= 1 and <= 10 },
                 "JobAggregation scheduler requires PollIntervalSeconds 10–3600, BatchSize 1–100 and MaxConcurrentSources 1–10.")

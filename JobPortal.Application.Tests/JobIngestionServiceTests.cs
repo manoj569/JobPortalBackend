@@ -65,6 +65,7 @@ public class JobIngestionServiceTests
         Assert.Equal(_company.Id, created.CompanyId);
         Assert.Equal(_categoryId, created.CategoryId);
         Assert.Equal(JobStatus.Draft, created.Status);
+        Assert.Null(created.ExpiresAtUtc);
 
         Assert.Equal(
             "https://example.com/jobs/123",
@@ -77,6 +78,41 @@ public class JobIngestionServiceTests
         Assert.NotNull(created.LastSeenAtUtc);
 
         Assert.Equal(1, _unitOfWork.SaveCalls);
+    }
+
+    [Theory]
+    [InlineData(-1, JobQualityDecision.Rejected)]
+    [InlineData(1, JobQualityDecision.Eligible)]
+    [InlineData(null, JobQualityDecision.NeedsReview)]
+    public async Task IngestAsync_SourceExpiryRemainsDraftAndControlsQuality(int? days, JobQualityDecision expected)
+    {
+        var now = new DateTime(2026, 10, 1, 12, 0, 0, DateTimeKind.Utc);
+        var expiry = days.HasValue ? now.AddDays(days.Value) : (DateTime?)null;
+        var raw = new ExternalJobNormalizer().Normalize(CreateRawJob() with
+        {
+            ExpiresAtUtc = expiry,
+            EmploymentType = EmploymentType.FullTime,
+            WorkplaceType = WorkplaceType.Remote,
+            ExperienceLevel = ExperienceLevel.Mid
+        });
+        var result = await _service.IngestAsync(raw);
+        Assert.Equal(JobIngestionOutcome.Created, result.Outcome);
+        var job = Assert.Single(_jobs.AddedJobs);
+        Assert.Equal(expiry, job.ExpiresAtUtc);
+        Assert.Equal(JobStatus.Draft, job.Status);
+        Assert.Equal(expected, new JobQualityGate().Evaluate(job, now).Decision);
+    }
+
+    [Theory]
+    [InlineData(DateTimeKind.Local)]
+    [InlineData(DateTimeKind.Unspecified)]
+    public async Task IngestAsync_AmbiguousExpiryIsNotPersisted(DateTimeKind kind)
+    {
+        await _service.IngestAsync(CreateRawJob() with
+        {
+            ExpiresAtUtc = new DateTime(2026, 12, 1, 12, 0, 0, kind)
+        });
+        Assert.Null(Assert.Single(_jobs.AddedJobs).ExpiresAtUtc);
     }
 
     [Fact]
@@ -165,6 +201,8 @@ public class JobIngestionServiceTests
         existing.RecruiterContact = recruiter;
         existing.PublishedAtUtc = DateTime.UtcNow.AddDays(-2);
         var publishedAt = existing.PublishedAtUtc;
+        var curatedExpiry = new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        existing.ExpiresAtUtc = curatedExpiry;
 
         _deduplication.Result =
             DeduplicationResult.SourceUrlMatch(existing);
@@ -172,6 +210,7 @@ public class JobIngestionServiceTests
         var raw = CreateRawJob() with
         {
             Title = "External Changed Title",
+            ExpiresAtUtc = curatedExpiry.AddDays(30),
             Description = "External description",
             Requirements = "External requirements",
             Responsibilities = "External responsibilities",
@@ -216,6 +255,7 @@ public class JobIngestionServiceTests
         Assert.Same(recruiter, existing.RecruiterContact);
         Assert.True(existing.RecruiterContact.IsSharingApproved);
         Assert.Equal(publishedAt, existing.PublishedAtUtc);
+        Assert.Equal(curatedExpiry, existing.ExpiresAtUtc);
 
         Assert.NotNull(existing.LastSeenAtUtc);
     }
@@ -393,6 +433,127 @@ public class JobIngestionServiceTests
         Assert.Empty(_jobs.AddedJobs);
         Assert.Empty(_jobs.UpdatedJobs);
         Assert.Equal(1, _unitOfWork.SaveCalls);
+    }
+
+    [Fact]
+    public async Task IngestAsync_NewValidJob_ReturnsCreatedReasonCode()
+    {
+        var result = await _service.IngestAsync(CreateRawJob());
+
+        Assert.Equal(JobIngestionOutcome.Created, result.Outcome);
+        Assert.Equal(JobIngestionReasonCode.None, result.ReasonCode);
+    }
+
+    [Fact]
+    public async Task IngestAsync_UrlDuplicate_ReturnsCanonicalUrlReasonCode()
+    {
+        var existing = CreateExistingJob();
+
+        _deduplication.Result =
+            DeduplicationResult.SourceUrlMatch(existing);
+
+        var result = await _service.IngestAsync(CreateRawJob());
+
+        Assert.Equal(JobIngestionOutcome.MatchedByUrl, result.Outcome);
+        Assert.Equal(
+            JobIngestionReasonCode.DuplicateCanonicalUrl,
+            result.ReasonCode);
+        Assert.Equal(existing.Id, result.JobId);
+        Assert.Empty(_jobs.AddedJobs);
+    }
+
+    [Fact]
+    public async Task IngestAsync_FingerprintDuplicate_ReturnsFingerprintReasonCode()
+    {
+        var existing = CreateExistingJob();
+
+        _deduplication.Result =
+            DeduplicationResult.FingerprintMatch(existing);
+
+        var result = await _service.IngestAsync(CreateRawJob());
+
+        Assert.Equal(
+            JobIngestionReasonCode.DuplicateFingerprint,
+            result.ReasonCode);
+
+        Assert.Equal(existing.Id, result.JobId);
+        Assert.Empty(_jobs.AddedJobs);
+    }
+
+    [Fact]
+    public async Task IngestAsync_FuzzyDuplicate_ReturnsFuzzyReasonCode()
+    {
+        var existing = CreateExistingJob();
+
+        _deduplication.Result =
+            DeduplicationResult.FuzzyMatch(existing, 0.91);
+
+        var result = await _service.IngestAsync(CreateRawJob());
+
+        Assert.Equal(
+            JobIngestionReasonCode.DuplicateFuzzyMatch,
+            result.ReasonCode);
+
+        Assert.Equal(existing.Id, result.JobId);
+        Assert.Empty(_jobs.AddedJobs);
+    }
+
+    [Fact]
+    public async Task IngestAsync_CompanyNotFound_ReturnsCompanyNotFoundReasonCode()
+    {
+        _companies.Company = null;
+
+        var result = await _service.IngestAsync(CreateRawJob());
+
+        Assert.Equal(
+            JobIngestionOutcome.CompanyNotFound,
+            result.Outcome);
+
+        Assert.Equal(
+            JobIngestionReasonCode.CompanyNotFound,
+            result.ReasonCode);
+
+        Assert.Null(result.JobId);
+        Assert.Empty(_jobs.AddedJobs);
+    }
+
+    [Fact]
+    public async Task IngestAsync_MalformedApplicationUrl_ReturnsInvalidApplicationUrlReasonCode()
+    {
+        var raw = CreateRawJob() with
+        {
+            ApplicationUrl = "not-a-valid-url"
+        };
+
+        var result = await _service.IngestAsync(raw);
+
+        Assert.Equal(JobIngestionOutcome.Invalid, result.Outcome);
+
+        Assert.Equal(
+            JobIngestionReasonCode.InvalidApplicationUrl,
+            result.ReasonCode);
+
+        Assert.Empty(_jobs.AddedJobs);
+    }
+
+    [Fact]
+    public async Task IngestAsync_InvalidSalary_ReturnsInvalidSourceDataReasonCode()
+    {
+        var raw = CreateRawJob() with
+        {
+            SalaryMin = 100000,
+            SalaryMax = 50000
+        };
+
+        var result = await _service.IngestAsync(raw);
+
+        Assert.Equal(JobIngestionOutcome.Invalid, result.Outcome);
+
+        Assert.Equal(
+            JobIngestionReasonCode.InvalidSourceData,
+            result.ReasonCode);
+
+        Assert.Empty(_jobs.AddedJobs);
     }
 
     private RawExternalJob CreateRawJob() => new()

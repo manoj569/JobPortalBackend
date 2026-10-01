@@ -13,10 +13,17 @@ public sealed record RawExternalJob
     public string? Benefits { get; init; }
     public string? ApplicationUrl { get; init; }
     public string? ExternalId { get; init; }
+    // Source-provided deadline only; providers must supply an explicit UTC instant.
+    public DateTime? ExpiresAtUtc { get; init; }
     public EmploymentType? EmploymentType { get; init; }
     public WorkplaceType? WorkplaceType { get; init; }
     public string? EmploymentTypeText { get; init; }
     public string? WorkplaceTypeText { get; init; }
+
+    public ExperienceLevel? ExperienceLevel { get; init; }
+    public int? MinimumExperienceYears { get; init; }
+    public int? MaximumExperienceYears { get; init; }
+    public string? EducationRequirement { get; init; }
     public string? ExternalCategory { get; init; }
     public bool DescriptionIsHtml { get; init; }
     public decimal? SalaryMin { get; init; }

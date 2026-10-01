@@ -1,3 +1,4 @@
+using JobPortal.Application.Abstractions.Jobs;
 using JobPortal.Application.Features.JobDiscovery;
 using JobPortal.Domain.Entities;
 using JobPortal.Persistence.Context;
@@ -41,9 +42,16 @@ public sealed class JobDiscoveryRepository(JobPortalDbContext db) : IJobDiscover
     public async Task<(Guid? JobId, string? Reason)> FindDuplicateAsync(string provider, ExternalJobCandidate c, DateTime cutoff, CancellationToken ct)
     {
         if (await db.JobDiscoveryItems.AnyAsync(x => x.Provider == provider && x.SourceJobId == c.SourceJobId, ct)) return (null, "ProviderSourceJobId");
-        var url = c.ApplicationUrl.Trim().ToLower();
-        var byUrl = await db.Jobs.AsNoTracking().Where(x => x.ApplicationUrl.ToLower() == url).Select(x => (Guid?)x.Id).FirstOrDefaultAsync(ct);
-        if (byUrl is not null) return (byUrl, "ApplicationUrl");
+        // Use the SAME canonical URL identity semantics as the ATS ingestion path:
+        // Jobs.CanonicalApplicationUrlHash is maintained by the DbContext from
+        // ApplicationUrlIdentity.Hash (UrlCanonicalizer + SHA256), so tracking
+        // parameters such as utm_source no longer defeat deduplication.
+        var hash = ApplicationUrlIdentity.Hash(c.ApplicationUrl);
+        if (hash is not null)
+        {
+            var byUrl = await db.Jobs.AsNoTracking().Where(x => x.CanonicalApplicationUrlHash == hash && !x.IsDeleted).Select(x => (Guid?)x.Id).FirstOrDefaultAsync(ct);
+            if (byUrl is not null) return (byUrl, "ApplicationUrl");
+        }
         var title = c.Title.Trim().ToLower(); var company = c.CompanyName.Trim().ToLower(); var location = (c.Location ?? "").Trim().ToLower();
         var probable = await db.Jobs.AsNoTracking().Where(x => x.CreatedAtUtc >= cutoff && x.Title.ToLower() == title &&
             x.Company.Name.ToLower() == company && (x.Location ?? "").ToLower() == location).Select(x => (Guid?)x.Id).FirstOrDefaultAsync(ct);

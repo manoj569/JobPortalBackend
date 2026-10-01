@@ -13,6 +13,18 @@ public sealed class ExternalJobNormalizationTests
     private readonly ExternalJobNormalizer normalizer = new();
 
     [Theory]
+    [InlineData(DateTimeKind.Utc)]
+    [InlineData(DateTimeKind.Local)]
+    [InlineData(DateTimeKind.Unspecified)]
+    public void ExpiryRequiresAnExplicitUtcInstant(DateTimeKind kind)
+    {
+        var expiry = new DateTime(2026, 12, 1, 12, 0, 0, kind);
+        var result = normalizer.Normalize(new() { ExpiresAtUtc = expiry });
+        Assert.Equal(kind == DateTimeKind.Utc ? expiry : (DateTime?)null, result.ExpiresAtUtc);
+        Assert.Null(normalizer.Normalize(new()).ExpiresAtUtc);
+    }
+
+    [Theory]
     [InlineData("  .NET   Developer  ", ".NET Developer")]
     [InlineData(" C#\tDeveloper ", "C# Developer")]
     [InlineData(" C++\nDeveloper ", "C++ Developer")]
@@ -21,6 +33,23 @@ public sealed class ExternalJobNormalizationTests
         Assert.Equal(expected, normalizer.Normalize(new() { Title = input }).Title);
 
     [Theory]
+    [InlineData("Bangalore", "Bengaluru")]
+    [InlineData("Bangalore, Karnataka", "Bengaluru, Karnataka")]
+    [InlineData("Bangalore Karnataka", "Bengaluru, Karnataka")]
+    [InlineData("Bengaluru Karnataka", "Bengaluru, Karnataka")]
+    [InlineData("Bombay", "Mumbai")]
+    [InlineData("Bombay, Maharashtra", "Mumbai, Maharashtra")]
+    [InlineData("Mumbai Maharashtra", "Mumbai, Maharashtra")]
+    [InlineData("Pune Maharashtra", "Pune, Maharashtra")]
+    [InlineData("Hyderabad Telangana", "Hyderabad, Telangana")]
+    [InlineData("Chennai Tamil Nadu", "Chennai, Tamil Nadu")]
+    [InlineData("bangalore karnataka", "Bengaluru, Karnataka")]
+    [InlineData("BOMBAY", "Mumbai")]
+    [InlineData("pUnE, mAhArAsHtRa", "Pune, Maharashtra")]
+    [InlineData("Delhi NCR", "Delhi NCR")]
+    [InlineData("Pune", "Pune")]
+    [InlineData("Delhi", "Delhi")]
+    [InlineData("Unknown / location", "Unknown / location")]
     [InlineData(" Pune,   Maharashtra ", "Pune, Maharashtra")]
     [InlineData("New York,NY", "New York, NY")]
     [InlineData("Pune ,, , India", "Pune, India")]
@@ -28,8 +57,41 @@ public sealed class ExternalJobNormalizationTests
     [InlineData("Washington D.C. / Arlington", "Washington D.C. / Arlington")]
     [InlineData(null, null)]
     [InlineData(" , , ", null)]
-    public void LocationIsConservative(string? input, string? expected) =>
-        Assert.Equal(expected, normalizer.Normalize(new() { Location = input }).Location);
+    public void LocationIsConservative(string? input, string? expected)
+    {
+        var result = normalizer.Normalize(new() { Location = input });
+        Assert.Equal(expected, result.Location);
+        Assert.Equal(result, normalizer.Normalize(result));
+    }
+
+    [Theory]
+    [InlineData("B.E", "B.E.")]
+    [InlineData("B.E.", "B.E.")]
+    [InlineData("be", "B.E.")]
+    [InlineData(" Bachelor  of Engineering ", "B.E.")]
+    [InlineData("B.Tech.", "B.Tech")]
+    [InlineData("BTech", "B.Tech")]
+    [InlineData("bachelor of technology", "B.Tech")]
+    [InlineData("B.Sc.", "B.Sc")]
+    [InlineData("BSc", "B.Sc")]
+    [InlineData("Bachelor of Science", "B.Sc")]
+    [InlineData("ssc", "SSC")]
+    [InlineData("hsc", "HSC")]
+    [InlineData("iti", "ITI")]
+    [InlineData("diploma", "Diploma")]
+    [InlineData("graduate", "Graduate")]
+    [InlineData("Bachelor's", "Bachelor's")]
+    [InlineData("Any Graduate", "Any Graduate")]
+    [InlineData("Engineering Graduate", "Engineering Graduate")]
+    [InlineData("Degree", "Degree")]
+    [InlineData("B.Tech or equivalent experience", "B.Tech or equivalent experience")]
+    [InlineData(null, null)]
+    public void EducationCanonicalizesOnlyEquivalentWholeValues(string? input, string? expected)
+    {
+        var result = normalizer.Normalize(new() { EducationRequirement = input });
+        Assert.Equal(expected, result.EducationRequirement);
+        Assert.Equal(result, normalizer.Normalize(result));
+    }
 
     [Fact]
     public void CopyIsDeterministicAndIdempotentWithoutMutatingInput()

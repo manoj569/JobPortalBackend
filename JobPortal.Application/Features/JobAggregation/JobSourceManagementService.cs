@@ -97,7 +97,12 @@ public sealed class JobSourceManagementService(
                 ["created"] = result.Created.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 ["matched"] = result.Matched.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 ["skipped"] = result.Skipped.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                ["failed"] = result.Failed.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                ["failed"] = result.Failed.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["published"] = result.Published.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["needsReview"] = result.NeedsReview.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["qualityRejected"] = result.QualityRejected.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["publishFailed"] = result.PublishFailed.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["autoPublishDisabled"] = result.AutoPublishDisabled.ToString(System.Globalization.CultureInfo.InvariantCulture)
             }), cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
         return result;

@@ -72,7 +72,9 @@ public sealed class ExternalJobCoverageTests
         Assert.Equal("Engineering", result.ExternalCategory);
         Assert.Null(result.EmploymentType);
         Assert.Null(result.WorkplaceType);
-        Assert.Equal("/v1/boards/acme/jobs?content=true", handler.Uri!.PathAndQuery);
+        Assert.Equal("/v1/boards/acme/jobs?content=true", handler.FirstUri!.PathAndQuery);
+        Assert.Equal("/v1/boards/acme/jobs/42", handler.Uri!.PathAndQuery);
+        Assert.Equal(2, handler.Calls);
     }
 
     [Fact]
@@ -236,12 +238,14 @@ public sealed class ExternalJobCoverageTests
     private sealed class Handler(string json, HttpStatusCode status = HttpStatusCode.OK) : HttpMessageHandler
     {
         public Uri? Uri { get; private set; }
+        public Uri? FirstUri { get; private set; }
         public int Calls { get; private set; }
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             Calls++;
             Uri = request.RequestUri;
+            FirstUri ??= request.RequestUri;
             return Task.FromResult(new HttpResponseMessage(status) { Content = new StringContent(json, Encoding.UTF8, "application/json") });
         }
     }

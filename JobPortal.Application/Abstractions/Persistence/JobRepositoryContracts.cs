@@ -9,8 +9,7 @@ public interface IJobRepository
     Task<(IReadOnlyCollection<Job> Items, int TotalCount)> SearchAsync(JobSearchQuery query, CancellationToken cancellationToken = default);
     Task<bool> CompanyExistsAsync(Guid companyId, CancellationToken cancellationToken = default);
     Task<bool> CategoryExistsAsync(Guid categoryId, CancellationToken cancellationToken = default);
-    Task<int> ExpireOverduePublishedAsync(
-        DateTime utcNow, CancellationToken cancellationToken = default);
+    Task<int> ExpireOverduePublishedAsync(DateTime utcNow, CancellationToken cancellationToken = default);
     Task AddAsync(Job job, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyCollection<Skill>> GetSkillsByNormalizedNamesAsync(
@@ -27,10 +26,29 @@ public interface IJobRepository
     void Remove(Job job);
     Task DeletePermanentlyAsync(Guid id, CancellationToken cancellationToken = default);
 
-    // Job Aggregation & Deduplication (Phase 1)
     Task<Job?> FindByExternalUrlAsync(string externalUrl, CancellationToken cancellationToken = default);
     Task<Job?> FindByFingerprintHashAsync(string fingerprintHash, CancellationToken cancellationToken = default);
-    Task<IReadOnlyList<Job>> FindCandidatesForFuzzyMatchAsync(Guid companyId, string title, string location, int maxResults, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<Job>> FindCandidatesForFuzzyMatchAsync(
+        Guid companyId, string title, string location, int maxResults,
+        CancellationToken cancellationToken = default);
+
+    Task<int> TouchAggregationMetadataAsync(
+        Guid jobId,
+        DateTime seenAtUtc,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(-1);
+
+    Task<IReadOnlyDictionary<string, Job>> FindByCanonicalUrlHashesAsync(
+        IReadOnlyCollection<string> hashes,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyDictionary<string, Job>>(
+            new Dictionary<string, Job>(StringComparer.Ordinal));
+
+    Task<int> TouchAggregationMetadataAsync(
+        IReadOnlyCollection<Guid> jobIds,
+        DateTime seenAtUtc,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(-1);
 }
 
 public interface IJobSourceRepository
@@ -38,9 +56,7 @@ public interface IJobSourceRepository
     Task<IReadOnlyCollection<JobSource>> GetDueSourcesAsync(
         DateTime nowUtc, int maxResults, CancellationToken cancellationToken = default);
 
-    Task<JobSource?> GetByIdAsync(
-        Guid id,
-        CancellationToken cancellationToken = default);
+    Task<JobSource?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
 
     void Update(JobSource source);
 }

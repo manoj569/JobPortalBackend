@@ -28,6 +28,14 @@ public sealed class JobsController(
     public async Task<ActionResult<ApiResponse<JobResponse>>> GetById(Guid id, CancellationToken cancellationToken) =>
         Ok(new ApiResponse<JobResponse>(await jobService.GetByIdAsync(id, cancellationToken)));
 
+    [HttpGet("{id:guid}/quality")]
+    [ProducesResponseType(typeof(ApiResponse<JobQualityResult>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiError), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<ApiResponse<JobQualityResult>>> Quality(
+        Guid id, [FromServices] JobPortal.Application.Services.JobQualityReviewService review,
+        CancellationToken cancellationToken) =>
+        Ok(new ApiResponse<JobQualityResult>(await review.ReviewAsync(id, cancellationToken)));
+
     [HttpPost]
     [ProducesResponseType(typeof(ApiResponse<JobResponse>), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ApiError), StatusCodes.Status400BadRequest)]

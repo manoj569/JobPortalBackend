@@ -15,6 +15,7 @@ using JobPortal.API.Swagger;
 using JobPortal.Application;
 using JobPortal.Application.Features.JobDiscovery;
 using JobPortal.Application.Features.AIApply;
+using JobPortal.Application.Features.JobAggregation;
 using JobPortal.Application.Abstractions.Auditing;
 using JobPortal.Application.Abstractions.Authentication;
 using JobPortal.Infrastructure;
@@ -136,6 +137,9 @@ builder.Services.AddOutputCache(options =>
         .Tag("public-jobs"));
 });
 builder.Services.AddHostedService<JobExpiryHostedService>();
+builder.Services.Configure<JobAggregationOptions>(
+    builder.Configuration.GetSection(JobAggregationOptions.SectionName));
+
 builder.Services.AddSingleton<JobAggregationScheduler>();
 builder.Services.AddHostedService<JobAggregationSchedulerHostedService>();
 builder.Services.Configure<JobDiscoveryOptions>(builder.Configuration.GetSection(JobDiscoveryOptions.SectionName));

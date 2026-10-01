@@ -57,8 +57,7 @@ public sealed class JobRepository(JobPortalDbContext context) : IJobRepository
         context.Companies.AnyAsync(x => x.Id == companyId, cancellationToken);
     public Task<bool> CategoryExistsAsync(Guid categoryId, CancellationToken cancellationToken = default) =>
         context.Categories.AnyAsync(x => x.Id == categoryId, cancellationToken);
-    public Task<int> ExpireOverduePublishedAsync(
-        DateTime utcNow, CancellationToken cancellationToken = default) =>
+    public Task<int> ExpireOverduePublishedAsync(DateTime utcNow, CancellationToken cancellationToken = default) =>
         context.Jobs
             .Where(x => x.Status == JobStatus.Published &&
                 x.ExpiresAtUtc.HasValue && x.ExpiresAtUtc <= utcNow)
@@ -67,15 +66,13 @@ public sealed class JobRepository(JobPortalDbContext context) : IJobRepository
                 .SetProperty(x => x.IsFeatured, false)
                 .SetProperty(x => x.UpdatedAtUtc, utcNow), cancellationToken);
     public Task AddAsync(Job job, CancellationToken cancellationToken = default) =>
-     context.Jobs.AddAsync(job, cancellationToken).AsTask();
+        context.Jobs.AddAsync(job, cancellationToken).AsTask();
 
     public async Task<IReadOnlyCollection<Skill>> GetSkillsByNormalizedNamesAsync(
         IReadOnlyCollection<string> normalizedNames,
         CancellationToken cancellationToken = default)
     {
-        if (normalizedNames.Count == 0)
-            return Array.Empty<Skill>();
-
+        if (normalizedNames.Count == 0) return Array.Empty<Skill>();
         return await context.Skills
             .Where(x => normalizedNames.Contains(x.NormalizedName))
             .ToArrayAsync(cancellationToken);
@@ -85,9 +82,7 @@ public sealed class JobRepository(JobPortalDbContext context) : IJobRepository
         IReadOnlyCollection<Skill> skills,
         CancellationToken cancellationToken = default)
     {
-        if (skills.Count == 0)
-            return;
-
+        if (skills.Count == 0) return;
         await context.Skills.AddRangeAsync(skills, cancellationToken);
     }
 
@@ -96,7 +91,6 @@ public sealed class JobRepository(JobPortalDbContext context) : IJobRepository
     public async Task DeletePermanentlyAsync(Guid id, CancellationToken cancellationToken = default) =>
         _ = await context.Jobs.IgnoreQueryFilters().Where(x => x.Id == id).ExecuteDeleteAsync(cancellationToken);
 
-    // Job Aggregation & Deduplication (Phase 1)
     public Task<Job?> FindByExternalUrlAsync(string externalUrl, CancellationToken cancellationToken = default)
     {
         var hash = JobPortal.Application.Abstractions.Jobs.ApplicationUrlIdentity.Hash(externalUrl);
@@ -105,10 +99,10 @@ public sealed class JobRepository(JobPortalDbContext context) : IJobRepository
     }
 
     internal IQueryable<Job> CanonicalUrlQuery(string hash) => context.Jobs
-            .AsNoTracking()
-            .Include(x => x.Company)
-            .Include(x => x.Category)
-            .Where(x => x.CanonicalApplicationUrlHash == hash && !x.IsDeleted);
+        .AsNoTracking()
+        .Include(x => x.Company)
+        .Include(x => x.Category)
+        .Where(x => x.CanonicalApplicationUrlHash == hash && !x.IsDeleted);
 
     public Task<Job?> FindByFingerprintHashAsync(string fingerprintHash, CancellationToken cancellationToken = default) =>
         context.Jobs
@@ -126,6 +120,68 @@ public sealed class JobRepository(JobPortalDbContext context) : IJobRepository
             .OrderByDescending(x => x.PublishedAtUtc)
             .Take(maxResults)
             .ToListAsync(cancellationToken);
+    }
+
+    public Task<int> TouchAggregationMetadataAsync(
+        Guid jobId,
+        DateTime seenAtUtc,
+        CancellationToken cancellationToken = default) =>
+        context.Jobs
+            .Where(x => x.Id == jobId && !x.IsDeleted)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(x => x.LastSeenAtUtc, seenAtUtc)
+                    .SetProperty(x => x.FirstSeenAtUtc, x => x.FirstSeenAtUtc ?? seenAtUtc),
+                cancellationToken);
+
+
+    public async Task<IReadOnlyDictionary<string, Job>> FindByCanonicalUrlHashesAsync(
+        IReadOnlyCollection<string> hashes,
+        CancellationToken cancellationToken = default)
+    {
+        if (hashes.Count == 0)
+            return new Dictionary<string, Job>(StringComparer.Ordinal);
+
+        var distinctHashes = hashes
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        if (distinctHashes.Length == 0)
+            return new Dictionary<string, Job>(StringComparer.Ordinal);
+
+        var matches = await context.Jobs
+            .AsNoTracking()
+            .Include(x => x.Company)
+            .Include(x => x.Category)
+            .Where(x => !x.IsDeleted &&
+                        x.CanonicalApplicationUrlHash != null &&
+                        distinctHashes.Contains(x.CanonicalApplicationUrlHash))
+            .ToArrayAsync(cancellationToken);
+
+        return matches
+            .Where(x => x.CanonicalApplicationUrlHash is not null)
+            .GroupBy(x => x.CanonicalApplicationUrlHash!, StringComparer.Ordinal)
+            .ToDictionary(x => x.Key, x => x.First(), StringComparer.Ordinal);
+    }
+
+    public Task<int> TouchAggregationMetadataAsync(
+        IReadOnlyCollection<Guid> jobIds,
+        DateTime seenAtUtc,
+        CancellationToken cancellationToken = default)
+    {
+        if (jobIds.Count == 0)
+            return Task.FromResult(0);
+
+        var distinctIds = jobIds.Distinct().ToArray();
+
+        return context.Jobs
+            .Where(x => distinctIds.Contains(x.Id) && !x.IsDeleted)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(x => x.LastSeenAtUtc, seenAtUtc)
+                    .SetProperty(x => x.FirstSeenAtUtc, x => x.FirstSeenAtUtc ?? seenAtUtc),
+                cancellationToken);
     }
 
     private static IQueryable<Job> ApplySorting(IQueryable<Job> source, string sortBy, bool descending) =>

@@ -8,8 +8,10 @@ namespace JobPortal.Application.Services;
 
 public sealed class JobSourceCategoryResolver(
     IOptionsMonitor<JobAggregationOptions> options,
-    ICategoryManagementRepository categories) : IJobSourceCategoryResolver
+    ICategoryManagementRepository categories,
+    IExternalJobCategoryClassifier? classifier = null) : IJobSourceCategoryResolver
 {
+    private IReadOnlyCollection<JobPortal.Application.Features.AdminManagement.AdminOptionResponse>? _categoryOptions;
     public async Task<Guid?> ResolveCategoryIdAsync(JobSource source, RawExternalJob rawJob, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(source);
@@ -27,6 +29,17 @@ public sealed class JobSourceCategoryResolver(
                 .Select(x => x.Value).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
             if (values.Length == 1 && Guid.TryParse(values[0], out var mappedId) && mappedId != Guid.Empty &&
                 await categories.ExistsAsync(mappedId, cancellationToken)) return mappedId;
+        }
+        var classified = classifier?.Classify(rawJob);
+        if (classified is not null)
+        {
+            _categoryOptions ??= await categories.GetOptionsAsync(cancellationToken);
+            var matches = _categoryOptions.Where(c => ExternalJobCategoryClassifier.MatchesCategory(classified, c.Slug, c.Name)).ToArray();
+            // Prefer the canonical slug; otherwise reuse a unique existing equivalent category.
+            var exact = matches.Where(c => string.Equals(c.Slug, classified, StringComparison.OrdinalIgnoreCase)).ToArray();
+            if (exact.Length == 1) return exact[0].Id;
+            // Strong evidence without an unambiguous taxonomy entry must not become an unrelated fallback.
+            return matches.Length == 1 ? matches[0].Id : null;
         }
         return await ResolveCategoryIdAsync(source, cancellationToken);
     }

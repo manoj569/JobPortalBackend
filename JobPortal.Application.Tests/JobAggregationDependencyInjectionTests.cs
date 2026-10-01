@@ -1,3 +1,4 @@
+using JobPortal.Application.Abstractions.Auditing;
 using JobPortal.Application.Abstractions.Jobs;
 using JobPortal.Application.Abstractions.Persistence;
 using JobPortal.Application.Features.JobDiscovery;
@@ -25,10 +26,18 @@ public sealed class JobAggregationDependencyInjectionTests
                 // DI construction only: no connection is opened.
                 ["ConnectionStrings:DefaultConnection"] = "Host=localhost;Database=di_only"
             }).Build();
+
         var services = new ServiceCollection();
+
         services.AddSingleton<IConfiguration>(configuration);
         services.AddLogging();
         services.AddSingleton(TimeProvider.System);
+
+        // Production registers HttpAuditContextAccessor in the API layer.
+        // This test builds Application/Infrastructure DI without the API host,
+        // so provide a minimal test-only audit context.
+        services.AddScoped<IAuditContextAccessor, TestAuditContextAccessor>();
+
         services.AddApplication();
         services.AddPersistence(configuration);
         services.AddPostgresAggregationLocks();
@@ -38,36 +47,112 @@ public sealed class JobAggregationDependencyInjectionTests
         AssertScoped<IJobSourceRunner, JobSourceRunner>(services);
         AssertScoped<IExternalJobNormalizer, ExternalJobNormalizer>(services);
         AssertScoped<IJobSourceRepository, JobSourceRepository>(services);
-        Assert.Single(services, x => x.ServiceType == typeof(IJobRepository));
-        Assert.Single(services, x => x.ServiceType == typeof(TimeProvider));
-        AssertScoped<IExternalJobSourceProvider, AdzunaJobSourceProvider>(services);
 
-        using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
+        Assert.Single(
+            services,
+            x => x.ServiceType == typeof(IJobRepository));
+
+        Assert.Single(
+            services,
+            x => x.ServiceType == typeof(TimeProvider));
+
+        AssertScoped<IExternalJobSourceProvider, AdzunaJobSourceProvider>(
+            services);
+
+        using var provider = services.BuildServiceProvider(
+            new ServiceProviderOptions
+            {
+                ValidateScopes = true
+            });
+
         using var scope = provider.CreateScope();
-        Assert.IsType<JobIngestionService>(scope.ServiceProvider.GetRequiredService<IJobIngestionService>());
-        Assert.IsType<JobSourceRunner>(scope.ServiceProvider.GetRequiredService<IJobSourceRunner>());
-        Assert.IsType<PostgresJobSourceExecutionLock>(provider.GetRequiredService<IJobSourceExecutionLock>());
-        Assert.IsType<PostgresExternalJobCreationLock>(provider.GetRequiredService<IExternalJobCreationLock>());
-        var providers = scope.ServiceProvider.GetServices<IExternalJobProvider>().ToArray();
-        Assert.Equal(3, providers.Length);
-        Assert.Contains(providers, x => x is GreenhouseExternalJobProvider);
-        Assert.Contains(providers, x => x is LeverExternalJobProvider);
-        Assert.Contains(providers, x => x is AshbyExternalJobProvider);
-        Assert.DoesNotContain(providers, x => x.AtsType == AtsType.Custom);
 
-        var clients = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
-        using var greenhouse = clients.CreateClient(GreenhouseExternalJobProvider.HttpClientName);
-        using var lever = clients.CreateClient(LeverExternalJobProvider.HttpClientName);
-        Assert.Equal(new Uri("https://boards-api.greenhouse.io/"), greenhouse.BaseAddress);
-        Assert.Equal(new Uri("https://api.lever.co/"), lever.BaseAddress);
-        using var ashby = clients.CreateClient(AshbyExternalJobProvider.HttpClientName);
-        Assert.Equal(new Uri("https://api.ashbyhq.com/"), ashby.BaseAddress);
+        Assert.IsType<JobIngestionService>(
+            scope.ServiceProvider
+                .GetRequiredService<IJobIngestionService>());
+
+        Assert.IsType<JobSourceRunner>(
+            scope.ServiceProvider
+                .GetRequiredService<IJobSourceRunner>());
+
+        Assert.IsType<PostgresJobSourceExecutionLock>(
+            provider.GetRequiredService<IJobSourceExecutionLock>());
+
+        Assert.IsType<PostgresExternalJobCreationLock>(
+            provider.GetRequiredService<IExternalJobCreationLock>());
+
+        var providers = scope.ServiceProvider
+            .GetServices<IExternalJobProvider>()
+            .ToArray();
+
+        Assert.Equal(3, providers.Length);
+
+        Assert.Contains(
+            providers,
+            x => x is GreenhouseExternalJobProvider);
+
+        Assert.Contains(
+            providers,
+            x => x is LeverExternalJobProvider);
+
+        Assert.Contains(
+            providers,
+            x => x is AshbyExternalJobProvider);
+
+        Assert.DoesNotContain(
+            providers,
+            x => x.AtsType == AtsType.Custom);
+
+        var clients = scope.ServiceProvider
+            .GetRequiredService<IHttpClientFactory>();
+
+        using var greenhouse =
+            clients.CreateClient(
+                GreenhouseExternalJobProvider.HttpClientName);
+
+        using var lever =
+            clients.CreateClient(
+                LeverExternalJobProvider.HttpClientName);
+
+        Assert.Equal(
+            new Uri("https://boards-api.greenhouse.io/"),
+            greenhouse.BaseAddress);
+
+        Assert.Equal(
+            new Uri("https://api.lever.co/"),
+            lever.BaseAddress);
+
+        using var ashby =
+            clients.CreateClient(
+                AshbyExternalJobProvider.HttpClientName);
+
+        Assert.Equal(
+            new Uri("https://api.ashbyhq.com/"),
+            ashby.BaseAddress);
     }
 
-    private static void AssertScoped<TService, TImplementation>(IServiceCollection services)
+    private static void AssertScoped<TService, TImplementation>(
+        IServiceCollection services)
     {
-        var registration = Assert.Single(services, x => x.ServiceType == typeof(TService));
-        Assert.Equal(typeof(TImplementation), registration.ImplementationType);
-        Assert.Equal(ServiceLifetime.Scoped, registration.Lifetime);
+        var registration = Assert.Single(
+            services,
+            x => x.ServiceType == typeof(TService));
+
+        Assert.Equal(
+            typeof(TImplementation),
+            registration.ImplementationType);
+
+        Assert.Equal(
+            ServiceLifetime.Scoped,
+            registration.Lifetime);
+    }
+
+    private sealed class TestAuditContextAccessor : IAuditContextAccessor
+    {
+        public Guid? ActorUserId => null;
+
+        public string? ActorRole => null;
+
+        public string? CorrelationId => null;
     }
 }
