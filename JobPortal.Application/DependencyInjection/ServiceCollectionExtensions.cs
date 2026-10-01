@@ -115,6 +115,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<JobQualityReviewService>();
         services.AddScoped<IJobSourceRunner, JobSourceRunner>();
         services.AddScoped<IExternalJobNormalizer, ExternalJobNormalizer>();
+        services.AddScoped<IExternalJobMetadataEnricher, ExternalJobMetadataEnricher>();
+        services.AddScoped<IExternalJobCategoryClassifier, ExternalJobCategoryClassifier>();
         services.AddScoped<IJobSourceCategoryResolver, JobSourceCategoryResolver>();
         services.AddScoped<IJobSourceManagementService, JobSourceManagementService>();
         services.AddSingleton<JobSourceRunGuard>();

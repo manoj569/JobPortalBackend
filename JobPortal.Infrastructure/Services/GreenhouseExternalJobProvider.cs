@@ -2,10 +2,12 @@ using System.Text.Json;
 using JobPortal.Application.Abstractions.Jobs;
 using JobPortal.Domain.Entities;
 using JobPortal.Domain.Enums;
+using JobPortal.Application.Features.JobAggregation;
+using Microsoft.Extensions.Options;
 
 namespace JobPortal.Infrastructure.Services;
 
-public sealed class GreenhouseExternalJobProvider(IHttpClientFactory clients) : IExternalJobProvider
+public sealed class GreenhouseExternalJobProvider(IHttpClientFactory clients, IOptions<JobAggregationOptions>? options = null) : IExternalJobProvider
 {
     public const string HttpClientName = "GreenhouseJobAggregation";
     public AtsType AtsType => AtsType.Greenhouse;
@@ -23,17 +25,24 @@ public sealed class GreenhouseExternalJobProvider(IHttpClientFactory clients) : 
         using var payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
         var jobs = payload.RootElement.Field("jobs");
         if (jobs.ValueKind != JsonValueKind.Array) throw new JsonException("Invalid Greenhouse jobs response.");
-        var results = new List<RawExternalJob>();
-        foreach (var job in jobs.EnumerateArray())
+        var entries = jobs.EnumerateArray().ToArray();
+        var results = new RawExternalJob[entries.Length];
+        var concurrency = options?.Value.GreenhouseDetailConcurrency ?? 2;
+        if (concurrency is < 1 or > 4) throw new InvalidOperationException("Greenhouse detail concurrency must be between 1 and 4.");
+        await Parallel.ForEachAsync(Enumerable.Range(0, entries.Length), new ParallelOptions
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            MaxDegreeOfParallelism = concurrency, CancellationToken = cancellationToken
+        }, async (index, tokenCancellation) =>
+        {
+            tokenCancellation.ThrowIfCancellationRequested();
+            var job = entries[index];
             var externalId = job.NumericId("id");
             // Greenhouse documents application_deadline on the detail endpoint, not the list.
-            // Sequential requests use the existing hardened client; no unbounded fan-out.
+            // Bounded requests retain the hardened client's retry/timeout policy and input order.
             var expiry = externalId is null || string.IsNullOrWhiteSpace(job.Text("title"))
                 ? null
-                : await ReadDeadlineAsync(client, token, externalId, cancellationToken);
-            results.Add(new RawExternalJob
+                : await ReadDeadlineAsync(client, token, externalId, tokenCancellation);
+            results[index] = new RawExternalJob
             {
                 Title = job.Text("title")?.Trim() ?? string.Empty,
                 CompanyName = source.Company?.Name?.Trim() ?? string.Empty,
@@ -44,8 +53,8 @@ public sealed class GreenhouseExternalJobProvider(IHttpClientFactory clients) : 
                 ExternalId = externalId,
                 ExpiresAtUtc = expiry,
                 ExternalCategory = job.SingleDepartment()
-            });
-        }
+            };
+        });
         return results;
     }
 

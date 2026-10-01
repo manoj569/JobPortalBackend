@@ -178,7 +178,14 @@ public sealed class CategoryConfiguration : IEntityTypeConfiguration<Category>
             new Category { Id = Guid.Parse("10000000-0000-0000-0000-000000000007"), Name = "Product Management", Slug = "product-management", DisplayOrder = 70, CreatedAtUtc = created },
             new Category { Id = Guid.Parse("10000000-0000-0000-0000-000000000008"), Name = "UI/UX Design", Slug = "ui-ux-design", DisplayOrder = 80, CreatedAtUtc = created },
             new Category { Id = Guid.Parse("10000000-0000-0000-0000-000000000009"), Name = "Engineering Management", Slug = "engineering-management", DisplayOrder = 90, CreatedAtUtc = created },
-            new Category { Id = Guid.Parse("10000000-0000-0000-0000-000000000010"), Name = "IT Support & Administration", Slug = "it-support-administration", DisplayOrder = 100, CreatedAtUtc = created });
+            new Category { Id = Guid.Parse("10000000-0000-0000-0000-000000000010"), Name = "IT Support & Administration", Slug = "it-support-administration", DisplayOrder = 100, CreatedAtUtc = created },
+            new Category { Id = Guid.Parse("10000000-0000-0000-0000-000000000011"), Name = "Human Resources & Recruitment", Slug = "human-resources-recruitment", DisplayOrder = 110, CreatedAtUtc = created },
+            new Category { Id = Guid.Parse("10000000-0000-0000-0000-000000000012"), Name = "Sales & Business Development", Slug = "sales-business-development", DisplayOrder = 120, CreatedAtUtc = created },
+            new Category { Id = Guid.Parse("10000000-0000-0000-0000-000000000013"), Name = "Marketing", Slug = "marketing", DisplayOrder = 130, CreatedAtUtc = created },
+            new Category { Id = Guid.Parse("10000000-0000-0000-0000-000000000014"), Name = "Finance & Accounting", Slug = "finance-accounting", DisplayOrder = 140, CreatedAtUtc = created },
+            new Category { Id = Guid.Parse("10000000-0000-0000-0000-000000000015"), Name = "Operations", Slug = "operations", DisplayOrder = 150, CreatedAtUtc = created },
+            new Category { Id = Guid.Parse("10000000-0000-0000-0000-000000000016"), Name = "Customer Success & Support", Slug = "customer-success-support", DisplayOrder = 160, CreatedAtUtc = created },
+            new Category { Id = Guid.Parse("10000000-0000-0000-0000-000000000017"), Name = "Legal & Compliance", Slug = "legal-compliance", DisplayOrder = 170, CreatedAtUtc = created });
     }
 }
 

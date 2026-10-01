@@ -219,6 +219,38 @@ public sealed class JobAggregationPipelineTests
         Assert.Equal("{id:guid}/quality", route.Template);
     }
 
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task EnrichedFieldsReachRealGateWithoutBypassingExpiryOrFlag(bool enabled, bool expiry)
+    {
+        using var f = new JobSourceFixture();
+        var audit = new PublicationAudit();
+        f.Provider.Jobs = [Valid(f) with
+        {
+            EmploymentType = null, WorkplaceType = null, ExperienceLevel = null,
+            Description = "This is a full-time position. Fully remote role. 7+ years of professional software development experience.",
+            ExpiresAtUtc = expiry ? Valid(f).ExpiresAtUtc : null
+        }];
+        var runner = Runner(f, enabled, audit, new ExternalJobMetadataEnricher());
+        var result = await runner.RunAsync(f.Source.Id);
+        Assert.Equal(1, result.Created);
+        Assert.Equal(enabled && expiry ? 1 : 0, result.Published);
+        Assert.Equal(enabled && !expiry ? 1 : 0, result.NeedsReview);
+        Assert.Equal(enabled ? 0 : 1, result.AutoPublishDisabled);
+        var job = Assert.Single(f.Context.Jobs);
+        Assert.Equal(7, job.MinimumExperienceYears);
+        Assert.Equal(EmploymentType.FullTime, job.EmploymentType);
+        Assert.Equal(ExperienceLevel.Senior, job.ExperienceLevel);
+        job.Description = "Curated";
+        await f.Context.SaveChangesAsync();
+        result = await runner.RunAsync(f.Source.Id);
+        Assert.Equal(1, result.Matched);
+        Assert.Equal(0, result.Published);
+        Assert.Equal("Curated", job.Description);
+    }
+
     private static RawExternalJob Valid(JobSourceFixture f) => new()
     {
         Title = "Engineer", CompanyName = f.Company.Name, Description = "Build reliable software.",
@@ -227,7 +259,7 @@ public sealed class JobAggregationPipelineTests
         ExperienceLevel = ExperienceLevel.Entry, ExpiresAtUtc = JobSourceFixture.Now.AddDays(10)
     };
 
-    private static JobSourceRunner Runner(JobSourceFixture f, bool enabled, IAuditWriter audit)
+    private static JobSourceRunner Runner(JobSourceFixture f, bool enabled, IAuditWriter audit, IExternalJobMetadataEnricher? enricher = null)
     {
         var jobs = new JobRepository(f.Context);
         var unit = new UnitOfWork(f.Context);
@@ -241,7 +273,7 @@ public sealed class JobAggregationPipelineTests
             new UpdateJobRequestValidator(), new UpdateRecruiterContactRequestValidator(), new JobSearchQueryValidator(), clock);
         var publisher = new JobAutoPublishService(jobs, new JobQualityGate(), jobService,
             Options.Create(new JobAggregationOptions { AutoPublishEnabled = enabled }), clock);
-        return new(f.Repository, [f.Provider], ingestion, unit, clock, f.Resolver, new ExternalJobNormalizer(), autoPublishService: publisher);
+        return new(f.Repository, [f.Provider], ingestion, unit, clock, f.Resolver, new ExternalJobNormalizer(), autoPublishService: publisher, enricher: enricher);
     }
 
     private sealed class Clock : TimeProvider

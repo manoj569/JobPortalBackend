@@ -7,6 +7,8 @@ public sealed class JobAggregationOptions
     // Safe default. Automatic publishing must be explicitly enabled.
     public bool AutoPublishEnabled { get; set; }
 
+    public int GreenhouseDetailConcurrency { get; set; } = 2;
+
     // String values deliberately allow invalid operator input to fail closed.
     public Dictionary<string, string?> SourceCategories { get; set; } =
         new(StringComparer.OrdinalIgnoreCase);

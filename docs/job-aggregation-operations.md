@@ -32,7 +32,8 @@ Salary mapping is deliberately not added: the current raw contract has no curren
 or pay-period representation. Copying hourly/annual/non-USD amounts into Job's existing
 default currency would misrepresent compensation. That needs a separate contract decision.
 Arbitrary Greenhouse metadata is not assumed to represent employment or education.
-Category precedence stays explicit ID, configured external mapping, then source fallback.
+Category precedence is explicit ID, configured external mapping, strong deterministic
+classification, then source fallback (see enrichment policy below).
 Ashby only includes explicitly listed posts (`isListed=true`).
 
 Contracts: [Greenhouse](https://docs.greenhouse.io/job-board.html),
@@ -50,10 +51,10 @@ Malformed optional record fields are treated as absent; remaining records surviv
 Invalid list envelopes or exhausted list failures fail the source, not other sources.
 Optional Greenhouse detail HTTP errors, malformed JSON, transport failures and timeout
 exhaustion leave expiry null. Caller cancellation still propagates.
-Greenhouse costs one list GET plus one sequential detail GET per usable ID/title.
+Greenhouse costs one list GET plus one bounded-concurrent detail GET per usable ID/title.
 For N usable records, nominal request count is 1+N; the existing HTTP handler permits
 up to three attempts per GET, uses 10-second attempt timeouts, and respects Retry-After
-with bounded waits/provider cooldown. No added parallel detail fan-out or new retry layer.
+with bounded waits/provider cooldown. No unbounded fan-out or new retry layer is added.
 An outage can still lengthen a large scan; measure duration and provider rate limits.
 Lever/Ashby use one list request in the current implementation.
 
@@ -80,7 +81,7 @@ They do not replace a production-database verification.
 
 ## Publication and admin review
 
-Provider -> normalize -> category resolution -> URL/fingerprint/fuzzy dedup (creation lock)
+Provider -> normalize -> conservative metadata enrichment -> category resolution -> URL/fingerprint/fuzzy dedup (creation lock)
 -> persist new Draft -> `JobAutoPublishService` -> feature flag -> `JobQualityGate`
 -> only Eligible invokes existing `IJobService.PublishAsync` -> existing validators,
 reference checks, future expiry, publication state change and audit -> candidate search.
@@ -96,13 +97,10 @@ Eligible is not a guarantee that all publication validators will pass. Existing 
 detail, update and `POST /api/admin/jobs/{id}/publish` remain the review workflow.
 No publish-all endpoint or validator bypass is added.
 
-**ExperienceLevel publication safeguard:** `JobService.PublishAsync` requires a valid
-ExperienceLevel enum. None of the current three ATS adapters supplies a trustworthy
-ExperienceLevel value, so the quality gate classifies those jobs as NeedsReview rather than
-allowing them to reach automatic publication. No ExperienceLevel is fabricated and the
-existing publication validator is not weakened. Admins can review and supply a valid value
-before publishing, or future provider mappings may populate it only from trustworthy
-structured source data.
+**ExperienceLevel publication safeguard:** `JobService.PublishAsync` still requires a valid
+ExperienceLevel. Explicit numeric experience now maps centrally: minimum 0–1 = Entry,
+2 = Junior, 3–5 = Mid, 6+ = Senior. Years never imply Lead/Executive. Unknown experience
+still needs review. Numeric candidate filter boundaries remain unchanged.
 
 ## Run observability and scheduler
 
@@ -133,7 +131,8 @@ No second scheduler, Redis, new locks or scheduler activation is included.
 
 1. Review validation safeguards first, especially ExperienceLevel handling and any failing
    regression fixtures. Review and deploy the validated commit through the normal process.
-   No migration is required for this change. Do not enable flags simply because a build passes.
+   Review the data-only `SeedGeneralJobCategories` migration before separately approving
+   deployment. Do not enable flags simply because a build passes.
 2. Keep both flags false initially. Confirm source category mappings, active company/category
    references, provider identifiers and direct PostgreSQL session support. Run the existing
    approved `job-aggregation-lock-test` manually before scheduler activation; protect credentials.
@@ -160,3 +159,60 @@ No second scheduler, Redis, new locks or scheduler activation is included.
    then Scheduler.Enabled and restarting; already published jobs need normal admin review.
 
 No production endpoint, database, scheduler or provider job feed was invoked during implementation.
+
+## Conservative metadata enrichment and general-job taxonomy
+
+`ExternalJobMetadataEnricher` fills missing values only. Valid provider values take priority.
+It accepts a limited grammar of explicit job assertions, not arbitrary keywords or an LLM:
+employment assertions, numeric experience requirements, remote/hybrid/onsite role assertions,
+explicit office-day schedules, missing location from explicit location statements, and required
+education. Negated, optional, conflicting or unsupported evidence stays unknown. A bare
+`10+ years` is accepted only as the entire Requirements field. No maximum is invented for `+`.
+Input over 64,000 characters fails closed. Existing normalization/whole-value aliases remain.
+Remote-work flexibility and remote teams alone do not establish a remote role. OnSite is
+the existing enum for an office role. Source `Remote - India` becomes Remote plus India.
+Salary is never text-parsed: the raw contract lacks currency/period metadata. USD and INR
+compensation text remains in the description. There is no FX conversion or fabricated expiry.
+
+Category precedence: valid explicit ID, valid exact configured external mapping, strong
+title classification (otherwise exact department), source fallback, then null. Source-only
+admin responses continue to show the configured fallback, not a per-job classification.
+Matching is role-phrase/word-boundary based: Product Engineer is not Product Management;
+Security-minded Software Engineer stays software; Recruiting-platform Engineer is not HR.
+Conflicting titles are unknown. A recognized category with no unique active taxonomy match
+returns null rather than assigning an unrelated source fallback. Canonical slugs take priority;
+otherwise a unique known equivalent name is reused. Options are loaded once per scoped resolver,
+avoiding a new category-list query per item; ingestion still validates category existence.
+
+Seven new category seeds use IDs `10000000-0000-0000-0000-000000000011` through `...017`:
+
+| ID suffix | Name | Slug |
+|---|---|---|
+| 011 | Human Resources & Recruitment | human-resources-recruitment |
+| 012 | Sales & Business Development | sales-business-development |
+| 013 | Marketing | marketing |
+| 014 | Finance & Accounting | finance-accounting |
+| 015 | Operations | operations |
+| 016 | Customer Success & Support | customer-success-support |
+| 017 | Legal & Compliance | legal-compliance |
+
+The EF-generated snapshot/Designer contain only these seed additions. The migration's Up
+uses guarded inserts, following the existing seed architecture, preserving existing IDs,
+slugs and recognized equivalent names (including soft-deleted rows). Down deliberately keeps
+taxonomy data to avoid deleting pre-existing or referenced categories. General, Digital
+Marketing and Software Development are not replaced or duplicated. Generic Marketing is
+broader than Digital Marketing. Unknown/custom synonyms cannot be verified without operator
+review; inspect category options before deployment and use explicit mappings for ambiguity.
+No schema columns, existing jobs or curated duplicate metadata are changed by this migration.
+
+Greenhouse still needs up to one list plus N detail requests for trustworthy deadline data.
+Detail requests now use bounded parallel workers with stable result ordering, default 2,
+configurable through `JobAggregation__GreenhouseDetailConcurrency` (1–4, validated). Maximum
+HTTP concurrency across sources also depends on scheduler source concurrency. Existing retries,
+timeouts, cancellation, session locks and fail-soft malformed details remain. No live latency
+benchmark was performed. DB ingestion stays sequential within each source's scoped DbContext.
+
+Structured logs report provider count/time, enrichment/ingestion start, progress every 25 items,
+processing completion and total duration. No titles, source bodies, URLs or secrets are logged.
+Both scheduler and auto-publish defaults remain false; enable neither until separate operator
+validation. Existing matched Drafts are intentionally not enriched or republished on reruns.

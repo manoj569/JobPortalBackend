@@ -13,8 +13,12 @@ public sealed class JobSourceRunner(
     IJobSourceCategoryResolver categoryResolver,
     IExternalJobNormalizer normalizer,
     ILogger<JobSourceRunner>? logger = null,
-    IJobAutoPublishService? autoPublishService = null) : IJobSourceRunner
+    IJobAutoPublishService? autoPublishService = null,
+    IExternalJobMetadataEnricher? enricher = null) : IJobSourceRunner
 {
+    private static readonly Action<ILogger, Guid, string, int, double, Exception?> Progress =
+        LoggerMessage.Define<Guid, string, int, double>(LogLevel.Information, new EventId(4325, nameof(Progress)),
+            "Job source {JobSourceId}: {Phase}, items {Count}, elapsed {ElapsedMilliseconds} ms.");
     private static readonly Action<ILogger, Guid, int, int, int, int, int, Exception?> RunCompleted =
         LoggerMessage.Define<Guid, int, int, int, int, int>(
             LogLevel.Information,
@@ -104,9 +108,14 @@ public sealed class JobSourceRunner(
 
         try
         {
+            var runTimer = System.Diagnostics.Stopwatch.StartNew();
             var rawJobs = await provider.FetchJobsAsync(
                 source,
                 cancellationToken);
+            if (_logger is not null) Progress(_logger, source.Id, "Provider fetch completed", rawJobs.Count, runTimer.Elapsed.TotalMilliseconds, null);
+            var processingTimer = System.Diagnostics.Stopwatch.StartNew();
+            var processed = 0;
+            if (_logger is not null) Progress(_logger, source.Id, "Enrichment and ingestion started", rawJobs.Count, 0, null);
 
             var created = 0;
             var matched = 0;
@@ -128,6 +137,7 @@ public sealed class JobSourceRunner(
                 try
                 {
                     var normalized = normalizer.Normalize(rawJob);
+                    normalized = enricher?.Enrich(normalized) ?? normalized;
                     var categoryId = await categoryResolver.ResolveCategoryIdAsync(source, normalized, cancellationToken);
                     var result = await ingestionService.IngestAsync(
                         normalized with { CategoryId = categoryId },
@@ -215,6 +225,12 @@ public sealed class JobSourceRunner(
                         ItemFailed(_logger, source.Id, null);
                     }
                 }
+                finally
+                {
+                    processed++;
+                    if (_logger is not null && processed % 25 == 0)
+                        Progress(_logger, source.Id, "Enrichment and ingestion progress", processed, processingTimer.Elapsed.TotalMilliseconds, null);
+                }
             }
 
             var now = timeProvider.GetUtcNow().UtcDateTime;
@@ -257,6 +273,8 @@ public sealed class JobSourceRunner(
 
             if (_logger is not null)
             {
+                Progress(_logger, source.Id, "Enrichment and ingestion completed", processed, processingTimer.Elapsed.TotalMilliseconds, null);
+                Progress(_logger, source.Id, "Run completed", processed, runTimer.Elapsed.TotalMilliseconds, null);
                 PublicationCompleted(_logger, source.Id, published, needsReview, qualityRejected, publishFailed, disabled, null);
                 foreach (var (reason, count) in qualityReasons)
                     RunReason(_logger, source.Id, $"Quality.{reason}", count, null);
