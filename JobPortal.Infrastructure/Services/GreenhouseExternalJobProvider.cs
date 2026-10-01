@@ -52,6 +52,22 @@ public sealed class GreenhouseExternalJobProvider(IHttpClientFactory clients) : 
     private static async Task<DateTime?> ReadDeadlineAsync(
         HttpClient client, string token, string id, CancellationToken cancellationToken)
     {
+        try
+        {
+            return await ReadDeadlineCoreAsync(client, token, id, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception exception) when (exception is HttpRequestException or JsonException or OperationCanceledException)
+        {
+            // Optional enrichment is fail-soft, including exhausted transport/timeouts.
+            // Never log raw exceptions/response bodies or turn missing data into a deadline.
+            return null;
+        }
+    }
+
+    private static async Task<DateTime?> ReadDeadlineCoreAsync(
+        HttpClient client, string token, string id, CancellationToken cancellationToken)
+    {
         using var response = await client.GetAsync(
             $"v1/boards/{Uri.EscapeDataString(token)}/jobs/{Uri.EscapeDataString(id)}", cancellationToken);
         // A post may disappear between the list and detail requests. No deadline is assumed.

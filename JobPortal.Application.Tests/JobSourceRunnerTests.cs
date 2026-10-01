@@ -421,6 +421,7 @@ public class JobSourceRunnerTests
 
         Assert.Equal(1, autoPublish.CallCount);
         Assert.Equal(jobId, autoPublish.LastJobId);
+        Assert.Equal(1, result.Published);
     }
 
     [Fact]
@@ -513,6 +514,9 @@ public class JobSourceRunnerTests
         Assert.Equal(1, result.Failed);
         Assert.Equal(2, _ingestion.CallCount);
         Assert.Equal(2, autoPublish.CallCount);
+        Assert.Equal(1, result.Published);
+        Assert.Equal(1, result.PublishFailed);
+        Assert.Equal(1, result.ReasonCounts![JobIngestionReasonCode.AutoPublishFailed]);
 
         // Per-item failure handling should reset tracked state.
         Assert.Equal(1, _unitOfWork.ResetCalls);

@@ -63,20 +63,14 @@ public sealed class ExternalJobNormalizer : IExternalJobNormalizer
                     ? experienceLevel
                     : null,
 
-            // Never invent experience values.
-            MinimumExperienceYears =
-                rawJob.MinimumExperienceYears is >= 0
-                    ? rawJob.MinimumExperienceYears
-                    : null,
-
-            MaximumExperienceYears =
-                rawJob.MaximumExperienceYears is >= 0
-                    ? rawJob.MaximumExperienceYears
-                    : null,
+            // Preserve invalid numbers too: ingestion must reject them, not silently
+            // turn invalid source data into unknown values that can pass publication.
+            MinimumExperienceYears = rawJob.MinimumExperienceYears,
+            MaximumExperienceYears = rawJob.MaximumExperienceYears,
 
             // Education is normalized only when supplied by source.
             EducationRequirement =
-                NormalizeText(rawJob.EducationRequirement)
+                Canonicalize(NormalizeText(rawJob.EducationRequirement), EducationAliases)
         };
     }
 
@@ -101,13 +95,41 @@ public sealed class ExternalJobNormalizer : IExternalJobNormalizer
         if (text is null)
             return null;
 
-        return Trim(
+        return Canonicalize(Trim(
             string.Join(
                 ", ",
                 text.Split(',')
                     .Select(Trim)
-                    .Where(x => x is not null)));
+                    .Where(x => x is not null))), LocationAliases);
     }
+
+    private static string? Canonicalize(string? text, Dictionary<string, string> aliases) =>
+        text is not null && aliases.TryGetValue(text, out var canonical) ? canonical : text;
+
+    // Whole-value aliases only. Never infer a state, qualification, or city from prose.
+    private static readonly Dictionary<string, string> LocationAliases = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Bangalore"] = "Bengaluru", ["Bengaluru"] = "Bengaluru",
+        ["Bangalore, Karnataka"] = "Bengaluru, Karnataka",
+        ["Bangalore Karnataka"] = "Bengaluru, Karnataka",
+        ["Bengaluru Karnataka"] = "Bengaluru, Karnataka",
+        ["Bengaluru, Karnataka"] = "Bengaluru, Karnataka",
+        ["Bombay"] = "Mumbai", ["Mumbai"] = "Mumbai",
+        ["Bombay, Maharashtra"] = "Mumbai, Maharashtra",
+        ["Mumbai Maharashtra"] = "Mumbai, Maharashtra",
+        ["Mumbai, Maharashtra"] = "Mumbai, Maharashtra",
+        ["Pune Maharashtra"] = "Pune, Maharashtra", ["Pune, Maharashtra"] = "Pune, Maharashtra",
+        ["Hyderabad Telangana"] = "Hyderabad, Telangana", ["Hyderabad, Telangana"] = "Hyderabad, Telangana",
+        ["Chennai Tamil Nadu"] = "Chennai, Tamil Nadu", ["Chennai, Tamil Nadu"] = "Chennai, Tamil Nadu"
+    };
+
+    private static readonly Dictionary<string, string> EducationAliases = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["B.E"] = "B.E.", ["B.E."] = "B.E.", ["BE"] = "B.E.", ["Bachelor of Engineering"] = "B.E.",
+        ["B.Tech"] = "B.Tech", ["B.Tech."] = "B.Tech", ["BTech"] = "B.Tech", ["Bachelor of Technology"] = "B.Tech",
+        ["B.Sc"] = "B.Sc", ["B.Sc."] = "B.Sc", ["BSc"] = "B.Sc", ["Bachelor of Science"] = "B.Sc",
+        ["SSC"] = "SSC", ["HSC"] = "HSC", ["Diploma"] = "Diploma", ["ITI"] = "ITI", ["Graduate"] = "Graduate"
+    };
 
     private static string TypeKey(string? value) =>
         (NormalizeText(value) ?? string.Empty)

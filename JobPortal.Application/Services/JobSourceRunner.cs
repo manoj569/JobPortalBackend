@@ -28,6 +28,12 @@ public sealed class JobSourceRunner(
             new EventId(4321, nameof(RunReason)),
             "Job source run {JobSourceId} reason {ReasonCode}: {Count}.");
 
+    private static readonly Action<ILogger, Guid, int, int, int, int, int, Exception?> PublicationCompleted =
+        LoggerMessage.Define<Guid, int, int, int, int, int>(LogLevel.Information,
+            new EventId(4324, nameof(PublicationCompleted)),
+            "Job source run {JobSourceId}: Published {Published}, NeedsReview {NeedsReview}, " +
+            "QualityRejected {QualityRejected}, PublishFailed {PublishFailed}, AutoPublishDisabled {AutoPublishDisabled}.");
+
     private static readonly Action<ILogger, Guid, Exception?> ItemFailed =
         LoggerMessage.Define<Guid>(
             LogLevel.Warning,
@@ -106,12 +112,19 @@ public sealed class JobSourceRunner(
             var matched = 0;
             var skipped = 0;
             var failed = 0;
+            var published = 0;
+            var needsReview = 0;
+            var qualityRejected = 0;
+            var publishFailed = 0;
+            var disabled = 0;
+            var qualityReasons = new Dictionary<JobQualityReasonCode, int>();
             var reasonCounts = new Dictionary<JobIngestionReasonCode, int>();
 
             foreach (var rawJob in rawJobs)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
+                var publicationAttempt = false;
                 try
                 {
                     var normalized = normalizer.Normalize(rawJob);
@@ -130,9 +143,25 @@ public sealed class JobSourceRunner(
                             if (result.JobId.HasValue &&
                                 autoPublishService is not null)
                             {
-                                await autoPublishService.TryPublishAsync(
+                                publicationAttempt = true;
+                                var publication = await autoPublishService.TryPublishAsync(
                                     result.JobId.Value,
                                     cancellationToken);
+                                switch (publication.Outcome)
+                                {
+                                    case JobAutoPublishOutcome.Published: published++; break;
+                                    case JobAutoPublishOutcome.NeedsReview: needsReview++; break;
+                                    case JobAutoPublishOutcome.Rejected: qualityRejected++; break;
+                                    case JobAutoPublishOutcome.Disabled: disabled++; break;
+                                    case JobAutoPublishOutcome.JobNotFound:
+                                        publishFailed++;
+                                        failed++;
+                                        reasonCounts[JobIngestionReasonCode.AutoPublishFailed] =
+                                            reasonCounts.GetValueOrDefault(JobIngestionReasonCode.AutoPublishFailed) + 1;
+                                        break;
+                                }
+                                foreach (var reason in publication.Reasons.Distinct())
+                                    qualityReasons[reason] = qualityReasons.GetValueOrDefault(reason) + 1;
                             }
 
                             break;
@@ -177,8 +206,10 @@ public sealed class JobSourceRunner(
                     // records the failure classification.
                     unitOfWork.ResetAfterFailure();
                     failed++;
-                    reasonCounts[JobIngestionReasonCode.PersistenceError] =
-                        reasonCounts.GetValueOrDefault(JobIngestionReasonCode.PersistenceError) + 1;
+                    if (publicationAttempt) publishFailed++;
+                    var failureReason = publicationAttempt
+                        ? JobIngestionReasonCode.AutoPublishFailed : JobIngestionReasonCode.PersistenceError;
+                    reasonCounts[failureReason] = reasonCounts.GetValueOrDefault(failureReason) + 1;
                     if (_logger is not null)
                     {
                         ItemFailed(_logger, source.Id, null);
@@ -198,7 +229,9 @@ public sealed class JobSourceRunner(
 
             // Provider-wide fetch failures never reach this per-item tally, but
             // any explicitly failed ingestion results are counted too.
-            if (failed > 0 && !reasonCounts.ContainsKey(JobIngestionReasonCode.PersistenceError))
+            if (failed > 0 && !reasonCounts.ContainsKey(JobIngestionReasonCode.PersistenceError) &&
+                !reasonCounts.ContainsKey(JobIngestionReasonCode.AutoPublishFailed) &&
+                !reasonCounts.ContainsKey(JobIngestionReasonCode.Unknown))
             {
                 reasonCounts[JobIngestionReasonCode.Unknown] =
                     reasonCounts.GetValueOrDefault(JobIngestionReasonCode.Unknown) + failed;
@@ -212,12 +245,21 @@ public sealed class JobSourceRunner(
                 Matched = matched,
                 Skipped = skipped,
                 Failed = failed,
+                Published = published,
+                NeedsReview = needsReview,
+                QualityRejected = qualityRejected,
+                PublishFailed = publishFailed,
+                AutoPublishDisabled = disabled,
+                QualityReasonCounts = qualityReasons.Count == 0 ? null : qualityReasons,
                 ReasonCounts = reasonCounts.Count == 0 ? null : reasonCounts,
                 Succeeded = true
             };
 
             if (_logger is not null)
             {
+                PublicationCompleted(_logger, source.Id, published, needsReview, qualityRejected, publishFailed, disabled, null);
+                foreach (var (reason, count) in qualityReasons)
+                    RunReason(_logger, source.Id, $"Quality.{reason}", count, null);
                 RunCompleted(
                     _logger,
                     source.Id,

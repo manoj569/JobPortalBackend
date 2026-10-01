@@ -79,8 +79,8 @@ public sealed class JobQualityGate : IJobQualityGate
                 JobQualityReasonCode.InvalidSalaryRange);
         }
 
-        // Validate experience only when experience information exists.
-        // Missing experience is allowed.
+        // Numeric experience years are optional, but explicitly
+        // invalid source values must never pass the quality gate.
         if (job.MinimumExperienceYears < 0 ||
             job.MaximumExperienceYears < 0 ||
             (job.MinimumExperienceYears.HasValue &&
@@ -141,6 +141,16 @@ public sealed class JobQualityGate : IJobQualityGate
                 JobQualityReasonCode.MissingEmploymentType);
         }
 
+        // Existing JobService.PublishAsync validates the stored job
+        // through UpdateJobValidator, where ExperienceLevel must be
+        // a valid enum value. Do not fabricate a level for external
+        // jobs; keep the job in Draft for admin review instead.
+        if ((int)job.ExperienceLevel == 0)
+        {
+            review.Add(
+                JobQualityReasonCode.MissingExperienceLevel);
+        }
+
         if (review.Count > 0)
         {
             return new JobQualityResult
@@ -153,8 +163,9 @@ public sealed class JobQualityGate : IJobQualityGate
             };
         }
 
-        // Salary, education and experience are intentionally not
-        // mandatory. Many legitimate job listings omit these fields.
+        // Salary, education and numeric experience years are
+        // intentionally optional. Many legitimate job listings
+        // omit these fields.
         //
         // Missing values must never be fabricated just to make a job
         // eligible for automatic publishing.

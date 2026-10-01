@@ -92,7 +92,8 @@ public class JobIngestionServiceTests
         {
             ExpiresAtUtc = expiry,
             EmploymentType = EmploymentType.FullTime,
-            WorkplaceType = WorkplaceType.Remote
+            WorkplaceType = WorkplaceType.Remote,
+            ExperienceLevel = ExperienceLevel.Mid
         });
         var result = await _service.IngestAsync(raw);
         Assert.Equal(JobIngestionOutcome.Created, result.Outcome);

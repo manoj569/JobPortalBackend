@@ -92,6 +92,15 @@ public sealed class PublicJobSearchTests
     }
 
     [Fact]
+    public void PaginationRejectsOverflowWithoutChangingValidBoundary()
+    {
+        var validator = new PublicJobQueryValidator();
+        Assert.False(validator.Validate(new PublicJobQuery(PageNumber: int.MaxValue, PageSize: 100)).IsValid);
+        Assert.False(validator.Validate(new PublicJobQuery(Page: int.MaxValue, PageSize: 100)).IsValid);
+        Assert.True(validator.Validate(new PublicJobQuery(PageNumber: int.MaxValue, PageSize: 1)).IsValid);
+    }
+
+    [Fact]
     public async Task SearchEnforcesEveryPublicVisibilityRuleAndAllowsNoExpiry()
     {
         await using var fixture = await SearchFixture.CreateAsync();
@@ -225,6 +234,74 @@ public sealed class PublicJobSearchTests
         Assert.Equal(
             new[] { fixture.Featured.Id, fixture.Flexible.Id }.Order(),
             items.Select(item => item.Id).Order());
+    }
+
+    [Fact]
+    public async Task LocationFilterMatchesExactCanonicalFacetNotCitySubstring()
+    {
+        await using var fixture = await SearchFixture.CreateAsync();
+
+        fixture.Featured.Location = "Pune, Maharashtra";
+        await fixture.Context.SaveChangesAsync();
+
+        // Multi-select values come from facets, not arbitrary city substrings.
+        var (_, cityCount) = await fixture.Repository.SearchAsync(
+            new PublicJobQuery(Locations: ["Pune"]));
+        Assert.Equal(0, cityCount);
+        var facets = await fixture.Repository.GetFilterOptionsAsync(new PublicJobQuery());
+        var location = Assert.Single(facets.Locations, x => x.Value == "pune, maharashtra");
+        var (items, count) = await fixture.Repository.SearchAsync(
+            new PublicJobQuery(Locations: [location.Value]));
+
+        Assert.Equal(1, count);
+        Assert.Equal(fixture.Featured.Id, Assert.Single(items).Id);
+    }
+
+    [Theory]
+    [InlineData(2, 4, 2, 4, true)]
+    [InlineData(2, 4, 3, 6, true)]
+    [InlineData(2, 4, 4, 6, true)]
+    [InlineData(2, 4, 5, 6, false)]
+    [InlineData(2, 4, 3, null, true)]
+    [InlineData(2, 4, null, 1, false)]
+    [InlineData(10, null, 10, null, true)]
+    [InlineData(8, 10, 10, null, true)]
+    [InlineData(8, 9, 10, null, false)]
+    [InlineData(null, 4, 3, 6, true)]
+    [InlineData(4, null, 3, 6, true)]
+    [InlineData(null, null, 0, 1, false)]
+    [InlineData(null, null, null, null, true)]
+    public async Task ExperienceUsesInclusiveOverlapAndSingleKnownBound(
+        int? jobMin, int? jobMax, int? requestedMin, int? requestedMax, bool expected)
+    {
+        await using var fixture = await SearchFixture.CreateAsync();
+        fixture.Featured.MinimumExperienceYears = jobMin;
+        fixture.Featured.MaximumExperienceYears = jobMax;
+        await fixture.Context.SaveChangesAsync();
+        var (_, count) = await fixture.Repository.SearchAsync(new PublicJobQuery(
+            CategoryId: fixture.Engineering.Id, MinExperienceYears: requestedMin, MaxExperienceYears: requestedMax));
+        Assert.Equal(expected ? 1 : 0, count);
+    }
+
+    [Fact]
+    public async Task CanonicalSourceValuesRoundTripThroughFacetsAndCombinedFilters()
+    {
+        await using var fixture = await SearchFixture.CreateAsync();
+        var normalizer = new JobPortal.Application.Services.ExternalJobNormalizer();
+        var raw = normalizer.Normalize(new() { Location = "bangalore karnataka", EducationRequirement = "btech" });
+        fixture.Featured.Location = raw.Location;
+        fixture.Featured.EducationRequirement = raw.EducationRequirement;
+        await fixture.Context.SaveChangesAsync();
+        var facets = await fixture.Repository.GetFilterOptionsAsync(new PublicJobQuery());
+        var location = Assert.Single(facets.Locations, x => x.Value == "bengaluru, karnataka");
+        var education = Assert.Single(facets.EducationRequirements, x => x.Value == "B.Tech");
+        var (items, count) = await fixture.Repository.SearchAsync(new PublicJobQuery(
+            Locations: [location.Value], EducationRequirements: [education.Value],
+            WorkModes: [fixture.Featured.WorkplaceType, WorkplaceType.Remote],
+            EmploymentTypes: [fixture.Featured.EmploymentType, EmploymentType.Contract],
+            CompanyId: fixture.Featured.CompanyId, CategoryId: fixture.Featured.CategoryId));
+        Assert.Equal(1, count);
+        Assert.Equal(fixture.Featured.Id, Assert.Single(items).Id);
     }
 
     [Fact]

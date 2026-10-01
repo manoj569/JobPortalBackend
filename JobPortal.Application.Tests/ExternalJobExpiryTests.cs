@@ -102,6 +102,23 @@ public sealed class ExternalJobExpiryTests
     }
 
     [Fact]
+    public async Task Greenhouse_MalformedOptionalDetailDoesNotDiscardListing()
+    {
+        using var handler = new DeadlineHandler("not JSON");
+        Assert.Null(Assert.Single(await FetchAsync(handler)).ExpiresAtUtc);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Greenhouse_ExhaustedTransportOrTimeoutDoesNotDiscardListing(bool timeout)
+    {
+        using var handler = new DeadlineHandler("{}", error: timeout
+            ? new TaskCanceledException("timeout") : new HttpRequestException("transport"));
+        Assert.Null(Assert.Single(await FetchAsync(handler)).ExpiresAtUtc);
+    }
+
+    [Fact]
     public async Task Ashby_PublicationDateDoesNotBecomeExpiry()
     {
         using var handler = new DeadlineHandler("""
@@ -127,7 +144,7 @@ public sealed class ExternalJobExpiryTests
     }
 
     private sealed class DeadlineHandler(string detail, HttpStatusCode status = HttpStatusCode.OK,
-        CancellationTokenSource? cancel = null) : HttpMessageHandler
+        CancellationTokenSource? cancel = null, Exception? error = null) : HttpMessageHandler
     {
         public List<string> Paths { get; } = [];
 
@@ -140,6 +157,7 @@ public sealed class ExternalJobExpiryTests
             {
                 cancel?.Cancel();
                 cancellationToken.ThrowIfCancellationRequested();
+                if (error is not null) throw error;
             }
             return Task.FromResult(new HttpResponseMessage(isList ? HttpStatusCode.OK : status)
             {

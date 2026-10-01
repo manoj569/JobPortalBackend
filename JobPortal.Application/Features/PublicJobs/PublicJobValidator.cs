@@ -11,6 +11,9 @@ public sealed class PublicJobQueryValidator : AbstractValidator<PublicJobQuery>
     {
         RuleFor(x => x.EffectivePageNumber).GreaterThan(0);
         RuleFor(x => x.PageSize).InclusiveBetween(1, 100);
+        RuleFor(x => x.EffectivePageNumber)
+            .Must((query, page) => ((long)page - 1) * query.PageSize <= int.MaxValue)
+            .WithMessage("Requested page exceeds the supported offset.");
         RuleFor(x => x.Search).MaximumLength(250);
         RuleFor(x => x.Keyword).MaximumLength(250);
         RuleFor(x => x.Location).MaximumLength(250);

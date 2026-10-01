@@ -14,6 +14,14 @@ public sealed record JobSourceRunResult
 
     public int Failed { get; init; }
 
+    // Publication counters are a separate dimension: a persisted creation may also fail publication.
+    public int Published { get; init; }
+    public int NeedsReview { get; init; }
+    public int QualityRejected { get; init; }
+    public int PublishFailed { get; init; }
+    public int AutoPublishDisabled { get; init; }
+    public IReadOnlyDictionary<JobQualityReasonCode, int>? QualityReasonCounts { get; init; }
+
     /// <summary>
     /// Run-level counter grouping: every MatchedBy* outcome (URL/fingerprint/
     /// fuzzy) means the job already existed, so it counts as an existing

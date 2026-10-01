@@ -35,7 +35,10 @@ public enum JobIngestionReasonCode
     PersistenceError = 8,
 
     /// <summary>The reason could not be classified by any known path.</summary>
-    Unknown = 9
+    Unknown = 9,
+
+    /// <summary>A Draft was created, but subsequent publication failed.</summary>
+    AutoPublishFailed = 10
 }
 
 public static class JobIngestionReasonCodes

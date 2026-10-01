@@ -27,8 +27,10 @@ public enum JobQualityReasonCode
 
     MissingLocation,
     MissingWorkplaceType,
-    MissingEmploymentType
+    MissingEmploymentType,
+    MissingExperienceLevel
 }
+
 public sealed record JobQualityResult
 {
     public JobQualityDecision Decision { get; init; }
