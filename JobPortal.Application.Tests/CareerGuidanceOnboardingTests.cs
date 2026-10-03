@@ -1,4 +1,5 @@
 using JobPortal.Application.Abstractions.Auditing;
+using JobPortal.Application.Abstractions.Candidates;
 using JobPortal.Application.Common.Exceptions;
 using JobPortal.Application.Features.Auditing;
 using JobPortal.Application.Features.CareerGuidance;
@@ -478,6 +479,16 @@ public sealed class CareerGuidanceOnboardingTests
         Assert.NotNull(stored.SubmittedAtUtc);
         Assert.NotNull(stored.TermsAcceptedAtUtc);
         Assert.NotNull(stored.PublicProfileConsentAtUtc);
+        // Rejection is correctable; correction retains feedback and requires explicit resubmission.
+        await f.Service.ReviewAsync(f.Admin.Id, stored.Id,
+            new(ConsultantReviewAction.Reject, "Clarify your background", stored.Revision), default);
+        var corrected = await f.Service.SaveBasicAsync(f.Owner.Id,
+            new(stored.Revision, DisplayName: new("Corrected consultant")), default);
+        Assert.Equal(ConsultantVerificationStatus.Draft, corrected.Status);
+        Assert.Equal("Clarify your background", corrected.RejectionFeedback);
+        var resubmitted = await f.Service.SubmitOnboardingAsync(f.Owner.Id,
+            new(corrected.Revision, CareerGuidanceService.PolicyVersion, true, true), default);
+        Assert.Equal(ConsultantVerificationStatus.Pending, resubmitted.Status);
     }
 
     [Fact]
@@ -772,6 +783,17 @@ public sealed class CareerGuidanceOnboardingTests
         Assert.NotEqual(
             "Changed professional headline",
             unchanged.ProfessionalHeadline);
+
+        // The legacy workspace profile endpoint must use the identical paid-booking guard.
+        var legacyError = await Assert.ThrowsAsync<ConflictException>(() => f.Service.UpdateAsync(f.Owner.Id,
+            new ConsultantProfileRequest("Consultant", "Experienced consultant", "Independent guidance",
+                f.Company.Id, f.Company.Name, "Engineer", 8, CareerProfessionalType.CurrentEmployee,
+                "https://www.linkedin.com/in/example", ["English"], ["Interview preparation"], true,
+                unchanged.Revision), default));
+        Assert.Contains("paid confirmed", legacyError.Message);
+        Assert.Equal(ConsultantVerificationStatus.Verified, profile.VerificationStatus);
+        Assert.Equal(CareerBookingStatus.Confirmed, booking.Status);
+        Assert.Equal(CareerPaymentStatus.Captured, payment.Status);
     }
 
 
@@ -1027,7 +1049,8 @@ public sealed class CareerGuidanceOnboardingTests
                 new ConsultantServiceRequestValidator(),
                 new ConsultantSearchQueryValidator(),
                 new ConsultantReviewRequestValidator(),
-                new ConsultantAdminQueryValidator());
+                new ConsultantAdminQueryValidator(),
+                new TestProfilePhotoStorage());
         }
 
         public void Dispose()

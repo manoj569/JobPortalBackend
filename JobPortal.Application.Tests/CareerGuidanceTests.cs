@@ -3,6 +3,7 @@ using System.Text.Json;
 using FluentValidation;
 using JobPortal.API.Controllers;
 using JobPortal.Application.Abstractions.Auditing;
+using JobPortal.Application.Abstractions.Candidates;
 using JobPortal.Application.Common.Exceptions;
 using JobPortal.Application.Features.Auditing;
 using JobPortal.Application.Features.CareerGuidance;
@@ -38,6 +39,7 @@ public sealed class CareerGuidanceTests
         var queue = await f.Service.AdminSearchAsync(f.Admin.Id, new(Status: ConsultantVerificationStatus.Pending), default);
         Assert.Equal(profile.Profile.Id, Assert.Single(queue.Items).Profile.Id);
         Assert.Empty((await f.Service.AdminSearchAsync(f.Admin.Id, new(Status: ConsultantVerificationStatus.Verified), default)).Items);
+        profile = await f.Review(profile, ConsultantReviewAction.Approve);
         profile = await f.Service.SaveServiceAsync(f.Owner.Id, null, Fixture.Offering(profile), default);
         var id = Assert.Single(profile.Services).Id;
         profile = await f.Service.DeleteServiceAsync(f.Owner.Id, id, profile.Revision, default);
@@ -74,7 +76,8 @@ public sealed class CareerGuidanceTests
         using var f = new Fixture();
         var profile = await f.Review(await f.Apply(), ConsultantReviewAction.Approve);
         profile = await f.Service.UpdateAsync(f.Owner.Id, f.Request with { Revision = profile.Revision, Languages = ["French"] }, default);
-        Assert.Equal(ConsultantVerificationStatus.Pending, profile.VerificationStatus);
+        Assert.Equal(ConsultantVerificationStatus.Draft, profile.VerificationStatus);
+        Assert.False(profile.Profile.IsAcceptingBookings);
         Assert.Null(profile.VerifiedAtUtc);
         Assert.Empty((await f.Service.SearchAsync(new(), default)).Items);
         f.Db.ChangeTracker.Clear();
@@ -105,8 +108,10 @@ public sealed class CareerGuidanceTests
         await Assert.ThrowsAsync<AppException>(() => f.Service.ReviewAsync(f.Owner.Id, profile.Profile.Id, new(ConsultantReviewAction.Approve, "reason", profile.Revision), default));
         await Assert.ThrowsAsync<AppException>(() => f.Service.AdminSearchAsync(f.Owner.Id, new(), default));
         await Assert.ThrowsAsync<NotFoundException>(() => f.Service.MineAsync(f.Other.Id, default));
+        profile = await f.Review(profile, ConsultantReviewAction.Approve);
         profile = await f.Service.SaveServiceAsync(f.Owner.Id, null, Fixture.Offering(profile), default);
         var other = await f.Service.ApplyAsync(f.Other.Id, f.Request, default);
+        other = await f.Review(other, ConsultantReviewAction.Approve);
         await Assert.ThrowsAsync<NotFoundException>(() => f.Service.SaveServiceAsync(f.Other.Id, profile.Services.Single().Id, Fixture.Offering(other), default));
         await Assert.ThrowsAsync<NotFoundException>(() => f.Service.DeleteServiceAsync(f.Other.Id, profile.Services.Single().Id, other.Revision, default));
         Assert.Equal(1, await f.Db.CareerConsultantServices.CountAsync());
@@ -127,9 +132,8 @@ public sealed class CareerGuidanceTests
     public async Task DiscoveryFiltersPaginationActiveServicesAndUserStatus()
     {
         using var f = new Fixture();
-        var profile = await f.Apply();
+        var profile = await f.Review(await f.Apply(), ConsultantReviewAction.Approve);
         profile = await f.Service.SaveServiceAsync(f.Owner.Id, null, Fixture.Offering(profile), default);
-        profile = await f.Review(profile, ConsultantReviewAction.Approve);
         var query = new ConsultantSearchQuery(PageSize: 1, CompanyId: f.Company.Id, Company: "example", Role: "engineer",
             Search: "professional", ProfessionalType: CareerProfessionalType.CurrentEmployee,
             Language: "english", Expertise: "interview preparation", ServiceType: "mock interview", Currency: "INR", MinPrice: 10, MaxPrice: 2000, Sort: "price-asc");
@@ -169,8 +173,239 @@ public sealed class CareerGuidanceTests
         var profile = await f.Review(await f.Apply(), ConsultantReviewAction.Reject);
         Assert.Equal("Private review reason", profile.VerificationReason);
         await Assert.ThrowsAsync<ConflictException>(() => f.Review(profile, ConsultantReviewAction.Approve));
-        profile = await f.Service.UpdateAsync(f.Owner.Id, f.Request with { Revision = profile.Revision }, default);
-        Assert.Equal(ConsultantVerificationStatus.Pending, profile.VerificationStatus);
+        profile = await f.Service.UpdateAsync(f.Owner.Id, f.Request with { Revision = profile.Revision, Bio = "Corrected independent advice" }, default);
+        Assert.Equal(ConsultantVerificationStatus.Draft, profile.VerificationStatus);
+        Assert.Equal("Private review reason", profile.VerificationReason);
+    }
+
+    [Theory]
+    [InlineData("basic")]
+    [InlineData("professional")]
+    [InlineData("expertise")]
+    [InlineData("languages")]
+    [InlineData("education")]
+    [InlineData("experience")]
+    [InlineData("import")]
+    [InlineData("legacy")]
+    public async Task PendingMaterialEditsFailBeforeMutationAndStatusRemainsReadable(string section)
+    {
+        using var f = new Fixture();
+        var p = await f.Apply();
+        f.Owner.Location = "Pune";
+        await f.Db.SaveChangesAsync();
+        var auditCount = await f.Db.AuditLogs.CountAsync();
+        Func<Task> edit = section switch
+        {
+            "basic" => () => f.Service.SaveBasicAsync(f.Owner.Id, new(p.Revision, DisplayName: new("Changed")), default),
+            "professional" => () => f.Service.SaveProfessionalAsync(f.Owner.Id, new(p.Revision, CurrentRole: new("Changed")), default),
+            "expertise" => () => f.Service.SaveExpertiseAsync(f.Owner.Id, new(p.Revision, Expertise: new(["New expertise"])), default),
+            "languages" => () => f.Service.SaveExpertiseAsync(f.Owner.Id, new(p.Revision, Languages: new(["French"])), default),
+            "education" => () => f.Service.SaveEducationAsync(f.Owner.Id, new(p.Revision, [new("B.Tech", "College")]), default),
+            "experience" => () => f.Service.SaveExperienceAsync(f.Owner.Id, new(p.Revision, [new("Engineer", "Company", new(2020, 1, 1), IsCurrent: true)]), default),
+            "import" => () => f.Service.ImportAsync(f.Owner.Id, new(p.Revision, ImportLocation: true), default),
+            _ => () => f.Service.UpdateAsync(f.Owner.Id, f.Request with { Revision = p.Revision, Bio = "Changed advice" }, default)
+        };
+        var error = await Assert.ThrowsAsync<ConflictException>(edit);
+        Assert.Equal(409, error.StatusCode);
+        Assert.Contains("under review", error.Message);
+        Assert.False(f.Db.ChangeTracker.HasChanges());
+        Assert.Equal(auditCount, await f.Db.AuditLogs.CountAsync());
+        var unchanged = await f.Service.MineAsync(f.Owner.Id, default);
+        Assert.Equal(p.Profile.DisplayName, unchanged.Profile.DisplayName);
+        Assert.Equal(p.Profile.Bio, unchanged.Profile.Bio);
+        Assert.Equal(p.Revision, unchanged.Revision);
+        var status = await f.Service.OnboardingAsync(f.Owner.Id, default);
+        Assert.Equal(ConsultantVerificationStatus.Pending, status.Status);
+        Assert.Equal(p.Revision, status.Revision);
+        Assert.False(status.Availability.IsAcceptingBookings);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RejectedServiceCorrectionReturnsToDraftAndKeepsFeedback(bool delete)
+    {
+        using var f = new Fixture();
+        var p = await f.Review(await f.Apply(), ConsultantReviewAction.Approve);
+        p = await f.Service.SaveServiceAsync(f.Owner.Id, null, Fixture.Offering(p), default);
+        var entity = await f.Db.CareerConsultants.SingleAsync();
+        entity.VerificationStatus = ConsultantVerificationStatus.Rejected;
+        entity.VerificationReason = "Clarify the offering";
+        await f.Db.SaveChangesAsync();
+        var id = Assert.Single(p.Services).Id;
+        p = delete
+            ? await f.Service.DeleteServiceAsync(f.Owner.Id, id, p.Revision, default)
+            : await f.Service.SaveServiceAsync(f.Owner.Id, id, Fixture.Offering(p) with { Description = "Clarified offering" }, default);
+        Assert.Equal(ConsultantVerificationStatus.Draft, p.VerificationStatus);
+        Assert.Equal("Clarify the offering", p.VerificationReason);
+    }
+
+    [Fact]
+    public async Task PendingServiceCatalogIsFrozen()
+    {
+        using var f = new Fixture();
+        var p = await f.Review(await f.Apply(), ConsultantReviewAction.Approve);
+        p = await f.Service.SaveServiceAsync(f.Owner.Id, null, Fixture.Offering(p), default);
+        var entity = await f.Db.CareerConsultants.SingleAsync();
+        entity.VerificationStatus = ConsultantVerificationStatus.Pending;
+        await f.Db.SaveChangesAsync();
+        var service = Assert.Single(p.Services);
+        await Assert.ThrowsAsync<ConflictException>(() => f.Service.SaveServiceAsync(f.Owner.Id, null, Fixture.Offering(p), default));
+        await Assert.ThrowsAsync<ConflictException>(() => f.Service.SaveServiceAsync(f.Owner.Id, service.Id, Fixture.Offering(p) with { Price = 2000 }, default));
+        await Assert.ThrowsAsync<ConflictException>(() => f.Service.DeleteServiceAsync(f.Owner.Id, service.Id, p.Revision, default));
+        Assert.False(f.Db.ChangeTracker.HasChanges());
+        Assert.Equal(1000, (await f.Db.CareerConsultantServices.SingleAsync()).Price);
+    }
+
+    [Theory]
+    [InlineData(ConsultantVerificationStatus.Pending)]
+    [InlineData(ConsultantVerificationStatus.Verified)]
+    [InlineData(ConsultantVerificationStatus.Rejected)]
+    public async Task LegacyNoOpDoesNotChangeLifecycleOrRevision(ConsultantVerificationStatus status)
+    {
+        using var f = new Fixture();
+        var p = await f.Apply();
+        if (status == ConsultantVerificationStatus.Verified) p = await f.Review(p, ConsultantReviewAction.Approve);
+        if (status == ConsultantVerificationStatus.Rejected) p = await f.Review(p, ConsultantReviewAction.Reject);
+        var result = await f.Service.UpdateAsync(f.Owner.Id, f.Request with { Revision = p.Revision }, default);
+        Assert.Equal(status, result.VerificationStatus);
+        Assert.Equal(p.Revision, result.Revision);
+        Assert.Equal(p.VerificationReason, result.VerificationReason);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task MaterialEditsHaveSameReverificationSemanticsAcrossBothPaths(bool legacy)
+    {
+        using var f = new Fixture();
+        var p = await f.Review(await f.Apply(), ConsultantReviewAction.Approve);
+        var entity = await f.Db.CareerConsultants.SingleAsync();
+        entity.IsAcceptingBookings = true;
+        entity.PublicProfileConsentAtUtc = DateTime.UtcNow;
+        await f.Db.SaveChangesAsync();
+        if (legacy)
+            await f.Service.UpdateAsync(f.Owner.Id, f.Request with { Revision = p.Revision, ProfessionalHeadline = "New professional headline" }, default);
+        else
+            await f.Service.SaveBasicAsync(f.Owner.Id, new(p.Revision, ProfessionalHeadline: new("New professional headline")), default);
+        Assert.Equal(ConsultantVerificationStatus.Draft, entity.VerificationStatus);
+        Assert.False(entity.IsAcceptingBookings);
+        Assert.Null(entity.VerifiedAtUtc);
+        Assert.Null(entity.VerificationMethod);
+        Assert.Null(entity.ReviewedAtUtc);
+        Assert.Null(entity.ReviewedByUserId);
+        Assert.Null(entity.PublicProfileConsentAtUtc);
+    }
+
+    [Theory]
+    [InlineData(ConsultantVerificationStatus.Draft)]
+    [InlineData(ConsultantVerificationStatus.Pending)]
+    [InlineData(ConsultantVerificationStatus.Rejected)]
+    [InlineData(ConsultantVerificationStatus.Suspended)]
+    public async Task NonVerifiedProfilesAreNeverPublicButOwnerCanRead(ConsultantVerificationStatus status)
+    {
+        using var f = new Fixture();
+        var p = await f.Apply();
+        var entity = await f.Db.CareerConsultants.SingleAsync();
+        entity.VerificationStatus = status;
+        entity.IsAcceptingBookings = true; // A stale flag cannot override verification.
+        await f.Db.SaveChangesAsync();
+        Assert.Empty((await f.Service.SearchAsync(new(), default)).Items);
+        await Assert.ThrowsAsync<NotFoundException>(() => f.Service.GetAsync(p.Profile.Id, default));
+        Assert.Equal(status, (await f.Service.MineAsync(f.Owner.Id, default)).VerificationStatus);
+        Assert.False((await f.Service.OnboardingAsync(f.Owner.Id, default)).Availability.IsAcceptingBookings);
+    }
+
+    [Fact]
+    public async Task PublicPhotoReturnsCanonicalStoredPhotoForVerifiedConsentedConsultant()
+    {
+        using var f = new Fixture();
+        var profile = await f.Review(await f.Apply(), ConsultantReviewAction.Approve);
+        var entity = await f.Db.CareerConsultants.SingleAsync();
+        entity.PublicProfileConsentAtUtc = DateTime.UtcNow;
+        await f.Db.SaveChangesAsync();
+
+        var content = new byte[] { 1, 2, 3, 4 };
+        var version = await f.Photos.StoreAsync(f.Owner.Id, content, "image/jpeg");
+
+        var photo = await f.Service.GetPublicPhotoAsync(profile.Profile.Id, default);
+
+        Assert.Equal(content, photo.Content);
+        Assert.Equal("image/jpeg", photo.ContentType);
+        Assert.Equal(content.Length, photo.SizeBytes);
+        Assert.Equal(version.ToString("N"), photo.Version);
+    }
+
+    [Fact]
+    public async Task PublicPhotoWithoutStoredPhotoIsNotFound()
+    {
+        using var f = new Fixture();
+        var profile = await f.Review(await f.Apply(), ConsultantReviewAction.Approve);
+        var entity = await f.Db.CareerConsultants.SingleAsync();
+        entity.PublicProfileConsentAtUtc = DateTime.UtcNow;
+        await f.Db.SaveChangesAsync();
+
+        await Assert.ThrowsAsync<NotFoundException>(
+            () => f.Service.GetPublicPhotoAsync(profile.Profile.Id, default));
+    }
+
+    [Fact]
+    public async Task PublicPhotoWithoutPublicProfileConsentIsNotFound()
+    {
+        using var f = new Fixture();
+        var profile = await f.Review(await f.Apply(), ConsultantReviewAction.Approve);
+        await f.Photos.StoreAsync(f.Owner.Id, new byte[] { 1, 2, 3 }, "image/png");
+
+        await Assert.ThrowsAsync<NotFoundException>(
+            () => f.Service.GetPublicPhotoAsync(profile.Profile.Id, default));
+    }
+
+    [Theory]
+    [InlineData(ConsultantVerificationStatus.Draft)]
+    [InlineData(ConsultantVerificationStatus.Pending)]
+    [InlineData(ConsultantVerificationStatus.Rejected)]
+    [InlineData(ConsultantVerificationStatus.Suspended)]
+    public async Task PublicPhotoIsNotAvailableForNonPublicConsultantStatuses(
+        ConsultantVerificationStatus status)
+    {
+        using var f = new Fixture();
+        var profile = await f.Apply();
+        var entity = await f.Db.CareerConsultants.SingleAsync();
+        entity.VerificationStatus = status;
+        entity.PublicProfileConsentAtUtc = DateTime.UtcNow;
+        await f.Db.SaveChangesAsync();
+        await f.Photos.StoreAsync(f.Owner.Id, new byte[] { 1, 2, 3 }, "image/webp");
+
+        await Assert.ThrowsAsync<NotFoundException>(
+            () => f.Service.GetPublicPhotoAsync(profile.Profile.Id, default));
+    }
+
+    [Fact]
+    public async Task ReplacingCanonicalProfilePhotoImmediatelyChangesPublicConsultantPhoto()
+    {
+        using var f = new Fixture();
+        var profile = await f.Review(await f.Apply(), ConsultantReviewAction.Approve);
+        var entity = await f.Db.CareerConsultants.SingleAsync();
+        entity.PublicProfileConsentAtUtc = DateTime.UtcNow;
+        await f.Db.SaveChangesAsync();
+
+        var firstContent = new byte[] { 1, 2, 3 };
+        var firstVersion = await f.Photos.StoreAsync(f.Owner.Id, firstContent, "image/jpeg");
+        var first = await f.Service.GetPublicPhotoAsync(profile.Profile.Id, default);
+
+        var secondContent = new byte[] { 9, 8, 7, 6 };
+        var secondVersion = await f.Photos.StoreAsync(f.Owner.Id, secondContent, "image/png");
+        var second = await f.Service.GetPublicPhotoAsync(profile.Profile.Id, default);
+
+        Assert.Equal(firstContent, first.Content);
+        Assert.Equal(firstVersion.ToString("N"), first.Version);
+        Assert.Equal(secondContent, second.Content);
+        Assert.Equal("image/png", second.ContentType);
+        Assert.Equal(secondVersion.ToString("N"), second.Version);
+        Assert.NotEqual(first.Version, second.Version);
+
+        var unchanged = await f.Service.MineAsync(f.Owner.Id, default);
+        Assert.Equal(ConsultantVerificationStatus.Verified, unchanged.VerificationStatus);
     }
 
     [Theory]
@@ -236,6 +471,7 @@ public sealed class CareerGuidanceTests
         public User Admin { get; } = new() { FirstName = "Admin", Status = UserStatus.Active };
         public Company Company { get; } = new() { Name = "Example", Slug = "example" };
         public CareerGuidanceService Service { get; }
+        public TestProfilePhotoStorage Photos { get; } = new();
         public ConsultantProfileRequest Request => new("Professional", "Experienced professional", "Independent advice",
             Company.Id, Company.Name, "Engineer", 8, CareerProfessionalType.CurrentEmployee, "https://www.linkedin.com/in/example",
             ["English"], ["Interview preparation"], true);
@@ -254,7 +490,7 @@ public sealed class CareerGuidanceTests
             Service = new(new CareerGuidanceRepository(Db), new UserRepository(Db), new CompanyManagementRepository(Db),
                 new UnitOfWork(Db), new AuditWriter(new AuditLogRepository(Db), new ActorContext(Admin.Id)), TimeProvider.System,
                 new ConsultantProfileRequestValidator(), new ConsultantServiceRequestValidator(), new ConsultantSearchQueryValidator(),
-                new ConsultantReviewRequestValidator(), new ConsultantAdminQueryValidator());
+                new ConsultantReviewRequestValidator(), new ConsultantAdminQueryValidator(), Photos);
         }
         public Task<ConsultantPrivateResponse> Apply() => Service.ApplyAsync(Owner.Id, Request, default);
         public Task<ConsultantPrivateResponse> Review(ConsultantPrivateResponse p, ConsultantReviewAction action) =>

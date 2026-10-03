@@ -68,10 +68,12 @@ public sealed class CareerAnalyticsRepository(JobPortalDbContext db, TimeProvide
 
     public Task<CareerGuidanceConsultantAnalytics?> ConsultantAsync(Guid userId, DateTime from, DateTime to, CancellationToken ct) => Snapshot<CareerGuidanceConsultantAnalytics?>(async () =>
     {
-        var consultantId = await db.Set<CareerConsultant>().Where(x => x.UserId == userId && !x.User.IsDeleted && x.User.Status == UserStatus.Active)
-            .Select(x => (Guid?)x.Id).SingleOrDefaultAsync(ct);
-        if (!consultantId.HasValue) return null;
-        var id = consultantId.Value;
+        var consultant = await db.Set<CareerConsultant>().Where(x => x.UserId == userId && !x.User.IsDeleted && x.User.Status == UserStatus.Active)
+            .Select(x => new { x.Id, x.VerificationStatus }).SingleOrDefaultAsync(ct);
+        if (consultant is null) return null;
+        if (consultant.VerificationStatus != ConsultantVerificationStatus.Verified)
+            throw new AppException("Approved consultant access required.", 403, "consultant_unverified");
+        var id = consultant.Id;
         var bookings = db.Set<CareerGuidanceBooking>().Where(x => x.ConsultantId == id && x.CreatedAtUtc >= from && x.CreatedAtUtc < to);
         var payments = db.Set<CareerGuidancePayment>().Where(x => !x.IsDeleted && x.ConsultantId == id && x.CreatedAtUtc >= from && x.CreatedAtUtc < to);
         var sessions = db.Set<CareerGuidanceSession>().Where(x => x.ConsultantId == id && x.CreatedAtUtc >= from && x.CreatedAtUtc < to);
