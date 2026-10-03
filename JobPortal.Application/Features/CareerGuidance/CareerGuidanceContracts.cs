@@ -18,6 +18,7 @@ public sealed record ConsultantSearchQuery(int PageNumber = 1, int PageSize = 20
 public sealed record ConsultantAdminQuery(int PageNumber = 1, int PageSize = 20, ConsultantVerificationStatus? Status = null);
 public sealed record ConsultantServiceResponse(Guid Id, string ServiceType, string Title, string Description,
     int DurationMinutes, decimal Price, string Currency, bool IsActive);
+public sealed record ConsultantPublicPhotoResponse(byte[] Content, string ContentType, int SizeBytes, string Version);
 public sealed record ConsultantPublicResponse(Guid Id, string DisplayName, string ProfessionalHeadline, string Bio,
     Guid? CompanyId, string CompanyName, string CurrentRole, decimal? YearsOfExperience, CareerProfessionalType? ProfessionalType,
     string[] Languages, string[] Expertise, bool IsAcceptingBookings, string GuidanceDisclaimer,
@@ -63,6 +64,7 @@ public interface ICareerGuidanceService
     Task<OnboardingResponse> SubmitOnboardingAsync(Guid actor, OnboardingSubmitRequest request, CancellationToken ct);
     Task<PagedResponse<ConsultantPublicResponse>> SearchAsync(ConsultantSearchQuery query, CancellationToken ct);
     Task<ConsultantPublicResponse> GetAsync(Guid id, CancellationToken ct);
+    Task<ConsultantPublicPhotoResponse> GetPublicPhotoAsync(Guid id, CancellationToken ct);
     Task<ConsultantPrivateResponse> MineAsync(Guid actor, CancellationToken ct);
     Task<ConsultantPrivateResponse> ApplyAsync(Guid actor, ConsultantProfileRequest request, CancellationToken ct);
     Task<ConsultantPrivateResponse> UpdateAsync(Guid actor, ConsultantProfileRequest request, CancellationToken ct);

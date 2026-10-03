@@ -14,9 +14,19 @@ public sealed class CareerGuidanceDiscoveryController(ICareerGuidanceService ser
     [HttpGet]
     public async Task<ActionResult<ApiResponse<PagedResponse<ConsultantPublicResponse>>>> Search([FromQuery] ConsultantSearchQuery query, CancellationToken ct) =>
         Ok(new ApiResponse<PagedResponse<ConsultantPublicResponse>>(await service.SearchAsync(query, ct)));
+
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<ApiResponse<ConsultantPublicResponse>>> Get(Guid id, CancellationToken ct) =>
         Ok(new ApiResponse<ConsultantPublicResponse>(await service.GetAsync(id, ct)));
+
+    [HttpGet("{id:guid}/photo")]
+    public async Task<IActionResult> Photo(Guid id, CancellationToken ct)
+    {
+        var photo = await service.GetPublicPhotoAsync(id, ct);
+        Response.Headers.CacheControl = "public, max-age=0, must-revalidate";
+        Response.Headers.ETag = $"\"consultant-photo-{photo.Version}\"";
+        return File(photo.Content, photo.ContentType);
+    }
 }
 
 [ApiController]
@@ -27,26 +37,32 @@ public sealed class CareerGuidanceOwnerController(ICareerGuidanceService service
     [HttpPost("application")]
     public async Task<ActionResult<ApiResponse<ConsultantPrivateResponse>>> Apply(ConsultantProfileRequest request, CancellationToken ct) =>
         StatusCode(StatusCodes.Status201Created, new ApiResponse<ConsultantPrivateResponse>(await service.ApplyAsync(User.GetRequiredUserId(), request, ct)));
+
     [HttpGet("profile")]
     public async Task<ActionResult<ApiResponse<ConsultantPrivateResponse>>> Get(CancellationToken ct) =>
         Ok(new ApiResponse<ConsultantPrivateResponse>(await service.MineAsync(User.GetRequiredUserId(), ct)));
+
     [HttpPut("profile")]
     public async Task<ActionResult<ApiResponse<ConsultantPrivateResponse>>> Update(ConsultantProfileRequest request, CancellationToken ct) =>
         Ok(new ApiResponse<ConsultantPrivateResponse>(await service.UpdateAsync(User.GetRequiredUserId(), request, ct)));
+
     [HttpPost("services")]
     public async Task<ActionResult<ApiResponse<ConsultantPrivateResponse>>> AddService(ConsultantServiceRequest request, CancellationToken ct) =>
         StatusCode(StatusCodes.Status201Created, new ApiResponse<ConsultantPrivateResponse>(await service.SaveServiceAsync(User.GetRequiredUserId(), null, request, ct)));
+
     [HttpPut("services/{id:guid}")]
     public async Task<ActionResult<ApiResponse<ConsultantPrivateResponse>>> UpdateService(Guid id, ConsultantServiceRequest request, CancellationToken ct) =>
         Ok(new ApiResponse<ConsultantPrivateResponse>(await service.SaveServiceAsync(User.GetRequiredUserId(), id, request, ct)));
+
     [HttpDelete("services/{id:guid}")]
     public async Task<ActionResult<ApiResponse<ConsultantPrivateResponse>>> DeleteService(Guid id, [FromQuery] Guid revision, CancellationToken ct) =>
         Ok(new ApiResponse<ConsultantPrivateResponse>(await service.DeleteServiceAsync(User.GetRequiredUserId(), id, revision, ct)));
+
     [HttpPost("onboarding")]
     public async Task<ActionResult<ApiResponse<OnboardingResponse>>> StartOnboarding(CancellationToken ct) =>
-    StatusCode(StatusCodes.Status201Created,
-        new ApiResponse<OnboardingResponse>(
-            await service.StartOnboardingAsync(User.GetRequiredUserId(), ct)));
+        StatusCode(StatusCodes.Status201Created,
+            new ApiResponse<OnboardingResponse>(
+                await service.StartOnboardingAsync(User.GetRequiredUserId(), ct)));
 
     [HttpGet("onboarding")]
     public async Task<ActionResult<ApiResponse<OnboardingResponse>>> GetOnboarding(CancellationToken ct) =>
@@ -117,9 +133,11 @@ public sealed class AdminCareerGuidanceController(ICareerGuidanceService service
     [HttpGet]
     public async Task<ActionResult<ApiResponse<PagedResponse<ConsultantPrivateResponse>>>> Search([FromQuery] ConsultantAdminQuery query, CancellationToken ct) =>
         Ok(new ApiResponse<PagedResponse<ConsultantPrivateResponse>>(await service.AdminSearchAsync(User.GetRequiredUserId(), query, ct)));
+
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<ApiResponse<ConsultantPrivateResponse>>> Get(Guid id, CancellationToken ct) =>
         Ok(new ApiResponse<ConsultantPrivateResponse>(await service.AdminGetAsync(User.GetRequiredUserId(), id, ct)));
+
     [HttpPost("{id:guid}/verification")]
     public async Task<ActionResult<ApiResponse<ConsultantPrivateResponse>>> Review(Guid id, ConsultantReviewRequest request, CancellationToken ct) =>
         Ok(new ApiResponse<ConsultantPrivateResponse>(await service.ReviewAsync(User.GetRequiredUserId(), id, request, ct)));

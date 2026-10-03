@@ -482,6 +482,10 @@ public sealed class CareerSchedulingService(
                 "Invalid booking status transition.");
         }
 
+        var profile = await repository.ProfileAsync(b.ConsultantId, ct)
+            ?? throw new NotFoundException("Consultant not found.");
+        RequireVerified(profile);
+
         if (b.RequiresPayment &&
             request.Status !=
             CareerBookingStatus.Confirmed)
@@ -498,19 +502,10 @@ public sealed class CareerSchedulingService(
                 throw new ConflictException(
                     "This booking requires verified payment capture before confirmation.");
             }
-
-            var p = await repository.ProfileAsync(
-                        b.ConsultantId,
-                        ct)
-                    ?? throw new NotFoundException(
-                        "Consultant not found.");
-
-            // Booking confirmation remains strictly Verified-only.
-            RequireVerified(p);
-
-            Touch(p);
         }
 
+        // Fence concurrent suspension/reverification for every operational status transition.
+        Touch(profile);
         b.Status = request.Status;
         b.Revision = Guid.NewGuid();
 

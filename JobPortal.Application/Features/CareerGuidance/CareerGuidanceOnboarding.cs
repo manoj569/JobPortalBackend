@@ -144,8 +144,15 @@ public sealed partial class CareerGuidanceService
         return await Finish(p, actor, "onboarding_submitted", ct);
     }
 
+    private static void CheckReviewInProgress(CareerConsultant p)
+    {
+        if (p.VerificationStatus == ConsultantVerificationStatus.Pending)
+            throw new ConflictException("Your consultant application is currently under review.", "consultant_under_review");
+    }
+
     private async Task GuardMaterialEdit(CareerConsultant p, CancellationToken ct)
     {
+        CheckReviewInProgress(p);
         if (p.VerificationStatus == ConsultantVerificationStatus.Verified &&
             await profiles.HasProtectedBookingsAsync(p.Id, clock.GetUtcNow().UtcDateTime, ct))
             throw new ConflictException("Material profile changes are blocked while paid confirmed sessions remain.");

@@ -346,20 +346,51 @@ public sealed class CareerTrustTests
         for (var i = 0; i < 2; i++)
         {
             // Additional completed paid graphs exercise decimal averaging independently of provider test IDs.
-            var b = new CareerGuidanceBooking { CandidateUserId = f.Candidate, Candidate = f.Session.Finance.Scheduling.Candidate,
-                ConsultantId = profile.Id, Consultant = profile, Status = CareerBookingStatus.Completed };
-            var session = new CareerGuidanceSession { BookingId = b.Id, Booking = b, CandidateUserId = f.Candidate,
-                ConsultantId = profile.Id, Status = CareerSessionStatus.Completed };
-            var payment = new CareerGuidancePayment { BookingId = b.Id, Booking = b, CandidateUserId = f.Candidate,
-                ConsultantId = profile.Id, Consultant = profile, Status = CareerPaymentStatus.Captured, PaidAtUtc = f.Clock.Utc };
-            f.Db.Add(new CareerGuidanceReview { BookingId = b.Id, Booking = b, SessionId = session.Id, Session = session,
-                PaymentId = payment.Id, Payment = payment, ConsultantId = profile.Id, CandidateUserId = f.Candidate,
-                Rating = 4, ModerationStatus = CareerReviewStatus.Approved, IsPublished = true });
+            var b = new CareerGuidanceBooking
+            {
+                CandidateUserId = f.Candidate,
+                Candidate = f.Session.Finance.Scheduling.Candidate,
+                ConsultantId = profile.Id,
+                Consultant = profile,
+                Status = CareerBookingStatus.Completed
+            };
+            var session = new CareerGuidanceSession
+            {
+                BookingId = b.Id,
+                Booking = b,
+                CandidateUserId = f.Candidate,
+                ConsultantId = profile.Id,
+                Status = CareerSessionStatus.Completed
+            };
+            var payment = new CareerGuidancePayment
+            {
+                BookingId = b.Id,
+                Booking = b,
+                CandidateUserId = f.Candidate,
+                ConsultantId = profile.Id,
+                Consultant = profile,
+                Status = CareerPaymentStatus.Captured,
+                PaidAtUtc = f.Clock.Utc
+            };
+            f.Db.Add(new CareerGuidanceReview
+            {
+                BookingId = b.Id,
+                Booking = b,
+                SessionId = session.Id,
+                Session = session,
+                PaymentId = payment.Id,
+                Payment = payment,
+                ConsultantId = profile.Id,
+                CandidateUserId = f.Candidate,
+                Rating = 4,
+                ModerationStatus = CareerReviewStatus.Approved,
+                IsPublished = true
+            });
         }
         await f.Db.SaveChangesAsync();
         var service = new CareerGuidanceService(new CareerGuidanceRepository(f.Db), new UserRepository(f.Db), new CompanyManagementRepository(f.Db),
             new UnitOfWork(f.Db), new AuditWriterTestDouble(), f.Clock, new ConsultantProfileRequestValidator(), new ConsultantServiceRequestValidator(),
-            new ConsultantSearchQueryValidator(), new ConsultantReviewRequestValidator(), new ConsultantAdminQueryValidator());
+            new ConsultantSearchQueryValidator(), new ConsultantReviewRequestValidator(), new ConsultantAdminQueryValidator(), new TestProfilePhotoStorage());
         var detail = await service.GetAsync(profile.Id, default);
         var discovery = Assert.Single((await service.SearchAsync(new(), default)).Items);
         Assert.Equal(4.33m, detail.AverageRating); Assert.Equal(3, detail.ReviewCount);

@@ -1,5 +1,6 @@
 using FluentValidation;
 using JobPortal.Application.Abstractions.Auditing;
+using JobPortal.Application.Abstractions.Candidates;
 using JobPortal.Application.Abstractions.Persistence;
 using JobPortal.Application.Common.Exceptions;
 using JobPortal.Domain.Entities;
@@ -12,7 +13,7 @@ public sealed partial class CareerGuidanceService(ICareerGuidanceRepository prof
     ICompanyManagementRepository companies, IUnitOfWork unitOfWork, IAuditWriter audit, TimeProvider clock,
     IValidator<ConsultantProfileRequest> profileValidator, IValidator<ConsultantServiceRequest> serviceValidator,
     IValidator<ConsultantSearchQuery> searchValidator, IValidator<ConsultantReviewRequest> reviewValidator,
-    IValidator<ConsultantAdminQuery> adminValidator) : ICareerGuidanceService
+    IValidator<ConsultantAdminQuery> adminValidator, IProfilePhotoStorage profilePhotoStorage) : ICareerGuidanceService
 {
     public const string PolicyVersion = "career-guidance-v1";
     public const string Disclaimer = "Independent career guidance, not employer representation. No guaranteed job, interview or referral. Do not disclose employer-confidential information; comply with your employer's outside-work policies.";
@@ -31,6 +32,25 @@ public sealed partial class CareerGuidanceService(ICareerGuidanceRepository prof
         var ratings = await profiles.RatingsAsync([id], ct);
         return WithRating(profile, ratings.GetValueOrDefault(id));
     }
+
+    public async Task<ConsultantPublicPhotoResponse> GetPublicPhotoAsync(Guid id, CancellationToken ct)
+    {
+        var profile = await profiles.FindAsync(id, true, ct)
+            ?? throw new NotFoundException("Consultant not found.");
+
+        if (!profile.PublicProfileConsentAtUtc.HasValue)
+            throw new NotFoundException("Consultant photo was not found.");
+
+        var photo = await profilePhotoStorage.GetAsync(profile.UserId, ct)
+            ?? throw new NotFoundException("Consultant photo was not found.");
+
+        return new ConsultantPublicPhotoResponse(
+            photo.Content,
+            photo.ContentType,
+            photo.SizeBytes,
+            photo.Version.ToString("N"));
+    }
+
     private static ConsultantPublicResponse WithRating(CareerConsultant profile, CareerRatingSummary? rating) =>
         Public(profile) with { AverageRating = rating?.AverageRating, ReviewCount = rating?.ReviewCount ?? 0 };
 
@@ -53,16 +73,8 @@ public sealed partial class CareerGuidanceService(ICareerGuidanceRepository prof
         var profile = await Own(actor, ct);
         await profileValidator.ValidateAndThrowAsync(request, ct);
         CheckMutable(profile, request.Revision);
-        await GuardMaterialEdit(profile, ct);
-        await ApplyProfile(profile, request, ct);
-        // Approval of an older claim must not carry across identity/employment/profile changes.
-        profile.VerificationStatus = ConsultantVerificationStatus.Pending;
-        profile.VerificationMethod = null;
-        profile.VerifiedAtUtc = null;
-        profile.VerificationReason = null;
-        profile.ReviewedAtUtc = null;
-        profile.ReviewedByUserId = null;
-        await Save(profile, AuditAction.Update, "profile_resubmitted", ct);
+        if (await ApplyProfile(profile, request, ct, updating: true))
+            await Save(profile, AuditAction.Update, "profile_updated", ct);
         return Private(profile);
     }
 
@@ -71,17 +83,29 @@ public sealed partial class CareerGuidanceService(ICareerGuidanceRepository prof
         var profile = await Own(actor, ct);
         await serviceValidator.ValidateAndThrowAsync(request, ct);
         CheckMutable(profile, request.Revision);
+        CheckReviewInProgress(profile);
         var service = id.HasValue ? profile.Services.SingleOrDefault(x => x.Id == id && !x.IsDeleted)
             ?? throw new NotFoundException("Service not found.") : new CareerConsultantService { ConsultantId = profile.Id };
         if ((!id.HasValue || service.DurationMinutes != request.DurationMinutes) && request.DurationMinutes is not (15 or 30 or 60))
             throw new BadRequestException("New or changed durations must be 15, 30 or 60 minutes.");
         if ((!id.HasValue || service.Currency != request.Currency) && request.Currency != "INR")
             throw new BadRequestException("New offerings use INR only.");
-        if (!id.HasValue)
-        {
-            if (profile.Services.Count(x => !x.IsDeleted) >= 20) throw new ConflictException("At most 20 services are allowed.");
-            profile.Services.Add(service);
-        }
+        if (!id.HasValue && profile.Services.Count(x => !x.IsDeleted) >= 20)
+            throw new ConflictException("At most 20 services are allowed.");
+        var changed = !id.HasValue ||
+        !string.Equals(
+            service.ServiceType,
+            request.ServiceType.Trim(),
+            StringComparison.OrdinalIgnoreCase) ||
+        service.Title != request.Title.Trim() ||
+        service.Description != request.Description.Trim() ||
+        service.DurationMinutes != request.DurationMinutes ||
+        service.Price != request.Price ||
+        service.Currency != request.Currency ||
+        service.IsActive != request.IsActive;
+        if (changed && profile.VerificationStatus == ConsultantVerificationStatus.Rejected)
+            await MaterialEdit(profile, ct);
+        if (!id.HasValue) profile.Services.Add(service);
         service.ServiceType = request.ServiceType.Trim().ToUpperInvariant();
         service.Title = request.Title.Trim();
         service.Description = request.Description.Trim();
@@ -97,7 +121,9 @@ public sealed partial class CareerGuidanceService(ICareerGuidanceRepository prof
     {
         var profile = await Own(actor, ct);
         CheckMutable(profile, revision);
+        CheckReviewInProgress(profile);
         var service = profile.Services.SingleOrDefault(x => x.Id == id && !x.IsDeleted) ?? throw new NotFoundException("Service not found.");
+        if (profile.VerificationStatus == ConsultantVerificationStatus.Rejected) await MaterialEdit(profile, ct);
         service.IsActive = false;
         service.IsDeleted = true;
         service.DeletedAtUtc = clock.GetUtcNow().UtcDateTime;
@@ -151,10 +177,23 @@ public sealed partial class CareerGuidanceService(ICareerGuidanceRepository prof
         return Private(profile);
     }
 
-    private async Task ApplyProfile(CareerConsultant profile, ConsultantProfileRequest request, CancellationToken ct)
+    private async Task<bool> ApplyProfile(CareerConsultant profile, ConsultantProfileRequest request, CancellationToken ct, bool updating = false)
     {
         var company = request.CompanyId.HasValue ? await companies.GetByIdAsync(request.CompanyId.Value, ct)
             ?? throw new BadRequestException("Company must exist.") : null;
+        if (updating)
+        {
+            var changed = profile.CompanyId != company?.Id || profile.CompanyName != (company?.Name ?? request.CompanyName.Trim()) ||
+                profile.DisplayName != request.DisplayName.Trim() || profile.ProfessionalHeadline != request.ProfessionalHeadline.Trim() ||
+                profile.Bio != request.Bio.Trim() || profile.CurrentRole != request.CurrentRole.Trim() ||
+                profile.YearsOfExperience != request.YearsOfExperience || profile.ProfessionalType != request.ProfessionalType ||
+                profile.LinkedInUrl != request.LinkedInUrl.Trim() ||
+                !TagValues(profile, ConsultantTagKind.Language).SequenceEqual(request.Languages.Select(x => x.Trim().ToUpperInvariant()).Distinct().Order(StringComparer.Ordinal)) ||
+                !TagValues(profile, ConsultantTagKind.Expertise).SequenceEqual(request.Expertise.Select(x => x.Trim().ToUpperInvariant()).Distinct().Order(StringComparer.Ordinal));
+            if (!changed) return false;
+            // Same pre-mutation guard, Draft transition and feedback retention as onboarding PATCH.
+            await MaterialEdit(profile, ct);
+        }
         profile.CompanyId = company?.Id;
         profile.CompanyName = company?.Name ?? request.CompanyName.Trim();
         profile.DisplayName = request.DisplayName.Trim();
@@ -168,6 +207,7 @@ public sealed partial class CareerGuidanceService(ICareerGuidanceRepository prof
         profile.PolicyVersion = PolicyVersion;
         SetTags(profile, ConsultantTagKind.Language, request.Languages);
         SetTags(profile, ConsultantTagKind.Expertise, request.Expertise);
+        return true;
     }
 
     private void SetTags(CareerConsultant profile, ConsultantTagKind kind, string[] values)
@@ -191,8 +231,25 @@ public sealed partial class CareerGuidanceService(ICareerGuidanceRepository prof
     private async Task RequireActor(Guid actor, bool admin, CancellationToken ct)
     {
         var user = await users.GetByIdWithRoleAsync(actor, ct);
-        if (user is null || user.IsDeleted || user.Status != UserStatus.Active) throw new UnauthorizedException();
-        if (admin && user.Role.Name != "Administrator") throw new AppException("Administrator access required.", 403, "forbidden");
+
+        if (user is null ||
+            user.IsDeleted ||
+            user.Status != UserStatus.Active)
+        {
+            throw new UnauthorizedException();
+        }
+
+        if (admin &&
+            !string.Equals(
+                user.Role.Name,
+                "Administrator",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new AppException(
+                "Administrator access required.",
+                403,
+                "forbidden");
+        }
     }
 
     private static void CheckRevision(CareerConsultant profile, Guid? revision)
@@ -212,7 +269,7 @@ public sealed partial class CareerGuidanceService(ICareerGuidanceRepository prof
     {
         profile.Revision = Guid.NewGuid();
         await audit.AppendAsync(new(action, "CareerConsultant", profile.Id.ToString(), new Dictionary<string, string?>
-            { ["result"] = result, ["status"] = profile.VerificationStatus.ToString() }), ct);
+        { ["result"] = result, ["status"] = profile.VerificationStatus.ToString() }), ct);
         try { await unitOfWork.SaveChangesAsync(ct); }
         catch (UniqueConstraintException) { unitOfWork.ResetAfterFailure(); throw new ConflictException("Consultant data already exists. Reload before retrying."); }
     }
@@ -225,15 +282,15 @@ public sealed partial class CareerGuidanceService(ICareerGuidanceRepository prof
         p.Tags.Where(t => !t.IsDeleted && t.Kind == ConsultantTagKind.Expertise).Select(t => t.Value).Order().ToArray(),
         p.IsAcceptingBookings && p.VerificationStatus == ConsultantVerificationStatus.Verified, Disclaimer,
         p.Services.Where(s => !s.IsDeleted && s.IsActive).OrderBy(s => s.Id).Select(Service).ToArray())
-        {
-            ProfileImageUrl = p.PublicProfileConsentAtUtc.HasValue ? p.ProfileImageUrl : null,
-            Location = p.PublicProfileConsentAtUtc.HasValue ? p.Location : null,
-            Industry = p.PublicProfileConsentAtUtc.HasValue ? p.Industry : null,
-            FunctionalArea = p.PublicProfileConsentAtUtc.HasValue ? p.FunctionalArea : null,
-            Education = p.PublicProfileConsentAtUtc.HasValue ? Education(p) : [],
-            WorkExperience = p.PublicProfileConsentAtUtc.HasValue ? Experience(p) : [],
-            ApprovalLabel = p.VerificationStatus == ConsultantVerificationStatus.Verified ? "Approved by CareerHarbor" : null
-        };
+    {
+        ProfileImageUrl = p.PublicProfileConsentAtUtc.HasValue ? p.ProfileImageUrl : null,
+        Location = p.PublicProfileConsentAtUtc.HasValue ? p.Location : null,
+        Industry = p.PublicProfileConsentAtUtc.HasValue ? p.Industry : null,
+        FunctionalArea = p.PublicProfileConsentAtUtc.HasValue ? p.FunctionalArea : null,
+        Education = p.PublicProfileConsentAtUtc.HasValue ? Education(p) : [],
+        WorkExperience = p.PublicProfileConsentAtUtc.HasValue ? Experience(p) : [],
+        ApprovalLabel = p.VerificationStatus == ConsultantVerificationStatus.Verified ? "Approved by CareerHarbor" : null
+    };
     private static ConsultantPrivateResponse Private(CareerConsultant p) => new(Public(p), p.UserId, p.LinkedInUrl,
         p.VerificationStatus, p.VerificationMethod, p.VerificationReason, p.ReviewedByUserId, p.ReviewedAtUtc, p.VerifiedAtUtc,
         p.TermsAcceptedAtUtc, p.PolicyVersion, p.Revision, p.Services.Where(s => !s.IsDeleted).OrderBy(s => s.Id).Select(Service).ToArray());
