@@ -53,6 +53,30 @@ public sealed class CareerConsultantBookingsController(ICareerSchedulingService 
     public async Task<ActionResult<ApiResponse<CareerBookingResponse>>> Cancel(Guid id, BookingActionRequest request, CancellationToken ct) => Ok(new ApiResponse<CareerBookingResponse>(await service.CancelAsync(User.GetRequiredUserId(), id, true, request, ct)));
     [HttpPost("{id:guid}/status")]
     public async Task<ActionResult<ApiResponse<CareerBookingResponse>>> Status(Guid id, BookingStatusRequest request, CancellationToken ct) => Ok(new ApiResponse<CareerBookingResponse>(await service.SetStatusAsync(User.GetRequiredUserId(), id, request, ct)));
+
+    [HttpPost("{id:guid}/accept")]
+    public async Task<ActionResult<ApiResponse<CareerBookingResponse>>> Accept(
+    Guid id,
+    BookingActionRequest request,
+    CancellationToken ct) =>
+    Ok(new ApiResponse<CareerBookingResponse>(
+        await service.AcceptAsync(
+            User.GetRequiredUserId(),
+            id,
+            request,
+            ct)));
+
+    [HttpPost("{id:guid}/decline")]
+    public async Task<ActionResult<ApiResponse<CareerBookingResponse>>> Decline(
+        Guid id,
+        BookingActionRequest request,
+        CancellationToken ct) =>
+        Ok(new ApiResponse<CareerBookingResponse>(
+            await service.DeclineAsync(
+                User.GetRequiredUserId(),
+                id,
+                request,
+                ct)));
 }
 
 [ApiController, Authorize(Roles = "Administrator"), Route("api/admin/career-guidance/bookings")]

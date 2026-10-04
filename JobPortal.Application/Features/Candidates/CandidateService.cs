@@ -18,6 +18,7 @@ using Microsoft.Extensions.Logging;
 namespace JobPortal.Application.Features.Candidates;
 
 public sealed class CandidateService(
+    IMembershipRepository memberships,
     ICandidateRepository candidates,
     IDashboardRepository dashboard,
     IResumeStorage resumeStorage,
@@ -621,9 +622,8 @@ public sealed class CandidateService(
         await RequiredCandidateAsync(userId, cancellationToken);
 
         var nowUtc = timeProvider.GetUtcNow().UtcDateTime;
-        var hasPremiumMembership = await candidates.HasActiveMembershipAsync(
-            userId,
-            cancellationToken);
+        var hasPremiumMembership = await memberships.GetActiveForUserAsync(
+            userId, "CareerHarborMembership", cancellationToken) is not null;
 
         var quota = GetApplicationQuotaWindow(nowUtc, hasPremiumMembership);
 
@@ -658,7 +658,8 @@ public sealed class CandidateService(
             throw new BadRequestException("This job does not support external applications.", "invalid_application_method");
 
         var nowUtc = timeProvider.GetUtcNow().UtcDateTime;
-        var hasPremiumMembership = await candidates.HasActiveMembershipAsync(userId, cancellationToken);
+        var hasPremiumMembership = await memberships.GetActiveForUserAsync(
+            userId, "CareerHarborMembership", cancellationToken) is not null;
 
         var quota = GetApplicationQuotaWindow(nowUtc, hasPremiumMembership);
 

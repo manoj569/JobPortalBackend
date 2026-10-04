@@ -1,4 +1,9 @@
 using System.Text.Json;
+using System.Reflection;
+using JobPortal.Application.Features.Memberships;
+using JobPortal.Persistence.Context;
+using JobPortal.Persistence.Repositories;
+using Microsoft.EntityFrameworkCore;
 using JobPortal.API.Middleware;
 using JobPortal.API.Controllers;
 using JobPortal.Application.Abstractions.Candidates;
@@ -20,6 +25,106 @@ namespace JobPortal.Application.Tests;
 
 public sealed class CandidateModuleTests
 {
+    public class QuotaMembershipProxy : DispatchProxy
+    {
+        public Func<Guid, string, Membership?> Lookup { get; set; } = null!;
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+        {
+            Assert.Equal(nameof(IMembershipRepository.GetActiveForUserAsync), targetMethod!.Name);
+            return Task.FromResult(Lookup((Guid)args![0]!, (string)args[1]!));
+        }
+    }
+
+    [Theory]
+    [InlineData("CareerHarborMembership", -1, 1, true)]
+    [InlineData("ReferralContactAccess", -1, 1, false)]
+    [InlineData("AIApply", -1, 1, false)]
+    [InlineData("AIApplyPro", -1, 1, false)]
+    [InlineData("CareerHarborMembership", -2, 0, false)]
+    [InlineData("CareerHarborMembership", 1, 2, false)]
+    public async Task ApplicationQuotaUsesOnlyStartedUnexpiredApplicationPlan(string plan, int startDays, int endDays, bool premium)
+    {
+        using var db = new JobPortalDbContext(new DbContextOptionsBuilder<JobPortalDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+        var f = CreateFixture(membershipOverride: new MembershipRepository(db, new FixedTimeProvider(Now)));
+        db.Memberships.Add(new Membership { UserId = f.Candidate.Id, PlanCode = plan,
+            Status = MembershipStatus.Active, StartsAtUtc = Now.AddDays(startDays), EndsAtUtc = Now.AddDays(endDays) });
+        await db.SaveChangesAsync();
+        var quota = await f.Service.GetApplicationQuotaAsync(f.Candidate.Id);
+        Assert.Equal(premium, quota.IsPremium);
+        Assert.Equal(premium ? 35 : 10, quota.Limit);
+        await f.Service.ApplyAsync(f.Candidate.Id, f.Job.Id, new());
+        Assert.Equal(premium ? ApplicationQuotaPeriod.PremiumDaily : ApplicationQuotaPeriod.FreeMonthly,
+            Assert.Single(f.Repository.AddedQuotaUsages).Period);
+    }
+
+    [Theory]
+    [InlineData(false, 8, 9)]
+    [InlineData(false, 9, 10)]
+    [InlineData(true, 34, 35)]
+    public async Task LegacyApplyUsesSharedQuotaAndDuplicateProtection(bool premium, int used, int expected)
+    {
+        var f = CreateFixture(); f.Repository.HasMembership = premium;
+        f.Repository.AvailableJob = f.Repository.AvailableJob! with { ApplicationUrl = "https://example.test/apply" };
+        // Seed a different prior application through the same workflow, then position the counter at the boundary.
+        var targetJob = f.Repository.AvailableJob;
+        f.Repository.AvailableJob = targetJob with { Id = Guid.NewGuid() };
+        await f.Service.ApplyAsync(f.Candidate.Id, f.Repository.AvailableJob.Id, new());
+        f.Repository.AvailableJob = targetJob;
+        var usage = Assert.Single(f.Repository.AddedQuotaUsages); usage.UsedApplications = used;
+        Assert.Equal((premium ? 35 : 10) - used, (await f.Service.GetApplicationQuotaAsync(f.Candidate.Id)).RemainingApplications);
+        var repository = new PortalMembershipTests.FakeMembershipRepository();
+        repository.Jobs[f.Job.Slug] = new(f.Job.Id, f.Repository.AvailableJob.ApplicationUrl);
+        var service = new MembershipService(repository, f.Service);
+        var result = await service.GetApplicationAccessAsync(f.Candidate.Id, f.Job.Slug);
+        Assert.Equal(ApplicationAccessStatus.Granted, result.Status);
+        Assert.Equal(expected, usage.UsedApplications);
+        var application = f.Repository.AddedApplications.Last(); application.Job = f.Job;
+        Assert.Equal(JobApplicationStatus.ExternalApplicationStarted, application.Status);
+        f.Repository.ExistingApplication = application;
+        await service.GetApplicationAccessAsync(f.Candidate.Id, f.Job.Slug);
+        Assert.Equal(expected, usage.UsedApplications);
+        Assert.Equal(2, f.Repository.AddedApplications.Count);
+        Assert.Empty(repository.RecordedApplications);
+        Assert.Equal(2, f.UnitOfWork.SaveCount);
+    }
+
+    [Theory]
+    [InlineData(false, 10, "MONTHLY_JOB_LIMIT_REACHED")]
+    [InlineData(true, 35, "DAILY_JOB_LIMIT_REACHED")]
+    public async Task LegacyApplyCannotBypassExhaustedQuota(bool premium, int limit, string code)
+    {
+        var f = CreateFixture(); f.Repository.HasMembership = premium;
+        f.Repository.AvailableJob = f.Repository.AvailableJob! with { ApplicationUrl = "https://example.test/apply" };
+        var targetJob = f.Repository.AvailableJob;
+        f.Repository.AvailableJob = targetJob with { Id = Guid.NewGuid() };
+        await f.Service.ApplyAsync(f.Candidate.Id, f.Repository.AvailableJob.Id, new());
+        f.Repository.AvailableJob = targetJob;
+        var usage = Assert.Single(f.Repository.AddedQuotaUsages); usage.UsedApplications = limit;
+        var repository = new PortalMembershipTests.FakeMembershipRepository();
+        repository.Jobs[f.Job.Slug] = new(f.Job.Id, f.Repository.AvailableJob.ApplicationUrl);
+        var service = new MembershipService(repository, f.Service);
+        var error = await Assert.ThrowsAsync<ApplicationQuotaExceededException>(() => service.GetApplicationAccessAsync(f.Candidate.Id, f.Job.Slug));
+        Assert.Equal(code, error.Code); Assert.Equal(!premium, error.RedirectToMembership);
+        Assert.Equal(limit, usage.UsedApplications); Assert.Single(f.Repository.AddedApplications);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task LegacyApplyRejectsInactiveOrNonCandidate(bool inactive)
+    {
+        var f = CreateFixture();
+        if (inactive) f.Candidate.Status = UserStatus.Suspended;
+        else f.Candidate.RoleId = Guid.NewGuid();
+        var repository = new PortalMembershipTests.FakeMembershipRepository();
+        repository.Jobs[f.Job.Slug] = new(f.Job.Id, "https://example.test/apply");
+        var service = new MembershipService(repository, f.Service);
+        await Assert.ThrowsAsync<UnauthorizedException>(() => service.GetApplicationAccessAsync(f.Candidate.Id, f.Job.Slug));
+        Assert.Empty(f.Repository.AddedApplications);
+        Assert.Empty(f.Repository.AddedQuotaUsages);
+        Assert.Equal(0, f.UnitOfWork.SaveCount);
+    }
     [Fact]
     public async Task ProfilePhotoCanBeUploadedReplacedRetrievedAndDeletedWithCandidateIsolation()
     {
@@ -1036,7 +1141,7 @@ public sealed class CandidateModuleTests
         Assert.Empty(recommended.Items);
     }
 
-    private static Fixture CreateFixture(DateTime? nowUtc = null)
+    private static Fixture CreateFixture(DateTime? nowUtc = null, IMembershipRepository? membershipOverride = null)
     {
         var candidate = new User
         {
@@ -1069,7 +1174,12 @@ public sealed class CandidateModuleTests
         var unitOfWork = new FakeUnitOfWork();
         var audit = new AuditWriterTestDouble();
         var timeProvider = new FixedTimeProvider(nowUtc ?? Now);
+        var memberships = DispatchProxy.Create<IMembershipRepository, QuotaMembershipProxy>();
+        ((QuotaMembershipProxy)(object)memberships).Lookup = (id, plan) =>
+            repository.HasMembership && plan == "CareerHarborMembership"
+                ? new Membership { UserId = id, PlanCode = plan, Status = MembershipStatus.Active } : null;
         var service = new CandidateService(
+            membershipOverride ?? memberships,
             repository, dashboard, storage, photoStorage, unitOfWork, audit,
             new UpdateCandidateProfileRequestValidator(),
             new UpdateCandidateAboutRequestValidator(),

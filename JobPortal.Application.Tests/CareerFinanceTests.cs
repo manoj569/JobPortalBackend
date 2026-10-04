@@ -71,7 +71,7 @@ public sealed class CareerFinanceTests
     }
 
     [Fact]
-    public async Task CaptureConfirmsBookingOnceAndPreservesFinancialSnapshots()
+    public async Task LegacyCaptureConfirmsBookingOnceAndPreservesFinancialSnapshots()
     {
         using var f = new Fixture(); var b = await f.Setup();
         await Assert.ThrowsAsync<ConflictException>(() => f.Scheduling.Service.SetStatusAsync(f.Scheduling.Owner.Id, b.Id,
@@ -92,8 +92,64 @@ public sealed class CareerFinanceTests
         });
         f.Options.PlatformCommissionPercent = 50;
         Assert.Equal(10, (await f.Service.GetAsync(f.Candidate, b.Id, false, default)).CommissionPercent);
-        var entity = await f.Db.Set<CareerGuidancePayment>().SingleAsync(); entity.AmountGross = 1;
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task LegacyWebhookAndCallbackOrderingConvergesWithoutRepeatingCapture(bool webhookFirst)
+    {
+        using var f = new Fixture(); var b = await f.Setup(); var order = await f.Order(b.Id);
+        var body = Payload("payment.captured", order.OrderId);
+        if (webhookFirst) Assert.True(await f.Service.TryWebhookAsync(body, "accepted", default));
+        else await f.Verify(b.Id, order);
+        var first = await f.Service.GetAsync(f.Candidate, b.Id, false, default);
+        var earningId = (await f.Db.Set<CareerGuidanceEarning>().SingleAsync()).Id;
+        var bookingRevision = (await f.Db.CareerGuidanceBookings.SingleAsync()).Revision;
+        var deliveryIds = await f.Db.NotificationDeliveries.Select(x => x.Id).ToArrayAsync();
+        f.Scheduling.Clock.Utc = f.Scheduling.Clock.Utc.AddSeconds(1);
+        if (webhookFirst) await f.Verify(b.Id, order);
+        else Assert.True(await f.Service.TryWebhookAsync(body, "accepted", default));
+
+        f.Db.ChangeTracker.Clear();
+        var payment = await f.Db.Set<CareerGuidancePayment>().SingleAsync();
+        var booking = await f.Db.CareerGuidanceBookings.SingleAsync();
+        var earning = await f.Db.Set<CareerGuidanceEarning>().SingleAsync();
+        Assert.Equal(CareerPaymentStatus.Captured, payment.Status);
+        Assert.Equal(CareerBookingStatus.Confirmed, booking.Status);
+        Assert.Equal(bookingRevision, booking.Revision);
+        Assert.Equal(first.PaidAtUtc, payment.PaidAtUtc);
+        Assert.Equal(earningId, earning.Id);
+        Assert.Equal(999m, payment.AmountGross);
+        Assert.Equal(10m, payment.PlatformCommissionPercentSnapshot);
+        Assert.Equal(99.90m, payment.PlatformCommissionAmount);
+        Assert.Equal(899.10m, payment.ConsultantNetAmount);
+        Assert.Equal(payment.AmountGross, earning.GrossAmount);
+        Assert.Equal(payment.PlatformCommissionAmount, earning.PlatformCommissionAmount);
+        Assert.Equal(payment.ConsultantNetAmount, earning.NetAmount);
+        Assert.Equal(4, deliveryIds.Length);
+        Assert.Equal(deliveryIds.Order(), (await f.Db.NotificationDeliveries.Select(x => x.Id).ToArrayAsync()).Order());
+        Assert.Single(await f.Db.Set<CareerGuidancePaymentEvent>().ToArrayAsync());
+    }
+
+    [Theory]
+    [InlineData(nameof(CareerGuidancePayment.AmountGross))]
+    [InlineData(nameof(CareerGuidancePayment.Currency))]
+    [InlineData(nameof(CareerGuidancePayment.PlatformCommissionPercentSnapshot))]
+    [InlineData(nameof(CareerGuidancePayment.PlatformCommissionAmount))]
+    [InlineData(nameof(CareerGuidancePayment.ConsultantNetAmount))]
+    public async Task CapturedFinancialSnapshotMutationIsRejectedWithoutChangingStoredValue(string property)
+    {
+        using var f = new Fixture(); var b = await f.Setup(); var order = await f.Order(b.Id);
+        await f.Verify(b.Id, order);
+        var payment = await f.Db.Set<CareerGuidancePayment>().SingleAsync();
+        var entry = f.Db.Entry(payment).Property(property);
+        var original = entry.CurrentValue;
+        entry.CurrentValue = original is decimal amount ? (object)(amount + 1m) : "USD";
         await Assert.ThrowsAsync<InvalidOperationException>(() => f.Db.SaveChangesAsync());
+        using var read = new JobPortalDbContext(f.Scheduling.Options);
+        var stored = await read.Set<CareerGuidancePayment>().SingleAsync();
+        Assert.Equal(original, read.Entry(stored).Property(property).CurrentValue);
     }
 
     [Theory]
@@ -210,6 +266,42 @@ public sealed class CareerFinanceTests
         Assert.Equal(CareerEarningStatus.Pending, (await f.Db.Set<CareerGuidanceEarning>().SingleAsync()).Status);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task LostRefundResponseNeverCausesSecondProviderPost(bool lookupFindsRefund)
+    {
+        using var f = new Fixture(); var b = await f.Setup(); var order = await f.Order(b.Id);
+        await f.Verify(b.Id, order);
+        f.Gateway.LoseRefundResponse = true;
+        await Assert.ThrowsAsync<ConflictException>(() => f.Service.RefundAsync(f.Admin.Id, order.PaymentId,
+            new(CareerRefundReason.AdminCorrection), default));
+        f.Db.ChangeTracker.Clear();
+        var intent = await f.Db.Set<CareerGuidanceRefund>().SingleAsync();
+        Assert.Equal(CareerRefundStatus.Requested, intent.Status);
+        Assert.Null(intent.ProviderRefundId);
+        Assert.Equal(CareerPaymentStatus.RefundPending, (await f.Db.Set<CareerGuidancePayment>().SingleAsync()).Status);
+        Assert.Equal(CareerEarningStatus.Pending, (await f.Db.Set<CareerGuidanceEarning>().SingleAsync()).Status);
+        if (!lookupFindsRefund) f.Gateway.Refund = null;
+        if (lookupFindsRefund)
+        {
+            var result = await f.Service.RefundAsync(f.Admin.Id, order.PaymentId, new(CareerRefundReason.AdminCorrection), default);
+            Assert.Equal(intent.Id, result.Id);
+            Assert.Equal(CareerRefundStatus.Processed, result.Status);
+            Assert.Equal(CareerPaymentStatus.Refunded, (await f.Db.Set<CareerGuidancePayment>().SingleAsync()).Status);
+            Assert.Equal(CareerEarningStatus.Reversed, (await f.Db.Set<CareerGuidanceEarning>().SingleAsync()).Status);
+        }
+        else
+        {
+            for (var attempt = 0; attempt < 2; attempt++)
+                await Assert.ThrowsAsync<ConflictException>(() => f.Service.RefundAsync(f.Admin.Id, order.PaymentId,
+                    new(CareerRefundReason.AdminCorrection), default));
+            Assert.Equal(CareerRefundStatus.Requested, intent.Status);
+        }
+        Assert.Equal(1, f.Gateway.RefundCalls);
+        Assert.Single(await f.Db.Set<CareerGuidanceRefund>().ToArrayAsync());
+    }
+
     [Fact]
     public async Task RefundWebhookReversesOnceAndDuplicateDoesNotRewriteHistory()
     {
@@ -283,6 +375,7 @@ public sealed class CareerFinanceTests
         public void ValidateConfiguration() { }
         public bool ValidSignature { get; set; } = true;
         public bool LoseOrderResponse { get; set; }
+        public bool LoseRefundResponse { get; set; }
         public bool WrongRefundAmount { get; set; }
         public int OrderCalls { get; private set; }
         public int RefundCalls { get; private set; }
@@ -302,7 +395,11 @@ public sealed class CareerFinanceTests
         public Task<GatewayPayment> GetPaymentAsync(string paymentId, CancellationToken ct) => Task.FromResult(Payment!);
         public Task<GatewayPayment?> CapturedPaymentAsync(string orderId, CancellationToken ct) => Task.FromResult(Payment?.Status == "captured" ? Payment : null);
         public Task<GatewayRefund> CreateRefundAsync(string paymentId, long amount, string receipt, CancellationToken ct)
-        { RefundCalls++; Refund = new("rfnd_test", paymentId, WrongRefundAmount ? amount + 1 : amount, "INR", RefundState, receipt); return Task.FromResult(Refund); }
+        {
+            RefundCalls++; Refund = new("rfnd_test", paymentId, WrongRefundAmount ? amount + 1 : amount, "INR", RefundState, receipt);
+            if (LoseRefundResponse) throw new ConflictException("Simulated uncertain refund response.");
+            return Task.FromResult(Refund);
+        }
         public Task<GatewayRefund?> FindRefundAsync(string paymentId, string receipt, CancellationToken ct) => Task.FromResult(Refund);
         public Task<GatewayRefund> GetRefundAsync(string refundId, CancellationToken ct) => Task.FromResult(Refund!);
     }

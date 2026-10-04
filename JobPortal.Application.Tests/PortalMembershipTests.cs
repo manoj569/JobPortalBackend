@@ -1,4 +1,7 @@
 using System.Text;
+using System.Reflection;
+using JobPortal.Application.Abstractions.Candidates;
+using JobPortal.Application.Features.Candidates;
 using System.Text.Json;
 using FluentValidation;
 using JobPortal.Application.Abstractions.Payments;
@@ -38,26 +41,30 @@ public sealed class PortalMembershipTests
                 ["second"] = new(Guid.NewGuid(), "https://example.test/second")
             }
         };
-        var service = new MembershipService(repository, new FakeUnitOfWork());
+        var candidate = DispatchProxy.Create<ICandidateService, CandidateApplySpy>();
+        var service = new MembershipService(repository, candidate);
 
         var first = await service.GetApplicationAccessAsync(UserId, "first");
         var second = await service.GetApplicationAccessAsync(UserId, "second");
 
         Assert.Equal(ApplicationAccessStatus.Granted, first.Status);
         Assert.Equal(ApplicationAccessStatus.Granted, second.Status);
-        Assert.Equal(2, repository.RecordedApplications.Count);
+        Assert.Equal(2, ((CandidateApplySpy)(object)candidate).Calls);
+        Assert.Empty(repository.RecordedApplications);
     }
 
     [Fact]
-    public async Task MissingMembershipRequiresPaymentAndAnonymousUserRequiresLogin()
+    public async Task MissingMembershipDelegatesApplicationAndAnonymousUserRequiresLogin()
     {
         var repository = AvailableRepository();
-        var service = new MembershipService(repository, new FakeUnitOfWork());
+        var candidate = DispatchProxy.Create<ICandidateService, CandidateApplySpy>();
+        var service = new MembershipService(repository, candidate);
 
         Assert.Equal(ApplicationAccessStatus.LoginRequired,
             (await service.GetApplicationAccessAsync(null, "job")).Status);
-        Assert.Equal(ApplicationAccessStatus.PaymentRequired,
+        Assert.Equal(ApplicationAccessStatus.Granted,
             (await service.GetApplicationAccessAsync(UserId, "job")).Status);
+        Assert.Equal(1, ((CandidateApplySpy)(object)candidate).Calls);
     }
 
     [Fact]
@@ -68,14 +75,14 @@ public sealed class PortalMembershipTests
             {
                 Membership = new Membership { UserId = UserId, Status = MembershipStatus.Active }
             },
-            new FakeUnitOfWork());
+            DispatchProxy.Create<ICandidateService, CandidateApplySpy>());
 
         await Assert.ThrowsAsync<NotFoundException>(
             () => service.GetApplicationAccessAsync(UserId, "hidden-archived-or-expired"));
     }
 
     [Fact]
-    public async Task ExpiredMembershipDoesNotGrantAccess()
+    public async Task ExpiredMembershipDelegatesToCandidateFreeQuota()
     {
         var repository = AvailableRepository();
         repository.Membership = new Membership
@@ -84,11 +91,11 @@ public sealed class PortalMembershipTests
             Status = MembershipStatus.Active,
             EndsAtUtc = Now.AddMinutes(-1)
         };
-        var service = new MembershipService(repository, new FakeUnitOfWork());
+        var service = new MembershipService(repository, DispatchProxy.Create<ICandidateService, CandidateApplySpy>());
 
         var result = await service.GetApplicationAccessAsync(UserId, "job");
 
-        Assert.Equal(ApplicationAccessStatus.PaymentRequired, result.Status);
+        Assert.Equal(ApplicationAccessStatus.Granted, result.Status);
     }
 
     [Fact]
@@ -861,7 +868,21 @@ public sealed class PortalMembershipTests
         FakeUnitOfWork UnitOfWork,
         AuditWriterTestDouble Audit, RecordingNotificationOutbox Notifications);
 
-    private sealed class FakeMembershipRepository : IMembershipRepository
+    public class CandidateApplySpy : DispatchProxy
+    {
+        public int Calls { get; private set; }
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+        {
+            Assert.Equal(nameof(ICandidateService.ApplyJobAsync), targetMethod!.Name);
+            Assert.Equal(UserId, (Guid)args![0]!);
+            Assert.Equal(ApplicationMethod.External, ((CreateJobApplicationRequest)args[2]!).ApplicationMethod);
+            Calls++;
+            return Task.FromResult(new ApplyJobResponse(Guid.NewGuid(), (Guid)args[1]!,
+                JobApplicationStatus.ExternalApplicationStarted, ApplicationMethod.External, Now));
+        }
+    }
+
+    internal sealed class FakeMembershipRepository : IMembershipRepository
     {
         public Dictionary<string, AvailableJobAccess> Jobs { get; init; } = [];
         public List<Guid> RecordedApplications { get; } = [];

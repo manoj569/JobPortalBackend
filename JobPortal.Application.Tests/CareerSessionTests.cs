@@ -181,7 +181,7 @@ public sealed class CareerSessionTests
     }
 
     [Fact]
-    public async Task CompletionUpdatesBookingAndSchedulesPendingEarningWithoutPayout()
+    public async Task LegacyConsultantCompletionUpdatesBookingAndSchedulesPendingEarningWithoutPayout()
     {
         using var f = new Fixture(); var s = await f.Setup(true);
         await Assert.ThrowsAsync<ConflictException>(() => f.Service.StartAsync(f.Owner, s.Id, new(s.Revision), default));

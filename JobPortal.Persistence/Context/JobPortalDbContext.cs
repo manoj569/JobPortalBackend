@@ -8,6 +8,7 @@ namespace JobPortal.Persistence.Context;
 
 public sealed class JobPortalDbContext(DbContextOptions<JobPortalDbContext> options) : DbContext(options)
 {
+    public DbSet<SupportTicket> SupportTickets => Set<SupportTicket>();
     public DbSet<CareerConsultant> CareerConsultants => Set<CareerConsultant>();
     public DbSet<CareerConsultantAvailability> CareerConsultantAvailability => Set<CareerConsultantAvailability>();
     public DbSet<CareerConsultantAvailabilityException> CareerConsultantAvailabilityExceptions => Set<CareerConsultantAvailabilityException>();
@@ -173,22 +174,62 @@ public sealed class JobPortalDbContext(DbContextOptions<JobPortalDbContext> opti
 
     private void EnsureFinancialHistory()
     {
-        foreach (var entry in ChangeTracker.Entries().Where(e => e.Entity is CareerGuidancePayment or CareerGuidanceEarning or CareerGuidanceRefund or CareerGuidancePaymentEvent))
+        foreach (var entry in ChangeTracker.Entries().Where(e =>
+            e.Entity is CareerGuidancePayment
+                or CareerGuidanceEarning
+                or CareerGuidanceRefund
+                or CareerGuidancePaymentEvent
+                or CareerConsultantPayout))
         {
             if (entry.State == EntityState.Deleted || entry.State == EntityState.Modified && entry.Entity is CareerGuidancePaymentEvent)
                 throw new InvalidOperationException("Financial history cannot be deleted; events are append-only.");
             if (entry.State != EntityState.Modified) continue;
             foreach (var property in entry.Properties.Where(p => p.IsModified))
             {
-                var allowed = property.Metadata.Name is "UpdatedAtUtc" or "Revision" or "Status" || entry.Entity switch
-                {
-                    CareerGuidancePayment => property.Metadata.Name is "ProviderOrderId" or "ProviderPaymentId" or "FailureCode" or "PaidAtUtc" or "RequiresRefundReview",
-                    CareerGuidanceRefund => property.Metadata.Name is "ProviderRefundId" or "ProcessedAtUtc" or "FailedAtUtc",
-                    CareerGuidanceEarning => property.Metadata.Name is "AvailableAtUtc" or "SettledAtUtc" or "ReversedAtUtc" or "SettlementReference",
-                    _ => false
-                };
+                var allowed =
+      property.Metadata.Name is "UpdatedAtUtc" or "Revision" or "Status"
+      || entry.Entity switch
+      {
+          CareerGuidancePayment =>
+              property.Metadata.Name is
+                  "ProviderOrderId"
+                  or "ProviderPaymentId"
+                  or "FailureCode"
+                  or "PaidAtUtc"
+                  or "RequiresRefundReview",
+
+          CareerGuidanceRefund =>
+              property.Metadata.Name is
+                  "ProviderRefundId"
+                  or "ProcessedAtUtc"
+                  or "FailedAtUtc",
+
+          CareerGuidanceEarning =>
+              property.Metadata.Name is
+                  "AvailableAtUtc"
+                  or "SettledAtUtc"
+                  or "ReversedAtUtc"
+                  or "SettlementReference",
+
+          CareerConsultantPayout =>
+              property.Metadata.Name is
+                  "ProviderPayoutId"
+                  or "ProcessingAtUtc"
+                  or "PaidAtUtc"
+                  or "FailedAtUtc"
+                  or "FailureCode"
+                  or "FailureReason",
+
+          _ => false
+      };
                 if (!allowed) throw new InvalidOperationException("Financial identity and amount snapshots are immutable.");
-                if (property.Metadata.Name is "ProviderOrderId" or "ProviderPaymentId" or "ProviderRefundId" && property.OriginalValue is not null && !Equals(property.OriginalValue, property.CurrentValue))
+                if (property.Metadata.Name is
+                        "ProviderOrderId"
+                        or "ProviderPaymentId"
+                        or "ProviderRefundId"
+                        or "ProviderPayoutId"
+                    && property.OriginalValue is not null
+                    && !Equals(property.OriginalValue, property.CurrentValue))
                     throw new InvalidOperationException("A financial provider identifier cannot be rebound.");
             }
         }

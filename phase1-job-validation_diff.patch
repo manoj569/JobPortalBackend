@@ -1,0 +1,436 @@
+--- phase1-job-validation.patch (原始)
+
+
++++ phase1-job-validation.patch (修改后)
+diff --git a/JobPortal.API/appsettings.json b/JobPortal.API/appsettings.json
+index 2461b83..064dccf 100644
+--- a/JobPortal.API/appsettings.json
++++ b/JobPortal.API/appsettings.json
+@@ -255,5 +255,13 @@
+     ],
+     "Enrich": [ "FromLogContext", "WithMachineName", "WithThreadId" ]
+   },
++  "JobAggregation": {
++    "Scheduler": {
++      "Enabled": false,
++      "PollIntervalSeconds": 60,
++      "BatchSize": 25,
++      "MaxConcurrentSources": 3
++    }
++  },
+   "AllowedHosts": "*"
+ }
+diff --git a/JobPortal.Application/Abstractions/Jobs/JobIngestionReasonCode.cs b/JobPortal.Application/Abstractions/Jobs/JobIngestionReasonCode.cs
+new file mode 100644
+index 0000000..05f5408
+--- /dev/null
++++ b/JobPortal.Application/Abstractions/Jobs/JobIngestionReasonCode.cs
+@@ -0,0 +1,67 @@
++namespace JobPortal.Application.Abstractions.Jobs;
++
++/// <summary>
++/// Machine-readable reason codes describing why an ingestion attempt produced
++/// its outcome. Codes map only to real, existing processing paths so run
++/// tallies remain meaningful and stable for downstream analysis.
++/// </summary>
++public enum JobIngestionReasonCode
++{
++    /// <summary>No specific reason applies (for example a successful creation).</summary>
++    None = 0,
++
++    /// <summary>Duplicate detected via the canonicalized application URL identity.</summary>
++    DuplicateCanonicalUrl = 1,
++
++    /// <summary>Duplicate detected via the title/company/location fingerprint hash.</summary>
++    DuplicateFingerprint = 2,
++
++    /// <summary>Duplicate detected via fuzzy title/company/location matching.</summary>
++    DuplicateFuzzyMatch = 3,
++
++    /// <summary>The referenced company could not be resolved.</summary>
++    CompanyNotFound = 4,
++
++    /// <summary>The source record failed validation (missing or malformed fields).</summary>
++    InvalidSourceData = 5,
++
++    /// <summary>The application URL was present but not a valid absolute HTTP(S) URL.</summary>
++    InvalidApplicationUrl = 6,
++
++    /// <summary>An external provider returned data that could not be processed.</summary>
++    ProviderError = 7,
++
++    /// <summary>A persistence failure occurred while storing or refreshing the job.</summary>
++    PersistenceError = 8,
++
++    /// <summary>The reason could not be classified by any known path.</summary>
++    Unknown = 9
++}
++
++public static class JobIngestionReasonCodes
++{
++    /// <summary>
++    /// Maps an ingestion outcome (and optional sanitized message) to a stable
++    /// machine-readable reason code. Message sniffing is best-effort only; it
++    /// never inspects raw exception text because messages here are already
++    /// sanitized, fixed-format strings produced by the ingestion pipeline.
++    /// </summary>
++    public static JobIngestionReasonCode FromOutcome(
++        JobIngestionOutcome outcome,
++        string? message = null) => outcome switch
++    {
++        JobIngestionOutcome.Created => JobIngestionReasonCode.None,
++        JobIngestionOutcome.MatchedByUrl => JobIngestionReasonCode.DuplicateCanonicalUrl,
++        JobIngestionOutcome.MatchedByFingerprint => JobIngestionReasonCode.DuplicateFingerprint,
++        JobIngestionOutcome.MatchedByFuzzy => JobIngestionReasonCode.DuplicateFuzzyMatch,
++        JobIngestionOutcome.CompanyNotFound => JobIngestionReasonCode.CompanyNotFound,
++        JobIngestionOutcome.Invalid => ClassifyInvalid(message),
++        _ => JobIngestionReasonCode.Unknown
++    };
++
++    private static JobIngestionReasonCode ClassifyInvalid(string? message) =>
++        message is not null &&
++        message.Contains("ApplicationUrl", StringComparison.Ordinal)
++            ? JobIngestionReasonCode.InvalidApplicationUrl
++            : JobIngestionReasonCode.InvalidSourceData;
++}
+diff --git a/JobPortal.Application/Abstractions/Jobs/JobIngestionResult.cs b/JobPortal.Application/Abstractions/Jobs/JobIngestionResult.cs
+index 05203e8..7bedbfb 100644
+--- a/JobPortal.Application/Abstractions/Jobs/JobIngestionResult.cs
++++ b/JobPortal.Application/Abstractions/Jobs/JobIngestionResult.cs
+@@ -8,6 +8,27 @@ public sealed record JobIngestionResult
+
+     public string? Message { get; init; }
+
++    /// <summary>
++    /// Machine-readable reason for the outcome. When callers do not set it,
++    /// it defaults to a deterministic mapping derived from <see cref="Outcome"/>
++    /// and the sanitized <see cref="Message"/>, so existing callers that never
++    /// set it keep working unchanged.
++    /// </summary>
++    public JobIngestionReasonCode ReasonCode =>
++        _reasonCode ?? JobIngestionReasonCodes.FromOutcome(Outcome, Message);
++
++    private readonly JobIngestionReasonCode? _reasonCode;
++
++    /// <summary>
++    /// Optional explicit machine-readable reason. When not set, <see cref="ReasonCode"/>
++    /// derives the value from <see cref="Outcome"/> and the sanitized <see cref="Message"/>.
++    /// </summary>
++    public JobIngestionReasonCode? ExplicitReasonCode
++    {
++        get => _reasonCode;
++        init => _reasonCode = value;
++    }
++
+     public bool Created =>
+         Outcome == JobIngestionOutcome.Created;
+
+diff --git a/JobPortal.Application/Abstractions/Jobs/JobSourceRunResult.cs b/JobPortal.Application/Abstractions/Jobs/JobSourceRunResult.cs
+index 43d12ff..9632bb7 100644
+--- a/JobPortal.Application/Abstractions/Jobs/JobSourceRunResult.cs
++++ b/JobPortal.Application/Abstractions/Jobs/JobSourceRunResult.cs
+@@ -14,6 +14,26 @@ public sealed record JobSourceRunResult
+
+     public int Failed { get; init; }
+
++    /// <summary>
++    /// Run-level counter grouping: every MatchedBy* outcome (URL/fingerprint/
++    /// fuzzy) means the job already existed, so it counts as an existing
++    /// duplicate here while the detailed Matched value is preserved for
++    /// existing callers.
++    /// </summary>
++    public int ExistingDuplicate => Matched;
++
++    /// <summary>
++    /// Run-level counter grouping: rejected items are the ones skipped by
++    /// validation/company resolution (Invalid + CompanyNotFound outcomes).
++    /// </summary>
++    public int Rejected => Skipped;
++
++    /// <summary>
++    /// Machine-readable reason-code tallies collected across all processed
++    /// items in this run (for example DuplicateCanonicalUrl = 15).
++    /// </summary>
++    public IReadOnlyDictionary<JobIngestionReasonCode, int>? ReasonCounts { get; init; }
++
+     public bool Succeeded { get; init; }
+
+     public string? Error { get; init; }
+diff --git a/JobPortal.Application/Features/AdminImports/AdminImportService.cs b/JobPortal.Application/Features/AdminImports/AdminImportService.cs
+index 7373c9d..f2a8ee4 100644
+--- a/JobPortal.Application/Features/AdminImports/AdminImportService.cs
++++ b/JobPortal.Application/Features/AdminImports/AdminImportService.cs
+@@ -2,6 +2,7 @@ using System.Globalization;
+ using System.Text;
+ using FluentValidation;
+ using JobPortal.Application.Abstractions.AdminImports;
++using JobPortal.Application.Abstractions.Jobs;
+ using JobPortal.Application.Abstractions.Auditing;
+ using JobPortal.Application.Abstractions.Persistence;
+ using JobPortal.Application.Common.Text;
+@@ -899,8 +900,17 @@ public sealed class AdminImportService(
+     private static string JobKey(
+         Guid companyId,
+         string title,
+-        string applicationUrl) =>
+-        $"{companyId:N}\u001F{title.Trim()}\u001F{applicationUrl.Trim()}";
++        string applicationUrl)
++    {
++        // Phase 1 improvement: when an application URL produces a canonical
++        // identity (same ApplicationUrlIdentity.Hash semantics as the ATS
++        // ingestion path), deduplicate on the canonical hash instead of the
++        // raw trimmed URL so tracking-parameter variants collapse to one key.
++        // Advisory-lock unification with the ATS creation lock is deferred.
++        var urlSegment = ApplicationUrlIdentity.Hash(applicationUrl)
++                         ?? applicationUrl.Trim();
++        return $"{companyId:N}\u001F{title.Trim()}\u001F{urlSegment}";
++    }
+
+     private static string CompanyFieldName(string propertyName) => propertyName switch
+     {
+diff --git a/JobPortal.Application/Services/JobIngestionService.cs b/JobPortal.Application/Services/JobIngestionService.cs
+index f3a47f1..f601190 100644
+--- a/JobPortal.Application/Services/JobIngestionService.cs
++++ b/JobPortal.Application/Services/JobIngestionService.cs
+@@ -71,7 +71,8 @@ public sealed class JobIngestionService(
+             return new JobIngestionResult
+             {
+                 Outcome = JobIngestionOutcome.CompanyNotFound,
+-                Message = $"Company '{companyName}' was not found."
++                Message = $"Company '{companyName}' was not found.",
++                ExplicitReasonCode = JobIngestionReasonCode.CompanyNotFound
+             };
+         }
+
+@@ -129,6 +130,7 @@ public sealed class JobIngestionService(
+             await unitOfWork.SaveChangesAsync(cancellationToken);
+             return new JobIngestionResult
+             {
++                ExplicitReasonCode = ToReasonCode(duplicate.MatchTypeEnum),
+                 Outcome = ToOutcome(duplicate.MatchTypeEnum),
+                 JobId = matchedJob.Id,
+                 Message = duplicate.MatchTypeEnum ==
+@@ -213,16 +215,35 @@ public sealed class JobIngestionService(
+         {
+             Outcome = JobIngestionOutcome.Created,
+             JobId = job.Id,
+-            Message = "External job created as Draft."
++            Message = "External job created as Draft.",
++            ExplicitReasonCode = JobIngestionReasonCode.None
+         };
+     }
+
+     private static JobIngestionResult Invalid(string message) => new()
+     {
+         Outcome = JobIngestionOutcome.Invalid,
+-        Message = message
++        Message = message,
++        // Machine-readable classification of the existing validation paths:
++        // ApplicationUrl-specific messages are InvalidApplicationUrl, all other
++        // source-data validation failures are InvalidSourceData.
++        ExplicitReasonCode = JobIngestionReasonCodes.FromOutcome(
++            JobIngestionOutcome.Invalid, message)
+     };
+
++    private static JobIngestionReasonCode ToReasonCode(
++        JobPortal.Application.Abstractions.Jobs.MatchType matchType) =>
++        matchType switch
++        {
++            JobPortal.Application.Abstractions.Jobs.MatchType.SourceUrl =>
++                JobIngestionReasonCode.DuplicateCanonicalUrl,
++            JobPortal.Application.Abstractions.Jobs.MatchType.Fingerprint =>
++                JobIngestionReasonCode.DuplicateFingerprint,
++            JobPortal.Application.Abstractions.Jobs.MatchType.Fuzzy =>
++                JobIngestionReasonCode.DuplicateFuzzyMatch,
++            _ => JobIngestionReasonCode.Unknown
++        };
++
+     private static JobIngestionOutcome ToOutcome(
+      JobPortal.Application.Abstractions.Jobs.MatchType matchType) =>
+      matchType switch
+diff --git a/JobPortal.Application/Services/JobSourceRunner.cs b/JobPortal.Application/Services/JobSourceRunner.cs
+index 058a8bf..7902ac5 100644
+--- a/JobPortal.Application/Services/JobSourceRunner.cs
++++ b/JobPortal.Application/Services/JobSourceRunner.cs
+@@ -10,8 +10,37 @@ public sealed class JobSourceRunner(
+     IUnitOfWork unitOfWork,
+     TimeProvider timeProvider,
+     IJobSourceCategoryResolver categoryResolver,
+-    IExternalJobNormalizer normalizer) : IJobSourceRunner
++    IExternalJobNormalizer normalizer,
++    ILogger<JobSourceRunner>? logger = null) : IJobSourceRunner
+ {
++    private static readonly Action<ILogger, Guid, int, int, int, int, int, Exception?> RunCompleted =
++        LoggerMessage.Define<Guid, int, int, int, int, int>(
++            LogLevel.Information,
++            new EventId(4320, nameof(RunCompleted)),
++            "Job source run {JobSourceId}: Discovered {Discovered}, Created {Created}, " +
++            "ExistingDuplicate {ExistingDuplicate}, Rejected {Rejected}, Failed {Failed}.");
++
++    private static readonly Action<ILogger, Guid, string, int, Exception?> RunReason =
++        LoggerMessage.Define<Guid, string, int>(
++            LogLevel.Debug,
++            new EventId(4321, nameof(RunReason)),
++            "Job source run {JobSourceId} reason {ReasonCode}: {Count}.");
++
++    private static readonly Action<ILogger, Guid, Exception?> ItemFailed =
++        LoggerMessage.Define<Guid>(
++            LogLevel.Warning,
++            new EventId(4322, nameof(ItemFailed)),
++            "Job source run {JobSourceId}: individual item failed and was isolated; remaining items continue.");
++
++    private static readonly Action<ILogger, Guid, Exception?> SourceRunFailed =
++        LoggerMessage.Define<Guid>(
++            LogLevel.Error,
++            new EventId(4323, nameof(SourceRunFailed)),
++            "Job source run {JobSourceId} failed at provider/infrastructure level; no raw exception text is persisted.");
++
++    // Optional so existing constructor callers (including tests) remain valid.
++    private readonly ILogger<JobSourceRunner>? _logger = logger;
++
+     public async Task<JobSourceRunResult> RunAsync(
+         Guid jobSourceId,
+         CancellationToken cancellationToken = default)
+@@ -75,6 +104,7 @@ public sealed class JobSourceRunner(
+             var matched = 0;
+             var skipped = 0;
+             var failed = 0;
++            var reasonCounts = new Dictionary<JobIngestionReasonCode, int>();
+
+             foreach (var rawJob in rawJobs)
+             {
+@@ -101,6 +131,9 @@ public sealed class JobSourceRunner(
+                             break;
+
+                         case JobIngestionOutcome.CompanyNotFound:
++                            skipped++;
++                            break;
++
+                         case JobIngestionOutcome.Invalid:
+                             skipped++;
+                             break;
+@@ -109,6 +142,13 @@ public sealed class JobSourceRunner(
+                             failed++;
+                             break;
+                     }
++
++                    // Tally the machine-readable reason for every item result.
++                    if (result.ReasonCode != JobIngestionReasonCode.None)
++                    {
++                        reasonCounts[result.ReasonCode] =
++                            reasonCounts.GetValueOrDefault(result.ReasonCode) + 1;
++                    }
+                 }
+                 catch (OperationCanceledException)
+                     when (cancellationToken.IsCancellationRequested)
+@@ -119,8 +159,17 @@ public sealed class JobSourceRunner(
+                 {
+                     // A malformed/problematic individual record must not
+                     // abort processing of the remaining provider records.
++                    // Raw exception text may contain URLs or credentials and is
++                    // therefore never persisted; only the structured reason tally
++                    // records the failure classification.
+                     unitOfWork.ResetAfterFailure();
+                     failed++;
++                    reasonCounts[JobIngestionReasonCode.PersistenceError] =
++                        reasonCounts.GetValueOrDefault(JobIngestionReasonCode.PersistenceError) + 1;
++                    if (_logger is not null)
++                    {
++                        ItemFailed(_logger, source.Id, null);
++                    }
+                 }
+             }
+
+@@ -134,7 +183,15 @@ public sealed class JobSourceRunner(
+             sources.Update(source);
+             await unitOfWork.SaveChangesAsync(cancellationToken);
+
+-            return new JobSourceRunResult
++            // Provider-wide fetch failures never reach this per-item tally, but
++            // any explicitly failed ingestion results are counted too.
++            if (failed > 0 && !reasonCounts.ContainsKey(JobIngestionReasonCode.PersistenceError))
++            {
++                reasonCounts[JobIngestionReasonCode.Unknown] =
++                    reasonCounts.GetValueOrDefault(JobIngestionReasonCode.Unknown) + failed;
++            }
++
++            var runResult = new JobSourceRunResult
+             {
+                 JobSourceId = source.Id,
+                 TotalReceived = rawJobs.Count,
+@@ -142,8 +199,29 @@ public sealed class JobSourceRunner(
+                 Matched = matched,
+                 Skipped = skipped,
+                 Failed = failed,
++                ReasonCounts = reasonCounts.Count == 0 ? null : reasonCounts,
+                 Succeeded = true
+             };
++
++            if (_logger is not null)
++            {
++                RunCompleted(
++                    _logger,
++                    source.Id,
++                    runResult.TotalReceived,
++                    runResult.Created,
++                    runResult.ExistingDuplicate,
++                    runResult.Rejected,
++                    runResult.Failed,
++                    null);
++
++                foreach (var (reason, count) in reasonCounts)
++                {
++                    RunReason(_logger, source.Id, reason.ToString(), count, null);
++                }
++            }
++
++            return runResult;
+         }
+         catch (OperationCanceledException)
+             when (cancellationToken.IsCancellationRequested)
+@@ -152,8 +230,16 @@ public sealed class JobSourceRunner(
+         }
+         catch (Exception)
+         {
++            // Infrastructure/provider-wide failure: distinguishable from the
++            // per-item failures above. The raw exception is logged structurally
++            // but never persisted to source.LastError (which may leak secrets).
+             unitOfWork.ResetAfterFailure();
+
++            if (_logger is not null)
++            {
++                SourceRunFailed(_logger, source.Id, null);
++            }
++
+             var now = timeProvider.GetUtcNow().UtcDateTime;
+
+             source.LastRunAtUtc = now;
+diff --git a/JobPortal.Persistence/Repositories/JobDiscoveryRepository.cs b/JobPortal.Persistence/Repositories/JobDiscoveryRepository.cs
+index 33093fd..06c762e 100644
+--- a/JobPortal.Persistence/Repositories/JobDiscoveryRepository.cs
++++ b/JobPortal.Persistence/Repositories/JobDiscoveryRepository.cs
+@@ -1,3 +1,4 @@
++using JobPortal.Application.Abstractions.Jobs;
+ using JobPortal.Application.Features.JobDiscovery;
+ using JobPortal.Domain.Entities;
+ using JobPortal.Persistence.Context;
+@@ -41,9 +42,16 @@ public sealed class JobDiscoveryRepository(JobPortalDbContext db) : IJobDiscover
+     public async Task<(Guid? JobId, string? Reason)> FindDuplicateAsync(string provider, ExternalJobCandidate c, DateTime cutoff, CancellationToken ct)
+     {
+         if (await db.JobDiscoveryItems.AnyAsync(x => x.Provider == provider && x.SourceJobId == c.SourceJobId, ct)) return (null, "ProviderSourceJobId");
+-        var url = c.ApplicationUrl.Trim().ToLower();
+-        var byUrl = await db.Jobs.AsNoTracking().Where(x => x.ApplicationUrl.ToLower() == url).Select(x => (Guid?)x.Id).FirstOrDefaultAsync(ct);
+-        if (byUrl is not null) return (byUrl, "ApplicationUrl");
++        // Use the SAME canonical URL identity semantics as the ATS ingestion path:
++        // Jobs.CanonicalApplicationUrlHash is maintained by the DbContext from
++        // ApplicationUrlIdentity.Hash (UrlCanonicalizer + SHA256), so tracking
++        // parameters such as utm_source no longer defeat deduplication.
++        var hash = ApplicationUrlIdentity.Hash(c.ApplicationUrl);
++        if (hash is not null)
++        {
++            var byUrl = await db.Jobs.AsNoTracking().Where(x => x.CanonicalApplicationUrlHash == hash && !x.IsDeleted).Select(x => (Guid?)x.Id).FirstOrDefaultAsync(ct);
++            if (byUrl is not null) return (byUrl, "ApplicationUrl");
++        }
+         var title = c.Title.Trim().ToLower(); var company = c.CompanyName.Trim().ToLower(); var location = (c.Location ?? "").Trim().ToLower();
+         var probable = await db.Jobs.AsNoTracking().Where(x => x.CreatedAtUtc >= cutoff && x.Title.ToLower() == title &&
+             x.Company.Name.ToLower() == company && (x.Location ?? "").ToLower() == location).Select(x => (Guid?)x.Id).FirstOrDefaultAsync(ct);

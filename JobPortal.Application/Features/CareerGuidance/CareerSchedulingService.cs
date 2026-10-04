@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FluentValidation;
 using JobPortal.Application.Abstractions.Auditing;
 using JobPortal.Application.Abstractions.Persistence;
@@ -313,6 +314,17 @@ public sealed class CareerSchedulingService(
 
         var booking = new CareerGuidanceBooking
         {
+            LifecycleVersion = 2,
+            PolicySnapshotJson = JsonSerializer.Serialize(new
+            {
+                Version = "cg-payment-v2",
+                ConsultantAcceptanceRequired = true,
+                PlatformCommissionPercent = 20m,
+                ConsultantCancellationRefundPercent = 100m,
+                ConsultantDeclineRefundPercent = 100m,
+                ConsultantNoResponseRefundPercent = 100m,
+                DisputeHoldsPayout = true
+            }),
             RequiresPayment = true,
             CandidateUserId = actor,
             ConsultantId = p.Id,
@@ -446,6 +458,116 @@ public sealed class CareerSchedulingService(
         return BookingDto(b);
     }
 
+    public async Task<CareerBookingResponse> AcceptAsync(
+    Guid actor,
+    Guid id,
+    BookingActionRequest request,
+    CancellationToken ct)
+    {
+        var b = await RequiredBooking(
+            actor,
+            id,
+            true,
+            false,
+            ct);
+
+        Revision(b.Revision, request.Revision);
+
+        if (b.LifecycleVersion < 2 ||
+            b.Status != CareerBookingStatus.AwaitingConsultant ||
+            b.StartUtc <= Now)
+        {
+            throw new ConflictException(
+                "This booking is not awaiting consultant acceptance.");
+        }
+
+        var profile = await repository.ProfileAsync(
+                          b.ConsultantId,
+                          ct)
+                      ?? throw new NotFoundException(
+                          "Consultant not found.");
+
+        RequireVerified(profile);
+
+        b.Status = CareerBookingStatus.Confirmed;
+        b.ConsultantDecision =
+            CareerConsultantBookingDecision.Accepted;
+        b.ConsultantDecisionAtUtc = Now;
+        b.ConsultantDecisionByUserId = actor;
+        b.Revision = Guid.NewGuid();
+
+        Touch(profile);
+
+        await Save(
+            b.Id,
+            "booking_accepted",
+            ct);
+
+        return BookingDto(b);
+    }
+
+    public async Task<CareerBookingResponse> DeclineAsync(
+        Guid actor,
+        Guid id,
+        BookingActionRequest request,
+        CancellationToken ct)
+    {
+        var b = await RequiredBooking(
+            actor,
+            id,
+            true,
+            false,
+            ct);
+
+        Revision(b.Revision, request.Revision);
+
+        if (b.LifecycleVersion < 2 ||
+            b.Status != CareerBookingStatus.AwaitingConsultant ||
+            b.StartUtc <= Now)
+        {
+            throw new ConflictException(
+                "This booking is not awaiting consultant decision.");
+        }
+
+        if (request.Reason?.Length > 1000)
+        {
+            throw new BadRequestException(
+                "Decline reason is too long.");
+        }
+
+        var profile = await repository.ProfileAsync(
+                          b.ConsultantId,
+                          ct)
+                      ?? throw new NotFoundException(
+                          "Consultant not found.");
+
+        RequireVerified(profile);
+
+        b.Status = CareerBookingStatus.CancelledByConsultant;
+
+        b.ConsultantDecision =
+            CareerConsultantBookingDecision.Declined;
+
+        b.ConsultantDecisionAtUtc = Now;
+        b.ConsultantDecisionByUserId = actor;
+
+        b.CancellationReason =
+            Text(request.Reason) ??
+            "Consultant declined the booking.";
+
+        b.CancelledByUserId = actor;
+        b.CancelledAtUtc = Now;
+        b.Revision = Guid.NewGuid();
+
+        Touch(profile);
+
+        await Save(
+            b.Id,
+            "booking_declined",
+            ct);
+
+        return BookingDto(b);
+    }
     public async Task<CareerBookingResponse> SetStatusAsync(
         Guid actor,
         Guid id,

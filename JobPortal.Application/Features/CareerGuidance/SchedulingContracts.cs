@@ -64,4 +64,16 @@ public interface ICareerSchedulingService
     Task<CareerBookingResponse> GetAsync(Guid actor, Guid id, bool consultant, bool admin, CancellationToken ct);
     Task<CareerBookingResponse> CancelAsync(Guid actor, Guid id, bool consultant, BookingActionRequest request, CancellationToken ct);
     Task<CareerBookingResponse> SetStatusAsync(Guid actor, Guid id, BookingStatusRequest request, CancellationToken ct);
+
+    Task<CareerBookingResponse> AcceptAsync(
+    Guid actor,
+    Guid id,
+    BookingActionRequest request,
+    CancellationToken ct);
+
+    Task<CareerBookingResponse> DeclineAsync(
+        Guid actor,
+        Guid id,
+        BookingActionRequest request,
+        CancellationToken ct);
 }

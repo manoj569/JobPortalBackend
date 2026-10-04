@@ -3,15 +3,16 @@ using JobPortal.Application.Abstractions.Persistence;
 using JobPortal.Application.Common.Exceptions;
 using JobPortal.Application.Common.Validation;
 using JobPortal.Shared.Models;
+using JobPortal.Application.Abstractions.Candidates;
+using JobPortal.Application.Features.Candidates;
+using JobPortal.Domain.Enums;
 
 namespace JobPortal.Application.Features.Memberships;
 
 public sealed class MembershipService(
     IMembershipRepository memberships,
-    IUnitOfWork unitOfWork) : IMembershipService
+    ICandidateService candidates) : IMembershipService
 {
-    private const string JobApplicationPlanCode = "CareerHarborMembership";
-
     public async Task<ApplicationAccessResponse> GetApplicationAccessAsync(
         Guid? userId,
         string jobSlug,
@@ -27,24 +28,10 @@ public sealed class MembershipService(
                 "Login Required");
         }
 
-        var membership = await memberships.GetActiveForUserAsync(
-            userId.Value,
-            JobApplicationPlanCode,
-            cancellationToken);
-
-        if (membership is null)
-        {
-            return new ApplicationAccessResponse(
-                ApplicationAccessStatus.PaymentRequired,
-                "Payment Required");
-        }
-
-        await memberships.RecordApplicationAsync(
-            userId.Value,
-            job.JobId,
-            cancellationToken);
-
-        await unitOfWork.SaveChangesAsync(cancellationToken);
+        // The shared candidate workflow owns authorization, duplicate detection,
+        // quota consumption and the atomic save before an employer URL is returned.
+        await candidates.ApplyJobAsync(userId.Value, job.JobId,
+            new CreateJobApplicationRequest(ApplicationMethod: ApplicationMethod.External), cancellationToken);
 
         return new ApplicationAccessResponse(
             ApplicationAccessStatus.Granted,

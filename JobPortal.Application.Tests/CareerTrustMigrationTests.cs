@@ -49,6 +49,33 @@ public sealed class CareerTrustMigrationTests
         Assert.False(db.Database.HasPendingModelChanges());
         var designer = new AddCareerGuidanceReviewsDisputesAndTrust().TargetModel;
         var snapshot = db.GetService<IMigrationsAssembly>().ModelSnapshot!.Model;
-        Assert.Equal(snapshot.GetEntityTypes().Select(e => e.Name).Order(), designer.GetEntityTypes().Select(e => e.Name).Order());
+        // Later migrations legitimately add unrelated entities. Compare only the three
+        // trust entities owned by this migration, retaining their schema-level checks.
+        foreach (var type in new[] { typeof(CareerGuidanceReview), typeof(CareerGuidanceDispute), typeof(CareerGuidanceDisputeEvidence) })
+        {
+            var historical = designer.FindEntityType(type.FullName!)!;
+            var current = snapshot.FindEntityType(type.FullName!)!;
+            Assert.NotNull(historical);
+            Assert.NotNull(current);
+            Assert.Equal(historical.GetTableName(), current.GetTableName());
+            Assert.Equal(historical.GetSchema(), current.GetSchema());
+            Assert.Equal(historical.GetProperties().OrderBy(p => p.Name).Select(p =>
+                (p.Name, p.GetColumnName(), p.GetColumnType(), p.IsNullable, p.IsConcurrencyToken)),
+                current.GetProperties().OrderBy(p => p.Name).Select(p =>
+                (p.Name, p.GetColumnName(), p.GetColumnType(), p.IsNullable, p.IsConcurrencyToken)));
+            Assert.Equal(historical.FindPrimaryKey()!.Properties.Select(p => p.Name), current.FindPrimaryKey()!.Properties.Select(p => p.Name));
+            Assert.Equal(historical.GetIndexes().OrderBy(i => i.GetDatabaseName()).Select(i =>
+                (i.GetDatabaseName(), Columns: string.Join(",", i.Properties.Select(p => p.Name)), i.IsUnique, Filter: i.GetFilter())),
+                current.GetIndexes().OrderBy(i => i.GetDatabaseName()).Select(i =>
+                (i.GetDatabaseName(), Columns: string.Join(",", i.Properties.Select(p => p.Name)), i.IsUnique, Filter: i.GetFilter())));
+            Assert.Equal(historical.GetForeignKeys().OrderBy(f => f.GetConstraintName()).Select(f =>
+                (f.GetConstraintName(), Columns: string.Join(",", f.Properties.Select(p => p.Name)), f.PrincipalEntityType.Name,
+                    PrincipalColumns: string.Join(",", f.PrincipalKey.Properties.Select(p => p.Name)), f.DeleteBehavior)),
+                current.GetForeignKeys().OrderBy(f => f.GetConstraintName()).Select(f =>
+                (f.GetConstraintName(), Columns: string.Join(",", f.Properties.Select(p => p.Name)), f.PrincipalEntityType.Name,
+                    PrincipalColumns: string.Join(",", f.PrincipalKey.Properties.Select(p => p.Name)), f.DeleteBehavior)));
+            Assert.Equal(historical.GetCheckConstraints().OrderBy(c => c.Name).Select(c => (c.Name, c.Sql)),
+                current.GetCheckConstraints().OrderBy(c => c.Name).Select(c => (c.Name, c.Sql)));
+        }
     }
 }

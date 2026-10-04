@@ -3,6 +3,7 @@ using System;
 using JobPortal.Persistence.Context;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace JobPortal.Persistence.Postgres.Migrations
 {
     [DbContext(typeof(JobPortalDbContext))]
-    partial class JobPortalDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261003120351_AddCareerGuidancePaymentLifecycleFoundation")]
+    partial class AddCareerGuidancePaymentLifecycleFoundation
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -5338,99 +5341,6 @@ namespace JobPortal.Persistence.Postgres.Migrations
                     b.ToTable("Skills", (string)null);
                 });
 
-            modelBuilder.Entity("JobPortal.Domain.Entities.SupportTicket", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("AdminNotes")
-                        .HasMaxLength(5000)
-                        .HasColumnType("character varying(5000)");
-
-                    b.Property<int>("Category")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime?>("DeletedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Description")
-                        .IsRequired()
-                        .HasMaxLength(5000)
-                        .HasColumnType("character varying(5000)");
-
-                    b.Property<string>("Email")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("character varying(256)");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(201)
-                        .HasColumnType("character varying(201)");
-
-                    b.Property<DateTime?>("ResolvedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<long>("Revision")
-                        .IsConcurrencyToken()
-                        .HasColumnType("bigint");
-
-                    b.Property<string>("ScreenshotPath")
-                        .HasMaxLength(40)
-                        .HasColumnType("character varying(40)");
-
-                    b.Property<int>("Status")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Subject")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<string>("TicketNumber")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("character varying(40)");
-
-                    b.Property<DateTime?>("UpdatedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid?>("UserId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CreatedAtUtc");
-
-                    b.HasIndex("Email");
-
-                    b.HasIndex("IsDeleted");
-
-                    b.HasIndex("TicketNumber")
-                        .IsUnique();
-
-                    b.HasIndex("Category", "CreatedAtUtc");
-
-                    b.HasIndex("Status", "CreatedAtUtc");
-
-                    b.HasIndex("UserId", "CreatedAtUtc");
-
-                    b.ToTable("SupportTickets", null, t =>
-                        {
-                            t.HasCheckConstraint("CK_SupportTickets_Category", "\"Category\" BETWEEN 1 AND 10");
-
-                            t.HasCheckConstraint("CK_SupportTickets_ResolvedAtUtc", "(\"Status\" = 3 AND \"ResolvedAtUtc\" IS NOT NULL) OR (\"Status\" <> 3 AND \"ResolvedAtUtc\" IS NULL)");
-
-                            t.HasCheckConstraint("CK_SupportTickets_Status", "\"Status\" BETWEEN 1 AND 4");
-                        });
-                });
-
             modelBuilder.Entity("JobPortal.Domain.Entities.User", b =>
                 {
                     b.Property<Guid>("Id")
@@ -6965,14 +6875,6 @@ namespace JobPortal.Persistence.Postgres.Migrations
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("User");
-                });
-
-            modelBuilder.Entity("JobPortal.Domain.Entities.SupportTicket", b =>
-                {
-                    b.HasOne("JobPortal.Domain.Entities.User", null)
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("JobPortal.Domain.Entities.User", b =>

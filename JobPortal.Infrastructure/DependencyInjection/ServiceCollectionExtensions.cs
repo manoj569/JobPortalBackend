@@ -46,6 +46,14 @@ public static class ServiceCollectionExtensions
             client.Timeout = TimeSpan.FromSeconds(10);
         });
         services.AddScoped<IEmailService, BrevoEmailService>();
+        services.AddOptions<JobPortal.Application.Features.Support.SupportSettings>()
+            .Bind(configuration.GetSection(JobPortal.Application.Features.Support.SupportSettings.SectionName))
+            .Validate(options => string.IsNullOrWhiteSpace(options.SupportEmail) ||
+                System.Net.Mail.MailAddress.TryCreate(options.SupportEmail, out var address) &&
+                address.Address == options.SupportEmail && !options.SupportEmail.Any(char.IsControl),
+                "SupportSettings:SupportEmail must be a valid email address.")
+            .ValidateOnStart();
+        services.AddSingleton<JobPortal.Application.Features.Support.ISupportScreenshotStorage, LocalSupportScreenshotStorage>();
         services.AddHttpClient(AdzunaJobSourceProvider.HttpClientName, client =>
         {
             client.BaseAddress = new Uri("https://api.adzuna.com/");

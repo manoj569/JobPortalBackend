@@ -46,6 +46,8 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddApplication(this IServiceCollection services)
     {
         services.AddValidatorsFromAssembly(typeof(ServiceCollectionExtensions).Assembly);
+        services.AddScoped<JobPortal.Application.Features.Support.ISupportTicketService,
+            JobPortal.Application.Features.Support.SupportTicketService>();
         services.AddScoped<JobPortal.Application.Features.Notifications.NotificationOutbox>();
         services.AddScoped<JobPortal.Application.Features.Notifications.NotificationDispatcher>();
         services.AddScoped<JobPortal.Application.Features.CareerGuidance.ICareerGuidanceService,

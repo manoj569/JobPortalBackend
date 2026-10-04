@@ -125,12 +125,39 @@ public sealed class CareerFinanceService(ICareerFinanceRepository repository, IU
         if (!b.IsDeleted && b.Status == CareerBookingStatus.Pending && b.StartUtc > Now && !b.Consultant.IsDeleted &&
             b.Consultant.VerificationStatus == ConsultantVerificationStatus.Verified && !b.Consultant.User.IsDeleted && b.Consultant.User.Status == UserStatus.Active)
         {
-            b.Status = CareerBookingStatus.Confirmed;
+            if (b.LifecycleVersion >= 2)
+            {
+                b.Status = CareerBookingStatus.AwaitingConsultant;
+
+                foreach (var recipient in new[] { b.CandidateUserId, b.Consultant.UserId }.Distinct())
+                    notifications.Enqueue(
+                        NotificationSource.CareerConfirmation,
+                        b.Id,
+                        Guid.Empty,
+                        recipient,
+                        $"career-payment-secured:{b.Id:D}",
+                        "Career guidance payment secured",
+                        recipient == b.CandidateUserId
+                            ? $"Your payment is secured. The consultant now needs to accept your session scheduled for {b.StartUtc:yyyy-MM-dd HH:mm} UTC."
+                            : $"A candidate has paid for a Career Guidance session scheduled for {b.StartUtc:yyyy-MM-dd HH:mm} UTC. Please review the booking and accept or decline it.");
+            }
+            else
+            {
+                // Legacy lifecycle remains unchanged.
+                b.Status = CareerBookingStatus.Confirmed;
+
+                foreach (var recipient in new[] { b.CandidateUserId, b.Consultant.UserId }.Distinct())
+                    notifications.Enqueue(
+                        NotificationSource.CareerConfirmation,
+                        b.Id,
+                        Guid.Empty,
+                        recipient,
+                        $"career-confirmation:{b.Id:D}",
+                        "Career guidance booking confirmed",
+                        $"Your Career Guidance booking is confirmed for {b.StartUtc:yyyy-MM-dd HH:mm} UTC. Open your authenticated booking details to prepare.");
+            }
+
             b.Consultant.Revision = Guid.NewGuid();
-            foreach (var recipient in new[] { b.CandidateUserId, b.Consultant.UserId }.Distinct())
-                notifications.Enqueue(NotificationSource.CareerConfirmation, b.Id, Guid.Empty, recipient,
-                    $"career-confirmation:{b.Id:D}", "Career guidance booking confirmed",
-                    $"Your Career Guidance booking is confirmed for {b.StartUtc:yyyy-MM-dd HH:mm} UTC. Open your authenticated booking details to prepare.");
         }
         else p.RequiresRefundReview = true;
         b.Revision = Guid.NewGuid();
