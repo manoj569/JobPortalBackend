@@ -31,10 +31,8 @@ public sealed class AIResumeRepository(JobPortalDbContext context) : IAIResumeRe
             return result;
         });
     }
-    public Task<User?> CandidateAsync(Guid userId, CancellationToken ct) => context.Users
-        .Include(x => x.Role).Include(x => x.ResumeProfile).Include(x => x.CandidateSkills)
-        .Include(x => x.CandidateExperiences).Include(x => x.CandidateEducation).Include(x => x.CandidateProjects)
-        .Include(x => x.CandidateCertifications).Include(x => x.CandidateProfessionalLinks).AsSplitQuery()
+    public Task<User?> CandidateAsync(Guid userId, CancellationToken ct) => context.Users.AsNoTracking()
+        .Include(x => x.Role).Include(x => x.ResumeProfile)
         .SingleOrDefaultAsync(x => x.Id == userId && x.Status == UserStatus.Active && x.Role.Name == "Candidate", ct);
     public Task<Job?> JobAsync(Guid jobId, DateTime now, CancellationToken ct) => context.Jobs.Include(x => x.Company)
         .SingleOrDefaultAsync(x => x.Id == jobId && x.Status == JobStatus.Published && !x.IsHidden &&

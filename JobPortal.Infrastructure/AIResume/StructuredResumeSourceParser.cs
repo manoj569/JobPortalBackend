@@ -14,8 +14,9 @@ public sealed class StructuredResumeSourceParser(IResumeStorage storage, IResume
         ct.ThrowIfCancellationRequested();
         if (candidate.ResumeProfile is null || candidate.ResumeStorageKey is null || candidate.ResumeFileName is null)
             throw new InvalidDataException("Candidate resume source is unavailable.");
-        await using var resume = await storage.OpenReadAsync(candidate.ResumeStorageKey, ct)
-            ?? throw new InvalidDataException("Candidate resume file was not found.");
+        await using var resume = await storage.OpenReadAsync(candidate.Id, candidate.ResumeStorageKey,
+            candidate.ResumeProfile.Id, candidate.ResumeFileName, candidate.ResumeContentType, ct)
+            ?? throw new ResumeStorageObjectNotFoundException();
         var extractedText = await textExtractor.ExtractAsync(resume, Path.GetExtension(candidate.ResumeFileName), ct);
         // The owned upload is authoritative. Profile keywords/tables are not a substitute for its facts.
         var source = UploadedResumeFactParser.Parse(extractedText);

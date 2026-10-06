@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using JobPortal.Application.Abstractions.Candidates;
 using JobPortal.Application.Abstractions.Payments;
 using JobPortal.Application.Common.Exceptions;
 using JobPortal.Domain.Entities;
@@ -26,6 +27,9 @@ public sealed class AIResumeService(IAIResumeRepository repository, IAIResumePro
     private static readonly Action<ILogger, string, Exception?> LogAnalysisRejected =
         LoggerMessage.Define<string>(LogLevel.Warning, new EventId(7406, "AIResumeAnalysisRejected"),
             "AIResumeAnalysisRejected {Diagnostic}");
+    private static readonly Action<ILogger, Guid, Guid, Exception?> LogSourceMissing =
+        LoggerMessage.Define<Guid, Guid>(LogLevel.Warning, new EventId(7409, "AIResumeSourceMissing"),
+            "AIResumeSourceMissing OwnerUserId={OwnerUserId} ResumeId={ResumeId}");
     private static readonly Action<ILogger, string, Exception?> LogPatchRejected =
         LoggerMessage.Define<string>(LogLevel.Warning, new EventId(7404, "AIResumeGroundingRejected"), "AIResumeGroundingRejected {Diagnostic}");
     private static readonly Action<ILogger, int, int, int, string, Exception?> LogPatchCounts =
@@ -46,8 +50,9 @@ public sealed class AIResumeService(IAIResumeRepository repository, IAIResumePro
         if (request.SourceResumeId == Guid.Empty || (request.JobId.HasValue == !string.IsNullOrWhiteSpace(request.ExternalJobDescription)))
             throw Invalid("Provide one resume source and either a CareerHarbor job or an external job description.", "invalid_session");
         var candidate = await repository.CandidateAsync(userId, ct) ?? throw new NotFoundException("Candidate was not found.");
-        if (candidate.ResumeProfile?.Id != request.SourceResumeId || candidate.ResumeStorageKey is null)
+        if (candidate.ResumeProfile?.Id != request.SourceResumeId)
             throw new NotFoundException("Resume source was not found.");
+        if (candidate.ResumeStorageKey is null) throw ReuploadRequired();
         ResumeMasterDocument? master = null;
         AIResumeSession? preparedSession = null;
         try
@@ -59,11 +64,20 @@ public sealed class AIResumeService(IAIResumeRepository repository, IAIResumePro
                 var parserCandidate = master is null ? candidate : new User { Id = candidate.Id, ResumeProfile = candidate.ResumeProfile,
                     ResumeStorageKey = master.StorageKey, ResumeFileName = "master" + master.Extension };
                 source = await sourceParser.ParseAsync(parserCandidate, ct);
-                if (master is not null) master = await masterDocuments!.BindAsync(master, source, ct);
+                if (master is not null) master = await masterDocuments!.BindAsync(userId, master, source, ct);
+            }
+            catch (ResumeStorageObjectNotFoundException)
+            {
+                if (logger is not null) LogSourceMissing(logger, userId, request.SourceResumeId, null);
+                throw ReuploadRequired();
+            }
+            catch (UnsupportedResumeFormatException)
+            {
+                throw Invalid("This resume file format is not supported for AI Resume.", "unsupported_resume_format");
             }
             catch (Exception ex)
             {
-                if (ex is InvalidDataException) throw Invalid("The uploaded resume does not contain a usable source document.", "invalid_resume_source");
+                if (ex is InvalidDataException) throw Invalid("The uploaded resume could not be read or parsed. Please upload a valid PDF, DOC, or DOCX file.", "invalid_resume_source");
                 throw;
             }
 
@@ -109,13 +123,13 @@ public sealed class AIResumeService(IAIResumeRepository repository, IAIResumePro
         {
             if (master is not null)
             {
-                if (preparedSession is null) await DeleteDocument(master.StorageKey);
+                if (preparedSession is null) await DeleteDocument(userId, master.StorageKey);
                 else
                 {
                     try
                     {
                         var persisted = await repository.SessionAsync(userId, preparedSession.Id, CancellationToken.None);
-                        if (persisted is null || SessionMaster(persisted)?.StorageKey != master.StorageKey) await DeleteDocument(master.StorageKey);
+                        if (persisted is null || SessionMaster(persisted)?.StorageKey != master.StorageKey) await DeleteDocument(userId, master.StorageKey);
                     }
                     catch { /* An ambiguous commit must not delete a persisted session's master document. */ }
                 }
@@ -342,7 +356,7 @@ public sealed class AIResumeService(IAIResumeRepository repository, IAIResumePro
                 var applied = ResumePatchGuard.Apply(reservation.Source, raw.Content, storedSession.JobDescription,
                     editable.Select(x => x.Id).ToHashSet(StringComparer.Ordinal), LogRejectedPatch);
                 if (applied.AcceptedCount == 0) throw new AIResumeProviderException("no_safe_tailoring_changes");
-                stagedArtifact = await masterDocuments.CreateArtifactAsync(master, reservation.Source, applied, ct);
+                stagedArtifact = await masterDocuments.CreateArtifactAsync(userId, master, reservation.Source, applied, ct);
                 tailoring = new(2, applied.Content, applied.Decisions, applied.EmphasizedSkillEvidenceIds, master, stagedArtifact);
                 generated = new(applied.Content, raw.Model, raw.InputTokens, raw.OutputTokens);
                 if (environment?.IsDevelopment() == true && logger is not null)
@@ -445,7 +459,7 @@ public sealed class AIResumeService(IAIResumeRepository repository, IAIResumePro
         try
         {
             if (ReadTailoring(resume.ContentJson) is { } tailoring)
-                return await (masterDocuments ?? throw new InvalidDataException("Document service is unavailable.")).DownloadAsync(tailoring, format, ct);
+                return await (masterDocuments ?? throw new InvalidDataException("Document service is unavailable.")).DownloadAsync(userId, tailoring, format, ct);
             return renderer.Render(Deserialize<TailoredResumeContent>(resume.ContentJson), format == "original" ? "pdf" : format);
         }
         catch (ArgumentException) { throw Invalid("Choose PDF, DOCX, or TXT.", "invalid_download_format"); }
@@ -485,7 +499,7 @@ public sealed class AIResumeService(IAIResumeRepository repository, IAIResumePro
         var editable = ResumePatchGuard.Targets(source).Where(x => stored.MasterDocument.Extension != ".docx" || stored.MasterDocument.Bindings.Any(b => b.TargetId == x.Id)).Select(x => x.Id).ToHashSet(StringComparer.Ordinal);
         var applied = ResumePatchGuard.Apply(source, new(proposals, stored.EmphasizedSkillEvidenceIds), jd, editable);
         if (applied.Decisions.Any(x => x.Status == "rejected")) throw Invalid("Edited text is not supported by the source resume.", "unsupported_claims");
-        var artifact = await documents.CreateArtifactAsync(stored.MasterDocument, source, applied, ct);
+        var artifact = await documents.CreateArtifactAsync(userId, stored.MasterDocument, source, applied, ct);
         try
         {
             var result = await repository.WriteAsync(userId, async () =>
@@ -505,7 +519,7 @@ public sealed class AIResumeService(IAIResumeRepository repository, IAIResumePro
             try
             {
                 var persisted = await repository.ResumeAsync(userId, resume.Id, CancellationToken.None);
-                if (ReadTailoring(persisted?.ContentJson ?? "{}")?.Artifact.StorageKey != artifact.StorageKey) await DeleteDocument(artifact.StorageKey);
+                if (ReadTailoring(persisted?.ContentJson ?? "{}")?.Artifact.StorageKey != artifact.StorageKey) await DeleteDocument(userId, artifact.StorageKey);
             }
             catch { /* Storage cleanup cannot hide the original persistence failure. */ }
             throw;
@@ -604,6 +618,9 @@ public sealed class AIResumeService(IAIResumeRepository repository, IAIResumePro
     };
     private static string SafeSnapshot(string? value, int max) => string.IsNullOrWhiteSpace(value) ? "" : value.Trim()[..Math.Min(value.Trim().Length, max)];
     private static BadRequestException Invalid(string message, string code) => new(message, code);
+    private static BadRequestException ReuploadRequired() => new(
+        "Please upload your resume again before using AI Resume. Your existing resume was uploaded before document-preserving AI Resume support was enabled.",
+        "resume_source_reupload_required");
     private static long MinorUnits(decimal amount) => checked((long)decimal.Round(amount * 100m, 0, MidpointRounding.AwayFromZero));
     private static AIResumeCreditResponse Wallet(AIResumeCreditWallet wallet) => new(wallet.Balance, wallet.Reserved, wallet.LifetimePurchased, wallet.LifetimeConsumed);
     private static AIResumeCheckout ToCheckout(AIResumePurchase purchase) => new(purchase.Id, purchase.MerchantOrderId,
@@ -640,10 +657,10 @@ public sealed class AIResumeService(IAIResumeRepository repository, IAIResumePro
             if (!string.IsNullOrEmpty(credential)) metadata = metadata.Replace(credential, "[credential redacted]", StringComparison.Ordinal);
         LogPatchRejected(logger, metadata, null);
     }
-    private async Task DeleteDocument(string key)
+    private async Task DeleteDocument(Guid userId, string key)
     {
         if (masterDocuments is null) return;
-        try { await masterDocuments.DeleteAsync(key, CancellationToken.None); }
+        try { await masterDocuments.DeleteAsync(userId, key, CancellationToken.None); }
         catch { /* An orphan must not prevent credit release or overwrite the original failure. */ }
     }
     private async Task DeleteUnpersistedArtifact(Guid userId, Guid generationId, string key)
@@ -651,7 +668,7 @@ public sealed class AIResumeService(IAIResumeRepository repository, IAIResumePro
         try
         {
             var persisted = await repository.ResumeForGenerationAsync(userId, generationId, CancellationToken.None);
-            if (ReadTailoring(persisted?.ContentJson ?? "{}")?.Artifact.StorageKey != key) await DeleteDocument(key);
+            if (ReadTailoring(persisted?.ContentJson ?? "{}")?.Artifact.StorageKey != key) await DeleteDocument(userId, key);
         }
         catch { /* An ambiguous commit must never delete a successfully persisted document. */ }
     }

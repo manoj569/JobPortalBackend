@@ -222,7 +222,8 @@ public sealed class UploadedResumeSourcePipelineTests
     internal sealed class DocxStorage : IResumeStorage
     {
         private readonly Dictionary<string, byte[]> copies = [];
-        public Task<Stream?> OpenReadAsync(string storageKey, CancellationToken cancellationToken = default)
+        public Task<Stream?> OpenReadAsync(Guid ownerUserId, string storageKey, Guid? resumeId = null,
+            string? originalFileName = null, string? contentType = null, CancellationToken cancellationToken = default)
         {
             if (copies.TryGetValue(storageKey, out var bytes)) return Task.FromResult<Stream?>(new MemoryStream(bytes, false));
             Assert.Equal("owned.docx", storageKey);
@@ -238,12 +239,13 @@ public sealed class UploadedResumeSourcePipelineTests
             stream.Position = 0;
             return Task.FromResult<Stream?>(stream);
         }
-        public async Task<string> StoreAsync(Stream content, string extension, CancellationToken cancellationToken = default)
+        public async Task<string> StoreAsync(Guid ownerUserId, Stream content, string extension, Guid? resumeId = null,
+            string? originalFileName = null, string? contentType = null, CancellationToken cancellationToken = default)
         {
             using var memory = new MemoryStream(); await content.CopyToAsync(memory, cancellationToken);
             var key = Guid.NewGuid().ToString("N") + extension; copies[key] = memory.ToArray(); return key;
         }
-        public Task DeleteAsync(string storageKey, CancellationToken cancellationToken = default) { copies.Remove(storageKey); return Task.CompletedTask; }
+        public Task DeleteAsync(Guid ownerUserId, string storageKey, CancellationToken cancellationToken = default) { copies.Remove(storageKey); return Task.CompletedTask; }
     }
 
 }

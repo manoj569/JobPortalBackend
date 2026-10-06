@@ -96,12 +96,22 @@ rename, reorder, restyle, or rebuild the original skill section.
 
 ## Original storage, persistence, and document behavior
 
-Original upload bytes already exist: `User.ResumeStorageKey` and `ResumeFileName` reference
-`IResumeStorage`/`LocalResumeStorage`, outside the public web root. Upload replacement can delete the
-previous key, so each new AI Resume session freezes a separate copy and parses that frozen copy.
-Later uploads/deletions cannot change the session's truth source or prevent regeneration.
+`User.ResumeStorageKey` and `ResumeFileName` reference private `IResumeStorage` objects. Production
+`IResumeStorage` is PostgreSQL-backed (`ResumeDocumentBlobs`), with owner-scoped reads, original file
+metadata, bounded `bytea` content, and SHA-256 integrity metadata. `LocalResumeStorage` is no longer
+registered as the production provider. `ResumeStorage:RootPath` is used only as a transitional,
+owner-reference-checked source for lazily promoting an old local object that still exists; new uploads
+and AI Resume copies are stored in PostgreSQL. The local filesystem is never the durable target.
 
-No database schema change is required. Existing JSON columns store version 2 envelopes:
+Upload persistence and candidate metadata cannot be committed in the same unit because blobs are saved
+through an independent context. If metadata persistence fails, an unreferenced blob can remain; it is
+preferable to preserve a recoverable document after an ambiguous commit. Replacement/deletion removes
+an old blob only after application references have been checked. Every new AI Resume session freezes a
+separate copy and parses that copy, so later uploads/deletions cannot change its truth source.
+
+The additive PostgreSQL migration `20261006173014_AddDurableResumeDocumentStorage` creates the private
+blob table; it must be applied before deploying the new application version. Existing JSON columns
+continue to store version 2 envelopes:
 
 - `AIResumeSession.SourceJson`: unchanged factual source JSON.
 - `AIResumeSession.EvidenceJson`: `{ version, evidence, masterDocument }`.
@@ -112,14 +122,18 @@ No database schema change is required. Existing JSON columns store version 2 env
 Existing candidate/session/generation/version/revision relations associate the artifact with its owner
 and source. Each revision has a separate stored artifact; previous artifacts remain for history.
 SHA-256 verifies master/artifact integrity. Failed unpersisted artifacts are cleaned up best-effort;
-ambiguous commits never intentionally delete an associated artifact or master. Filesystem and database
-writes cannot form one atomic transaction, so persistent storage/DB outages can leave orphan files;
-retention/garbage collection is not introduced in this scoped change.
+ambiguous commits never intentionally delete an associated artifact or master. Blob and session writes
+cannot form one atomic transaction, so database outages can leave orphan blobs; retention/garbage
+collection is not introduced in this scoped change.
 
 Old plain content/evidence records remain readable and downloadable. Old sessions without a frozen
-master fail generation safely with `master_snapshot_required` and release the reservation. Create a
-fresh session; a new upload is unnecessary while the candidate's original stored upload remains available.
-The code does not silently reread a changed current upload for an old session.
+master fail generation safely with `master_snapshot_required` and release the reservation. If an old
+candidate file still exists in the configured legacy local directory and a candidate/job-application
+record references that exact key, the first owner-scoped read promotes it into PostgreSQL. If no
+recoverable object exists (including files lost from an ephemeral Render instance), session creation
+returns `resume_source_reupload_required`; the UI should ask the candidate to upload again. Corrupt
+files remain `invalid_resume_source`, and unsupported formats use `unsupported_resume_format`. The code
+does not silently reread a changed current upload for an old session.
 
 ### DOCX
 

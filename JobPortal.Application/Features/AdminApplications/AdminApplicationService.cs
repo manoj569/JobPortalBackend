@@ -56,7 +56,8 @@ public sealed class AdminApplicationService(
         if (!ResumeContentTypes.TryGetValue(extension, out var contentType))
             throw new NotFoundException("Application resume was not found.");
         var content = await resumeStorage.OpenReadAsync(
-            application.ResumeStorageKey, cancellationToken)
+            application.UserId, application.ResumeStorageKey, originalFileName: application.ResumeFileName,
+            contentType: contentType, cancellationToken: cancellationToken)
             ?? throw new NotFoundException("Application resume was not found.");
         return new(content, $"resume{extension.ToLowerInvariant()}", contentType);
     }

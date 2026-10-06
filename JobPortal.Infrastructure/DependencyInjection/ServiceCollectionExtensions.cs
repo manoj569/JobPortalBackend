@@ -141,7 +141,6 @@ public static class ServiceCollectionExtensions
             client.Timeout = TimeSpan.FromSeconds(15);
         }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false }).RemoveAllLoggers();
         services.AddSingleton<IMembershipPlanProvider, ConfigurationMembershipPlanProvider>();
-        services.AddSingleton<IResumeStorage, LocalResumeStorage>();
         services.AddSingleton<IResumeTextExtractor, ResumeTextExtractor>();
         services.AddOptions<JobPortal.Application.Features.AIResume.AIResumeOptions>()
             .Bind(configuration.GetSection(JobPortal.Application.Features.AIResume.AIResumeOptions.SectionName))

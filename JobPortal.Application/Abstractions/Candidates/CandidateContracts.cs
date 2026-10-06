@@ -52,9 +52,16 @@ public interface IResumeTextExtractor
 
 public interface IResumeStorage
 {
-    Task<string> StoreAsync(Stream content, string extension, CancellationToken cancellationToken = default);
-    Task<Stream?> OpenReadAsync(string storageKey, CancellationToken cancellationToken = default);
-    Task DeleteAsync(string storageKey, CancellationToken cancellationToken = default);
+    Task<string> StoreAsync(Guid ownerUserId, Stream content, string extension, Guid? resumeId = null,
+        string? originalFileName = null, string? contentType = null, CancellationToken cancellationToken = default);
+    Task<Stream?> OpenReadAsync(Guid ownerUserId, string storageKey, Guid? resumeId = null,
+        string? originalFileName = null, string? contentType = null, CancellationToken cancellationToken = default);
+    Task DeleteAsync(Guid ownerUserId, string storageKey, CancellationToken cancellationToken = default);
+}
+
+public sealed class ResumeStorageObjectNotFoundException : Exception
+{
+    public ResumeStorageObjectNotFoundException() : base("The referenced resume document was not found.") { }
 }
 
 public sealed record StoredProfilePhoto(byte[] Content, string ContentType, int SizeBytes, Guid Version);

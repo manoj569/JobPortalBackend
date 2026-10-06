@@ -19,7 +19,7 @@ public static class ServiceCollectionExtensions
         var connectionString = configuration.GetConnectionString("DefaultConnection")
             ?? throw new InvalidOperationException("Connection string 'DefaultConnection' is not configured.");
 
-        services.AddDbContextPool<JobPortalDbContext>(options =>
+        services.AddPooledDbContextFactory<JobPortalDbContext>(options =>
             options.UseNpgsql(connectionString, npgsql =>
             {
                 npgsql.CommandTimeout(30);
@@ -30,6 +30,7 @@ public static class ServiceCollectionExtensions
                     TimeSpan.FromSeconds(5),
                     null);
             }), poolSize: 128);
+        services.AddScoped(provider => provider.GetRequiredService<IDbContextFactory<JobPortalDbContext>>().CreateDbContext());
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<JobPortal.Application.Features.AIResume.IAIResumeRepository, AIResumeRepository>();
         services.AddScoped<JobPortal.Application.Features.Support.ISupportTicketRepository, SupportTicketRepository>();
@@ -62,6 +63,9 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICandidateRepository, CandidateRepository>();
         services.AddScoped<ICandidateCompanyRepository, CandidateCompanyRepository>();
         services.AddScoped<IProfilePhotoStorage, PostgresProfilePhotoStorage>();
+        services.AddScoped<PostgresResumeStorage>(provider => new PostgresResumeStorage(
+            provider.GetRequiredService<IDbContextFactory<JobPortalDbContext>>(), configuration["ResumeStorage:RootPath"]));
+        services.AddScoped<IResumeStorage>(provider => provider.GetRequiredService<PostgresResumeStorage>());
         services.AddScoped<InterviewInsightRepository>();
         services.AddScoped<IInterviewInsightRepository>(provider => provider.GetRequiredService<InterviewInsightRepository>());
         services.AddScoped<IInterviewScheduleNotificationProcessor>(provider => provider.GetRequiredService<InterviewInsightRepository>());

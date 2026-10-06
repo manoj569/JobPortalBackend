@@ -392,20 +392,19 @@ public sealed class AdminApplicationManagementTests
         public Stream? Content { get; set; }
         public string? OpenedKey { get; private set; }
 
-        public Task<string> StoreAsync(
-            Stream content, string extension,
-            CancellationToken cancellationToken = default) =>
+        public Task<string> StoreAsync(Guid ownerUserId, Stream content, string extension, Guid? resumeId = null,
+            string? originalFileName = null, string? contentType = null, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
         public Task<Stream?> OpenReadAsync(
-            string storageKey, CancellationToken cancellationToken = default)
+            Guid ownerUserId, string storageKey, Guid? resumeId = null, string? originalFileName = null,
+            string? contentType = null, CancellationToken cancellationToken = default)
         {
             OpenedKey = storageKey;
             return Task.FromResult(Content);
         }
 
-        public Task DeleteAsync(
-            string storageKey, CancellationToken cancellationToken = default) =>
+        public Task DeleteAsync(Guid ownerUserId, string storageKey, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
     }
 

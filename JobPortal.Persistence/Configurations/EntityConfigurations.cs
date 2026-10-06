@@ -97,6 +97,27 @@ public sealed class CandidateResumeProfileConfiguration : IEntityTypeConfigurati
     }
 }
 
+public sealed class ResumeDocumentBlobConfiguration : IEntityTypeConfiguration<ResumeDocumentBlob>
+{
+    public void Configure(EntityTypeBuilder<ResumeDocumentBlob> builder)
+    {
+        builder.ToTable("ResumeDocumentBlobs", table => table.HasCheckConstraint(
+            "CK_ResumeDocumentBlobs_FileLength", "\"FileLength\" > 0 AND \"FileLength\" <= 10485760"));
+        builder.ConfigureBaseEntity();
+        builder.Property(x => x.StorageKey).HasMaxLength(64).IsRequired();
+        builder.Property(x => x.OriginalFileName).HasMaxLength(255).IsRequired();
+        builder.Property(x => x.ContentType).HasMaxLength(100).IsRequired();
+        builder.Property(x => x.Extension).HasMaxLength(8).IsRequired();
+        builder.Property(x => x.FileLength).IsRequired();
+        builder.Property(x => x.Sha256).HasMaxLength(64).IsRequired();
+        builder.Property(x => x.Content).HasColumnType("bytea").IsRequired();
+        builder.HasIndex(x => x.StorageKey).IsUnique();
+        builder.HasIndex(x => new { x.OwnerUserId, x.StorageKey });
+        builder.HasIndex(x => new { x.OwnerUserId, x.ResumeId });
+        builder.HasOne<User>().WithMany().HasForeignKey(x => x.OwnerUserId).OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
 public sealed class RoleConfiguration : IEntityTypeConfiguration<Role>
 {
     public void Configure(EntityTypeBuilder<Role> builder)

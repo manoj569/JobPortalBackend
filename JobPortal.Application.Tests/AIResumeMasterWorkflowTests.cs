@@ -35,6 +35,33 @@ public sealed class AIResumeMasterWorkflowTests
     }
 
     [Fact]
+    public async Task MissingLegacySourceReturnsActionableReuploadError()
+    {
+        await using var fixture = await Workflow.Create();
+        fixture.Storage.Files.Remove("owned.docx");
+
+        var error = await Assert.ThrowsAsync<BadRequestException>(() => fixture.Service.CreateSessionAsync(
+            fixture.UserId, new(fixture.SourceId, null, MasterResumeFixture.Jd), default));
+
+        Assert.Equal("resume_source_reupload_required", error.Code);
+        Assert.Equal("Please upload your resume again before using AI Resume. Your existing resume was uploaded before document-preserving AI Resume support was enabled.", error.Message);
+        Assert.Empty(fixture.Db.AIResumeSessions);
+    }
+
+    [Fact]
+    public async Task CorruptSourceKeepsInvalidSourceErrorInsteadOfReuploadError()
+    {
+        await using var fixture = await Workflow.Create();
+        fixture.Storage.Files["owned.docx"] = "not a DOCX package"u8.ToArray();
+
+        var error = await Assert.ThrowsAsync<BadRequestException>(() => fixture.Service.CreateSessionAsync(
+            fixture.UserId, new(fixture.SourceId, null, MasterResumeFixture.Jd), default));
+
+        Assert.Equal("invalid_resume_source", error.Code);
+        Assert.Empty(fixture.Db.AIResumeSessions);
+    }
+
+    [Fact]
     public async Task EightSafeTwoUnsafePersistOriginalFormatAndConsumeExactlyOneCredit()
     {
         await using var fixture = await Workflow.Create();

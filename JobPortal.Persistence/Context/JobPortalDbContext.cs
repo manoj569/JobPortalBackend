@@ -18,6 +18,7 @@ public sealed class JobPortalDbContext(DbContextOptions<JobPortalDbContext> opti
     public DbSet<User> Users => Set<User>();
     public DbSet<UserExternalLogin> UserExternalLogins => Set<UserExternalLogin>();
     public DbSet<CandidateResumeProfile> CandidateResumeProfiles => Set<CandidateResumeProfile>();
+    public DbSet<ResumeDocumentBlob> ResumeDocumentBlobs => Set<ResumeDocumentBlob>();
     public DbSet<CandidateSkill> CandidateSkills => Set<CandidateSkill>();
     public DbSet<CandidateProfilePhoto> CandidateProfilePhotos => Set<CandidateProfilePhoto>();
     public DbSet<CandidatePortfolio> CandidatePortfolios => Set<CandidatePortfolio>();

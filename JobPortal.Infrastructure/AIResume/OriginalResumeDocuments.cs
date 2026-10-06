@@ -13,26 +13,28 @@ public sealed class OriginalResumeDocuments(IResumeStorage storage, IAIResumeDoc
 {
     public async Task<ResumeMasterDocument> CaptureAsync(User candidate, CancellationToken ct)
     {
-        var extension = Path.GetExtension(candidate.ResumeFileName ?? "").ToLowerInvariant();
-        if (extension is not (".docx" or ".pdf" or ".doc") || candidate.ResumeStorageKey is null)
-            throw new InvalidDataException("Original resume is unavailable.");
-        var bytes = await Read(candidate.ResumeStorageKey, ct);
+        var extension = Path.GetExtension(candidate.ResumeFileName ?? candidate.ResumeStorageKey ?? "").ToLowerInvariant();
+        if (extension is not (".docx" or ".pdf" or ".doc")) throw new UnsupportedResumeFormatException();
+        if (candidate.ResumeStorageKey is null) throw new ResumeStorageObjectNotFoundException();
+        var bytes = await Read(candidate.Id, candidate.ResumeStorageKey, ct, candidate.ResumeProfile?.Id,
+            candidate.ResumeFileName, candidate.ResumeContentType);
         if (extension == ".docx") _ = DocxTextEditor.Bind(bytes, []);
         await using var input = new MemoryStream(bytes, writable: false);
-        var key = await storage.StoreAsync(input, extension, ct);
-        return new(key, extension, Hash(bytes), []);
+        var key = await storage.StoreAsync(candidate.Id, input, extension, candidate.ResumeProfile?.Id,
+            candidate.ResumeFileName, candidate.ResumeContentType, ct);
+        return new(key, extension, Hash(bytes), [], candidate.ResumeProfile?.Id);
     }
 
-    public async Task<ResumeMasterDocument> BindAsync(ResumeMasterDocument master, TailoredResumeContent source, CancellationToken ct)
+    public async Task<ResumeMasterDocument> BindAsync(Guid ownerUserId, ResumeMasterDocument master, TailoredResumeContent source, CancellationToken ct)
     {
-        var bytes = await VerifiedRead(master.StorageKey, master.Sha256, ct);
+        var bytes = await VerifiedRead(ownerUserId, master.StorageKey, master.Sha256, ct);
         return master with { Bindings = master.Extension == ".docx" ? DocxTextEditor.Bind(bytes, ResumePatchGuard.Targets(source)) : [] };
     }
 
-    public async Task<ResumeArtifact> CreateArtifactAsync(ResumeMasterDocument master, TailoredResumeContent source,
+    public async Task<ResumeArtifact> CreateArtifactAsync(Guid ownerUserId, ResumeMasterDocument master, TailoredResumeContent source,
         ResumePatchResult result, CancellationToken ct)
     {
-        var original = await VerifiedRead(master.StorageKey, master.Sha256, ct);
+        var original = await VerifiedRead(ownerUserId, master.StorageKey, master.Sha256, ct);
         byte[] bytes;
         string extension;
         if (master.Extension == ".docx")
@@ -43,37 +45,42 @@ public sealed class OriginalResumeDocuments(IResumeStorage storage, IAIResumeDoc
         else { bytes = fallback.Render(result.Content, "pdf").Content; extension = ".pdf"; }
         ct.ThrowIfCancellationRequested();
         await using var stream = new MemoryStream(bytes, writable: false);
-        var key = await storage.StoreAsync(stream, extension, ct);
+        var contentType = extension == ".docx"
+            ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document" : "application/pdf";
+        var fileName = extension == ".docx" ? "Tailored_Resume.docx" : "Tailored_Resume.pdf";
+        var key = await storage.StoreAsync(ownerUserId, stream, extension, master.ResumeId, fileName, contentType, ct);
         return new(key, extension, Hash(bytes));
     }
 
-    public async Task<AIResumeDownload> DownloadAsync(StoredTailoring tailoring, string format, CancellationToken ct)
+    public async Task<AIResumeDownload> DownloadAsync(Guid ownerUserId, StoredTailoring tailoring, string format, CancellationToken ct)
     {
         var capabilities = Capabilities(tailoring.MasterDocument);
         format = format.ToLowerInvariant();
         if (format == "original") format = capabilities.DefaultDownloadFormat;
         if (!capabilities.DownloadFormats.Contains(format, StringComparer.Ordinal)) throw new ArgumentException("Unsupported download format.", nameof(format));
         if (format == tailoring.Artifact.Extension.TrimStart('.'))
-            return new(await VerifiedRead(tailoring.Artifact.StorageKey, tailoring.Artifact.Sha256, ct),
+            return new(await VerifiedRead(ownerUserId, tailoring.Artifact.StorageKey, tailoring.Artifact.Sha256, ct),
                 format == "docx" ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document" : "application/pdf", $"Tailored_Resume.{format}");
         return fallback.Render(tailoring.Content, format);
     }
 
-    public Task DeleteAsync(string storageKey, CancellationToken ct) => storage.DeleteAsync(storageKey, ct);
+    public Task DeleteAsync(Guid ownerUserId, string storageKey, CancellationToken ct) => storage.DeleteAsync(ownerUserId, storageKey, ct);
     public ResumeDocumentCapabilities Capabilities(ResumeMasterDocument master) => master.Extension == ".docx"
         ? new("original_docx", "docx", true, "docx", ["docx", "txt"], "PDF conversion is unavailable. Text wrapping can change; mixed run styles are retained as closely as practical.")
         : new("rendered_fallback", master.Extension.TrimStart('.'), false, "pdf", ["pdf", "docx", "txt"],
             "Original layout and skill categories are not preserved by fallback rendering. Upload DOCX for original-format preservation.");
 
-    private async Task<byte[]> VerifiedRead(string key, string expectedHash, CancellationToken ct)
+    private async Task<byte[]> VerifiedRead(Guid ownerUserId, string key, string expectedHash, CancellationToken ct)
     {
-        var bytes = await Read(key, ct);
+        var bytes = await Read(ownerUserId, key, ct);
         if (Hash(bytes) != expectedHash) throw new InvalidDataException("Resume document integrity check failed.");
         return bytes;
     }
-    private async Task<byte[]> Read(string key, CancellationToken ct)
+    private async Task<byte[]> Read(Guid ownerUserId, string key, CancellationToken ct, Guid? resumeId = null,
+        string? originalFileName = null, string? contentType = null)
     {
-        await using var stream = await storage.OpenReadAsync(key, ct) ?? throw new InvalidDataException("Resume document was not found.");
+        await using var stream = await storage.OpenReadAsync(ownerUserId, key, resumeId, originalFileName,
+            contentType, ct) ?? throw new ResumeStorageObjectNotFoundException();
         using var result = new MemoryStream();
         var buffer = new byte[81920];
         int count;

@@ -1,6 +1,13 @@
 using JobPortal.Domain.Entities;
+using JobPortal.Application.Abstractions.Candidates;
+using JobPortal.Persistence;
 using JobPortal.Persistence.Context;
+using JobPortal.Persistence.Repositories;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace JobPortal.Application.Tests;
@@ -74,6 +81,40 @@ public sealed class PostgresPersistenceConfigurationTests
         Assert.True(owner.IsUnique);
         Assert.Equal("\"IsDeleted\" = FALSE", owner.GetFilter());
         Assert.Equal(DeleteBehavior.Cascade, Assert.Single(photo.GetForeignKeys()).DeleteBehavior);
+    }
+
+    [Fact]
+    public void ResumeDocumentBlobsArePrivateBoundedAndDurablePostgresBytea()
+    {
+        using var context = CreateContext();
+        var blob = context.GetService<IDesignTimeModel>().Model.FindEntityType(typeof(ResumeDocumentBlob))!;
+        Assert.Equal("ResumeDocumentBlobs", blob.GetTableName());
+        Assert.Equal("bytea", blob.FindProperty(nameof(ResumeDocumentBlob.Content))!.GetColumnType());
+        Assert.Contains(blob.GetCheckConstraints(), x => x.Name == "CK_ResumeDocumentBlobs_FileLength");
+        Assert.Contains(blob.GetIndexes(), x => x.IsUnique && x.Properties.Select(p => p.Name)
+            .SequenceEqual([nameof(ResumeDocumentBlob.StorageKey)]));
+        var ownerIndex = Assert.Single(blob.GetIndexes(), x => x.Properties.Select(p => p.Name)
+            .SequenceEqual([nameof(ResumeDocumentBlob.OwnerUserId), nameof(ResumeDocumentBlob.StorageKey)]));
+        Assert.False(ownerIndex.IsUnique);
+        var ownerFk = Assert.Single(blob.GetForeignKeys(), x => x.PrincipalEntityType.ClrType == typeof(User));
+        Assert.Equal(nameof(ResumeDocumentBlob.OwnerUserId), Assert.Single(ownerFk.Properties).Name);
+        Assert.Equal(DeleteBehavior.Cascade, ownerFk.DeleteBehavior);
+    }
+
+    [Fact]
+    public void ProductionResumeStorageIsRegisteredThroughPostgresContextFactory()
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:DefaultConnection"] = "Host=localhost;Database=jobportal_test;Username=postgres;SSL Mode=Disable"
+        }).Build();
+        var services = new ServiceCollection();
+        services.AddPersistence(configuration);
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+
+        Assert.IsType<PostgresResumeStorage>(scope.ServiceProvider.GetRequiredService<IResumeStorage>());
+        Assert.NotNull(scope.ServiceProvider.GetRequiredService<JobPortalDbContext>());
     }
 
     [Theory]

@@ -132,7 +132,8 @@ public sealed class PlaywrightJobApplicationBrowserAgent(
         if (application?.ResumeStorageKey is null || application.ResumeFileName is null || application.ResumeContentType is null ||
             !resumeSize.HasValue || resumeSize is <= 0 or > 5 * 1024 * 1024 ||
             application.ResumeContentType is not ("application/pdf" or "application/vnd.openxmlformats-officedocument.wordprocessingml.document" or "application/msword")) return null;
-        await using var source = await resumeStorage.OpenReadAsync(application.ResumeStorageKey, ct);
+        await using var source = await resumeStorage.OpenReadAsync(application.UserId, application.ResumeStorageKey,
+            originalFileName: application.ResumeFileName, contentType: application.ResumeContentType, cancellationToken: ct);
         if (source is null) return null;
         using var memory = new MemoryStream((int)resumeSize.GetValueOrDefault());
         await source.CopyToAsync(memory, ct);

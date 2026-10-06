@@ -43,7 +43,7 @@ Use .NET environment-variable notation (`__` for `:`).
 | Job discovery | `JobDiscovery__Adzuna__ApiKey` | Optional secret | Required only when its provider is enabled. |
 | Frontend/CORS | `AppUrls__FrontendBaseUrl`, `Cors__AllowedOrigins` | Required non-secret | Exact HTTPS origins only; do not use wildcard origins with credentials. |
 | Reverse proxy | `ReverseProxy__KnownProxies` | Required non-secret | Exact trusted proxy IPs; forwarded-header limit remains one. |
-| Resume storage | `ResumeStorage__RootPath` | Required non-secret | Mount durable private storage when using local-file storage. Do not rely on the container writable layer. |
+| Resume storage | `ResumeStorage__RootPath` | Optional non-secret during transition | Used only to recover/promote owner-referenced legacy local resume files that still exist. New resume uploads and AI Resume documents are stored durably in PostgreSQL; do not treat the container writable layer as durable. |
 | Bootstrap admin | `BootstrapAdmin__Enabled` and identity fields | Optional non-secret | Disabled normally and immediately after an approved bootstrap. |
 | Bootstrap admin | `BootstrapAdmin__Password` | One-time secret | Secret manager only; rotate after bootstrap. |
 | Logging | Serilog levels and console sink | Required non-secret | Central collection must ingest structured stdout. A container-local file is not a durable monitoring sink. |

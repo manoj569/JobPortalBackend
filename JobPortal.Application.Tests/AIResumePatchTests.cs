@@ -293,12 +293,14 @@ internal sealed class MasterResumeMemoryStorage : IResumeStorage
 {
     internal Dictionary<string, byte[]> Files { get; } = new() { ["owned.docx"] = MasterResumeFixture.Docx() };
     internal bool FailWrites { get; set; }
-    public async Task<string> StoreAsync(Stream content, string extension, CancellationToken cancellationToken = default)
+    public async Task<string> StoreAsync(Guid ownerUserId, Stream content, string extension, Guid? resumeId = null,
+        string? originalFileName = null, string? contentType = null, CancellationToken cancellationToken = default)
     {
         if (FailWrites) throw new IOException("Sanitized test failure");
         using var result = new MemoryStream(); await content.CopyToAsync(result, cancellationToken);
         var key = Guid.NewGuid().ToString("N") + extension; Files[key] = result.ToArray(); return key;
     }
-    public Task<Stream?> OpenReadAsync(string storageKey, CancellationToken cancellationToken = default) => Task.FromResult<Stream?>(Files.TryGetValue(storageKey, out var bytes) ? new MemoryStream(bytes.ToArray(), false) : null);
-    public Task DeleteAsync(string storageKey, CancellationToken cancellationToken = default) { Files.Remove(storageKey); return Task.CompletedTask; }
+    public Task<Stream?> OpenReadAsync(Guid ownerUserId, string storageKey, Guid? resumeId = null,
+        string? originalFileName = null, string? contentType = null, CancellationToken cancellationToken = default) => Task.FromResult<Stream?>(Files.TryGetValue(storageKey, out var bytes) ? new MemoryStream(bytes.ToArray(), false) : null);
+    public Task DeleteAsync(Guid ownerUserId, string storageKey, CancellationToken cancellationToken = default) { Files.Remove(storageKey); return Task.CompletedTask; }
 }

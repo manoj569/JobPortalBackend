@@ -672,10 +672,12 @@ public sealed class AIResumeWorkflowTests
 
     private sealed class MemoryResumeStorage : IResumeStorage
     {
-        public Task<string> StoreAsync(Stream content, string extension, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<Stream?> OpenReadAsync(string storageKey, CancellationToken cancellationToken = default) =>
+        public Task<string> StoreAsync(Guid ownerUserId, Stream content, string extension, Guid? resumeId = null,
+            string? originalFileName = null, string? contentType = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<Stream?> OpenReadAsync(Guid ownerUserId, string storageKey, Guid? resumeId = null,
+            string? originalFileName = null, string? contentType = null, CancellationToken cancellationToken = default) =>
             Task.FromResult<Stream?>(new MemoryStream(Encoding.UTF8.GetBytes("test fixture")));
-        public Task DeleteAsync(string storageKey, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task DeleteAsync(Guid ownerUserId, string storageKey, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
     private sealed class FakeResumeTextExtractor : IResumeTextExtractor

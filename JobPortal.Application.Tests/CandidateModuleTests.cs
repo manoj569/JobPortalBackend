@@ -992,6 +992,20 @@ public sealed class CandidateModuleTests
     }
 
     [Fact]
+    public async Task FailedResumeMetadataSaveCleansUpUnreferencedStoredBlob()
+    {
+        var fixture = CreateFixture();
+        fixture.UnitOfWork.FailNextSave = true;
+        await using var stream = new MemoryStream("%PDF-1.7 test"u8.ToArray());
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Service.UploadResumeAsync(
+            fixture.Candidate.Id, new(stream, stream.Length, "resume.pdf", "application/pdf")));
+
+        Assert.Single(fixture.Storage.Stored);
+        Assert.Equal(fixture.Storage.Stored.Single(), Assert.Single(fixture.Storage.Deleted));
+    }
+
+    [Fact]
     public async Task SavingAJobIsIdempotentAndUnavailableJobsAreRejected()
     {
         var fixture = CreateFixture();
@@ -1401,8 +1415,8 @@ public sealed class CandidateModuleTests
         public List<string> Stored { get; } = [];
         public List<string> Deleted { get; } = [];
         public Dictionary<string, byte[]> Content { get; } = [];
-        public Task<string> StoreAsync(
-            Stream content, string extension, CancellationToken cancellationToken = default)
+        public Task<string> StoreAsync(Guid ownerUserId, Stream content, string extension, Guid? resumeId = null,
+            string? originalFileName = null, string? contentType = null, CancellationToken cancellationToken = default)
         {
             var key = $"{Guid.NewGuid():N}{extension}";
             Stored.Add(key);
@@ -1412,11 +1426,11 @@ public sealed class CandidateModuleTests
             content.Position = 0;
             return Task.FromResult(key);
         }
-        public Task<Stream?> OpenReadAsync(
-            string storageKey, CancellationToken cancellationToken = default) =>
+        public Task<Stream?> OpenReadAsync(Guid ownerUserId, string storageKey, Guid? resumeId = null,
+            string? originalFileName = null, string? contentType = null, CancellationToken cancellationToken = default) =>
             Task.FromResult<Stream?>(Content.TryGetValue(storageKey, out var bytes)
                 ? new MemoryStream(bytes, writable: false) : null);
-        public Task DeleteAsync(string storageKey, CancellationToken cancellationToken = default)
+        public Task DeleteAsync(Guid ownerUserId, string storageKey, CancellationToken cancellationToken = default)
         {
             Deleted.Add(storageKey);
             return Task.CompletedTask;
@@ -1441,9 +1455,15 @@ public sealed class CandidateModuleTests
     private sealed class FakeUnitOfWork : IUnitOfWork
     {
         public int SaveCount { get; private set; }
+        public bool FailNextSave { get; set; }
         public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
         {
             SaveCount++;
+            if (FailNextSave)
+            {
+                FailNextSave = false;
+                throw new InvalidOperationException("Simulated metadata persistence failure.");
+            }
             return Task.FromResult(1);
         }
     }

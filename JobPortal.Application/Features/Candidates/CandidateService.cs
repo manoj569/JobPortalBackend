@@ -398,50 +398,63 @@ public sealed class CandidateService(
         var (extension, validatedContent) = await ValidateResumeAsync(
             upload with { FileName = displayFileName }, cancellationToken);
         var oldKey = user.ResumeStorageKey;
-        await using var content = validatedContent;
-        var storageKey = await resumeStorage.StoreAsync(content, extension, cancellationToken);
-        user.ResumeStorageKey = storageKey;
-        user.ResumeFileName = displayFileName;
-        user.ResumeContentType = upload.ContentType;
-        user.ResumeSizeBytes = content.Length;
-        user.ResumeUploadedAtUtc = UtcNow;
         var profile = await candidates.GetResumeProfileAsync(userId, true, cancellationToken);
         if (profile is null)
         {
             profile = new CandidateResumeProfile { UserId = userId };
             await candidates.AddResumeProfileAsync(profile, cancellationToken);
         }
-        profile.ExtractionStatus = ResumeExtractionStatus.Processing;
-        profile.ExtractionError = null;
-        profile.ExtractedAtUtc = null;
-        if (resumeTextExtractor is not null)
+        await using var content = validatedContent;
+        var storageKey = await resumeStorage.StoreAsync(userId, content, extension, profile.Id,
+            displayFileName, upload.ContentType, cancellationToken);
+        try
         {
-            try
+            user.ResumeStorageKey = storageKey;
+            user.ResumeFileName = displayFileName;
+            user.ResumeContentType = upload.ContentType;
+            user.ResumeSizeBytes = content.Length;
+            user.ResumeUploadedAtUtc = UtcNow;
+            profile.ExtractionStatus = ResumeExtractionStatus.Processing;
+            profile.ExtractionError = null;
+            profile.ExtractedAtUtc = null;
+            if (resumeTextExtractor is not null)
             {
-                content.Position = 0;
-                ApplyExtractedProfile(profile, await resumeTextExtractor.ExtractAsync(content, extension, cancellationToken));
+                try
+                {
+                    content.Position = 0;
+                    ApplyExtractedProfile(profile, await resumeTextExtractor.ExtractAsync(content, extension, cancellationToken));
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    profile.ExtractionStatus = ResumeExtractionStatus.Failed;
+                    profile.ExtractionError = "Resume text extraction failed.";
+                    profile.ExtractedAtUtc = UtcNow;
+                    logger?.LogWarning(ex, "Resume extraction failed for candidate {CandidateId}", userId);
+                }
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                profile.ExtractionStatus = ResumeExtractionStatus.Failed;
-                profile.ExtractionError = "Resume text extraction failed.";
-                profile.ExtractedAtUtc = UtcNow;
-                logger?.LogWarning(ex, "Resume extraction failed for candidate {CandidateId}", userId);
-            }
+            await auditWriter.AppendAsync(new(
+                AuditAction.Upload,
+                "Resume",
+                user.Id.ToString(),
+                new Dictionary<string, string?>
+                {
+                    ["fileType"] = extension,
+                    ["sizeBytes"] = content.Length.ToString(
+                        System.Globalization.CultureInfo.InvariantCulture)
+                },
+                new(userId, "Candidate")), cancellationToken);
+            await unitOfWork.SaveChangesAsync(cancellationToken);
         }
-        await auditWriter.AppendAsync(new(
-            AuditAction.Upload,
-            "Resume",
-            user.Id.ToString(),
-            new Dictionary<string, string?>
+        catch
+        {
+            try { await DeleteIfUnreferencedAsync(userId, storageKey, CancellationToken.None); }
+            catch (Exception cleanupError)
             {
-                ["fileType"] = extension,
-                ["sizeBytes"] = content.Length.ToString(
-                    System.Globalization.CultureInfo.InvariantCulture)
-            },
-            new(userId, "Candidate")), cancellationToken);
-        await unitOfWork.SaveChangesAsync(cancellationToken);
-        await DeleteIfUnreferencedAsync(oldKey, cancellationToken);
+                logger?.LogWarning(cleanupError, "Failed to clean up an unreferenced resume document for candidate {CandidateId}", userId);
+            }
+            throw;
+        }
+        await DeleteIfUnreferencedAsync(userId, oldKey, cancellationToken);
         return new ResumeResponse(user.ResumeFileName, user.ResumeContentType, user.ResumeSizeBytes.Value,
             user.ResumeUploadedAtUtc.Value, profile.ExtractionStatus, profile.Id);
     }
@@ -451,7 +464,9 @@ public sealed class CandidateService(
         var user = await RequiredCandidateAsync(userId, cancellationToken);
         if (user.ResumeStorageKey is null || user.ResumeContentType is null)
             throw new NotFoundException("Resume was not found.");
-        var content = await resumeStorage.OpenReadAsync(user.ResumeStorageKey, cancellationToken)
+        var profile = await candidates.GetResumeProfileAsync(userId, false, cancellationToken);
+        var content = await resumeStorage.OpenReadAsync(userId, user.ResumeStorageKey, profile?.Id,
+            user.ResumeFileName, user.ResumeContentType, cancellationToken)
             ?? throw new NotFoundException("Resume was not found.");
         return new(content, ResumeDisplayFileName(user.ResumeFileName, user.ResumeContentType),
             user.ResumeContentType);
@@ -480,7 +495,7 @@ public sealed class CandidateService(
             user.Id.ToString(),
             Actor: new(userId, "Candidate")), cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
-        await DeleteIfUnreferencedAsync(storageKey, cancellationToken);
+        await DeleteIfUnreferencedAsync(userId, storageKey, cancellationToken);
     }
 
     public async Task<ResumeStatusResponse> GetResumeStatusAsync(Guid userId, CancellationToken cancellationToken = default)
@@ -1067,11 +1082,11 @@ public sealed class CandidateService(
             job.EmploymentType, job.WorkplaceType, job.ExperienceLevel, job.IsFeatured,
             job.PublishedAtUtc, job.ExpiresAtUtc, score, reasons.Take(3).ToArray());
     }
-    private async Task DeleteIfUnreferencedAsync(string? storageKey, CancellationToken cancellationToken)
+    private async Task DeleteIfUnreferencedAsync(Guid userId, string? storageKey, CancellationToken cancellationToken)
     {
         if (storageKey is not null &&
             !await candidates.IsResumeReferencedAsync(storageKey, cancellationToken))
-            await resumeStorage.DeleteAsync(storageKey, cancellationToken);
+            await resumeStorage.DeleteAsync(userId, storageKey, cancellationToken);
     }
     private DateTime UtcNow => timeProvider.GetUtcNow().UtcDateTime;
 
