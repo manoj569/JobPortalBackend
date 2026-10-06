@@ -8,7 +8,7 @@ This runbook covers the PostgreSQL/.NET 9 Career Harbor API release candidate. I
 - Target `linux/amd64` using `JobPortal.API/Dockerfile` and the repository `JobPortal.API/seccomp_profile.json`.
 - PostgreSQL migrations are owned by `JobPortal.Persistence.Postgres`. The manual `.github/workflows/migrate.yml` workflow targets the historical SQL Server project and must not be used for PostgreSQL.
 - The application never applies migrations automatically.
-- Razorpay currently accepts Test Mode key IDs only. PhonePe currently accepts the Sandbox environment only. Do not enable either as a live production payment provider until a separately reviewed production integration exists.
+- Razorpay currently accepts Test Mode key IDs only. PhonePe supports explicit `Sandbox` and `Production` Standard Checkout configurations; see [PhonePe production configuration](phonepe-production.md) for verified endpoints, required Render variables, and webhook setup. Live enablement still requires reviewed production credentials and merchant onboarding; this runbook does not authorize deployment.
 - Every external job-site adapter remains disabled until its separately authorized enablement gate passes.
 
 ## Configuration inventory
@@ -34,8 +34,8 @@ Use .NET environment-variable notation (`__` for `:`).
 | External sessions | `AIApply__ExternalSessions__Enabled` and capture/transport limits | Optional non-secret | Requires persistent Data Protection keys; SignalR transport additionally requires configured sticky affinity. |
 | External AI | `AIApply__AI__Enabled`, provider/model/embedding model | Optional non-secret | Keep disabled until an implemented provider and its secret-provider contract have been reviewed. |
 | Payments | `Razorpay__KeyId`, `KeySecret`, `WebhookSecret` | Staging secret | Current code is Test Mode only; not a production payment configuration. |
-| Payments | `PhonePe__ClientId`, `ClientSecret`, `WebhookUsername`, `WebhookPassword` | Staging secret | Current code is Sandbox only. |
-| Payments | `PhonePe__ClientVersion`, `Environment`, `RedirectBaseUrl` | Staging non-secret | Environment must currently be `Sandbox`; redirect base must be the authorized HTTPS frontend origin. |
+| Payments | `PhonePe__ClientId`, `ClientSecret`, `WebhookUsername`, `WebhookPassword` | Environment-specific secret | Supply approved credentials for the selected environment; never commit values. |
+| Payments | `PhonePe__ClientVersion`, `Environment`, `RedirectBaseUrl` | Environment-specific non-secret | Environment is exactly `Sandbox` or `Production` (case-insensitive internally). Production redirect must be HTTPS and cannot use localhost. |
 | Membership | `Membership__Plans__*` and AI Apply plan limits | Required non-secret | Review price, currency, duration and entitlements before rollout. |
 | Email | `Email__Enabled`, `FromName`, `FromAddress`, `AppUrls__FrontendBaseUrl` | Required non-secret when enabled | Frontend URL must be the exact HTTPS public origin. |
 | Email | `Email__Brevo__ApiKey` | Required secret when enabled | Secret manager only. |

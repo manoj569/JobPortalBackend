@@ -461,24 +461,29 @@ public sealed class PortalMembershipTests
             x => x.CurrentStatus == PaymentStatus.Paid);
     }
 
-    [Fact]
-    public async Task SafeReturnPathIsReleasedOnlyAfterVerifiedActiveMembership()
+    [Theory]
+    [InlineData("/dashboard/jobs")]
+    [InlineData("/dashboard/jobs?mode=referral")]
+    [InlineData("/dashboard/interview-insights")]
+    [InlineData("/dashboard/membership")]
+    [InlineData("/dashboard/jobs/referral/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/contact")]
+    public async Task SafeReturnPathIsReleasedOnlyAfterVerifiedActiveMembership(string returnTo)
     {
         var fixture = CreatePaymentFixture();
         var checkout = await fixture.Service.CreatePhonePeCheckoutAsync(
-            UserId, PaymentReturnPath.InterviewInsights);
-        Assert.Equal(PaymentReturnPath.InterviewInsights, checkout.ReturnTo);
+            UserId, returnTo);
+        Assert.Equal(returnTo, checkout.ReturnTo);
 
         var pending = await fixture.Service.GetPhonePeStatusAsync(
-            UserId, checkout.MerchantOrderId, PaymentReturnPath.InterviewInsights);
+            UserId, checkout.MerchantOrderId, returnTo);
         Assert.Null(pending.ReturnTo);
 
         fixture.PhonePe.VerificationState = new(PhonePeOrderStateKind.Completed,
             checkout.MerchantOrderId, "phonepe_return_txn", 9900);
         var completed = await fixture.Service.GetPhonePeStatusAsync(
-            UserId, checkout.MerchantOrderId, PaymentReturnPath.InterviewInsights);
+            UserId, checkout.MerchantOrderId, returnTo);
         Assert.Equal(PhonePeBrowserPaymentStatus.Completed, completed.Status);
-        Assert.Equal(PaymentReturnPath.InterviewInsights, completed.ReturnTo);
+        Assert.Equal(returnTo, completed.ReturnTo);
     }
 
     [Theory]
@@ -536,6 +541,37 @@ public sealed class PortalMembershipTests
             "phonepe_txn_terminal", 9900);
         await fixture.Service.ProcessPhonePeWebhookAsync(new("{}"u8.ToArray(), "valid"));
         Assert.Equal(expected, fixture.Payments.Payment!.Status);
+        Assert.NotEqual(MembershipStatus.Active, fixture.Memberships.Membership!.Status);
+    }
+
+    [Fact]
+    public async Task ConcurrentPhonePeWebhookAndReturnActivateMembershipOnlyOnce()
+    {
+        var fixture = CreatePaymentFixture();
+        var checkout = await fixture.Service.CreatePhonePeCheckoutAsync(UserId);
+        fixture.PhonePe.VerificationState = new(PhonePeOrderStateKind.Completed, checkout.MerchantOrderId, "fixture-transaction", 9900);
+        fixture.PhonePe.StatusEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        fixture.PhonePe.AllowStatus = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        var returning = fixture.Service.GetPhonePeStatusAsync(UserId, checkout.MerchantOrderId);
+        await fixture.PhonePe.StatusEntered.Task;
+        var webhook = fixture.Service.ProcessPhonePeWebhookAsync(new("{\"event\":\"checkout.order.completed\"}"u8.ToArray(), "valid"));
+        fixture.PhonePe.AllowStatus.SetResult();
+        await Task.WhenAll(returning, webhook);
+        Assert.Equal(PaymentStatus.Paid, fixture.Payments.Payment!.Status);
+        Assert.Equal(Now.AddDays(30), fixture.Memberships.Membership!.EndsAtUtc);
+        Assert.Single(fixture.Memberships.Membership.History.Where(x => x.CurrentStatus == MembershipStatus.Active));
+    }
+
+    [Theory]
+    [InlineData(PhonePeOrderStateKind.Pending)]
+    [InlineData(PhonePeOrderStateKind.Failed)]
+    public async Task CompletedEventNameCannotOverrideVerifiedPendingOrFailedMembershipPayment(PhonePeOrderStateKind state)
+    {
+        var fixture = CreatePaymentFixture();
+        var checkout = await fixture.Service.CreatePhonePeCheckoutAsync(UserId);
+        fixture.PhonePe.VerificationState = new(state, checkout.MerchantOrderId, "fixture-transaction", 9900);
+        await fixture.Service.ProcessPhonePeWebhookAsync(new("{\"event\":\"checkout.order.completed\"}"u8.ToArray(), "valid"));
+        Assert.NotEqual(PaymentStatus.Paid, fixture.Payments.Payment!.Status);
         Assert.NotEqual(MembershipStatus.Active, fixture.Memberships.Membership!.Status);
     }
 

@@ -133,14 +133,28 @@ public static class ServiceCollectionExtensions
             client.Timeout = TimeSpan.FromSeconds(15);
         }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
         services.AddSingleton<PhonePeAccessTokenCache>();
-        services.AddHttpClient<IPhonePeGateway, PhonePeGateway>(client =>
+        services.AddSingleton<IValidateOptions<PhonePeOptions>, PhonePeOptionsValidator>();
+        services.AddOptions<PhonePeOptions>().Bind(configuration.GetSection(PhonePeOptions.SectionName)).ValidateOnStart();
+        services.AddHttpClient<IPhonePeGateway, PhonePeGateway>((provider, client) =>
         {
-            client.BaseAddress = new Uri("https://api-preprod.phonepe.com/apis/pg-sandbox/");
+            client.BaseAddress = provider.GetRequiredService<IOptions<PhonePeOptions>>().Value.ResolveEndpoints().ApiBaseUri;
             client.Timeout = TimeSpan.FromSeconds(15);
-        });
+        }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false }).RemoveAllLoggers();
         services.AddSingleton<IMembershipPlanProvider, ConfigurationMembershipPlanProvider>();
         services.AddSingleton<IResumeStorage, LocalResumeStorage>();
         services.AddSingleton<IResumeTextExtractor, ResumeTextExtractor>();
+        services.AddOptions<JobPortal.Application.Features.AIResume.AIResumeOptions>()
+            .Bind(configuration.GetSection(JobPortal.Application.Features.AIResume.AIResumeOptions.SectionName))
+            .Validate(x => x.IsValid(), "Invalid AI resume provider settings.");
+        services.AddHttpClient(JobPortal.Infrastructure.AIResume.ClaudeAIResumeProvider.HttpClientName, client =>
+        {
+            client.Timeout = Timeout.InfiniteTimeSpan;
+        }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })
+          .RemoveAllLoggers();
+        services.AddScoped<JobPortal.Application.Features.AIResume.IAIResumeProvider, JobPortal.Infrastructure.AIResume.ClaudeAIResumeProvider>();
+        services.AddScoped<JobPortal.Application.Features.AIResume.IAIResumeSourceParser, JobPortal.Infrastructure.AIResume.StructuredResumeSourceParser>();
+        services.AddScoped<JobPortal.Application.Features.AIResume.IAIResumeDocumentRenderer, JobPortal.Infrastructure.AIResume.ProfessionalResumeDocumentRenderer>();
+        services.AddScoped<JobPortal.Application.Features.AIResume.IAIResumeMasterDocuments, JobPortal.Infrastructure.AIResume.OriginalResumeDocuments>();
         services.AddSingleton<PlaywrightBrowserManager>();
         services.AddSingleton<IPlaywrightBrowserRuntime>(provider => provider.GetRequiredService<PlaywrightBrowserManager>());
         services.AddSingleton<IExternalHostAddressResolver, SystemExternalHostAddressResolver>();

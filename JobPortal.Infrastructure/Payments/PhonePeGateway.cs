@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -30,7 +31,9 @@ public sealed class PhonePeGateway(
     private readonly string clientVersion = Required(configuration, "PhonePe:ClientVersion");
     private readonly string webhookUsername = Required(configuration, "PhonePe:WebhookUsername");
     private readonly string webhookPassword = Required(configuration, "PhonePe:WebhookPassword");
-    private readonly Uri redirectBaseUrl = RequiredSandboxRedirect(configuration);
+    private readonly PhonePeOptions settings = PhonePeOptions.Load(configuration);
+    private PhonePeEndpoints Endpoints => settings.ResolveEndpoints();
+    private Uri RedirectBaseUrl => new(settings.RedirectBaseUrl.Trim());
 
     public async Task<PhonePeCheckout> CreateCheckoutAsync(
         string merchantOrderId, long amountInMinorUnits, CancellationToken cancellationToken = default)
@@ -44,12 +47,12 @@ public sealed class PhonePeGateway(
         var query = $"merchantOrderId={Uri.EscapeDataString(merchantOrderId)}";
         if (returnTo is not null)
             query += $"&returnTo={Uri.EscapeDataString(returnTo)}";
-        var redirectUrl = new UriBuilder(redirectBaseUrl)
+        var redirectUrl = new UriBuilder(RedirectBaseUrl)
         {
-            Path = redirectBaseUrl.AbsolutePath.TrimEnd('/') + "/payment/phonepe/return",
+            Path = RedirectBaseUrl.AbsolutePath.TrimEnd('/') + "/payment/phonepe/return",
             Query = query
         }.Uri.AbsoluteUri;
-        using var request = new HttpRequestMessage(HttpMethod.Post, "checkout/v2/pay")
+        using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(Endpoints.ApiBaseUri, "checkout/v2/pay"))
         {
             Content = JsonContent.Create(new
             {
@@ -93,7 +96,7 @@ public sealed class PhonePeGateway(
         string merchantOrderId, CancellationToken cancellationToken = default)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get,
-            $"checkout/v2/order/{Uri.EscapeDataString(merchantOrderId)}/status");
+            new Uri(Endpoints.ApiBaseUri, $"checkout/v2/order/{Uri.EscapeDataString(merchantOrderId)}/status"));
         using var response = await SendAuthorizedAsync(request, cancellationToken);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         if (!response.IsSuccessStatusCode)
@@ -178,14 +181,13 @@ public sealed class PhonePeGateway(
 
     private async Task<string> GetTokenAsync(bool forceRefresh, CancellationToken cancellationToken)
     {
-        if (!forceRefresh && tokenCache.Token is not null && tokenCache.ExpiresAtUtc > timeProvider.GetUtcNow().UtcDateTime.AddMinutes(1))
-            return tokenCache.Token;
-        await tokenCache.Lock.WaitAsync(cancellationToken);
+        var partition = tokenCache.For(Endpoints.Environment, clientId, clientVersion, clientSecret);
+        await partition.Lock.WaitAsync(cancellationToken);
         try
         {
-            if (!forceRefresh && tokenCache.Token is not null && tokenCache.ExpiresAtUtc > timeProvider.GetUtcNow().UtcDateTime.AddMinutes(1))
-                return tokenCache.Token;
-            using var request = new HttpRequestMessage(HttpMethod.Post, "v1/oauth/token")
+            if (!forceRefresh && partition.Token is not null && partition.ExpiresAtUtc > timeProvider.GetUtcNow().UtcDateTime.AddMinutes(1))
+                return partition.Token;
+            using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(Endpoints.OAuthBaseUri, "v1/oauth/token"))
             {
                 Content = new FormUrlEncodedContent(new Dictionary<string, string>
                 {
@@ -203,17 +205,18 @@ public sealed class PhonePeGateway(
                 throw new AppException("PhonePe authentication is temporarily unavailable.", 503, "payment_provider_unavailable");
             }
             using var document = JsonDocument.Parse(body);
-            tokenCache.Token = document.RootElement.GetProperty("access_token").GetString();
-            if (string.IsNullOrWhiteSpace(tokenCache.Token)) throw new JsonException();
-            tokenCache.ExpiresAtUtc = TokenExpiry(document.RootElement);
-            return tokenCache.Token;
+            var token = document.RootElement.GetProperty("access_token").GetString();
+            if (string.IsNullOrWhiteSpace(token)) throw new JsonException();
+            partition.ExpiresAtUtc = TokenExpiry(document.RootElement);
+            partition.Token = token;
+            return token;
         }
         catch (JsonException)
         {
             LogProviderFailure("GetAccessToken", HttpStatusCode.OK, null, "invalid_oauth_schema");
             throw new AppException("PhonePe returned an invalid authentication response.", 503, "payment_provider_invalid_response");
         }
-        finally { tokenCache.Lock.Release(); }
+        finally { partition.Lock.Release(); }
     }
 
     private DateTime TokenExpiry(JsonElement root)
@@ -242,8 +245,18 @@ public sealed class PhonePeGateway(
     }
 
     private void LogProviderFailure(
-        string operation, HttpStatusCode statusCode, string? providerCode, string schemaCategory) =>
+        string operation, HttpStatusCode statusCode, string? providerCode, string schemaCategory)
+    {
+        if (providerCode is not null)
+        {
+            var token = tokenCache.For(Endpoints.Environment, clientId, clientVersion, clientSecret).Token;
+            var webhookHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{webhookUsername}:{webhookPassword}")));
+            if (new[] { clientId, clientSecret, webhookUsername, webhookPassword, token, webhookHash }
+                .Any(value => !string.IsNullOrEmpty(value) && providerCode.Contains(value, StringComparison.OrdinalIgnoreCase)))
+                providerCode = null;
+        }
         ProviderDiagnostic(logger, operation, (int)statusCode, providerCode, schemaCategory, null);
+    }
 
     private static string? SafeProviderCode(string body)
     {
@@ -289,24 +302,27 @@ public sealed class PhonePeGateway(
         return value;
     }
 
-    private static Uri RequiredSandboxRedirect(IConfiguration configuration)
-    {
-        if (!string.Equals(configuration["PhonePe:Environment"], "Sandbox", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("PhonePe:Environment must be Sandbox for this integration stage.");
-        var value = Required(configuration, "PhonePe:RedirectBaseUrl");
-        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) ||
-            (uri.Scheme != Uri.UriSchemeHttps && !(uri.Scheme == Uri.UriSchemeHttp && uri.IsLoopback)) ||
-            !string.IsNullOrEmpty(uri.UserInfo) || !string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.Fragment))
-            throw new InvalidOperationException("PhonePe:RedirectBaseUrl must be a safe absolute web URL.");
-        return uri;
-    }
-
 }
 
 public sealed class PhonePeAccessTokenCache : IDisposable
 {
-    internal SemaphoreSlim Lock { get; } = new(1, 1);
-    internal string? Token { get; set; }
-    internal DateTime ExpiresAtUtc { get; set; }
-    public void Dispose() => Lock.Dispose();
+    private readonly ConcurrentDictionary<string, TokenPartition> partitions = new(StringComparer.Ordinal);
+    internal TokenPartition For(string environment, string clientId, string clientVersion, string clientSecret)
+    {
+        // Fingerprint credentials without retaining raw secrets as dictionary keys or logging the key.
+        var key = Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(new[] { environment, clientId, clientVersion, clientSecret })));
+        return partitions.GetOrAdd(key, _ => new());
+    }
+    public void Dispose()
+    {
+        foreach (var partition in partitions.Values) partition.Dispose();
+        partitions.Clear();
+    }
+    internal sealed class TokenPartition : IDisposable
+    {
+        internal SemaphoreSlim Lock { get; } = new(1, 1);
+        internal string? Token { get; set; }
+        internal DateTime ExpiresAtUtc { get; set; }
+        public void Dispose() => Lock.Dispose();
+    }
 }
