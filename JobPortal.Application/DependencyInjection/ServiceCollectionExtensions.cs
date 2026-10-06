@@ -61,6 +61,8 @@ public static class ServiceCollectionExtensions
             JobPortal.Application.Features.CareerGuidance.CareerFinanceService>();
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IAIApplyService, AIApplyService>();
+        services.AddScoped<JobPortal.Application.Features.AIResume.IAIResumeService,
+            JobPortal.Application.Features.AIResume.AIResumeService>();
         services.AddScoped<IAIApplyAuthorizationService, AIApplyAuthorizationService>();
         services.AddScoped<IAIApplyMatcher, DeterministicAIApplyMatcher>();
         services.AddScoped<IApplicationQuestionMatcher, ApplicationQuestionMatcher>();

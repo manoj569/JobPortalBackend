@@ -7,7 +7,6 @@ namespace JobPortal.Application.Abstractions.AIApply;
 public interface IAIApplyRepository
 {
     Task<User?> GetUserProfileAsync(Guid userId, CancellationToken ct = default);
-    Task<Membership?> GetMembershipAsync(Guid userId, CancellationToken ct = default);
     Task<Job?> GetJobAsync(Guid jobId, CancellationToken ct = default);
     Task<IReadOnlyList<Job>> GetJobsAsync(IReadOnlyCollection<Guid> jobIds, CancellationToken ct = default);
     Task<AIApplyProfile?> GetProfileAsync(Guid userId, CancellationToken ct = default);

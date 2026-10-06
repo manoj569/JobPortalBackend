@@ -1,5 +1,6 @@
 using System.Text.Json;
 using JobPortal.Application.Abstractions.AIApply;
+using JobPortal.Application.Abstractions.Persistence;
 using JobPortal.Application.Common.Exceptions;
 using JobPortal.Application.Common.Validation;
 using JobPortal.Domain.Common;
@@ -9,19 +10,32 @@ using Microsoft.Extensions.Options;
 
 namespace JobPortal.Application.Features.AIApply;
 
-public sealed class AIApplyAuthorizationService(IAIApplyRepository repository, TimeProvider clock,
-    IOptions<AIApplyOptions> options, JobPortal.Application.Abstractions.Payments.IMembershipPlanProvider plans) : IAIApplyAuthorizationService
+public sealed class AIApplyAuthorizationService(IMembershipRepository memberships, TimeProvider clock,
+    IOptions<AIApplyOptions> options) : IAIApplyAuthorizationService
 {
+    private const string StandardPlanCode = "AIApply";
+    private const string ProPlanCode = "AIApplyPro";
+
     public async Task<AIApplyAccess> GetAccessAsync(Guid userId, CancellationToken ct = default)
     {
-        var membership = await repository.GetMembershipAsync(userId, ct);
+        // Each plan has its own membership. Only an active Pro entitlement outranks Standard.
+        var membership = await memberships.GetActiveForUserAsync(userId, ProPlanCode, ct)
+            ?? await memberships.GetActiveForUserAsync(userId, StandardPlanCode, ct);
+        var active = membership is not null;
+        // Retain subscription status/date metadata when neither AI Apply plan grants access.
+        membership ??= await memberships.GetMembershipForUserAndPlanAsync(userId, StandardPlanCode, ct)
+            ?? await memberships.GetMembershipForUserAndPlanAsync(userId, ProPlanCode, ct);
         var now = clock.GetUtcNow().UtcDateTime;
-        var active = membership is { Status: MembershipStatus.Active } && membership.StartsAtUtc <= now && (!membership.EndsAtUtc.HasValue || membership.EndsAtUtc > now);
         var expired = membership is { Status: MembershipStatus.Expired } || membership?.EndsAtUtc <= now;
-        var plan = membership is null ? null : plans.FindByName(membership.PlanName);
-        var tier = plan?.AIApplyProEnabled == true ? AIApplyPlanTier.Pro : plan?.AIApplyEnabled == true ? AIApplyPlanTier.Standard : AIApplyPlanTier.None;
-        var pro = active && plan?.AIApplyProEnabled == true; var ai = active && plan?.AIApplyEnabled == true;
-        return new(active, expired, tier, ai, pro, plan?.Code, membership?.Status, membership?.StartsAtUtc, membership?.EndsAtUtc, active, pro, pro, pro, pro ? options.Value.ProQueuePriority : ai ? options.Value.StandardQueuePriority : 0);
+        var tier = membership?.PlanCode switch
+        {
+            ProPlanCode => AIApplyPlanTier.Pro,
+            StandardPlanCode => AIApplyPlanTier.Standard,
+            _ => AIApplyPlanTier.None
+        };
+        var pro = active && tier == AIApplyPlanTier.Pro;
+        var ai = active && tier != AIApplyPlanTier.None;
+        return new(active, expired, tier, ai, pro, membership?.PlanCode, membership?.Status, membership?.StartsAtUtc, membership?.EndsAtUtc, active, pro, pro, pro, pro ? options.Value.ProQueuePriority : ai ? options.Value.StandardQueuePriority : 0);
     }
 
     public async Task<AIApplyAccess> RequireAsync(Guid userId, bool pro = false, CancellationToken ct = default)

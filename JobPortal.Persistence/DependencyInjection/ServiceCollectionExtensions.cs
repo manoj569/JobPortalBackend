@@ -31,6 +31,7 @@ public static class ServiceCollectionExtensions
                     null);
             }), poolSize: 128);
         services.AddScoped<IUserRepository, UserRepository>();
+        services.AddScoped<JobPortal.Application.Features.AIResume.IAIResumeRepository, AIResumeRepository>();
         services.AddScoped<JobPortal.Application.Features.Support.ISupportTicketRepository, SupportTicketRepository>();
         services.AddScoped<JobPortal.Application.Features.Notifications.INotificationOutbox, NotificationOutboxRepository>();
         services.AddScoped<JobPortal.Application.Features.Notifications.INotificationDeliveryRepository, NotificationDeliveryRepository>();

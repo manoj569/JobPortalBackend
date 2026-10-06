@@ -125,10 +125,10 @@ public sealed record UpdateCandidateOnboardingRequest(
     decimal? YearsOfExperience);
 public sealed record ResumeUpload(Stream Content, long Length, string FileName, string ContentType);
 public sealed record ResumeResponse(string FileName, string ContentType, long SizeBytes, DateTime UploadedAtUtc,
-    ResumeExtractionStatus ExtractionStatus = ResumeExtractionStatus.NotStarted);
+    ResumeExtractionStatus ExtractionStatus = ResumeExtractionStatus.NotStarted, Guid? ResumeId = null);
 public sealed record ResumeDownload(Stream Content, string FileName, string ContentType);
 public sealed record ResumeStatusResponse(bool HasResume, ResumeExtractionStatus ExtractionStatus,
-    DateTime? ExtractedAtUtc, string Message);
+    DateTime? ExtractedAtUtc, string Message, Guid? ResumeId = null);
 public sealed record RecommendedJobResponse(Guid Id, string ReferenceNumber, string Title, string Slug,
     Guid CompanyId, string CompanyName, string CompanySlug, string? CompanyLogoUrl,
     Guid CategoryId, string CategoryName, string? Location, EmploymentType EmploymentType,

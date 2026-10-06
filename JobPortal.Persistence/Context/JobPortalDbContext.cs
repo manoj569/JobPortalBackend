@@ -78,12 +78,20 @@ public sealed class JobPortalDbContext(DbContextOptions<JobPortalDbContext> opti
     public DbSet<AIApplyWorkerInstance> AIApplyWorkerInstances => Set<AIApplyWorkerInstance>();
     public DbSet<AIApplySiteOperationalState> AIApplySiteOperationalStates => Set<AIApplySiteOperationalState>();
     public DbSet<JobSource> JobSources => Set<JobSource>();
+    public DbSet<AIResumeSession> AIResumeSessions => Set<AIResumeSession>();
+    public DbSet<AIResumeCreditWallet> AIResumeCreditWallets => Set<AIResumeCreditWallet>();
+    public DbSet<AIResumePurchase> AIResumePurchases => Set<AIResumePurchase>();
+    public DbSet<AIResumeGeneration> AIResumeGenerations => Set<AIResumeGeneration>();
+    public DbSet<TailoredResume> TailoredResumes => Set<TailoredResume>();
+    public DbSet<TailoredResumeEdit> TailoredResumeEdits => Set<TailoredResumeEdit>();
+    public DbSet<AIResumeCreditTransaction> AIResumeCreditTransactions => Set<AIResumeCreditTransaction>();
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         EnsureFinancialHistory();
         EnsureTrustHistory();
         EnsureAuditLogsAreAppendOnly();
+        EnsureAIResumeLedgerIsAppendOnly();
         ApplyAuditAndSoftDelete();
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
@@ -93,6 +101,7 @@ public sealed class JobPortalDbContext(DbContextOptions<JobPortalDbContext> opti
         EnsureFinancialHistory();
         EnsureTrustHistory();
         EnsureAuditLogsAreAppendOnly();
+        EnsureAIResumeLedgerIsAppendOnly();
         ApplyAuditAndSoftDelete();
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
@@ -150,6 +159,13 @@ public sealed class JobPortalDbContext(DbContextOptions<JobPortalDbContext> opti
                 entry.State is EntityState.Modified or EntityState.Deleted))
             throw new InvalidOperationException(
                 "Audit logs are append-only and cannot be updated or deleted.");
+    }
+
+    private void EnsureAIResumeLedgerIsAppendOnly()
+    {
+        if (ChangeTracker.Entries<AIResumeCreditTransaction>().Any(entry =>
+                entry.State is EntityState.Modified or EntityState.Deleted))
+            throw new InvalidOperationException("AI Resume credit transactions are append-only and cannot be updated or deleted.");
     }
 
     private void EnsureTrustHistory()

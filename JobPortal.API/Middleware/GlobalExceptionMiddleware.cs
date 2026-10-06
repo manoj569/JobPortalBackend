@@ -33,11 +33,11 @@ public sealed class GlobalExceptionMiddleware(
         catch (Exception exception)
         {
             // 1. Handle Client Disconnects gracefully
-            if (exception is OperationCanceledException && context.RequestAborted.IsCancellationRequested)
+            if (context.RequestAborted.IsCancellationRequested)
             {
                 if (!context.Response.HasStarted)
                     context.Response.StatusCode = StatusCodes.Status499ClientClosedRequest;
-                RequestCancelled(logger, context.Request.Path, exception);
+                RequestCancelled(logger, context.Request.Path, null);
                 return;
             }
 
@@ -104,7 +104,12 @@ public sealed class GlobalExceptionMiddleware(
             context.Response.ContentType = "application/json";
 
             // Use the cancellation token from the context to prevent writing if client disconnects
-            await context.Response.WriteAsJsonAsync(error, context.RequestAborted);
+            try { await context.Response.WriteAsJsonAsync(error, context.RequestAborted); }
+            catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+            {
+                if (!context.Response.HasStarted) context.Response.StatusCode = StatusCodes.Status499ClientClosedRequest;
+                RequestCancelled(logger, context.Request.Path, null);
+            }
         }
     }
 }

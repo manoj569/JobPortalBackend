@@ -52,10 +52,13 @@ public sealed class CandidateService(
     public async Task<CandidateProfileResponse> GetProfileAsync(Guid userId, CancellationToken cancellationToken = default)
     {
         var user = await RequiredCandidateAsync(userId, cancellationToken);
+        var resumeId = user.ResumeStorageKey is null
+            ? null
+            : (await candidates.GetResumeProfileAsync(userId, false, cancellationToken))?.Id;
         return MapProfile(user, await profilePhotoStorage.GetAsync(userId, cancellationToken),
             CalculateTotalExperience(await candidates.GetEmploymentPeriodsAsync(userId, cancellationToken),
                 DateOnly.FromDateTime(UtcNow)),
-            (await candidates.GetSkillsAsync(userId, cancellationToken)).Select(x => x.Name).ToArray());
+            (await candidates.GetSkillsAsync(userId, cancellationToken)).Select(x => x.Name).ToArray(), resumeId);
     }
 
     public async Task<CandidateProfileResponse> UpdateProfileAsync(
@@ -82,10 +85,13 @@ public sealed class CandidateService(
             user.Id.ToString(),
             Actor: new(userId, "Candidate")), cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
+        var resumeId = user.ResumeStorageKey is null
+            ? null
+            : (await candidates.GetResumeProfileAsync(userId, false, cancellationToken))?.Id;
         return MapProfile(user, await profilePhotoStorage.GetAsync(userId, cancellationToken),
             CalculateTotalExperience(await candidates.GetEmploymentPeriodsAsync(userId, cancellationToken),
                 DateOnly.FromDateTime(UtcNow)),
-            (await candidates.GetSkillsAsync(userId, cancellationToken)).Select(x => x.Name).ToArray());
+            (await candidates.GetSkillsAsync(userId, cancellationToken)).Select(x => x.Name).ToArray(), resumeId);
     }
 
     public async Task<CandidateBasicDetailsResponse> GetBasicDetailsAsync(
@@ -437,7 +443,7 @@ public sealed class CandidateService(
         await unitOfWork.SaveChangesAsync(cancellationToken);
         await DeleteIfUnreferencedAsync(oldKey, cancellationToken);
         return new ResumeResponse(user.ResumeFileName, user.ResumeContentType, user.ResumeSizeBytes.Value,
-            user.ResumeUploadedAtUtc.Value, profile.ExtractionStatus);
+            user.ResumeUploadedAtUtc.Value, profile.ExtractionStatus, profile.Id);
     }
 
     public async Task<ResumeDownload> DownloadResumeAsync(Guid userId, CancellationToken cancellationToken = default)
@@ -483,7 +489,7 @@ public sealed class CandidateService(
         if (user.ResumeStorageKey is null) return new(false, ResumeExtractionStatus.NotStarted, null, "Upload a resume to enable personalized job recommendations.");
         var profile = await candidates.GetResumeProfileAsync(userId, false, cancellationToken);
         var status = profile?.ExtractionStatus ?? ResumeExtractionStatus.NotStarted;
-        return new(true, status, profile?.ExtractedAtUtc, StatusMessage(status));
+        return new(true, status, profile?.ExtractedAtUtc, StatusMessage(status), profile?.Id);
     }
 
     public async Task<RecommendedJobsResponse> GetRecommendedJobsAsync(Guid userId, CandidatePageQuery query, CancellationToken cancellationToken = default)
@@ -872,11 +878,11 @@ public sealed class CandidateService(
 
     private static CandidateProfileResponse MapProfile(
         User user, StoredProfilePhoto? photo, decimal totalExperienceYears,
-        IReadOnlyCollection<string> storedSkills) => new(
+        IReadOnlyCollection<string> storedSkills, Guid? resumeId) => new(
         user.Id, user.Email, user.FirstName, user.LastName, user.Headline, user.Bio, user.Location,
         PrefillSkills(user, storedSkills), Deserialize<string>(user.EducationJson),
         Deserialize<string>(user.ExperienceJson), user.LinkedInUrl, user.PortfolioUrl,
-        Deserialize<EmploymentType>(user.PreferredJobTypesJson), MapResume(user), user.PhoneNumber,
+        Deserialize<EmploymentType>(user.PreferredJobTypesJson), MapResume(user, resumeId), user.PhoneNumber,
         photo is not null, photo?.Version.ToString("N"), MapBasicDetails(user, storedSkills),
         MapCareerPreferences(user), totalExperienceYears, user.PhoneNumber,
         user.PhoneConfirmed, user.AvailabilityToJoin);
@@ -905,11 +911,12 @@ public sealed class CandidateService(
         user.GraduationYear,
         user.YearsOfExperience,
         user.OnboardingCompletedAtUtc);
-    private static ResumeResponse? MapResume(User user) =>
+    private static ResumeResponse? MapResume(User user, Guid? resumeId) =>
         user.ResumeStorageKey is not null && user.ResumeContentType is not null &&
         user.ResumeSizeBytes.HasValue && user.ResumeUploadedAtUtc.HasValue
             ? new(ResumeDisplayFileName(user.ResumeFileName, user.ResumeContentType),
-                user.ResumeContentType, user.ResumeSizeBytes.Value, user.ResumeUploadedAtUtc.Value)
+                user.ResumeContentType, user.ResumeSizeBytes.Value, user.ResumeUploadedAtUtc.Value,
+                ResumeExtractionStatus.NotStarted, resumeId)
             : null;
     private static JobApplicationResponse MapApplication(JobApplication application, CandidateJob job) => new(
         application.Id, application.JobId, job.Title, job.Slug, job.CompanyName,

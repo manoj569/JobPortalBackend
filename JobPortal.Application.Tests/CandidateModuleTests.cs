@@ -14,6 +14,7 @@ using JobPortal.Application.Features.Dashboard;
 using JobPortal.Domain.Common;
 using JobPortal.Domain.Entities;
 using JobPortal.Domain.Enums;
+using JobPortal.Shared.Models;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -1028,10 +1029,16 @@ public sealed class CandidateModuleTests
         var uploaded = await fixture.Service.UploadResumeAsync(fixture.Candidate.Id,
             new(stream, stream.Length, displayName, "application/pdf"));
         var profile = await fixture.Service.GetProfileAsync(fixture.Candidate.Id);
+        var status = await fixture.Service.GetResumeStatusAsync(fixture.Candidate.Id);
         var downloaded = await fixture.Service.DownloadResumeAsync(fixture.Candidate.Id);
         var json = JsonSerializer.Serialize(profile, WebJson);
         Assert.Equal(displayName, uploaded.FileName);
         Assert.Equal(displayName, profile.Resume!.FileName);
+        Assert.NotEqual(Guid.Empty, uploaded.ResumeId);
+        Assert.Equal(uploaded.ResumeId, profile.Resume.ResumeId);
+        Assert.Equal(uploaded.ResumeId, status.ResumeId);
+        Assert.Contains($"\"resumeId\":\"{uploaded.ResumeId}\"",
+            JsonSerializer.Serialize(uploaded, WebJson), StringComparison.Ordinal);
         Assert.Equal(displayName, downloaded.FileName);
         Assert.DoesNotContain(fixture.Candidate.ResumeStorageKey!, json, StringComparison.Ordinal);
         var controller = new CandidateController(fixture.Service)
@@ -1048,6 +1055,10 @@ public sealed class CandidateModuleTests
         };
         var file = Assert.IsType<FileStreamResult>(await controller.DownloadResume(default));
         Assert.Equal(displayName, file.FileDownloadName);
+        var profileAction = await controller.Profile(default);
+        var profileResponse = Assert.IsType<ApiResponse<CandidateProfileResponse>>(
+            Assert.IsType<OkObjectResult>(profileAction.Result).Value);
+        Assert.Equal(uploaded.ResumeId, profileResponse.Data!.Resume!.ResumeId);
         await Assert.ThrowsAsync<UnauthorizedException>(() =>
             fixture.Service.DownloadResumeAsync(Guid.NewGuid()));
     }

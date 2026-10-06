@@ -24,6 +24,20 @@ public sealed class ResumeTextExtractorTests
     }
 
     [Fact]
+    public async Task DocxExtractionPreservesParagraphAndRunBoundaries()
+    {
+        await using var stream = new MemoryStream();
+        using (var archive = new ZipArchive(stream, ZipArchiveMode.Create, true))
+        {
+            var entry = archive.CreateEntry("word/document.xml");
+            await using var writer = new StreamWriter(entry.Open(), Encoding.UTF8);
+            await writer.WriteAsync("<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body><w:p><w:r><w:t>TECHNICAL SKILLS</w:t></w:r></w:p><w:p><w:r><w:t>C</w:t></w:r><w:r><w:t># | .NET</w:t></w:r></w:p><w:p><w:r><w:t>WORK EXPERIENCE</w:t></w:r></w:p></w:body></w:document>");
+        }
+        stream.Position = 0;
+        Assert.Equal("TECHNICAL SKILLS\nC# | .NET\nWORK EXPERIENCE", await extractor.ExtractAsync(stream, ".docx"));
+    }
+
+    [Fact]
     public async Task LegacyDocExtractionReadsBoundedPrintableText()
     {
         await using var stream = new MemoryStream(Encoding.Latin1.GetBytes("\0\0Software Engineer\0C# and SQL\0"));

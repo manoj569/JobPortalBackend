@@ -12,7 +12,6 @@ namespace JobPortal.Persistence.Repositories;
 public sealed class AIApplyRepository(JobPortalDbContext context) : IAIApplyRepository
 {
     public Task<User?> GetUserProfileAsync(Guid userId, CancellationToken ct = default) => context.Users.Include(x => x.CandidateSkills).Include(x => x.CandidateCertifications).Include(x => x.CandidateExperiences).SingleOrDefaultAsync(x => x.Id == userId && x.Status == UserStatus.Active, ct);
-    public Task<Membership?> GetMembershipAsync(Guid userId, CancellationToken ct = default) => context.Memberships.SingleOrDefaultAsync(x => x.UserId == userId, ct);
     public Task<Job?> GetJobAsync(Guid id, CancellationToken ct = default) => context.Jobs.Include(x => x.Company).Include(x => x.JobSkills).ThenInclude(x => x.Skill).SingleOrDefaultAsync(x => x.Id == id, ct);
     public async Task<IReadOnlyList<Job>> GetJobsAsync(IReadOnlyCollection<Guid> ids, CancellationToken ct = default) => await context.Jobs.Include(x => x.Company).Where(x => ids.Contains(x.Id)).ToListAsync(ct);
     public Task<AIApplyProfile?> GetProfileAsync(Guid userId, CancellationToken ct = default) => context.AIApplyProfiles.SingleOrDefaultAsync(x => x.UserId == userId, ct);

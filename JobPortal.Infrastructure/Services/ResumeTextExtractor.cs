@@ -28,7 +28,11 @@ public sealed class ResumeTextExtractor : IResumeTextExtractor
     private static string Pdf(Stream content)
     {
         using var document = PdfDocument.Open(content);
-        return string.Join('\n', document.GetPages().Select(page => page.Text));
+        // Preserve line boundaries needed by the factual source parser.
+        return string.Join('\n', document.GetPages().Select(page => string.Join('\n', page.GetWords()
+            .GroupBy(word => Math.Round(word.BoundingBox.Bottom / 3))
+            .OrderByDescending(line => line.Key)
+            .Select(line => string.Join(' ', line.OrderBy(word => word.BoundingBox.Left).Select(word => word.Text))))));
     }
 
     private static string Docx(Stream content)
@@ -38,7 +42,9 @@ public sealed class ResumeTextExtractor : IResumeTextExtractor
         using var stream = entry.Open();
         var document = XDocument.Load(stream, LoadOptions.None);
         XNamespace word = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
-        return string.Join(' ', document.Descendants(word + "t").Select(x => x.Value));
+        return string.Join('\n', document.Descendants(word + "p").Select(paragraph =>
+            string.Concat(paragraph.Descendants().Where(x => x.Name == word + "t" || x.Name == word + "tab" || x.Name == word + "br")
+                .Select(x => x.Name == word + "t" ? x.Value : x.Name == word + "tab" ? " | " : "\n"))));
     }
 
     private static string LegacyDoc(Stream content)

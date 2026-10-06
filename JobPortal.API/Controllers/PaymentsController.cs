@@ -13,7 +13,8 @@ namespace JobPortal.API.Controllers;
 [Authorize(Roles = "Candidate")]
 [Route("api/payments")]
 [Produces("application/json")]
-public sealed class PaymentsController(IPaymentService paymentService) : ControllerBase
+public sealed class PaymentsController(IPaymentService paymentService,
+    JobPortal.Application.Features.AIResume.IAIResumeService aiResumeService) : ControllerBase
 {
     [HttpPost("checkout")]
     public async Task<ActionResult<ApiResponse<PaymentOrderResponse>>> CreateOrder(
@@ -83,8 +84,10 @@ public sealed class PaymentsController(IPaymentService paymentService) : Control
                 return StatusCode(StatusCodes.Status413PayloadTooLarge);
             await body.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
         }
-        var result = await paymentService.ProcessPhonePeWebhookAsync(new(
-            body.ToArray(), Request.Headers.Authorization.ToString()), cancellationToken);
+        var webhook = new PhonePeWebhookRequest(body.ToArray(), Request.Headers.Authorization.ToString());
+        if (await aiResumeService.ProcessPhonePeWebhookAsync(webhook, cancellationToken))
+            return Ok(new ApiResponse<PhonePeWebhookResponse>(new("resume_purchase_verified")));
+        var result = await paymentService.ProcessPhonePeWebhookAsync(webhook, cancellationToken);
         return Ok(new ApiResponse<PhonePeWebhookResponse>(result));
     }
 
