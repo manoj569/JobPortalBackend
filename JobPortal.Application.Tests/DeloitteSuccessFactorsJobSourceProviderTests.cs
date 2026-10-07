@@ -81,6 +81,21 @@ public sealed class DeloitteSuccessFactorsJobSourceProviderTests
         Assert.Equal("123", parsed!.ExternalId);
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("deloitte")]
+    [InlineData("https://southasiacareers.deloitte.com/go/Deloitte-India/718244")]
+    public async Task ProviderRequiresExactDeloitteBoardIdentifier(string? identifier)
+    {
+        var factory = new FakeClientFactory(_ => throw new InvalidOperationException("No HTTP call is expected."));
+        var provider = new DeloitteSuccessFactorsJobSourceProvider(factory);
+        var source = Source();
+        source.AtsIdentifier = identifier;
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => provider.FetchSnapshotAsync(source));
+        Assert.Equal("Deloitte SuccessFactors source must use the configured official India careers page.", exception.Message);
+    }
+
     [Fact]
     public async Task SourceHttpFailurePropagatesAndDoesNotProduceACompleteSnapshot()
     {

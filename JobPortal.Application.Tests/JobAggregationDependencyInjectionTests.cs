@@ -17,6 +17,38 @@ namespace JobPortal.Application.Tests;
 
 public sealed class JobAggregationDependencyInjectionTests
 {
+    [Theory]
+    [InlineData(AtsType.SuccessFactors, typeof(DeloitteSuccessFactorsJobSourceProvider))]
+    [InlineData(AtsType.Greenhouse, typeof(GreenhouseExternalJobProvider))]
+    [InlineData(AtsType.Lever, typeof(LeverExternalJobProvider))]
+    [InlineData(AtsType.Ashby, typeof(AshbyExternalJobProvider))]
+    [InlineData(AtsType.Custom, null)]
+    public void SourceAtsTypeResolvesOnlyItsRegisteredProvider(AtsType atsType, Type? expectedProviderType)
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection().Build();
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(configuration);
+        services.AddLogging();
+        services.AddInfrastructure(configuration);
+        using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
+        using var scope = provider.CreateScope();
+        var source = new JobPortal.Domain.Entities.JobSource { AtsType = atsType };
+        var providers = scope.ServiceProvider.GetServices<IExternalJobProvider>().ToArray();
+
+        // Use the same ATS equality selection as JobSourceRunner; there is no fallback provider.
+        var resolved = providers.FirstOrDefault(x => x.AtsType == source.AtsType);
+        if (expectedProviderType is null)
+        {
+            Assert.Null(resolved);
+        }
+        else
+        {
+            Assert.Single(providers, x => x.AtsType == source.AtsType);
+            Assert.IsType(expectedProviderType, resolved);
+        }
+        Assert.Equal(4, (int)AtsType.SuccessFactors);
+    }
+
     [Fact]
     public void AggregationServicesResolveWithScopedRepositoriesAndExistingClock()
     {

@@ -169,10 +169,44 @@ public sealed class JobSourceAdministrationTests
     [InlineData(AtsType.Greenhouse, " ")]
     [InlineData(AtsType.Lever, null)]
     [InlineData(AtsType.Lever, "")]
+    [InlineData(AtsType.Ashby, null)]
+    [InlineData(AtsType.SuccessFactors, null)]
+    [InlineData(AtsType.SuccessFactors, "")]
+    [InlineData(AtsType.SuccessFactors, " ")]
     public async Task SupportedAtsRequiresIdentifier(AtsType atsType, string? identifier)
     {
         using var f = new JobSourceFixture();
         await Assert.ThrowsAsync<ValidationException>(() => f.Service.CreateAsync(f.Request with { AtsType = atsType, AtsIdentifier = identifier }));
+    }
+
+    [Fact]
+    public async Task SuccessFactorsCreateEditListAndDetailPreserveProviderConfiguration()
+    {
+        using var f = new JobSourceFixture();
+        var request = f.Request with
+        {
+            AtsType = AtsType.SuccessFactors,
+            AtsIdentifier = " 718244 ",
+            CareerPageUrl = "https://southasiacareers.deloitte.com/go/Deloitte-India/718244",
+            ScanIntervalMinutes = 1440
+        };
+        var created = await f.Service.CreateAsync(request);
+        Assert.Equal(AtsType.SuccessFactors, created.AtsType);
+        Assert.Equal("718244", created.AtsIdentifier);
+        Assert.Equal(request.CareerPageUrl, created.CareerPageUrl);
+
+        var updated = await f.Service.UpdateAsync(created.Id, request with { ScanIntervalMinutes = 720 });
+        Assert.Equal(720, updated.ScanIntervalMinutes);
+        Assert.Equal(AtsType.SuccessFactors, updated.AtsType);
+        Assert.Equal("718244", updated.AtsIdentifier);
+        Assert.Equal(request.CareerPageUrl, updated.CareerPageUrl);
+        Assert.Equal(updated, await f.Service.GetByIdAsync(created.Id));
+        Assert.Equal(updated, Assert.Single((await f.Service.SearchAsync(new(AtsType: AtsType.SuccessFactors))).Items));
+        Assert.Equal(AtsType.Greenhouse, (await f.Service.GetByIdAsync(f.Source.Id)).AtsType);
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            f.Service.UpdateAsync(created.Id, request with { AtsIdentifier = null }));
+        Assert.Equal(updated, await f.Service.GetByIdAsync(created.Id));
     }
 
     [Theory]
