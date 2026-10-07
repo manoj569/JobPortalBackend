@@ -38,6 +38,9 @@ public sealed class AIResumeService(IAIResumeRepository repository, IAIResumePro
     private static readonly Action<ILogger, int, int, int, string, Exception?> LogPatchCounts =
         LoggerMessage.Define<int, int, int, string>(LogLevel.Information, new EventId(7408, "AIResumeTailoringPatch"),
             "AIResumeTailoringPatch Proposed={Proposed} Accepted={Accepted} Rejected={Rejected} PreservationMode={PreservationMode}");
+    private static readonly Action<ILogger, string, string, Exception?> LogGenerationRejected =
+        LoggerMessage.Define<string, string>(LogLevel.Warning, new EventId(7411, "AIResumeGenerationRejected"),
+            "AIResumeGenerationRejected Code={Code} Stage={Stage}");
 
     public IReadOnlyList<AIResumePackage> Packages() => Settings.Packages
         .Select(x => new AIResumePackage(x.Code, x.Name, x.Price, x.Credits, x.IsPopular)).ToArray();
@@ -354,6 +357,7 @@ public sealed class AIResumeService(IAIResumeRepository repository, IAIResumePro
         }, ct);
         if (reservation.ExistingResume is not null) return ToResume(reservation.ExistingResume);
         ResumeArtifact? stagedArtifact = null;
+        var generationStage = "session_reload";
         try
         {
             var storedSession = await RequiredSession(userId, sessionId, ct);
@@ -361,21 +365,30 @@ public sealed class AIResumeService(IAIResumeRepository repository, IAIResumePro
             StoredTailoring? tailoring = null;
             if (masterDocuments is not null)
             {
+                generationStage = "master_snapshot_lookup";
                 var master = SessionMaster(storedSession) ?? throw new AIResumeProviderException("master_snapshot_required");
                 var editable = ResumePatchGuard.Targets(reservation.Source).Where(x => master.Extension != ".docx" || master.Bindings.Any(b => b.TargetId == x.Id)).ToArray();
+                generationStage = "tailoring_provider_call";
                 var raw = await provider.GenerateTailoringPatchAsync(new(reservation.Source, storedSession.JobDescription, reservation.Analysis,
                     ResumeEvidenceCatalog.Create(reservation.Source), editable), ct);
+                generationStage = "patch_guard_result";
                 var applied = ResumePatchGuard.Apply(reservation.Source, raw.Content, storedSession.JobDescription,
                     editable.Select(x => x.Id).ToHashSet(StringComparer.Ordinal), LogRejectedPatch);
                 if (applied.AcceptedCount == 0) throw new AIResumeProviderException("no_safe_tailoring_changes");
+                generationStage = "artifact_creation";
                 stagedArtifact = await masterDocuments.CreateArtifactAsync(userId, master, reservation.Source, applied, ct);
                 tailoring = new(2, applied.Content, applied.Decisions, applied.EmphasizedSkillEvidenceIds, master, stagedArtifact);
                 generated = new(applied.Content, raw.Model, raw.InputTokens, raw.OutputTokens);
-                if (environment?.IsDevelopment() == true && logger is not null)
+                if (logger is not null)
                     LogPatchCounts(logger, applied.Decisions.Length, applied.AcceptedCount, applied.Decisions.Count(x => x.Status == "rejected"),
                         masterDocuments.Capabilities(master).PreservationMode, null);
             }
-            else generated = await provider.GenerateTailoredResumeAsync(new(reservation.Source, storedSession.JobDescription, reservation.Analysis), ct);
+            else
+            {
+                generationStage = "tailoring_provider_call";
+                generated = await provider.GenerateTailoredResumeAsync(new(reservation.Source, storedSession.JobDescription, reservation.Analysis), ct);
+            }
+            generationStage = "final_validation";
             var validation = await provider.ValidateTailoredResumeAsync(new(reservation.Source, generated.Content), ct);
             if (!validation.IsValid) throw new AIResumeProviderException("unsupported_claims");
             var result = await repository.WriteAsync(userId, async () =>
@@ -409,7 +422,10 @@ public sealed class AIResumeService(IAIResumeRepository repository, IAIResumePro
             await ReleaseGeneration(userId, request.IdempotencyKey, owner, CancellationToken.None);
             if (stagedArtifact is not null) await DeleteUnpersistedArtifact(userId, reservation.Generation.Id, stagedArtifact.StorageKey);
             if (ex is AIResumeProviderException providerError)
+            {
+                if (logger is not null) LogGenerationRejected(logger, providerError.Code, generationStage, null);
                 throw new AppException("Resume generation could not be completed. Your credit was restored.", 503, providerError.Code);
+            }
             throw;
         }
     }
