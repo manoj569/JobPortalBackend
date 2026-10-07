@@ -18,7 +18,7 @@ namespace JobPortal.Application.Tests;
 public sealed class JobAggregationDependencyInjectionTests
 {
     [Theory]
-    [InlineData(AtsType.SuccessFactors, typeof(DeloitteSuccessFactorsJobSourceProvider))]
+    [InlineData(AtsType.SuccessFactors, typeof(SuccessFactorsJobSourceProvider))]
     [InlineData(AtsType.Greenhouse, typeof(GreenhouseExternalJobProvider))]
     [InlineData(AtsType.Lever, typeof(LeverExternalJobProvider))]
     [InlineData(AtsType.Ashby, typeof(AshbyExternalJobProvider))]
@@ -131,7 +131,7 @@ public sealed class JobAggregationDependencyInjectionTests
             providers,
             x => x is AshbyExternalJobProvider);
 
-        Assert.Contains(providers, x => x is DeloitteSuccessFactorsJobSourceProvider);
+        Assert.Contains(providers, x => x is SuccessFactorsJobSourceProvider);
 
         Assert.DoesNotContain(
             providers,
@@ -164,7 +164,7 @@ public sealed class JobAggregationDependencyInjectionTests
             new Uri("https://api.ashbyhq.com/"),
             ashby.BaseAddress);
 
-        using var deloitte = clients.CreateClient(DeloitteSuccessFactorsJobSourceProvider.HttpClientName);
+        using var deloitte = clients.CreateClient(SuccessFactorsJobSourceProvider.HttpClientName);
         Assert.Contains("CareerHarborJobAggregation", deloitte.DefaultRequestHeaders.UserAgent.ToString(), StringComparison.Ordinal);
         Assert.Contains("text/html", deloitte.DefaultRequestHeaders.Accept.ToString(), StringComparison.Ordinal);
     }

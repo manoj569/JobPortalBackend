@@ -96,6 +96,45 @@ public sealed class JobAggregationCreationRaceTests
             fingerprints, new UnitOfWork(context), TimeProvider.System, locks, new UrlCanonicalizer());
     }
 
+    [Fact]
+    public async Task PreparedNegativeSourceIdentityIsRecheckedUnderLockAcrossWriters()
+    {
+        var options = new DbContextOptionsBuilder<JobPortalDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
+        await using var seed = new JobPortalDbContext(options);
+        var company = new Company { Name = "Acme", Slug = "acme" };
+        var category = new Category { Name = "Engineering", Slug = "engineering" };
+        var source = new JobSource { Company = company, CompanyId = company.Id, AtsType = AtsType.SuccessFactors };
+        seed.AddRange(company, category, source);
+        await seed.SaveChangesAsync();
+        await using var firstContext = new JobPortalDbContext(options);
+        await using var secondContext = new JobPortalDbContext(options);
+        var locks = new TestAggregationLocks();
+        JobIngestionService Create(JobPortalDbContext context)
+        {
+            var jobs = new JobRepository(context);
+            var fingerprints = new JobFingerprintService();
+            var canonical = new UrlCanonicalizer();
+            return new(jobs, new CompanyManagementRepository(context), new CategoryManagementRepository(context),
+                new JobDeduplicationService(jobs, fingerprints, canonical), fingerprints, new UnitOfWork(context),
+                TimeProvider.System, locks, canonical);
+        }
+        var first = Create(firstContext);
+        var second = Create(secondContext);
+        var raw = new RawExternalJob { Title = "Engineer", CompanyName = company.Name, Location = "Pune",
+            ApplicationUrl = "https://example.test/1", CategoryId = category.Id, JobSourceId = source.Id, ExternalId = "1" };
+        await first.PrepareRunAsync([raw]);
+        await second.PrepareRunAsync([raw]);
+        try
+        {
+            var results = await Task.WhenAll(first.IngestAsync(raw), second.IngestAsync(raw));
+            Assert.Single(results, x => x.Created);
+            Assert.Single(results, x => x.Outcome == JobIngestionOutcome.Unchanged);
+            Assert.Equal(results[0].JobId, results[1].JobId);
+            Assert.Single(await seed.Jobs.AsNoTracking().ToListAsync());
+        }
+        finally { await first.CompleteRunAsync(); await second.CompleteRunAsync(); }
+    }
+
     private sealed class InitialMissBarrier
     {
         private int arrivals;

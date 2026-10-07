@@ -14,7 +14,7 @@ public sealed class DeloitteSuccessFactorsJobSourceProviderTests
     public void ListingParserReadsRowsAndOffsetPagination()
     {
         var html = Listing(26, 26, 26, 25, Row("Engineer", "hyderabad/123"));
-        var page = DeloitteSuccessFactorsJobSourceProvider.ParseListingPage(html, 25);
+        var page = SuccessFactorsJobSourceProvider.ParseListingPage(html, 25, new Uri(Source().CareerPageUrl));
         Assert.Equal(26, page.TotalCount);
         Assert.Equal(25, page.LastOffset);
         Assert.Equal("Engineer", Assert.Single(page.Results).Title);
@@ -27,7 +27,7 @@ public sealed class DeloitteSuccessFactorsJobSourceProviderTests
         var source = Source();
         var factory = new FakeClientFactory(request => request.AbsolutePath.Contains("/job/", StringComparison.Ordinal)
             ? Detail("Systems Engineer") : Listing(1, 1, 1, 0, Row("Systems Engineer", "systems-engineer/123")));
-        var provider = new DeloitteSuccessFactorsJobSourceProvider(factory);
+        var provider = new SuccessFactorsJobSourceProvider(factory);
 
         var snapshot = await provider.FetchSnapshotAsync(source);
 
@@ -50,7 +50,7 @@ public sealed class DeloitteSuccessFactorsJobSourceProviderTests
     [Fact]
     public async Task MalformedDetailMakesSnapshotIncompleteAndCannotBeUsedForClosing()
     {
-        var provider = new DeloitteSuccessFactorsJobSourceProvider(new FakeClientFactory(request =>
+        var provider = new SuccessFactorsJobSourceProvider(new FakeClientFactory(request =>
             request.AbsolutePath.Contains("/job/", StringComparison.Ordinal)
                 ? "<html>not a job page</html>"
                 : Listing(1, 1, 1, 0, Row("Engineer", "engineer/123"))));
@@ -65,7 +65,7 @@ public sealed class DeloitteSuccessFactorsJobSourceProviderTests
     [Fact]
     public async Task ProviderRejectsSourceOutsideConfiguredOfficialBoard()
     {
-        var provider = new DeloitteSuccessFactorsJobSourceProvider(new FakeClientFactory(_ => string.Empty));
+        var provider = new SuccessFactorsJobSourceProvider(new FakeClientFactory(_ => string.Empty));
         var source = Source();
         source.CareerPageUrl = "https://example.test/careers";
         await Assert.ThrowsAsync<InvalidOperationException>(() => provider.FetchSnapshotAsync(source));
@@ -74,10 +74,10 @@ public sealed class DeloitteSuccessFactorsJobSourceProviderTests
     [Fact]
     public void DetailUsesStablePostingIdWhenRequisitionIdIsAbsent()
     {
-        var listing = new DeloitteSuccessFactorsJobSourceProvider.ListingEntry("Engineer", "Pune, India",
+        var listing = new SuccessFactorsJobSourceProvider.ListingEntry("Engineer", "Pune, India",
             DateTimeOffset.Parse("2026-10-04T00:00:00Z"), new Uri("https://southasiacareers.deloitte.com/job/engineer/123/"));
         var html = Detail("Engineer").Replace("Job requisition ID : 100536", "", StringComparison.Ordinal);
-        var parsed = DeloitteSuccessFactorsJobSourceProvider.ParseDetail(html, listing, "Deloitte");
+        var parsed = SuccessFactorsJobSourceProvider.ParseDetail(html, listing, "Deloitte");
         Assert.Equal("123", parsed!.ExternalId);
     }
 
@@ -89,17 +89,17 @@ public sealed class DeloitteSuccessFactorsJobSourceProviderTests
     public async Task ProviderRequiresExactDeloitteBoardIdentifier(string? identifier)
     {
         var factory = new FakeClientFactory(_ => throw new InvalidOperationException("No HTTP call is expected."));
-        var provider = new DeloitteSuccessFactorsJobSourceProvider(factory);
+        var provider = new SuccessFactorsJobSourceProvider(factory);
         var source = Source();
         source.AtsIdentifier = identifier;
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => provider.FetchSnapshotAsync(source));
-        Assert.Equal("Deloitte SuccessFactors source must use the configured official India careers page.", exception.Message);
+        Assert.Equal("SuccessFactors source must use a public HTTPS /go/{board}/{numeric-id} URL matching its ATS identifier.", exception.Message);
     }
 
     [Fact]
     public async Task SourceHttpFailurePropagatesAndDoesNotProduceACompleteSnapshot()
     {
-        var provider = new DeloitteSuccessFactorsJobSourceProvider(new FaultClientFactory((_, _) =>
+        var provider = new SuccessFactorsJobSourceProvider(new FaultClientFactory((_, _) =>
             Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable))));
         await Assert.ThrowsAsync<HttpRequestException>(() => provider.FetchSnapshotAsync(Source()));
     }
@@ -108,7 +108,7 @@ public sealed class DeloitteSuccessFactorsJobSourceProviderTests
     public async Task CancellationDuringSourceRequestPropagates()
     {
         using var cancellation = new CancellationTokenSource();
-        var provider = new DeloitteSuccessFactorsJobSourceProvider(new FaultClientFactory(async (_, token) =>
+        var provider = new SuccessFactorsJobSourceProvider(new FaultClientFactory(async (_, token) =>
         {
             await Task.Delay(Timeout.InfiniteTimeSpan, token);
             return new HttpResponseMessage(HttpStatusCode.OK);

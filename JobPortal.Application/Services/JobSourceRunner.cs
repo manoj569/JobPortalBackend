@@ -56,8 +56,8 @@ public sealed partial class JobSourceRunner(
     private readonly IJobRepository? _jobRepository = jobRepository;
 
     [LoggerMessage(EventId = 4353, Level = LogLevel.Information,
-        Message = "DeloitteSyncCompleted Source={JobSourceId} Fetched={Fetched} Inserted={Inserted} Updated={Updated} Unchanged={Unchanged} Closed={Closed} Failed={Failed} DurationMs={DurationMs}.")]
-    private static partial void LogDeloitteSyncCompleted(ILogger logger, Guid jobSourceId, int fetched,
+        Message = "SuccessFactorsSyncCompleted Source={JobSourceId} Fetched={Fetched} Inserted={Inserted} Updated={Updated} Unchanged={Unchanged} Closed={Closed} Failed={Failed} DurationMs={DurationMs}.")]
+    private static partial void LogSuccessFactorsSyncCompleted(ILogger logger, Guid jobSourceId, int fetched,
         int inserted, int updated, int unchanged, int closed, int failed, double durationMs);
 
     public async Task<JobSourceRunResult> RunAsync(
@@ -112,10 +112,10 @@ public sealed partial class JobSourceRunner(
 
         var previousSuccessfulRun = source.LastSuccessfulRunAtUtc;
         var previousFailures = source.ConsecutiveFailures;
+        var runTimer = System.Diagnostics.Stopwatch.StartNew();
 
         try
         {
-            var runTimer = System.Diagnostics.Stopwatch.StartNew();
             ExternalJobSourceSnapshot? snapshot = null;
             IReadOnlyCollection<RawExternalJob> rawJobs;
             if (provider is ICompleteExternalJobProvider completeProvider)
@@ -132,14 +132,19 @@ public sealed partial class JobSourceRunner(
             }
             if (_logger is not null) Progress(_logger, source.Id, "Provider fetch completed", rawJobs.Count, runTimer.Elapsed.TotalMilliseconds, null);
             var processingTimer = System.Diagnostics.Stopwatch.StartNew();
+            var enrichmentMilliseconds = 0d;
+            var ingestionMilliseconds = 0d;
+            (categoryResolver as IJobSourceCategoryRunCache)?.BeginRun();
             var processed = 0;
             if (_logger is not null) Progress(_logger, source.Id, "Enrichment and ingestion started", rawJobs.Count, 0, null);
 
             // Prefetch canonical URL duplicates in one database round trip.
             // PrepareRunAsync only reads raw ApplicationUrl values, so normalization,
             // enrichment and category resolution remain isolated per provider item below.
+            var preloadTimer = System.Diagnostics.Stopwatch.StartNew();
             if (ingestionService is IBulkJobIngestionService bulkIngestion)
                 await bulkIngestion.PrepareRunAsync(rawJobs, cancellationToken);
+            if (_logger is not null) Progress(_logger, source.Id, "DB preload completed", rawJobs.Count, preloadTimer.Elapsed.TotalMilliseconds, null);
 
             var created = 0;
             var updated = 0;
@@ -162,17 +167,21 @@ public sealed partial class JobSourceRunner(
                 var publicationAttempt = false;
                 try
                 {
-                    var normalized = normalizer.Normalize(rawJob);
-                    normalized = enricher?.Enrich(normalized) ?? normalized;
-                    var categoryId = await categoryResolver.ResolveCategoryIdAsync(
-                        source,
-                        normalized,
-                        cancellationToken);
-                    var preparedJob = normalized with { CategoryId = categoryId };
+                    var enrichmentStart = System.Diagnostics.Stopwatch.GetTimestamp();
+                    RawExternalJob preparedJob;
+                    try
+                    {
+                        var normalized = normalizer.Normalize(rawJob);
+                        normalized = enricher?.Enrich(normalized) ?? normalized;
+                        var categoryId = await categoryResolver.ResolveCategoryIdAsync(source, normalized, cancellationToken);
+                        preparedJob = normalized with { CategoryId = categoryId };
+                    }
+                    finally { enrichmentMilliseconds += System.Diagnostics.Stopwatch.GetElapsedTime(enrichmentStart).TotalMilliseconds; }
 
-                    var result = await ingestionService.IngestAsync(
-                        preparedJob,
-                        cancellationToken);
+                    var ingestionStart = System.Diagnostics.Stopwatch.GetTimestamp();
+                    JobIngestionResult result;
+                    try { result = await ingestionService.IngestAsync(preparedJob, cancellationToken); }
+                    finally { ingestionMilliseconds += System.Diagnostics.Stopwatch.GetElapsedTime(ingestionStart).TotalMilliseconds; }
 
                     switch (result.Outcome)
                     {
@@ -254,6 +263,7 @@ public sealed partial class JobSourceRunner(
                     // therefore never persisted; only the structured reason tally
                     // records the failure classification.
                     unitOfWork.ResetAfterFailure();
+                    (ingestionService as IBulkJobIngestionService)?.ResetRunAfterFailure();
                     failed++;
                     if (publicationAttempt) publishFailed++;
                     var failureReason = publicationAttempt
@@ -280,18 +290,30 @@ public sealed partial class JobSourceRunner(
             var hasCompleteIdentities = externalIdsForReconciliation.Length == rawJobs.Count &&
                 externalIdsForReconciliation.Distinct(StringComparer.Ordinal).Count() == rawJobs.Count;
             var canReconcile = snapshot is { IsComplete: true, Skipped: 0 } && hasCompleteIdentities && skipped == 0 && failed == 0;
+            var reconciliationTimer = System.Diagnostics.Stopwatch.StartNew();
             if (canReconcile && _jobRepository is not null)
             {
                 closed = await _jobRepository.CloseSourceJobsMissingFromSnapshotAsync(
                     source.Id, externalIdsForReconciliation, timeProvider.GetUtcNow().UtcDateTime, cancellationToken);
             }
+            if (_logger is not null)
+            {
+                Progress(_logger, source.Id, "Enrichment completed", processed, enrichmentMilliseconds, null);
+                Progress(_logger, source.Id, "Insert/update processing completed (includes saves)", processed, ingestionMilliseconds, null);
+                if ((ingestionService as IBulkJobIngestionService)?.RunMetrics is { } metrics)
+                    Progress(_logger, source.Id, "Item SaveChanges attempts", metrics.SaveCalls, metrics.SaveMilliseconds, null);
+                Progress(_logger, source.Id, "Reconciliation completed", closed, reconciliationTimer.Elapsed.TotalMilliseconds, null);
+            }
 
             var now = timeProvider.GetUtcNow().UtcDateTime;
 
             source.LastRunAtUtc = now;
-            source.LastSuccessfulRunAtUtc = now;
-            source.LastError = null;
-            source.ConsecutiveFailures = 0;
+            // A complete-source provider's partial scan must never claim a successful
+            // full run. Already committed items remain resumable on the next attempt.
+            var successful = snapshot is null || canReconcile;
+            source.LastSuccessfulRunAtUtc = successful ? now : previousSuccessfulRun;
+            source.LastError = successful ? null : "External job source scan was incomplete or had failed/skipped items.";
+            source.ConsecutiveFailures = successful ? 0 : previousFailures + 1;
 
             sources.Update(source);
             await unitOfWork.SaveChangesAsync(cancellationToken);
@@ -324,7 +346,8 @@ public sealed partial class JobSourceRunner(
                 AutoPublishDisabled = disabled,
                 QualityReasonCounts = qualityReasons.Count == 0 ? null : qualityReasons,
                 ReasonCounts = reasonCounts.Count == 0 ? null : reasonCounts,
-                Succeeded = true
+                Succeeded = successful,
+                Error = source.LastError
             };
 
             if (_logger is not null)
@@ -333,7 +356,7 @@ public sealed partial class JobSourceRunner(
                 Progress(_logger, source.Id, "Run completed", processed, runTimer.Elapsed.TotalMilliseconds, null);
                 PublicationCompleted(_logger, source.Id, published, needsReview, qualityRejected, publishFailed, disabled, null);
                 if (source.AtsType == JobPortal.Domain.Enums.AtsType.SuccessFactors)
-                    LogDeloitteSyncCompleted(_logger, source.Id, runResult.TotalReceived, created, updated, unchanged,
+                    LogSuccessFactorsSyncCompleted(_logger, source.Id, runResult.TotalReceived, created, updated, unchanged,
                         closed, failed, runTimer.Elapsed.TotalMilliseconds);
                 foreach (var (reason, count) in qualityReasons)
                     RunReason(_logger, source.Id, $"Quality.{reason}", count, null);
@@ -358,6 +381,7 @@ public sealed partial class JobSourceRunner(
         catch (OperationCanceledException)
             when (cancellationToken.IsCancellationRequested)
         {
+            unitOfWork.ResetAfterFailure();
             throw;
         }
         catch (Exception)
@@ -389,6 +413,12 @@ public sealed partial class JobSourceRunner(
                 Succeeded = false,
                 Error = source.LastError
             };
+        }
+        finally
+        {
+            (categoryResolver as IJobSourceCategoryRunCache)?.EndRun();
+            if (ingestionService is IBulkJobIngestionService bulk) await bulk.CompleteRunAsync();
+            if (_logger is not null) Progress(_logger, source.Id, "Total duration (including cleanup)", 0, runTimer.Elapsed.TotalMilliseconds, null);
         }
     }
 }

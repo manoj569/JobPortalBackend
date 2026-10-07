@@ -6,6 +6,7 @@ using JobPortal.Domain.Entities;
 using JobPortal.Domain.Enums;
 using JobPortal.Persistence.Repositories;
 using Microsoft.Extensions.Options;
+using Microsoft.EntityFrameworkCore;
 using Xunit;
 
 namespace JobPortal.Application.Tests;
@@ -78,6 +79,8 @@ public sealed class DeloitteSourceReconciliationTests
         provider.Snapshot = new ExternalJobSourceSnapshot([changedSourceJob], 0, true);
         var changed = await runner.RunAsync(f.Source.Id);
         Assert.Equal(1, changed.Updated);
+        // Aggregation now detaches saved jobs to keep tracking bounded. Verify persisted state.
+        imported = await f.Context.Jobs.AsNoTracking().SingleAsync(x => x.Id == imported.Id);
         Assert.Equal("Source changed", imported.Description);
         Assert.Equal(ApplicationUrlIdentity.Hash(changedSourceJob.ApplicationUrl), imported.CanonicalApplicationUrlHash);
 
@@ -94,6 +97,7 @@ public sealed class DeloitteSourceReconciliationTests
         provider.Snapshot = new ExternalJobSourceSnapshot([], 0, true);
         var complete = await runner.RunAsync(f.Source.Id);
         Assert.Equal(1, complete.Closed);
+        imported = await f.Context.Jobs.AsNoTracking().SingleAsync(x => x.Id == imported.Id);
         Assert.Equal(JobStatus.Closed, imported.Status);
         Assert.Equal(JobStatus.Published, manual.Status);
         Assert.Null(manual.JobSourceId);

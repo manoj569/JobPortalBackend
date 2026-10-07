@@ -28,12 +28,47 @@ public sealed class JobIngestionService(
         new(StringComparer.Ordinal);
 
     private readonly HashSet<Guid> _bulkTouchedJobIds = [];
+    private readonly Dictionary<(Guid Source, string ExternalId), Job> _ownedJobs = [];
+    private readonly HashSet<Guid> _preloadedSources = [];
+    private readonly HashSet<Guid> _validCategories = [];
+    private IExternalJobCreationLockRun? _creationRun;
+    private bool _runPrepared;
+    private int _saveCalls;
+    private double _saveMilliseconds;
+    private int _preloadedOwnedCount;
+    public JobIngestionRunMetrics RunMetrics => new(_saveCalls, _saveMilliseconds, _preloadedOwnedCount);
+
+    private async Task PersistAsync(CancellationToken token)
+    {
+        var start = System.Diagnostics.Stopwatch.GetTimestamp();
+        _saveCalls++;
+        try { await unitOfWork.SaveChangesAsync(token); }
+        finally { _saveMilliseconds += System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds; }
+    }
 
     public async Task PrepareRunAsync(
         IReadOnlyCollection<RawExternalJob> rawJobs,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+
+        await CompleteRunAsync();
+        _saveCalls = 0;
+        _saveMilliseconds = 0;
+        _preloadedOwnedCount = 0;
+        _companyCache.Clear();
+        foreach (var source in rawJobs.Where(x => x.JobSourceId.HasValue && !string.IsNullOrWhiteSpace(x.ExternalId))
+            .GroupBy(x => x.JobSourceId!.Value))
+        {
+            var owned = await jobs.FindSourceOwnedJobsAsync(source.Key,
+                source.Select(x => x.ExternalId!.Trim()).Distinct(StringComparer.Ordinal).ToArray(), cancellationToken);
+            if (owned is null) continue;
+            _preloadedSources.Add(source.Key);
+            foreach (var job in owned) _ownedJobs[(source.Key, job.ExternalJobId!)] = job;
+        }
+        _creationRun = (creationLock as IExternalJobCreationLockRunFactory)?.CreateRun();
+        _preloadedOwnedCount = _ownedJobs.Count;
+        _runPrepared = true;
 
         var canonicalByHash = new Dictionary<string, string>(StringComparer.Ordinal);
 
@@ -73,7 +108,8 @@ public sealed class JobIngestionService(
         }
 
         var now = timeProvider.GetUtcNow().UtcDateTime;
-        var ids = matches.Values.Select(x => x.Id).Distinct().ToArray();
+        var ownedIds = _ownedJobs.Values.Select(x => x.Id).ToHashSet();
+        var ids = matches.Values.Select(x => x.Id).Where(x => !ownedIds.Contains(x)).Distinct().ToArray();
         var touched = await jobs.TouchAggregationMetadataAsync(ids, now, cancellationToken);
 
         if (touched == ids.Length)
@@ -81,6 +117,22 @@ public sealed class JobIngestionService(
             foreach (var id in ids)
                 _bulkTouchedJobIds.Add(id);
         }
+    }
+
+    public void ResetRunAfterFailure()
+    {
+        _ownedJobs.Clear();
+        _preloadedSources.Clear();
+        _canonicalUrlDuplicateCache.Clear();
+        _bulkTouchedJobIds.Clear();
+        _companyCache.Clear();
+        _validCategories.Clear();
+    }
+
+    public async Task CompleteRunAsync()
+    {
+        try { if (_creationRun is not null) await _creationRun.DisposeAsync(); }
+        finally { _creationRun = null; _runPrepared = false; ResetRunAfterFailure(); }
     }
 
     public async Task<JobIngestionResult> IngestAsync(RawExternalJob rawJob, CancellationToken cancellationToken = default)
@@ -134,14 +186,23 @@ public sealed class JobIngestionService(
         var sourceExternalId = TextNormalizer.TrimOrNull(rawJob.ExternalId);
         if (rawJob.JobSourceId.HasValue && sourceExternalId is not null)
         {
-            var owned = await jobs.FindBySourceIdentityAsync(rawJob.JobSourceId.Value, sourceExternalId, cancellationToken);
+            var owned = _ownedJobs.GetValueOrDefault((rawJob.JobSourceId.Value, sourceExternalId));
+            if (owned is null && !_preloadedSources.Contains(rawJob.JobSourceId.Value))
+                owned = await jobs.FindBySourceIdentityAsync(rawJob.JobSourceId.Value, sourceExternalId, cancellationToken);
             if (owned is not null)
             {
+                owned = jobs.TrackAggregationJob(owned);
+                var oldUrl = owned.ApplicationUrl;
                 var changed = ApplySourceFields(owned, rawJob, title, company, location, applicationUrl);
                 owned.LastSeenAtUtc = now;
                 owned.FirstSeenAtUtc ??= now;
                 if (changed) owned.UpdatedAtUtc = now;
-                await unitOfWork.SaveChangesAsync(cancellationToken);
+                await PersistAsync(cancellationToken);
+                if (_runPrepared)
+                {
+                    RememberSavedOwned(owned, oldUrl);
+                    jobs.ReleaseSavedAggregationTracking();
+                }
                 return new JobIngestionResult
                 {
                     Outcome = changed ? JobIngestionOutcome.Updated : JobIngestionOutcome.Unchanged,
@@ -158,13 +219,28 @@ public sealed class JobIngestionService(
         await using var creationLease =
             duplicate.IsDuplicate
                 ? null
-                : await creationLock.AcquireAsync(
+                : await (_creationRun ?? creationLock).AcquireAsync(
                     applicationUrl is null ? null : canonicalizer.Canonicalize(applicationUrl),
                     fingerprintService.GenerateFingerprint(title, company.Name, location),
                     cancellationToken);
 
         if (creationLease is not null)
         {
+            // Negative preload results are not authoritative across writers. Recheck under
+            // the same creation locks before dedup/save; never trust cached absence here.
+            if (rawJob.JobSourceId.HasValue && sourceExternalId is not null &&
+                await jobs.FindBySourceIdentityAsync(rawJob.JobSourceId.Value, sourceExternalId, cancellationToken) is { } concurrentOwned)
+            {
+                var oldUrl = concurrentOwned.ApplicationUrl;
+                var changed = ApplySourceFields(concurrentOwned, rawJob, title, company, location, applicationUrl);
+                concurrentOwned.LastSeenAtUtc = timeProvider.GetUtcNow().UtcDateTime;
+                concurrentOwned.FirstSeenAtUtc ??= concurrentOwned.LastSeenAtUtc;
+                await PersistAsync(cancellationToken);
+                if (_runPrepared) RememberSavedOwned(concurrentOwned, oldUrl);
+                if (_runPrepared) jobs.ReleaseSavedAggregationTracking();
+                return new JobIngestionResult { Outcome = changed ? JobIngestionOutcome.Updated : JobIngestionOutcome.Unchanged,
+                    JobId = concurrentOwned.Id, ExplicitReasonCode = JobIngestionReasonCode.None };
+            }
             duplicate = await deduplicationService.FindDuplicateAsync(
                 title, company.Name, location, applicationUrl, company.Id, cancellationToken);
             now = timeProvider.GetUtcNow().UtcDateTime;
@@ -214,15 +290,17 @@ public sealed class JobIngestionService(
                     matchedJob.Title, matchedJob.Company.Name, matchedJob.Location);
             }
 
-            await unitOfWork.SaveChangesAsync(cancellationToken);
+            await PersistAsync(cancellationToken);
+            if (_runPrepared) jobs.ReleaseSavedAggregationTracking();
             return DuplicateResult(duplicate, matchedJob.Id);
         }
 
         if (!rawJob.CategoryId.HasValue || rawJob.CategoryId.Value == Guid.Empty)
             return Invalid("CategoryId is required when creating a new external job.");
 
-        if (!await categories.ExistsAsync(rawJob.CategoryId.Value, cancellationToken))
+        if (!_validCategories.Contains(rawJob.CategoryId.Value) && !await categories.ExistsAsync(rawJob.CategoryId.Value, cancellationToken))
             return Invalid($"Category '{rawJob.CategoryId.Value}' does not exist.");
+        if (_runPrepared) _validCategories.Add(rawJob.CategoryId.Value);
 
         var id = Guid.NewGuid();
 
@@ -260,7 +338,10 @@ public sealed class JobIngestionService(
         };
 
         await jobs.AddAsync(job, cancellationToken);
-        await unitOfWork.SaveChangesAsync(cancellationToken);
+        await PersistAsync(cancellationToken);
+        if (_runPrepared && job.JobSourceId.HasValue && sourceExternalId is not null)
+            RememberSavedOwned(job, null);
+        if (_runPrepared) jobs.ReleaseSavedAggregationTracking();
 
         return new JobIngestionResult
         {
@@ -320,6 +401,17 @@ public sealed class JobIngestionService(
         return changed;
     }
 
+    private void RememberSavedOwned(Job job, string? oldUrl)
+    {
+        _ownedJobs[(job.JobSourceId!.Value, job.ExternalJobId!)] = job;
+        var oldKey = oldUrl is null ? null : canonicalizer.Canonicalize(oldUrl);
+        var newKey = canonicalizer.Canonicalize(job.ApplicationUrl);
+        if (oldKey is not null && oldKey != newKey &&
+            _canonicalUrlDuplicateCache.TryGetValue(oldKey, out var oldMatch) && oldMatch.Id == job.Id)
+            _canonicalUrlDuplicateCache.Remove(oldKey);
+        if (!string.IsNullOrWhiteSpace(newKey)) _canonicalUrlDuplicateCache[newKey] = job;
+    }
+
     private async Task<DeduplicationResult> FindDuplicateAsync(
         string title,
         Company company,
@@ -337,6 +429,10 @@ public sealed class JobIngestionService(
                 return DeduplicationResult.SourceUrlMatch(cachedJob);
             }
         }
+
+        // Bulk URL hits are safe positives. For misses, skip the redundant unlocked
+        // three-query pass: the full fresh dedup check still runs while holding the lock.
+        if (_runPrepared) return DeduplicationResult.NoMatch();
 
         var duplicate = await deduplicationService.FindDuplicateAsync(
             title,

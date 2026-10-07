@@ -149,6 +149,33 @@ public sealed class JobRepository(JobPortalDbContext context) : IJobRepository
             .FirstOrDefaultAsync(x => x.JobSourceId == jobSourceId && x.ExternalJobId == externalJobId && !x.IsDeleted,
                 cancellationToken);
 
+    public async Task<IReadOnlyCollection<Job>?> FindSourceOwnedJobsAsync(Guid sourceId,
+        IReadOnlyCollection<string> externalIds, CancellationToken cancellationToken = default)
+    {
+        var results = new List<Job>();
+        foreach (var batch in externalIds.Distinct(StringComparer.Ordinal).Chunk(500))
+            results.AddRange(await context.Jobs.AsNoTracking()
+                .Where(x => x.JobSourceId == sourceId && batch.Contains(x.ExternalJobId!) && !x.IsDeleted)
+                .ToArrayAsync(cancellationToken));
+        return results;
+    }
+
+    public Job TrackAggregationJob(Job job)
+    {
+        var tracked = context.Jobs.Local.FirstOrDefault(x => x.Id == job.Id);
+        if (tracked is not null) return tracked;
+        if (context.Entry(job).State == EntityState.Detached)
+            context.Entry(job).State = EntityState.Unchanged;
+        return job;
+    }
+
+    public void ReleaseSavedAggregationTracking()
+    {
+        // Do not Clear(): source bookkeeping, audit, publication and pending metadata remain tracked.
+        foreach (var entry in context.ChangeTracker.Entries<Job>().Where(x => x.State == EntityState.Unchanged).ToArray())
+            entry.State = EntityState.Detached;
+    }
+
     public Task<int> CloseSourceJobsMissingFromSnapshotAsync(Guid jobSourceId,
         IReadOnlyCollection<string> activeExternalJobIds, DateTime closedAtUtc,
         CancellationToken cancellationToken = default)

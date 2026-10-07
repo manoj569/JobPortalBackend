@@ -7,6 +7,11 @@ pagination. The provider reads the listing and public job detail pages; it keeps
 the public job detail URL as `ApplicationUrl` and does not visit the separate
 application endpoint.
 
+The reusable `SuccessFactorsJobSourceProvider` now handles this configuration.
+The existing Deloitte source URL, identifier, company, category mapping and scan
+interval require no changes. See [SuccessFactors source configuration](successfactors-job-sources.md)
+for supported templates and URL/transport safety limits.
+
 ## Database prerequisite
 
 Apply the reviewed PostgreSQL migration

@@ -20,9 +20,56 @@ public static class AggregationLockRegistration
     }
 }
 
-public sealed class PostgresExternalJobCreationLock(IConfiguration configuration) : IExternalJobCreationLock
+public sealed class PostgresExternalJobCreationLock(IConfiguration configuration) : IExternalJobCreationLock, IExternalJobCreationLockRunFactory
 {
     private readonly string connectionString = PostgresAdvisorySession.ConnectionString(configuration);
+
+    public IExternalJobCreationLockRun CreateRun() => new CreationRun(() => new NpgsqlConnection(connectionString));
+
+    internal sealed class CreationRun(Func<DbConnection> connections) : IExternalJobCreationLockRun
+    {
+        private DbConnection? connection;
+        private int active;
+        private bool disposed;
+        public async Task<IAsyncDisposable> AcquireAsync(string? canonicalUrl, string fingerprintHash, CancellationToken cancellationToken = default)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            ArgumentException.ThrowIfNullOrWhiteSpace(fingerprintHash);
+            if (Interlocked.CompareExchange(ref active, 1, 0) != 0)
+                throw new InvalidOperationException("A creation run may hold only one item lease at a time.");
+            try
+            {
+                if (connection is not null && connection.State != ConnectionState.Open)
+                {
+                    await connection.DisposeAsync();
+                    connection = null;
+                }
+                connection ??= connections();
+                var lease = (await PostgresAdvisorySession.AcquireAsync(connection, CreateKeys(canonicalUrl, fingerprintHash),
+                    false, cancellationToken, reuseSession: true))!;
+                return new ItemLease(lease, this);
+            }
+            catch { Interlocked.Exchange(ref active, 0); throw; }
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            disposed = true;
+            if (connection is not null) await connection.DisposeAsync();
+            connection = null;
+        }
+
+        private sealed class ItemLease(IAsyncDisposable lease, CreationRun run) : IAsyncDisposable
+        {
+            private int released;
+            public async ValueTask DisposeAsync()
+            {
+                if (Interlocked.Exchange(ref released, 1) != 0) return;
+                try { await lease.DisposeAsync(); }
+                finally { Interlocked.Exchange(ref run.active, 0); }
+            }
+        }
+    }
 
     public async Task<IAsyncDisposable> AcquireAsync(string? canonicalUrl, string fingerprintHash, CancellationToken cancellationToken = default)
     {
@@ -57,11 +104,12 @@ internal static class PostgresAdvisorySession
         return builder.ConnectionString;
     }
 
-    internal static async Task<IAsyncDisposable?> AcquireAsync(DbConnection connection, long[] keys, bool tryOnly, CancellationToken token)
+    internal static async Task<IAsyncDisposable?> AcquireAsync(DbConnection connection, long[] keys, bool tryOnly, CancellationToken token,
+        bool reuseSession = false)
     {
         try
         {
-            await connection.OpenAsync(token);
+            if (connection.State != ConnectionState.Open) await connection.OpenAsync(token);
             foreach (var key in keys)
             {
                 await using var command = Command(connection, tryOnly ? "pg_try_advisory_lock" : "pg_advisory_lock", key, 30);
@@ -72,7 +120,7 @@ internal static class PostgresAdvisorySession
                     return null;
                 }
             }
-            return new Lease(connection, keys);
+            return new Lease(connection, keys, !reuseSession);
         }
         catch
         {
@@ -94,22 +142,25 @@ internal static class PostgresAdvisorySession
         return command;
     }
 
-    private sealed class Lease(DbConnection connection, long[] keys) : IAsyncDisposable
+    private sealed class Lease(DbConnection connection, long[] keys, bool disposeConnection) : IAsyncDisposable
     {
         private int disposed;
         public async ValueTask DisposeAsync()
         {
             if (Interlocked.Exchange(ref disposed, 1) != 0) return;
+            var unlocked = false;
             try
             {
                 if (connection.State != ConnectionState.Open) return;
                 foreach (var key in keys.Reverse())
                 {
                     await using var command = Command(connection, "pg_advisory_unlock", key, 5);
-                    await command.ExecuteScalarAsync(CancellationToken.None);
+                    if (await command.ExecuteScalarAsync(CancellationToken.None) is not true)
+                        throw new InvalidOperationException("Advisory lock release was not confirmed.");
                 }
+                unlocked = true;
             }
-            finally { await connection.DisposeAsync(); }
+            finally { if (disposeConnection || !unlocked) await connection.DisposeAsync(); }
         }
     }
 }

@@ -12,26 +12,24 @@ using Microsoft.Extensions.Logging;
 namespace JobPortal.Infrastructure.Services;
 
 /// <summary>
-/// Reads Deloitte India's public, server-rendered SAP SuccessFactors career site.
-/// It never visits the robots-disallowed application endpoint; ApplicationUrl remains the public job detail URL.
+/// Reads configured public, server-rendered SAP SuccessFactors career boards.
+/// Only listing and public job detail pages are fetched; application endpoints are never visited.
 /// </summary>
-public sealed partial class DeloitteSuccessFactorsJobSourceProvider(
+public sealed partial class SuccessFactorsJobSourceProvider(
     IHttpClientFactory clients,
-    ILogger<DeloitteSuccessFactorsJobSourceProvider>? logger = null) : ICompleteExternalJobProvider
+    ILogger<SuccessFactorsJobSourceProvider>? logger = null) : ICompleteExternalJobProvider
 {
-    public const string HttpClientName = "DeloitteSuccessFactorsJobAggregation";
-    private const string Host = "southasiacareers.deloitte.com";
-    private const string BoardPath = "/go/Deloitte-India/718244";
+    public const string HttpClientName = "SuccessFactorsJobAggregation";
     private const int PageSize = 25;
     private const int MaxJobs = 10_000;
     private const int MaxHtmlBytes = 4 * 1024 * 1024;
     private static readonly TimeSpan RequestSpacing = TimeSpan.FromMilliseconds(250);
     private static readonly Action<ILogger, Guid, Exception?> Started = LoggerMessage.Define<Guid>(LogLevel.Information,
-        new EventId(4350, nameof(Started)), "DeloitteSyncStarted Provider=Deloitte Source={JobSourceId}.");
+        new EventId(4350, nameof(Started)), "SuccessFactorsSyncStarted Source={JobSourceId}.");
     private static readonly Action<ILogger, Guid, string, int, Exception?> HttpFailure = LoggerMessage.Define<Guid, string, int>(
-        LogLevel.Warning, new EventId(4351, nameof(HttpFailure)), "DeloitteSyncHttpFailure Provider=Deloitte Source={JobSourceId} Stage={Stage} StatusCode={StatusCode}.");
+        LogLevel.Warning, new EventId(4351, nameof(HttpFailure)), "SuccessFactorsSyncHttpFailure Source={JobSourceId} Stage={Stage} StatusCode={StatusCode}.");
     private static readonly Action<ILogger, Guid, int, int, int, double, Exception?> Completed = LoggerMessage.Define<Guid, int, int, int, double>(
-        LogLevel.Information, new EventId(4352, nameof(Completed)), "DeloitteSyncFetched Provider=Deloitte Source={JobSourceId} Fetched={Fetched} Parsed={Parsed} Skipped={Skipped} DurationMs={DurationMs}.");
+        LogLevel.Information, new EventId(4352, nameof(Completed)), "SuccessFactorsSyncFetched Source={JobSourceId} Fetched={Fetched} Parsed={Parsed} Skipped={Skipped} DurationMs={DurationMs}.");
 
     public AtsType AtsType => AtsType.SuccessFactors;
 
@@ -41,7 +39,7 @@ public sealed partial class DeloitteSuccessFactorsJobSourceProvider(
     public async Task<ExternalJobSourceSnapshot> FetchSnapshotAsync(JobSource source, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(source);
-        ValidateSource(source);
+        var boardUri = ValidateSource(source);
         cancellationToken.ThrowIfCancellationRequested();
         var stopwatch = Stopwatch.StartNew();
         if (logger is not null) Started(logger, source.Id, null);
@@ -53,28 +51,28 @@ public sealed partial class DeloitteSuccessFactorsJobSourceProvider(
         for (var offset = 0; ; offset += PageSize)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var html = await GetHtmlAsync(client, ListingUri(source.CareerPageUrl, offset), source.Id, "listing", cancellationToken);
-            var page = ParseListingPage(html, offset);
+            var html = await GetHtmlAsync(client, ListingUri(boardUri, offset), source.Id, "listing", cancellationToken);
+            var page = ParseListingPage(html, offset, boardUri);
             if (expectedTotal < 0)
             {
                 expectedTotal = page.TotalCount;
                 expectedLastOffset = page.LastOffset;
                 var calculatedLast = expectedTotal == 0 ? 0 : ((expectedTotal - 1) / PageSize) * PageSize;
                 if (expectedTotal > MaxJobs || calculatedLast != expectedLastOffset)
-                    throw new InvalidDataException("The Deloitte listing pagination did not provide a safe, bounded complete result set.");
+                    throw new InvalidDataException("The SuccessFactors listing pagination did not provide a safe, bounded complete result set.");
             }
             if (page.TotalCount != expectedTotal || page.LastOffset != expectedLastOffset ||
                 page.FirstResult != offset + 1 || page.Results.Count != Math.Min(PageSize, Math.Max(0, expectedTotal - offset)))
-                throw new InvalidDataException("The Deloitte listing changed during pagination; refusing an incomplete snapshot.");
+                throw new InvalidDataException("The SuccessFactors listing changed during pagination; refusing an incomplete snapshot.");
 
             pages.AddRange(page.Results);
             if (offset == expectedLastOffset) break;
-            if (page.Results.Count == 0) throw new InvalidDataException("The Deloitte listing ended before its advertised last page.");
+            if (page.Results.Count == 0) throw new InvalidDataException("The SuccessFactors listing ended before its advertised last page.");
             await Task.Delay(RequestSpacing, cancellationToken);
         }
 
         if (pages.Count != expectedTotal || pages.Select(x => x.DetailUrl.AbsoluteUri).Distinct(StringComparer.Ordinal).Count() != expectedTotal)
-            throw new InvalidDataException("The Deloitte listing contained missing or duplicate job detail links.");
+            throw new InvalidDataException("The SuccessFactors listing contained missing or duplicate job detail links.");
 
         var parsed = new ConcurrentDictionary<int, RawExternalJob>();
         var skipped = 0;
@@ -98,7 +96,7 @@ public sealed partial class DeloitteSuccessFactorsJobSourceProvider(
                     finally { pace.Release(); }
 
                     var detailHtml = await GetHtmlAsync(client, item.entry.DetailUrl, source.Id, "detail", token);
-                    var detail = ParseDetail(detailHtml, item.entry, source.Company?.Name ?? "Deloitte");
+                    var detail = ParseDetail(detailHtml, item.entry, source.Company?.Name ?? string.Empty);
                     if (detail is null) Interlocked.Increment(ref skipped);
                     else parsed[item.index] = detail;
                     Interlocked.Increment(ref nextIndex);
@@ -114,7 +112,7 @@ public sealed partial class DeloitteSuccessFactorsJobSourceProvider(
         return new(ordered, skipped, isComplete);
     }
 
-    internal static ListingPage ParseListingPage(string html, int requestedOffset)
+    internal static ListingPage ParseListingPage(string html, int requestedOffset, Uri boardUri)
     {
         ArgumentNullException.ThrowIfNull(html);
         var totalMatch = ListingTotalRegex().Match(html);
@@ -123,12 +121,14 @@ public sealed partial class DeloitteSuccessFactorsJobSourceProvider(
             !int.TryParse(totalMatch.Groups[1].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var first) ||
             !int.TryParse(totalMatch.Groups[2].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var last) ||
             !int.TryParse(totalMatch.Groups[3].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var total))
-            throw new InvalidDataException("The Deloitte listing page did not contain valid pagination metadata.");
+            throw new InvalidDataException("The SuccessFactors listing page did not contain valid pagination metadata.");
 
-        var lastUri = new Uri(new Uri("https://" + Host), WebUtility.HtmlDecode(lastMatch.Groups[3].Value));
-        var lastOffsetMatch = LastOffsetRegex().Match(lastUri.AbsolutePath);
-        if (!lastOffsetMatch.Success || !int.TryParse(lastOffsetMatch.Groups[1].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var lastOffset))
-            throw new InvalidDataException("The Deloitte listing page did not contain a valid last-page link.");
+        var prefix = boardUri.AbsolutePath.TrimEnd('/') + "/";
+        var boardRoot = new Uri(boardUri.AbsoluteUri.TrimEnd('/') + "/");
+        if (!Uri.TryCreate(boardRoot, WebUtility.HtmlDecode(lastMatch.Groups[3].Value), out var lastUri) ||
+            !SameOrigin(boardUri, lastUri) || !lastUri.AbsolutePath.StartsWith(prefix, StringComparison.Ordinal) ||
+            !int.TryParse(lastUri.AbsolutePath[prefix.Length..].TrimEnd('/'), NumberStyles.None, CultureInfo.InvariantCulture, out var lastOffset))
+            throw new InvalidDataException("The SuccessFactors listing page did not contain a valid last-page link for this board.");
 
         var rows = ListingRowRegex().Matches(html).Select(x => x.Groups[2].Value).ToArray();
         var results = new List<ListingEntry>(rows.Length);
@@ -143,13 +143,13 @@ public sealed partial class DeloitteSuccessFactorsJobSourceProvider(
             var dateMatch = ClassSpanRegex("jobDate").Match(row);
             var location = locationMatch.Success ? PlainText(locationMatch.Groups[2].Value) : string.Empty;
             var postedText = dateMatch.Success ? PlainText(dateMatch.Groups[2].Value) : string.Empty;
-            if (title.Length == 0 || !TryDetailUrl(link, out var detailUri) || !ParseListingDate(postedText, out var posted)) continue;
+            if (title.Length == 0 || !TryDetailUrl(boardUri, link, out var detailUri) || !ParseListingDate(postedText, out var posted)) continue;
             results.Add(new(title, location, posted, detailUri));
         }
 
         var expectedCount = total == 0 ? 0 : Math.Min(PageSize, Math.Max(0, total - requestedOffset));
         if (first != requestedOffset + 1 || last < first || total < 0 || rows.Length != expectedCount || results.Count != expectedCount)
-            throw new InvalidDataException("The Deloitte listing page contained malformed or incomplete job rows.");
+            throw new InvalidDataException("The SuccessFactors listing page contained malformed or incomplete job rows.");
         return new(first, last, total, lastOffset, results);
     }
 
@@ -181,7 +181,7 @@ public sealed partial class DeloitteSuccessFactorsJobSourceProvider(
             ApplicationUrl = listing.DetailUrl.AbsoluteUri,
             SourcePostedAtUtc = (ParseMetaDate(html, "datePosted") ?? listing.PostedAtUtc).UtcDateTime,
             ExpiresAtUtc = ParseMetaDate(html, "validThrough")?.UtcDateTime,
-            // Deloitte does not expose stable structured skills, salary, experience, or work-mode fields here.
+            // This public HTML template does not expose stable structured skills, salary, experience, or work-mode fields.
         };
     }
 
@@ -194,14 +194,14 @@ public sealed partial class DeloitteSuccessFactorsJobSourceProvider(
             response.EnsureSuccessStatusCode();
         }
         if (response.Content.Headers.ContentLength is > MaxHtmlBytes)
-            throw new InvalidDataException("Deloitte returned an oversized public page.");
+            throw new InvalidDataException("SuccessFactors returned an oversized public page.");
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         using var output = new MemoryStream();
         var buffer = new byte[8192];
         int count;
         while ((count = await stream.ReadAsync(buffer, cancellationToken)) > 0)
         {
-            if (output.Length + count > MaxHtmlBytes) throw new InvalidDataException("Deloitte returned an oversized public page.");
+            if (output.Length + count > MaxHtmlBytes) throw new InvalidDataException("SuccessFactors returned an oversized public page.");
             await output.WriteAsync(buffer.AsMemory(0, count), cancellationToken);
         }
         var charset = response.Content.Headers.ContentType?.CharSet?.Trim('"');
@@ -211,26 +211,39 @@ public sealed partial class DeloitteSuccessFactorsJobSourceProvider(
         return encoding.GetString(output.ToArray());
     }
 
-    private static void ValidateSource(JobSource source)
+    internal static Uri ValidateSource(JobSource source)
     {
-        if (source.AtsType != AtsType.SuccessFactors || source.AtsIdentifier != "718244" ||
+        if (source.AtsType != AtsType.SuccessFactors || string.IsNullOrWhiteSpace(source.AtsIdentifier) ||
             !Uri.TryCreate(source.CareerPageUrl, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps ||
-            !string.Equals(uri.Host, Host, StringComparison.OrdinalIgnoreCase) || uri.AbsolutePath.TrimEnd('/') != BoardPath)
-            throw new InvalidOperationException("Deloitte SuccessFactors source must use the configured official India careers page.");
+            !uri.IsDefaultPort || !string.IsNullOrEmpty(uri.UserInfo) || !string.IsNullOrEmpty(uri.Query) ||
+            !string.IsNullOrEmpty(uri.Fragment) || uri.HostNameType != UriHostNameType.Dns ||
+            !uri.Host.Contains('.') || uri.IsLoopback ||
+            uri.Host.EndsWith(".local", StringComparison.OrdinalIgnoreCase) ||
+            uri.Host.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("SuccessFactors source must use a public HTTPS /go/{board}/{numeric-id} URL matching its ATS identifier.");
+        var board = BoardPathRegex().Match(uri.AbsolutePath);
+        if (!board.Success || board.Groups[1].Value != source.AtsIdentifier)
+            throw new InvalidOperationException("SuccessFactors source must use a public HTTPS /go/{board}/{numeric-id} URL matching its ATS identifier.");
+        return uri;
     }
 
-    private static Uri ListingUri(string careerPageUrl, int offset)
+    private static Uri ListingUri(Uri boardUri, int offset)
     {
-        var root = new Uri(careerPageUrl.TrimEnd('/') + "/");
+        var root = new Uri(boardUri.AbsoluteUri.TrimEnd('/') + "/");
         var path = offset == 0 ? root.AbsolutePath : root.AbsolutePath + offset.ToString(CultureInfo.InvariantCulture) + "/";
         return new UriBuilder(root) { Path = path, Query = "q=&sortColumn=referencedate&sortDirection=desc" }.Uri;
     }
 
-    private static bool TryDetailUrl(string href, out Uri uri)
+    private static bool SameOrigin(Uri boardUri, Uri candidate) =>
+        candidate.Scheme == boardUri.Scheme && candidate.Port == boardUri.Port &&
+        string.Equals(candidate.IdnHost, boardUri.IdnHost, StringComparison.OrdinalIgnoreCase) &&
+        string.IsNullOrEmpty(candidate.UserInfo) && string.IsNullOrEmpty(candidate.Fragment);
+
+    private static bool TryDetailUrl(Uri boardUri, string href, out Uri uri)
     {
-        uri = new Uri("https://" + Host);
-        if (!Uri.TryCreate(uri, WebUtility.HtmlDecode(href), out var candidate) || candidate.Scheme != "https" ||
-            !string.Equals(candidate.Host, Host, StringComparison.OrdinalIgnoreCase) || !candidate.AbsolutePath.StartsWith("/job/", StringComparison.Ordinal)) return false;
+        uri = boardUri;
+        if (!Uri.TryCreate(boardUri, WebUtility.HtmlDecode(href), out var candidate) || !SameOrigin(boardUri, candidate) ||
+            !candidate.AbsolutePath.StartsWith("/job/", StringComparison.Ordinal)) return false;
         if (!PostingIdRegex().IsMatch(candidate.AbsolutePath)) return false;
         uri = candidate;
         return true;
@@ -311,8 +324,8 @@ public sealed partial class DeloitteSuccessFactorsJobSourceProvider(
     private static partial Regex ListingTotalRegex();
     [GeneratedRegex("""(?is)<a\b(?=[^>]*\bclass\s*=\s*(['"])[^'"]*\bpaginationItemLast\b[^'"]*\1)[^>]*\bhref\s*=\s*(['"])(.*?)\2[^>]*>""", RegexOptions.CultureInvariant)]
     private static partial Regex LastPageRegex();
-    [GeneratedRegex(@"/go/Deloitte-India/718244/(\d+)/?", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex LastOffsetRegex();
+    [GeneratedRegex(@"^/go/[A-Za-z0-9_-]+/([0-9]+)/?$", RegexOptions.CultureInvariant)]
+    private static partial Regex BoardPathRegex();
     [GeneratedRegex(@"/(\d+)/?$", RegexOptions.CultureInvariant)]
     private static partial Regex PostingIdRegex();
     [GeneratedRegex(@"(?is)Job requisition ID\s*(?:</strong>)?\s*:?[\s·•]*([0-9]+)", RegexOptions.CultureInvariant)]

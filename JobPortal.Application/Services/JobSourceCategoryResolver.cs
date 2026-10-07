@@ -9,8 +9,20 @@ namespace JobPortal.Application.Services;
 public sealed class JobSourceCategoryResolver(
     IOptionsMonitor<JobAggregationOptions> options,
     ICategoryManagementRepository categories,
-    IExternalJobCategoryClassifier? classifier = null) : IJobSourceCategoryResolver
+    IExternalJobCategoryClassifier? classifier = null) : IJobSourceCategoryResolver, IJobSourceCategoryRunCache
 {
+    private bool _running;
+    private readonly HashSet<Guid> _validCategories = [];
+    public void BeginRun() { _running = true; _validCategories.Clear(); _categoryOptions = null; }
+    public void EndRun() { _running = false; _validCategories.Clear(); _categoryOptions = null; }
+    private async Task<bool> ExistsAsync(Guid id, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        if (_running && _validCategories.Contains(id)) return true;
+        var exists = await categories.ExistsAsync(id, token);
+        if (_running && exists) _validCategories.Add(id);
+        return exists;
+    }
     private IReadOnlyCollection<JobPortal.Application.Features.AdminManagement.AdminOptionResponse>? _categoryOptions;
     public async Task<Guid?> ResolveCategoryIdAsync(JobSource source, RawExternalJob rawJob, CancellationToken cancellationToken = default)
     {
@@ -18,7 +30,7 @@ public sealed class JobSourceCategoryResolver(
         ArgumentNullException.ThrowIfNull(rawJob);
         cancellationToken.ThrowIfCancellationRequested();
         if (rawJob.CategoryId is { } explicitId && explicitId != Guid.Empty &&
-            await categories.ExistsAsync(explicitId, cancellationToken)) return explicitId;
+            await ExistsAsync(explicitId, cancellationToken)) return explicitId;
 
         var key = ExternalJobNormalizer.NormalizeText(rawJob.ExternalCategory);
         if (key is not null)
@@ -28,7 +40,7 @@ public sealed class JobSourceCategoryResolver(
                 .Where(x => string.Equals(ExternalJobNormalizer.NormalizeText(x.Key), key, StringComparison.OrdinalIgnoreCase))
                 .Select(x => x.Value).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
             if (values.Length == 1 && Guid.TryParse(values[0], out var mappedId) && mappedId != Guid.Empty &&
-                await categories.ExistsAsync(mappedId, cancellationToken)) return mappedId;
+                await ExistsAsync(mappedId, cancellationToken)) return mappedId;
         }
         var classified = classifier?.Classify(rawJob);
         if (classified is not null)
@@ -53,6 +65,6 @@ public sealed class JobSourceCategoryResolver(
             !Guid.TryParse(value, out var categoryId) || categoryId == Guid.Empty)
             return null;
 
-        return await categories.ExistsAsync(categoryId, cancellationToken) ? categoryId : null;
+        return await ExistsAsync(categoryId, cancellationToken) ? categoryId : null;
     }
 }

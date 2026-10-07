@@ -258,10 +258,53 @@ public sealed class JobAggregationHardeningTests
         Assert.False(index.IsUnique);
     }
 
+    [Fact]
+    public async Task CreationRunReusesPhysicalConnectionButReleasesExactKeysAfterEveryItem()
+    {
+        var connection = new LockConnection();
+        await using var run = new PostgresExternalJobCreationLock.CreationRun(() => connection);
+        var keys = PostgresExternalJobCreationLock.CreateKeys("url", "fp");
+        var first = await run.AcquireAsync("url", "fp");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => run.AcquireAsync("other", "other"));
+        await first.DisposeAsync();
+        await first.DisposeAsync();
+        Assert.Equal(0, connection.Disposals);
+        Assert.Equal(ConnectionState.Open, connection.State);
+        await using (await run.AcquireAsync("url", "fp")) { }
+        Assert.Equal(1, connection.Opens);
+        Assert.Equal(keys.Concat(keys.Reverse()).Concat(keys).Concat(keys.Reverse()), connection.Commands.Select(x => x.Key));
+        Assert.Equal(4, connection.Commands.Count(x => x.Sql.Contains("unlock", StringComparison.Ordinal)));
+        await run.DisposeAsync();
+        Assert.Equal(ConnectionState.Closed, connection.State);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CreationRunDiscardsSessionAfterCancellationOrUnlockFailure(bool cancel)
+    {
+        var bad = new LockConnection { CancelCommand = cancel, FailUnlock = !cancel };
+        var good = new LockConnection();
+        var connections = new Queue<DbConnection>([bad, good]);
+        await using var run = new PostgresExternalJobCreationLock.CreationRun(connections.Dequeue);
+        if (cancel) await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run.AcquireAsync("url", "fp"));
+        else
+        {
+            var lease = await run.AcquireAsync("url", "fp");
+            await Assert.ThrowsAsync<InvalidOperationException>(() => lease.DisposeAsync().AsTask());
+        }
+        Assert.Equal(ConnectionState.Closed, bad.State);
+        await using (await run.AcquireAsync("url", "fp")) { }
+        Assert.Equal(1, good.Opens);
+        await run.DisposeAsync();
+        Assert.Equal(ConnectionState.Closed, good.State);
+    }
+
     private sealed class LockConnection : DbConnection
     {
         private ConnectionState state;
         public int Disposals { get; private set; }
+        public int Opens { get; private set; }
         public bool Available { get; init; } = true;
         public bool FailUnlock { get; init; }
         public bool CancelCommand { get; init; }
@@ -271,7 +314,7 @@ public sealed class JobAggregationHardeningTests
         public override string DataSource => "fake";
         public override string ServerVersion => "1";
         public override ConnectionState State => state;
-        public override void Open() => state = ConnectionState.Open;
+        public override void Open() { Opens++; state = ConnectionState.Open; }
         public override void Close() => state = ConnectionState.Closed;
         public override void ChangeDatabase(string databaseName) => throw new NotSupportedException();
         protected override DbTransaction BeginDbTransaction(IsolationLevel isolationLevel) => throw new NotSupportedException();

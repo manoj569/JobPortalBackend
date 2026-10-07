@@ -53,6 +53,12 @@ public interface IJobRepository
     Task<Job?> FindBySourceIdentityAsync(Guid jobSourceId, string externalJobId,
         CancellationToken cancellationToken = default) => Task.FromResult<Job?>(null);
 
+    // Null means unsupported, not an authoritative empty result (legacy test repositories).
+    Task<IReadOnlyCollection<Job>?> FindSourceOwnedJobsAsync(Guid sourceId, IReadOnlyCollection<string> externalIds,
+        CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyCollection<Job>?>(null);
+    Job TrackAggregationJob(Job job) => job;
+    void ReleaseSavedAggregationTracking() { }
+
     Task<int> CloseSourceJobsMissingFromSnapshotAsync(Guid jobSourceId, IReadOnlyCollection<string> activeExternalJobIds,
         DateTime closedAtUtc, CancellationToken cancellationToken = default) => Task.FromResult(0);
 }
