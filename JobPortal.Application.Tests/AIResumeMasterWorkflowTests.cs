@@ -122,6 +122,13 @@ public sealed class AIResumeMasterWorkflowTests
         Assert.Equal(1, await fixture.Db.AIResumeCreditTransactions.CountAsync(x => x.Kind == AIResumeCreditKind.Release));
         Assert.Equal(2, fixture.Storage.Files.Count); // Original upload + frozen master only.
         Assert.Equal(1, fixture.GenerationCalls);
+        if (failure == "zero_safe")
+        {
+            Assert.Contains(fixture.Logger.Messages, x => x.Contains(
+                "AIResumeTailoringPatch Proposed=2 Accepted=0 Rejected=2 PreservationMode=original_docx", StringComparison.Ordinal));
+            Assert.Contains(fixture.Logger.Messages, x => x.Contains(
+                "AIResumeGenerationRejected Code=no_safe_tailoring_changes Stage=patch_guard_result", StringComparison.Ordinal));
+        }
     }
 
     [Fact]

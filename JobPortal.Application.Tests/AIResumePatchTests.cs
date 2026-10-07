@@ -106,6 +106,75 @@ public sealed class AIResumePatchTests
     }
 
     [Fact]
+    public void ConservativeRestToWebApiParaphraseIsAcceptedWithTargetEvidence()
+    {
+        var source = MasterResumeFixture.Source with
+        {
+            Experience = [MasterResumeFixture.Source.Experience[0] with { Bullets = ["Developed REST APIs using ASP.NET Core."] }]
+        };
+        var target = Assert.Single(ResumePatchGuard.Targets(source), x => x.Id == "SRC-EXP-001-BULLET-001");
+        var proposal = new ResumeTextReplacement(target.Id, target.Text, "Built web APIs using ASP.NET Core.",
+            [target.Id], ["ASP.NET Core Web APIs"], "Align equivalent API wording with the job description");
+        var result = ResumePatchGuard.Apply(source, new([proposal], []), "Experience building ASP.NET Core Web APIs.",
+            new HashSet<string>([target.Id], StringComparer.Ordinal));
+
+        Assert.Equal("accepted", Assert.Single(result.Decisions).Status);
+        Assert.Null(Assert.Single(result.Decisions).RejectionReason);
+        Assert.Equal("Built web APIs using ASP.NET Core.", result.Content.Experience[0].Bullets[0]);
+
+        var unrelated = proposal with { ReplacementText = "Built web platforms using ASP.NET Core.", MatchedJdTerms = [] };
+        var rejected = ResumePatchGuard.Apply(source, new([unrelated], []), "Build web platforms.");
+        Assert.Equal("factual_wording", Assert.Single(rejected.Decisions).RejectionCategory);
+        Assert.Equal("new_factual_word_not_supported", rejected.Decisions[0].RejectionReason);
+    }
+
+    [Fact]
+    public void PartialPatchAcceptsGroundedChangeAndRejectsFabricatedTechnologies()
+    {
+        var source = MasterResumeFixture.Source with
+        {
+            Experience = [MasterResumeFixture.Source.Experience[0] with { Bullets =
+                ["Developed REST APIs using ASP.NET Core and SQL Server.", "Developed database services using SQL Server."] }]
+        };
+        var targets = ResumePatchGuard.Targets(source).ToDictionary(x => x.Id, StringComparer.Ordinal);
+        var safe = new ResumeTextReplacement("SRC-EXP-001-BULLET-001", targets["SRC-EXP-001-BULLET-001"].Text,
+            "Built REST APIs using ASP.NET Core and SQL Server.", ["SRC-EXP-001-BULLET-001"], ["ASP.NET Core"], "Emphasize relevant API experience");
+        var fabricatedTechnology = new ResumeTextReplacement("SRC-EXP-001-BULLET-002", targets["SRC-EXP-001-BULLET-002"].Text,
+            "Built database services using SQL Server, Kubernetes, AWS, and Kafka.", ["SRC-EXP-001-BULLET-002"], [], "Add relevant technologies");
+        var diagnostics = new List<ResumeGroundingDiagnostic>();
+
+        var result = ResumePatchGuard.Apply(source, new([safe, fabricatedTechnology], []),
+            "Build ASP.NET Core APIs with Kubernetes, AWS, and Kafka.", diagnostic: diagnostics.Add);
+
+        Assert.Equal(1, result.AcceptedCount);
+        Assert.Equal(2, result.Decisions.Length);
+        Assert.Equal(new[] { "accepted", "rejected" }, result.Decisions.Select(x => x.Status));
+        Assert.Contains(result.Decisions, x => x.RejectionCategory == "technology" && x.RejectionReason == "claim_not_supported_by_cited_evidence");
+        Assert.Equal("Built REST APIs using ASP.NET Core and SQL Server.", result.Content.Experience[0].Bullets[0]);
+        Assert.Equal("Developed database services using SQL Server.", result.Content.Experience[0].Bullets[1]);
+        Assert.Single(diagnostics);
+    }
+
+    [Fact]
+    public void UnsupportedMetricIsRejectedEvenWhenTheRestOfTheClaimIsSupported()
+    {
+        var source = MasterResumeFixture.Source with
+        {
+            Experience = [MasterResumeFixture.Source.Experience[0] with { Bullets = ["Improved API performance."] }]
+        };
+        var target = Assert.Single(ResumePatchGuard.Targets(source), x => x.Id == "SRC-EXP-001-BULLET-001");
+        var proposal = new ResumeTextReplacement(target.Id, target.Text, "Improved API performance by 60%.",
+            [target.Id], [], "Add a quantified result");
+
+        var result = ResumePatchGuard.Apply(source, new([proposal], []), "Improve API performance.");
+
+        Assert.Equal(0, result.AcceptedCount);
+        Assert.Equal("metric", Assert.Single(result.Decisions).RejectionCategory);
+        Assert.Equal("claim_not_supported_by_cited_evidence", result.Decisions[0].RejectionReason);
+        Assert.Equal("Improved API performance.", result.Content.Experience[0].Bullets[0]);
+    }
+
+    [Fact]
     public void MissingSummaryCannotBeCreatedAndWhitespaceOnlyChangesAreNotUseful()
     {
         var source = MasterResumeFixture.Source with { ProfessionalSummary = "" };
@@ -138,6 +207,12 @@ public sealed class AIResumePatchTests
         Assert.Equal(new[] { "replacements", "emphasizedSkillEvidenceIds" }, schema.GetProperty("properties").EnumerateObject().Select(x => x.Name));
         var targetIds = schema.GetProperty("properties").GetProperty("replacements").GetProperty("items").GetProperty("properties").GetProperty("targetId").GetProperty("enum");
         Assert.DoesNotContain(targetIds.EnumerateArray(), x => x.GetString()!.Contains("IDENTITY", StringComparison.Ordinal));
+        var evidenceIds = schema.GetProperty("properties").GetProperty("replacements").GetProperty("items").GetProperty("properties")
+            .GetProperty("sourceEvidenceIds").GetProperty("items").GetProperty("enum");
+        Assert.Contains(targetIds.EnumerateArray(), x => x.GetString() == "SRC-EXP-001-BULLET-001");
+        Assert.Contains(evidenceIds.EnumerateArray(), x => x.GetString() == "SRC-EXP-001-BULLET-001");
+        Assert.Contains("Copy targetId and originalText EXACTLY from editableTargets", body.RootElement.GetProperty("system").GetString());
+        Assert.Contains("Cite the target ID itself and only evidence from its SAME scope/entry", body.RootElement.GetProperty("system").GetString());
         Assert.Contains("Return ONLY TailoringPatch", body.RootElement.GetProperty("system").GetString());
         using var input = JsonDocument.Parse(body.RootElement.GetProperty("messages")[0].GetProperty("content").GetString()!);
         Assert.DoesNotContain(input.RootElement.GetProperty("sourceEvidence").EnumerateArray(), x => x.GetProperty("id").GetString() == "FAKE");
@@ -189,6 +264,7 @@ public sealed class AIResumePatchTests
         Assert.Equal(originalDocument.Descendants(w + "sectPr").Single().ToString(), tailoredDocument.Descendants(w + "sectPr").Single().ToString());
         Assert.Contains("Engineering:", Encoding.UTF8.GetString(after["word/document.xml"]));
     }
+
 }
 
 internal static class MasterResumeFixture

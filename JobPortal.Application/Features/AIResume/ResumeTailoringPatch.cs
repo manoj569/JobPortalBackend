@@ -66,7 +66,9 @@ public static partial class ResumePatchGuard
             if (reason is null)
             {
                 var supportedWords = facts.SelectMany(x => Words().Matches(x!.Text).Select(m => m.Value)).ToHashSet(StringComparer.OrdinalIgnoreCase);
-                if (Words().Matches(proposal!.ReplacementText).Any(x => !supportedWords.Contains(x.Value) && !Grammar.Contains(x.Value)))
+                if (Words().Matches(proposal!.ReplacementText).Any(x => !supportedWords.Contains(x.Value) && !Grammar.Contains(x.Value) &&
+                    !(x.Value.Equals("web", StringComparison.OrdinalIgnoreCase) && WebApi().IsMatch(proposal.ReplacementText) &&
+                        facts.Any(f => RestApi().IsMatch(f!.Text)))))
                 { category = "factual_wording"; reason = "new_factual_word_not_supported"; }
             }
             var status = reason is not null ? "rejected" : NormalizedWhitespace(proposal!.ReplacementText) == NormalizedWhitespace(target!.Text) ? "original" : "accepted";
@@ -115,6 +117,8 @@ public static partial class ResumePatchGuard
     private static readonly HashSet<string> Grammar = new("a an the and or with using to for of in on by from through that which while as at is are was were be been being developed maintained built implemented improved optimized reduced delivered worked created supported collaborated analyzed reducing improving optimizing".Split(' '), StringComparer.OrdinalIgnoreCase);
     private static string Metric(string value) => string.Concat(value.Where(x => !char.IsWhiteSpace(x)));
     private static string NormalizedWhitespace(string text) => string.Join(' ', text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+    [GeneratedRegex(@"\bREST\s+APIs?\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)] private static partial Regex RestApi();
+    [GeneratedRegex(@"\bweb\s+APIs?\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)] private static partial Regex WebApi();
     [GeneratedRegex(@"\d+(?:[.,]\d+)*(?:\s*%)?", RegexOptions.CultureInvariant)] private static partial Regex Metrics();
     [GeneratedRegex(@"\p{L}[\p{L}\p{M}\p{N}+#-]*(?:\.[\p{L}\p{M}\p{N}]+)*", RegexOptions.CultureInvariant)] private static partial Regex Words();
 }

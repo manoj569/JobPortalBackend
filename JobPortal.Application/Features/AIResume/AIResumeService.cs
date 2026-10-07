@@ -374,14 +374,14 @@ public sealed class AIResumeService(IAIResumeRepository repository, IAIResumePro
                 generationStage = "patch_guard_result";
                 var applied = ResumePatchGuard.Apply(reservation.Source, raw.Content, storedSession.JobDescription,
                     editable.Select(x => x.Id).ToHashSet(StringComparer.Ordinal), LogRejectedPatch);
+                if (logger is not null)
+                    LogPatchCounts(logger, applied.Decisions.Length, applied.AcceptedCount, applied.Decisions.Count(x => x.Status == "rejected"),
+                        masterDocuments.Capabilities(master).PreservationMode, null);
                 if (applied.AcceptedCount == 0) throw new AIResumeProviderException("no_safe_tailoring_changes");
                 generationStage = "artifact_creation";
                 stagedArtifact = await masterDocuments.CreateArtifactAsync(userId, master, reservation.Source, applied, ct);
                 tailoring = new(2, applied.Content, applied.Decisions, applied.EmphasizedSkillEvidenceIds, master, stagedArtifact);
                 generated = new(applied.Content, raw.Model, raw.InputTokens, raw.OutputTokens);
-                if (logger is not null)
-                    LogPatchCounts(logger, applied.Decisions.Length, applied.AcceptedCount, applied.Decisions.Count(x => x.Status == "rejected"),
-                        masterDocuments.Capabilities(master).PreservationMode, null);
             }
             else
             {
