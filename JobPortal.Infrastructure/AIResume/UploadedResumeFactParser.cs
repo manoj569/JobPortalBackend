@@ -45,16 +45,23 @@ public static partial class UploadedResumeFactParser
             return list.Split([',', ';', '|', '•'], StringSplitOptions.RemoveEmptyEntries).Select(CleanBullet);
         }).Where(x => x.Length > 0).Distinct(StringComparer.Ordinal).ToArray();
         var experienceEntries = Entries(Part("experience"), "experience").ToArray();
-        var experience = experienceEntries.Where(fields => !fields.ContainsKey("unclassified")).Select(fields =>
+        // Partially structured table rows cannot safely establish a role/employer pair.
+        // Ignore those rows rather than failing the whole resume or inferring missing facts.
+        var experience = experienceEntries.Where(fields => !fields.ContainsKey("unclassified") &&
+                fields.TryGetValue("employer", out var employer) && !string.IsNullOrWhiteSpace(employer) &&
+                fields.TryGetValue("role", out var role) && !string.IsNullOrWhiteSpace(role)).Select(fields =>
             new ResumeExperience(Required(fields, "employer"), Required(fields, "role"),
                 Get(fields, "startDate"), Get(fields, "endDate"), Bullets(fields))).ToArray();
         var projects = Entries(Part("projects"), "projects", skills).Select(fields =>
             new ResumeProject(Required(fields, "name"), Get(fields, "technologies").Split([',', ';', '|'], StringSplitOptions.RemoveEmptyEntries)
                 .Select(x => x.Trim()).ToArray(), Bullets(fields))).ToArray();
-        var education = Entries(Part("education"), "education").Select(fields =>
+        var education = Entries(Part("education"), "education").Where(fields =>
+                fields.TryGetValue("institution", out var institution) && !string.IsNullOrWhiteSpace(institution) &&
+                fields.TryGetValue("qualification", out var qualification) && !string.IsNullOrWhiteSpace(qualification)).Select(fields =>
             new ResumeEducation(Required(fields, "institution"), Required(fields, "qualification"),
                 Get(fields, "startDate"), Get(fields, "endDate"))).ToArray();
-        var certifications = Entries(Part("certifications"), "certifications").Select(fields =>
+        var certifications = Entries(Part("certifications"), "certifications").Where(fields =>
+                fields.TryGetValue("name", out var name) && !string.IsNullOrWhiteSpace(name)).Select(fields =>
             new ResumeCertification(Required(fields, "name"), Get(fields, "issuer"), Get(fields, "date"))).ToArray();
         var result = new TailoredResumeContent(contact, string.Join(' ', Part("summary")), skills,
             experience, projects, education, certifications, Part("additional").Concat(experienceEntries
@@ -80,6 +87,24 @@ public static partial class UploadedResumeFactParser
             }
             var parts = line.Split('|', StringSplitOptions.TrimEntries);
             var technologyTokens = line.Split([',', ';', '|'], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            if (section == "experience" && parts.Length == 3 && string.IsNullOrWhiteSpace(parts[0]) &&
+                !string.IsNullOrWhiteSpace(parts[1]) && DateRange().IsMatch(parts[2]) && index + 1 < lines.Length)
+            {
+                var employerParts = lines[index + 1].Split('|', StringSplitOptions.TrimEntries);
+                if (employerParts.Length == 3 && string.IsNullOrWhiteSpace(employerParts[0]) &&
+                    !string.IsNullOrWhiteSpace(employerParts[1]) && !DateRange().IsMatch(employerParts[2]))
+                {
+                    if (fields is not null) yield return fields;
+                    fields = new(StringComparer.Ordinal)
+                    {
+                        ["role"] = parts[1],
+                        ["employer"] = employerParts[1]
+                    };
+                    Dates(fields, parts[2]);
+                    index++;
+                    continue;
+                }
+            }
             if (section == "projects" && fields is not null && !IsBullet(line) && technologyTokens.Length > 1 &&
                 sourceSkills is not null && technologyTokens.All(token => sourceSkills.Contains(token, StringComparer.Ordinal)))
             {
@@ -148,7 +173,9 @@ public static partial class UploadedResumeFactParser
                 {
                     fields[section == "experience" ? "role" : "qualification"] = parts[0];
                     fields[section == "experience" ? "employer" : "institution"] = parts[1];
-                    Dates(fields, parts[2]);
+                    // Three-column resume rows often use the final column for a location
+                    // rather than dates. Only treat it as dates when it is an explicit range.
+                    if (DateRange().IsMatch(parts[2])) Dates(fields, parts[2]);
                 }
                 continue;
             }
@@ -176,7 +203,8 @@ public static partial class UploadedResumeFactParser
                 fields = new(StringComparer.Ordinal) { ["name"] = line };
                 continue;
             }
-            if (fields is null || section is "education" or "certifications") throw InvalidLayout($"unrecognized_{section}_entry_at_line_{index}");
+            if (section is "education" or "certifications") continue;
+            if (fields is null) throw InvalidLayout($"unrecognized_{section}_entry_at_line_{index}");
             fields["bullets"] = Get(fields, "bullets") + line + "\n";
         }
         if (fields is not null) yield return fields;

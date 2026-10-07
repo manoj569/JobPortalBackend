@@ -27,6 +27,9 @@ public sealed class AIResumeService(IAIResumeRepository repository, IAIResumePro
     private static readonly Action<ILogger, string, Exception?> LogAnalysisRejected =
         LoggerMessage.Define<string>(LogLevel.Warning, new EventId(7406, "AIResumeAnalysisRejected"),
             "AIResumeAnalysisRejected {Diagnostic}");
+    private static readonly Action<ILogger, string, string, string, Exception?> LogResumeSourceFailure =
+        LoggerMessage.Define<string, string, string>(LogLevel.Warning, new EventId(7410, "AIResumeSourceFailure"),
+            "AIResumeSourceFailure Stage={Stage} Category={Category} ExceptionType={ExceptionType}");
     private static readonly Action<ILogger, Guid, Guid, Exception?> LogSourceMissing =
         LoggerMessage.Define<Guid, Guid>(LogLevel.Warning, new EventId(7409, "AIResumeSourceMissing"),
             "AIResumeSourceMissing OwnerUserId={OwnerUserId} ResumeId={ResumeId}");
@@ -55,16 +58,22 @@ public sealed class AIResumeService(IAIResumeRepository repository, IAIResumePro
         if (candidate.ResumeStorageKey is null) throw ReuploadRequired();
         ResumeMasterDocument? master = null;
         AIResumeSession? preparedSession = null;
+        var sourceStage = "source_parse";
         try
         {
             TailoredResumeContent source;
             try
             {
-                if (masterDocuments is not null) master = await masterDocuments.CaptureAsync(candidate, ct);
-                var parserCandidate = master is null ? candidate : new User { Id = candidate.Id, ResumeProfile = candidate.ResumeProfile,
-                    ResumeStorageKey = master.StorageKey, ResumeFileName = "master" + master.Extension };
-                source = await sourceParser.ParseAsync(parserCandidate, ct);
-                if (master is not null) master = await masterDocuments!.BindAsync(userId, master, source, ct);
+                // Parse the candidate-owned immutable upload before creating a session snapshot.
+                // Invalid source documents then fail without an avoidable blob write and cleanup read.
+                source = await sourceParser.ParseAsync(candidate, ct);
+                if (masterDocuments is not null)
+                {
+                    sourceStage = "master_capture";
+                    master = await masterDocuments.CaptureAsync(candidate, ct);
+                    sourceStage = "master_bind";
+                    master = await masterDocuments.BindAsync(userId, master, source, ct);
+                }
             }
             catch (ResumeStorageObjectNotFoundException)
             {
@@ -77,6 +86,9 @@ public sealed class AIResumeService(IAIResumeRepository repository, IAIResumePro
             }
             catch (Exception ex)
             {
+                if (logger is not null)
+                    LogResumeSourceFailure(logger, sourceStage,
+                        ex is InvalidDataException ? "invalid_document" : "storage_or_internal_error", ex.GetType().Name, null);
                 if (ex is InvalidDataException) throw Invalid("The uploaded resume could not be read or parsed. Please upload a valid PDF, DOC, or DOCX file.", "invalid_resume_source");
                 throw;
             }
