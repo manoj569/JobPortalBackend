@@ -31,6 +31,9 @@ public sealed class ExternalJobNormalizer : IExternalJobNormalizer
 
             ApplicationUrl = Trim(rawJob.ApplicationUrl),
             ExternalId = Trim(rawJob.ExternalId),
+            JobSourceId = rawJob.JobSourceId,
+            SourcePostedAtUtc = rawJob.SourcePostedAtUtc is { Kind: DateTimeKind.Utc }
+                ? rawJob.SourcePostedAtUtc : null,
             // Never interpret an unspecified/source-local timestamp using the server timezone.
             ExpiresAtUtc = rawJob.ExpiresAtUtc is { Kind: DateTimeKind.Utc }
                 ? rawJob.ExpiresAtUtc : null,

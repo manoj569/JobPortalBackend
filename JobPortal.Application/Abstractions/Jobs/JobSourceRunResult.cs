@@ -8,6 +8,12 @@ public sealed record JobSourceRunResult
 
     public int Created { get; init; }
 
+    public int Updated { get; init; }
+
+    public int Unchanged { get; init; }
+
+    public int Closed { get; init; }
+
     public int Matched { get; init; }
 
     public int Skipped { get; init; }

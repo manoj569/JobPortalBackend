@@ -127,10 +127,33 @@ public sealed class JobIngestionService(
             };
         }
 
+        var now = timeProvider.GetUtcNow().UtcDateTime;
+
+        // Source identity takes precedence over general deduplication so a provider
+        // can update only records it owns; URL/fingerprint matches remain untouched.
+        var sourceExternalId = TextNormalizer.TrimOrNull(rawJob.ExternalId);
+        if (rawJob.JobSourceId.HasValue && sourceExternalId is not null)
+        {
+            var owned = await jobs.FindBySourceIdentityAsync(rawJob.JobSourceId.Value, sourceExternalId, cancellationToken);
+            if (owned is not null)
+            {
+                var changed = ApplySourceFields(owned, rawJob, title, company, location, applicationUrl);
+                owned.LastSeenAtUtc = now;
+                owned.FirstSeenAtUtc ??= now;
+                if (changed) owned.UpdatedAtUtc = now;
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+                return new JobIngestionResult
+                {
+                    Outcome = changed ? JobIngestionOutcome.Updated : JobIngestionOutcome.Unchanged,
+                    JobId = owned.Id,
+                    Message = changed ? "Source-owned job updated." : "Source-owned job is unchanged.",
+                    ExplicitReasonCode = JobIngestionReasonCode.None
+                };
+            }
+        }
+
         var duplicate = await FindDuplicateAsync(
             title, company, location, applicationUrl, cancellationToken);
-
-        var now = timeProvider.GetUtcNow().UtcDateTime;
 
         await using var creationLease =
             duplicate.IsDuplicate
@@ -214,6 +237,7 @@ public sealed class JobIngestionService(
             Requirements = TextNormalizer.TrimOrNull(rawJob.Requirements),
             Benefits = TextNormalizer.TrimOrNull(rawJob.Benefits),
             ApplicationUrl = applicationUrl ?? string.Empty,
+            CanonicalApplicationUrlHash = ApplicationUrlIdentity.Hash(applicationUrl),
             Location = location,
             ExpiresAtUtc = rawJob.ExpiresAtUtc is { Kind: DateTimeKind.Utc } ? rawJob.ExpiresAtUtc : null,
             MinimumSalary = rawJob.SalaryMin,
@@ -225,12 +249,14 @@ public sealed class JobIngestionService(
             MaximumExperienceYears = rawJob.MaximumExperienceYears,
             EducationRequirement = TextNormalizer.TrimOrNull(rawJob.EducationRequirement),
             CompanyId = company.Id,
-            Company = company,
             CategoryId = rawJob.CategoryId.Value,
             Status = JobStatus.Draft,
             FingerprintHash = fingerprintService.GenerateFingerprint(title, company.Name, location),
             FirstSeenAtUtc = now,
-            LastSeenAtUtc = now
+            LastSeenAtUtc = now,
+            JobSourceId = rawJob.JobSourceId,
+            ExternalJobId = sourceExternalId,
+            SourcePostedAtUtc = rawJob.SourcePostedAtUtc is { Kind: DateTimeKind.Utc } posted ? posted : null
         };
 
         await jobs.AddAsync(job, cancellationToken);
@@ -243,6 +269,55 @@ public sealed class JobIngestionService(
             Message = "External job created as Draft.",
             ExplicitReasonCode = JobIngestionReasonCode.None
         };
+    }
+
+    private bool ApplySourceFields(Job job, RawExternalJob raw, string title, Company company,
+        string? location, string? applicationUrl)
+    {
+        var description = TextNormalizer.TrimOrNull(raw.Description) ?? string.Empty;
+        var responsibilities = TextNormalizer.TrimOrNull(raw.Responsibilities);
+        var requirements = TextNormalizer.TrimOrNull(raw.Requirements);
+        var benefits = TextNormalizer.TrimOrNull(raw.Benefits);
+        DateTime? expiry = raw.ExpiresAtUtc is { Kind: DateTimeKind.Utc } expires ? expires : null;
+        DateTime? sourcePosted = raw.SourcePostedAtUtc is { Kind: DateTimeKind.Utc } posted ? posted : null;
+        var education = TextNormalizer.TrimOrNull(raw.EducationRequirement);
+        var canonicalUrlHash = ApplicationUrlIdentity.Hash(applicationUrl);
+        var fingerprint = fingerprintService.GenerateFingerprint(title, company.Name, location);
+        var slug = $"{SlugGenerator.Generate(title, 240)}-{job.Id.ToString("N")[..8]}";
+        var changed = job.Title != title || job.Description != description || job.Responsibilities != responsibilities ||
+            job.Requirements != requirements || job.Benefits != benefits || job.ApplicationUrl != (applicationUrl ?? string.Empty) ||
+            job.CanonicalApplicationUrlHash != canonicalUrlHash || job.FingerprintHash != fingerprint || job.Slug != slug ||
+            job.Location != location || job.ExpiresAtUtc != expiry || job.MinimumSalary != raw.SalaryMin ||
+            job.MaximumSalary != raw.SalaryMax || job.EmploymentType != (raw.EmploymentType ?? default) ||
+            job.WorkplaceType != (raw.WorkplaceType ?? default) || job.ExperienceLevel != (raw.ExperienceLevel ?? default) ||
+            job.MinimumExperienceYears != raw.MinimumExperienceYears || job.MaximumExperienceYears != raw.MaximumExperienceYears ||
+            job.EducationRequirement != education || (raw.CategoryId.HasValue && raw.CategoryId.Value != Guid.Empty && job.CategoryId != raw.CategoryId.Value) ||
+            job.SourcePostedAtUtc != sourcePosted || job.CompanyId != company.Id;
+
+        job.Title = title;
+        job.Slug = slug;
+        job.Description = description;
+        job.Responsibilities = responsibilities;
+        job.Requirements = requirements;
+        job.Benefits = benefits;
+        job.ApplicationUrl = applicationUrl ?? string.Empty;
+        job.CanonicalApplicationUrlHash = canonicalUrlHash;
+        job.FingerprintHash = fingerprint;
+        job.Location = location;
+        job.ExpiresAtUtc = expiry;
+        job.MinimumSalary = raw.SalaryMin;
+        job.MaximumSalary = raw.SalaryMax;
+        job.EmploymentType = raw.EmploymentType ?? default;
+        job.WorkplaceType = raw.WorkplaceType ?? default;
+        job.ExperienceLevel = raw.ExperienceLevel ?? default;
+        job.MinimumExperienceYears = raw.MinimumExperienceYears;
+        job.MaximumExperienceYears = raw.MaximumExperienceYears;
+        job.EducationRequirement = education;
+        job.SourcePostedAtUtc = sourcePosted;
+        if (raw.CategoryId.HasValue && raw.CategoryId.Value != Guid.Empty)
+            job.CategoryId = raw.CategoryId.Value;
+        job.CompanyId = company.Id;
+        return changed;
     }
 
     private async Task<DeduplicationResult> FindDuplicateAsync(

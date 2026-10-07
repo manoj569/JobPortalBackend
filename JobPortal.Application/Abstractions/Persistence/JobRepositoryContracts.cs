@@ -49,6 +49,12 @@ public interface IJobRepository
         DateTime seenAtUtc,
         CancellationToken cancellationToken = default) =>
         Task.FromResult(-1);
+
+    Task<Job?> FindBySourceIdentityAsync(Guid jobSourceId, string externalJobId,
+        CancellationToken cancellationToken = default) => Task.FromResult<Job?>(null);
+
+    Task<int> CloseSourceJobsMissingFromSnapshotAsync(Guid jobSourceId, IReadOnlyCollection<string> activeExternalJobIds,
+        DateTime closedAtUtc, CancellationToken cancellationToken = default) => Task.FromResult(0);
 }
 
 public interface IJobSourceRepository

@@ -93,6 +93,14 @@ public static class ServiceCollectionExtensions
             client.Timeout = Timeout.InfiniteTimeSpan;
         }).AddHttpMessageHandler<AggregationHttpRetryHandler>();
         services.AddScoped<IExternalJobProvider, AshbyExternalJobProvider>();
+        services.AddHttpClient(DeloitteSuccessFactorsJobSourceProvider.HttpClientName, client =>
+        {
+            client.Timeout = Timeout.InfiniteTimeSpan;
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("CareerHarborJobAggregation/1.0 (+https://careerharbor.in)");
+            client.DefaultRequestHeaders.Accept.ParseAdd("text/html,application/xhtml+xml");
+        }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })
+            .AddHttpMessageHandler<AggregationHttpRetryHandler>();
+        services.AddScoped<IExternalJobProvider, DeloitteSuccessFactorsJobSourceProvider>();
 
         services.Configure<AiExtractionOptions>(configuration.GetSection(AiExtractionOptions.SectionName));
         services.AddHttpClient(ClaudeJobUrlExtractionService.PageFetchClientName, client =>

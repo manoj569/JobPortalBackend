@@ -4,7 +4,7 @@ using JobPortal.Application.Abstractions.Persistence;
 
 namespace JobPortal.Application.Services;
 
-public sealed class JobSourceRunner(
+public sealed partial class JobSourceRunner(
     IJobSourceRepository sources,
     IEnumerable<IExternalJobProvider> providers,
     IJobIngestionService ingestionService,
@@ -14,7 +14,8 @@ public sealed class JobSourceRunner(
     IExternalJobNormalizer normalizer,
     ILogger<JobSourceRunner>? logger = null,
     IJobAutoPublishService? autoPublishService = null,
-    IExternalJobMetadataEnricher? enricher = null) : IJobSourceRunner
+    IExternalJobMetadataEnricher? enricher = null,
+    IJobRepository? jobRepository = null) : IJobSourceRunner
 {
     private static readonly Action<ILogger, Guid, string, int, double, Exception?> Progress =
         LoggerMessage.Define<Guid, string, int, double>(LogLevel.Information, new EventId(4325, nameof(Progress)),
@@ -52,6 +53,12 @@ public sealed class JobSourceRunner(
 
     // Optional so existing constructor callers (including tests) remain valid.
     private readonly ILogger<JobSourceRunner>? _logger = logger;
+    private readonly IJobRepository? _jobRepository = jobRepository;
+
+    [LoggerMessage(EventId = 4353, Level = LogLevel.Information,
+        Message = "DeloitteSyncCompleted Source={JobSourceId} Fetched={Fetched} Inserted={Inserted} Updated={Updated} Unchanged={Unchanged} Closed={Closed} Failed={Failed} DurationMs={DurationMs}.")]
+    private static partial void LogDeloitteSyncCompleted(ILogger logger, Guid jobSourceId, int fetched,
+        int inserted, int updated, int unchanged, int closed, int failed, double durationMs);
 
     public async Task<JobSourceRunResult> RunAsync(
         Guid jobSourceId,
@@ -109,9 +116,20 @@ public sealed class JobSourceRunner(
         try
         {
             var runTimer = System.Diagnostics.Stopwatch.StartNew();
-            var rawJobs = await provider.FetchJobsAsync(
-                source,
-                cancellationToken);
+            ExternalJobSourceSnapshot? snapshot = null;
+            IReadOnlyCollection<RawExternalJob> rawJobs;
+            if (provider is ICompleteExternalJobProvider completeProvider)
+            {
+                snapshot = await completeProvider.FetchSnapshotAsync(source, cancellationToken);
+                rawJobs = snapshot.Jobs.Select(x => x with
+                {
+                    JobSourceId = string.IsNullOrWhiteSpace(x.ExternalId) ? null : source.Id
+                }).ToArray();
+            }
+            else
+            {
+                rawJobs = await provider.FetchJobsAsync(source, cancellationToken);
+            }
             if (_logger is not null) Progress(_logger, source.Id, "Provider fetch completed", rawJobs.Count, runTimer.Elapsed.TotalMilliseconds, null);
             var processingTimer = System.Diagnostics.Stopwatch.StartNew();
             var processed = 0;
@@ -124,8 +142,10 @@ public sealed class JobSourceRunner(
                 await bulkIngestion.PrepareRunAsync(rawJobs, cancellationToken);
 
             var created = 0;
+            var updated = 0;
+            var unchanged = 0;
             var matched = 0;
-            var skipped = 0;
+            var skipped = snapshot?.Skipped ?? 0;
             var failed = 0;
             var published = 0;
             var needsReview = 0;
@@ -187,6 +207,14 @@ public sealed class JobSourceRunner(
 
                             break;
 
+                        case JobIngestionOutcome.Updated:
+                            updated++;
+                            break;
+
+                        case JobIngestionOutcome.Unchanged:
+                            unchanged++;
+                            break;
+
                         case JobIngestionOutcome.MatchedByUrl:
                         case JobIngestionOutcome.MatchedByFingerprint:
                         case JobIngestionOutcome.MatchedByFuzzy:
@@ -244,6 +272,20 @@ public sealed class JobSourceRunner(
                 }
             }
 
+            var closed = 0;
+            var externalIdsForReconciliation = rawJobs.Select(x => x.ExternalId)
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Select(x => x!.Trim())
+                .ToArray();
+            var hasCompleteIdentities = externalIdsForReconciliation.Length == rawJobs.Count &&
+                externalIdsForReconciliation.Distinct(StringComparer.Ordinal).Count() == rawJobs.Count;
+            var canReconcile = snapshot is { IsComplete: true, Skipped: 0 } && hasCompleteIdentities && skipped == 0 && failed == 0;
+            if (canReconcile && _jobRepository is not null)
+            {
+                closed = await _jobRepository.CloseSourceJobsMissingFromSnapshotAsync(
+                    source.Id, externalIdsForReconciliation, timeProvider.GetUtcNow().UtcDateTime, cancellationToken);
+            }
+
             var now = timeProvider.GetUtcNow().UtcDateTime;
 
             source.LastRunAtUtc = now;
@@ -267,8 +309,11 @@ public sealed class JobSourceRunner(
             var runResult = new JobSourceRunResult
             {
                 JobSourceId = source.Id,
-                TotalReceived = rawJobs.Count,
+                TotalReceived = rawJobs.Count + (snapshot?.Skipped ?? 0),
                 Created = created,
+                Updated = updated,
+                Unchanged = unchanged,
+                Closed = closed,
                 Matched = matched,
                 Skipped = skipped,
                 Failed = failed,
@@ -287,6 +332,9 @@ public sealed class JobSourceRunner(
                 Progress(_logger, source.Id, "Enrichment and ingestion completed", processed, processingTimer.Elapsed.TotalMilliseconds, null);
                 Progress(_logger, source.Id, "Run completed", processed, runTimer.Elapsed.TotalMilliseconds, null);
                 PublicationCompleted(_logger, source.Id, published, needsReview, qualityRejected, publishFailed, disabled, null);
+                if (source.AtsType == JobPortal.Domain.Enums.AtsType.SuccessFactors)
+                    LogDeloitteSyncCompleted(_logger, source.Id, runResult.TotalReceived, created, updated, unchanged,
+                        closed, failed, runTimer.Elapsed.TotalMilliseconds);
                 foreach (var (reason, count) in qualityReasons)
                     RunReason(_logger, source.Id, $"Quality.{reason}", count, null);
                 RunCompleted(

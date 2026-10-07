@@ -122,17 +122,55 @@ public sealed class JobRepository(JobPortalDbContext context) : IJobRepository
             .ToListAsync(cancellationToken);
     }
 
-    public Task<int> TouchAggregationMetadataAsync(
+    public async Task<int> TouchAggregationMetadataAsync(
         Guid jobId,
         DateTime seenAtUtc,
-        CancellationToken cancellationToken = default) =>
-        context.Jobs
+        CancellationToken cancellationToken = default)
+    {
+        if (!context.Database.IsRelational())
+        {
+            var job = await context.Jobs.FirstOrDefaultAsync(x => x.Id == jobId && !x.IsDeleted, cancellationToken);
+            if (job is null) return 0;
+            job.LastSeenAtUtc = seenAtUtc;
+            job.FirstSeenAtUtc ??= seenAtUtc;
+            return 1;
+        }
+        return await context.Jobs
             .Where(x => x.Id == jobId && !x.IsDeleted)
             .ExecuteUpdateAsync(
                 setters => setters
                     .SetProperty(x => x.LastSeenAtUtc, seenAtUtc)
                     .SetProperty(x => x.FirstSeenAtUtc, x => x.FirstSeenAtUtc ?? seenAtUtc),
                 cancellationToken);
+    }
+
+    public Task<Job?> FindBySourceIdentityAsync(Guid jobSourceId, string externalJobId,
+        CancellationToken cancellationToken = default) => context.Jobs
+            .FirstOrDefaultAsync(x => x.JobSourceId == jobSourceId && x.ExternalJobId == externalJobId && !x.IsDeleted,
+                cancellationToken);
+
+    public Task<int> CloseSourceJobsMissingFromSnapshotAsync(Guid jobSourceId,
+        IReadOnlyCollection<string> activeExternalJobIds, DateTime closedAtUtc,
+        CancellationToken cancellationToken = default)
+    {
+        var activeIds = activeExternalJobIds.Distinct(StringComparer.Ordinal).ToArray();
+        return CloseMissingAsync();
+
+        async Task<int> CloseMissingAsync()
+        {
+            var missing = await context.Jobs
+                .Where(x => x.JobSourceId == jobSourceId && !x.IsDeleted && x.Status != JobStatus.Closed &&
+                    (activeIds.Length == 0 || !activeIds.Contains(x.ExternalJobId!)))
+                .ToListAsync(cancellationToken);
+            foreach (var job in missing)
+            {
+                job.Status = JobStatus.Closed;
+                job.IsFeatured = false;
+                job.UpdatedAtUtc = closedAtUtc;
+            }
+            return missing.Count;
+        }
+    }
 
 
     public async Task<IReadOnlyDictionary<string, Job>> FindByCanonicalUrlHashesAsync(
@@ -165,17 +203,29 @@ public sealed class JobRepository(JobPortalDbContext context) : IJobRepository
             .ToDictionary(x => x.Key, x => x.First(), StringComparer.Ordinal);
     }
 
-    public Task<int> TouchAggregationMetadataAsync(
+    public async Task<int> TouchAggregationMetadataAsync(
         IReadOnlyCollection<Guid> jobIds,
         DateTime seenAtUtc,
         CancellationToken cancellationToken = default)
     {
         if (jobIds.Count == 0)
-            return Task.FromResult(0);
+            return 0;
 
         var distinctIds = jobIds.Distinct().ToArray();
 
-        return context.Jobs
+        if (!context.Database.IsRelational())
+        {
+            var tracked = await context.Jobs.Where(x => distinctIds.Contains(x.Id) && !x.IsDeleted)
+                .ToListAsync(cancellationToken);
+            foreach (var job in tracked)
+            {
+                job.LastSeenAtUtc = seenAtUtc;
+                job.FirstSeenAtUtc ??= seenAtUtc;
+            }
+            return tracked.Count;
+        }
+
+        return await context.Jobs
             .Where(x => distinctIds.Contains(x.Id) && !x.IsDeleted)
             .ExecuteUpdateAsync(
                 setters => setters

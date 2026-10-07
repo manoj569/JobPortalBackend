@@ -23,7 +23,8 @@ public sealed class AggregationHttpRetryHandler(TimeProvider clock, ILogger<Aggr
         if (request.Method != HttpMethod.Get) return await base.SendAsync(request, cancellationToken);
         var provider = request.RequestUri?.Host switch
         {
-            "boards-api.greenhouse.io" => "Greenhouse", "api.lever.co" => "Lever", "api.ashbyhq.com" => "Ashby", _ => "ATS"
+            "boards-api.greenhouse.io" => "Greenhouse", "api.lever.co" => "Lever", "api.ashbyhq.com" => "Ashby",
+            "southasiacareers.deloitte.com" => "Deloitte", _ => "ATS"
         };
         var remaining = retryState.Remaining(provider, clock.GetUtcNow());
         if (remaining > TimeSpan.Zero)

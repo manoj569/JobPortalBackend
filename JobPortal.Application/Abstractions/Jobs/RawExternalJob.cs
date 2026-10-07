@@ -13,6 +13,9 @@ public sealed record RawExternalJob
     public string? Benefits { get; init; }
     public string? ApplicationUrl { get; init; }
     public string? ExternalId { get; init; }
+    // Set by JobSourceRunner only for providers that return a complete snapshot.
+    public Guid? JobSourceId { get; init; }
+    public DateTime? SourcePostedAtUtc { get; init; }
     // Source-provided deadline only; providers must supply an explicit UTC instant.
     public DateTime? ExpiresAtUtc { get; init; }
     public EmploymentType? EmploymentType { get; init; }

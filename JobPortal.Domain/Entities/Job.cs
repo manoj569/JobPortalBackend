@@ -50,4 +50,9 @@ public sealed class Job : BaseEntity
     public string? FingerprintHash { get; set; }
     public DateTime? FirstSeenAtUtc { get; set; }
     public DateTime? LastSeenAtUtc { get; set; }
+
+    // Nullable source identity is populated only for provider-owned imports.
+    public Guid? JobSourceId { get; set; }
+    public string? ExternalJobId { get; set; }
+    public DateTime? SourcePostedAtUtc { get; set; }
 }

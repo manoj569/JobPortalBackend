@@ -85,7 +85,7 @@ public sealed class JobAggregationDependencyInjectionTests
             .GetServices<IExternalJobProvider>()
             .ToArray();
 
-        Assert.Equal(3, providers.Length);
+        Assert.Equal(4, providers.Length);
 
         Assert.Contains(
             providers,
@@ -98,6 +98,8 @@ public sealed class JobAggregationDependencyInjectionTests
         Assert.Contains(
             providers,
             x => x is AshbyExternalJobProvider);
+
+        Assert.Contains(providers, x => x is DeloitteSuccessFactorsJobSourceProvider);
 
         Assert.DoesNotContain(
             providers,
@@ -129,6 +131,10 @@ public sealed class JobAggregationDependencyInjectionTests
         Assert.Equal(
             new Uri("https://api.ashbyhq.com/"),
             ashby.BaseAddress);
+
+        using var deloitte = clients.CreateClient(DeloitteSuccessFactorsJobSourceProvider.HttpClientName);
+        Assert.Contains("CareerHarborJobAggregation", deloitte.DefaultRequestHeaders.UserAgent.ToString(), StringComparison.Ordinal);
+        Assert.Contains("text/html", deloitte.DefaultRequestHeaders.Accept.ToString(), StringComparison.Ordinal);
     }
 
     private static void AssertScoped<TService, TImplementation>(

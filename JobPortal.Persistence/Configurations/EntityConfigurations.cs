@@ -240,6 +240,12 @@ public sealed class JobConfiguration : IEntityTypeConfiguration<Job>
         builder.Property(x => x.RoleCategory).HasMaxLength(150);
         builder.Property(x => x.EducationRequirement).HasMaxLength(200);
         builder.Property(x => x.FingerprintHash).HasMaxLength(64);
+        builder.Property(x => x.ExternalJobId).HasMaxLength(255);
+        builder.HasOne<JobSource>().WithMany().HasForeignKey(x => x.JobSourceId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasIndex(x => x.JobSourceId);
+        builder.HasIndex(x => new { x.JobSourceId, x.ExternalJobId })
+            .IsUnique()
+            .HasFilter("\"IsDeleted\" = FALSE AND \"JobSourceId\" IS NOT NULL AND \"ExternalJobId\" IS NOT NULL");
         builder.HasIndex(x => x.ReferenceNumber).IsUnique().HasFilter("\"IsDeleted\" = FALSE");
         builder.HasIndex(x => x.Slug).IsUnique().HasFilter("\"IsDeleted\" = FALSE");
         builder.HasIndex(x => new { x.CompanyId, x.Status, x.PublishedAtUtc });

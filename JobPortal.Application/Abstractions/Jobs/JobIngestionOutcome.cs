@@ -8,5 +8,7 @@ public enum JobIngestionOutcome
     MatchedByFuzzy = 4,
     CompanyNotFound = 5,
     Invalid = 6,
-    Failed = 7
+    Failed = 7,
+    Updated = 8,
+    Unchanged = 9
 }

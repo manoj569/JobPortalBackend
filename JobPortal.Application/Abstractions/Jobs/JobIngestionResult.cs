@@ -36,4 +36,7 @@ public sealed record JobIngestionResult
         Outcome is JobIngestionOutcome.MatchedByUrl
             or JobIngestionOutcome.MatchedByFingerprint
             or JobIngestionOutcome.MatchedByFuzzy;
+
+    public bool Updated => Outcome == JobIngestionOutcome.Updated;
+    public bool Unchanged => Outcome == JobIngestionOutcome.Unchanged;
 }
