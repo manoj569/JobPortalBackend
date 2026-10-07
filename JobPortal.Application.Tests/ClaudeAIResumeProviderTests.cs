@@ -134,6 +134,114 @@ public sealed class ClaudeAIResumeProviderTests
         Assert.Equal(1, handler.Calls);
     }
 
+    [Fact]
+    public async Task CamelCasePatchJsonWithTwoProposalsSurvivesProviderDeserializationAndGuard()
+    {
+        var source = UploadedResumeFactParser.Parse(UploadedResumeSourcePipelineTests.Resume);
+        var targets = ResumePatchGuard.Targets(source);
+        var first = targets.Single(x => x.Id == "SRC-EXP-001-BULLET-001");
+        var second = targets.Single(x => x.Id == "SRC-PROJECT-001-BULLET-001");
+        var patch = new TailoringPatch(
+        [
+            new(first.Id, first.Text, first.Text.Replace("Built", "Developed", StringComparison.Ordinal), [first.Id], ["C#"], "Emphasize supported API experience"),
+            new(second.Id, second.Text, second.Text.Replace("Built", "Developed", StringComparison.Ordinal), [second.Id], [], "Emphasize supported project work")
+        ], []);
+        var json = JsonSerializer.Serialize(patch, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var handler = new Handler((_, _) => Task.FromResult(ResponseText($"```json\n{json}\n```")));
+
+        var result = await Provider(handler).GenerateTailoringPatchAsync(new(source, JobDescription, Analysis,
+            ResumeEvidenceCatalog.Create(source), targets));
+        var applied = ResumePatchGuard.Apply(source, result.Content, JobDescription, targets.Select(x => x.Id).ToHashSet(StringComparer.Ordinal));
+
+        Assert.Contains("\"replacements\"", json);
+        Assert.Contains("\"targetId\"", json);
+        Assert.Contains("\"replacementText\"", json);
+        Assert.Contains("\"sourceEvidenceIds\"", json);
+        Assert.Contains("\"matchedJdTerms\"", json);
+        Assert.Contains("\"reason\"", json);
+        Assert.Contains("\"emphasizedSkillEvidenceIds\"", json);
+        Assert.Equal(2, result.Content.Replacements.Length);
+        Assert.Equal(2, applied.Decisions.Length);
+        Assert.Equal(2, applied.AcceptedCount);
+        using var body = JsonDocument.Parse(handler.Body!);
+        using var sentInput = JsonDocument.Parse(body.RootElement.GetProperty("messages")[0].GetProperty("content").GetString()!);
+        Assert.NotEmpty(sentInput.RootElement.GetProperty("editableTargets").EnumerateArray());
+        Assert.NotEmpty(sentInput.RootElement.GetProperty("sourceEvidence").EnumerateArray());
+        Assert.Contains(sentInput.RootElement.GetProperty("editableTargets").EnumerateArray(), x => x.GetProperty("id").GetString() == first.Id);
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Fact]
+    public async Task ExplicitEmptyPatchRemainsAnExplicitEmptyPatch()
+    {
+        var handler = new Handler((_, _) => Task.FromResult(Response(new TailoringPatch([], []))));
+        var source = UploadedResumeFactParser.Parse(UploadedResumeSourcePipelineTests.Resume);
+        var targets = ResumePatchGuard.Targets(source);
+
+        var result = await Provider(handler).GenerateTailoringPatchAsync(new(source, JobDescription, Analysis,
+            ResumeEvidenceCatalog.Create(source), targets));
+
+        Assert.Empty(result.Content.Replacements);
+        Assert.Equal(0, ResumePatchGuard.Apply(source, result.Content, JobDescription).AcceptedCount);
+    }
+
+    [Fact]
+    public async Task ProviderPatchWithOneGroundedAndOneFabricatedTechnologyKeepsBothForGuardReview()
+    {
+        var source = UploadedResumeFactParser.Parse(UploadedResumeSourcePipelineTests.Resume);
+        var first = ResumePatchGuard.Targets(source).Single(x => x.Id == "SRC-EXP-001-BULLET-001");
+        var second = ResumePatchGuard.Targets(source).Single(x => x.Id == "SRC-PROJECT-001-BULLET-001");
+        var patch = new TailoringPatch(
+        [
+            new(first.Id, first.Text, first.Text.Replace("Built", "Developed", StringComparison.Ordinal), [first.Id], ["C#"], "Emphasize supported APIs"),
+            new(second.Id, second.Text, "Built C# APIs using SQL Server, Kubernetes, AWS, and Kafka.", [second.Id], ["Kubernetes"], "Add job skills")
+        ], []);
+        var handler = new Handler((_, _) => Task.FromResult(Response(patch)));
+        var result = await Provider(handler).GenerateTailoringPatchAsync(new(source, JobDescription, Analysis,
+            ResumeEvidenceCatalog.Create(source), ResumePatchGuard.Targets(source)));
+        var applied = ResumePatchGuard.Apply(source, result.Content, JobDescription);
+
+        Assert.Equal(2, result.Content.Replacements.Length);
+        Assert.Equal(2, applied.Decisions.Length);
+        Assert.Equal(1, applied.AcceptedCount);
+        Assert.Equal(1, applied.Decisions.Count(x => x.Status == "rejected"));
+        Assert.Contains(applied.Decisions, x => x.RejectionCategory == "technology" && x.RejectionReason == "claim_not_supported_by_cited_evidence");
+    }
+
+    [Fact]
+    public async Task ProviderPatchWithFabricatedMetricDeserializesButGuardRejectsIt()
+    {
+        var source = UploadedResumeFactParser.Parse(UploadedResumeSourcePipelineTests.Resume);
+        var target = ResumePatchGuard.Targets(source).Single(x => x.Id == "SRC-EXP-001-BULLET-001");
+        var patch = new TailoringPatch([new(target.Id, target.Text, "Developed REST APIs using .NET and SQL Server with 60% faster processing.",
+            [target.Id], [], "Quantify the impact")], []);
+        var handler = new Handler((_, _) => Task.FromResult(Response(patch)));
+        var result = await Provider(handler).GenerateTailoringPatchAsync(new(source, JobDescription, Analysis,
+            ResumeEvidenceCatalog.Create(source), ResumePatchGuard.Targets(source)));
+        var applied = ResumePatchGuard.Apply(source, result.Content, JobDescription);
+
+        Assert.Single(result.Content.Replacements);
+        Assert.Equal(0, applied.AcceptedCount);
+        Assert.Equal("metric", Assert.Single(applied.Decisions).RejectionCategory);
+    }
+
+    [Theory]
+    [InlineData("not-json")]
+    [InlineData("{\"changes\":[],\"emphasizedSkillEvidenceIds\":[]}")]
+    [InlineData("{\"emphasizedSkillEvidenceIds\":[]}")]
+    public async Task MalformedMissingOrWrongPatchCollectionFailsAsProviderResponseError(string json)
+    {
+        var handler = new Handler((_, _) => Task.FromResult(ResponseText(json)));
+        var source = UploadedResumeFactParser.Parse(UploadedResumeSourcePipelineTests.Resume);
+        var targets = ResumePatchGuard.Targets(source);
+
+        var error = await Assert.ThrowsAsync<AIResumeProviderException>(() => Provider(handler).GenerateTailoringPatchAsync(new(source,
+            JobDescription, Analysis, ResumeEvidenceCatalog.Create(source), targets)));
+
+        Assert.Equal("provider_invalid_response", error.Code);
+        Assert.Equal(1, handler.Calls);
+    }
+
 
     [Fact]
     public async Task AnalysisUsesOfficialEndpointSmallSchemaAndCapturesUsage()
@@ -312,6 +420,11 @@ public sealed class ClaudeAIResumeProviderTests
         Assert.Equal(6000, body.RootElement.GetProperty("max_tokens").GetInt32());
         Assert.Contains("Never invent", body.RootElement.GetProperty("system").GetString());
         Assert.Contains("MUST NOT", body.RootElement.GetProperty("system").GetString());
+        Assert.Contains("When source evidence and the JD overlap, propose conservative ATS-oriented wording improvements", body.RootElement.GetProperty("system").GetString());
+        Assert.Contains("Return zero changes only when there is genuinely no grounded, JD-relevant wording improvement", body.RootElement.GetProperty("system").GetString());
+        var schemaDescription = body.RootElement.GetProperty("output_config").GetProperty("format").GetProperty("schema")
+            .GetProperty("properties").GetProperty("replacements").GetProperty("description").GetString();
+        Assert.Contains("Do not return [] merely because a required skill is already present", schemaDescription);
     }
 
     [Theory]

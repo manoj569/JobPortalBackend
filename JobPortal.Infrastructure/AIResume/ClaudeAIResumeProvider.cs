@@ -104,6 +104,10 @@ public sealed class ClaudeAIResumeProvider(IHttpClientFactory clients, IOptions<
             project/education/certification identities, lists, formatting or section order.
             The JD only selects emphasis; it is NEVER evidence about this candidate.
             Suggest at most 20 useful conservative wording changes to EXISTING editableTargets.
+            When source evidence and the JD overlap, propose conservative ATS-oriented wording improvements
+            to relevant editable targets. Do not return an empty change list merely because the resume already
+            contains a required skill when its existing wording can be safely aligned using source-supported terms.
+            Return zero changes only when there is genuinely no grounded, JD-relevant wording improvement.
             Each replacement has targetId, originalText, replacementText, sourceEvidenceIds,
             matchedJdTerms and reason. Copy targetId and originalText EXACTLY from editableTargets.
             Cite the target ID itself and only evidence from its SAME scope/entry.
@@ -427,7 +431,7 @@ public sealed class ClaudeAIResumeProvider(IHttpClientFactory clients, IOptions<
     {
         var schema = Schema(typeof(TailoringPatch));
         var replacements = schema["properties"]!["replacements"]!;
-        replacements["description"] = "At most 20 useful changes to existing editable targets. Return [] when none are safe.";
+        replacements["description"] = "At most 20 conservative ATS-oriented wording changes to relevant editable targets when source evidence overlaps the JD. Do not return [] merely because a required skill is already present when its wording can be safely aligned; return [] only when there is no grounded, JD-relevant wording improvement.";
         var fields = replacements["items"]!["properties"]!;
         fields["targetId"]!["enum"] = new JsonArray(targets.Select(x => (JsonNode?)JsonValue.Create(x.Id)).ToArray());
         fields["sourceEvidenceIds"]!["minItems"] = 1;

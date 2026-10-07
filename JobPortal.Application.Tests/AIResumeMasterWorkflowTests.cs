@@ -1,5 +1,8 @@
+using System.IO.Compression;
+using System.Text;
 using System.Text.Json;
 using System.Reflection;
+using System.Xml.Linq;
 using JobPortal.Application.Common.Exceptions;
 using JobPortal.Application.Features.AIResume;
 using JobPortal.Domain.Entities;
@@ -18,6 +21,51 @@ namespace JobPortal.Application.Tests;
 
 public sealed class AIResumeMasterWorkflowTests
 {
+    [Fact]
+    public async Task GroundedDotNetProviderJsonCreatesAndValidatesOriginalDocxArtifact()
+    {
+        const string resumeText = """
+            Morgan Example
+            Email: morgan@example.invalid
+            Phone: +91 90000 00000
+            Location: Pune, India
+            PROFESSIONAL SUMMARY
+            Backend developer with C# experience.
+            TECHNICAL SKILLS
+            C# | ASP.NET Core | REST APIs | SQL Server | Entity Framework
+            WORK EXPERIENCE
+            Backend Developer | Cedar Software | Jan 2021 - Present
+            - Developed REST APIs using ASP.NET Core and SQL Server.
+            - Built data access using Entity Framework and SQL Server.
+            """;
+        const string jd = "Senior .NET backend role building REST APIs with ASP.NET Core, Entity Framework, and SQL Server.";
+        await using var fixture = await Workflow.Create();
+        fixture.Storage.Files["owned.docx"] = DocxFromText(resumeText);
+        fixture.Analysis = new(82, ["C#", "ASP.NET Core", "SQL Server", "Entity Framework"], [], [],
+            ["Build REST APIs with ASP.NET Core and Entity Framework"], ["API development"], [], ["Emphasize supported .NET API work"]);
+        var source = UploadedResumeFactParser.Parse(resumeText);
+        var target = ResumePatchGuard.Targets(source).Single(x => x.Id == "SRC-EXP-001-BULLET-001");
+        fixture.Patch = new([new(target.Id, target.Text, "Built REST APIs using ASP.NET Core and SQL Server.",
+            [target.Id], ["REST APIs", "ASP.NET Core"], "Align supported API wording with the job")], []);
+
+        var session = await fixture.Service.CreateSessionAsync(fixture.UserId, new(fixture.SourceId, null, jd), default);
+        await fixture.Service.AnalyzeAsync(fixture.UserId, session.Id, default);
+        var tailored = await fixture.Service.GenerateAsync(fixture.UserId, session.Id, new(Guid.NewGuid()), default);
+        var download = await fixture.Service.DownloadAsync(fixture.UserId, tailored.Id, "original", default);
+        var documentXml = Encoding.UTF8.GetString(MasterResumeFixture.Parts(download.Content)["word/document.xml"]);
+
+        Assert.True(fixture.GenerationEditableTargetCount > 0);
+        Assert.True(fixture.GenerationEvidenceCount > 0);
+        Assert.Contains(target.Id, fixture.GenerationTargetIds);
+        Assert.Equal(1, tailored.Tailoring!.Replacements.Count(x => x.Status == "accepted"));
+        Assert.Contains(fixture.Logger.Messages, x => x.Contains(
+            "AIResumeTailoringPatch Proposed=1 Accepted=1 Rejected=0 PreservationMode=original_docx", StringComparison.Ordinal));
+        Assert.Equal("original_docx", tailored.DocumentCapabilities!.PreservationMode);
+        Assert.Contains("Built REST APIs using ASP.NET Core and SQL Server.", documentXml, StringComparison.Ordinal);
+        Assert.Equal(1, (await fixture.Service.CreditsAsync(fixture.UserId, default)).LifetimeConsumed);
+        Assert.Equal(0, (await fixture.Service.CreditsAsync(fixture.UserId, default)).Reserved);
+    }
+
     [Fact]
     public async Task AmbiguousSessionCommitDoesNotDeletePersistedMaster()
     {
@@ -100,6 +148,7 @@ public sealed class AIResumeMasterWorkflowTests
 
     [Theory]
     [InlineData("zero_safe")]
+    [InlineData("empty")]
     [InlineData("provider")]
     [InlineData("storage")]
     [InlineData("cancel")]
@@ -110,6 +159,7 @@ public sealed class AIResumeMasterWorkflowTests
         var session = await fixture.Service.CreateSessionAsync(fixture.UserId, new(fixture.SourceId, null, MasterResumeFixture.Jd), default);
         await fixture.Service.AnalyzeAsync(fixture.UserId, session.Id, default);
         if (failure == "zero_safe") fixture.Patch = new(MasterResumeFixture.Patch.Replacements.Where(x => x.Reason.StartsWith("Unsafe", StringComparison.Ordinal)).ToArray(), []);
+        if (failure == "empty") fixture.Patch = new([], []);
         if (failure == "provider") fixture.FailProvider = true;
         if (failure == "storage") fixture.Storage.FailWrites = true;
         if (failure == "persistence") fixture.RepositoryFault.FailAtWrite = fixture.RepositoryFault.Writes + 2;
@@ -122,10 +172,12 @@ public sealed class AIResumeMasterWorkflowTests
         Assert.Equal(1, await fixture.Db.AIResumeCreditTransactions.CountAsync(x => x.Kind == AIResumeCreditKind.Release));
         Assert.Equal(2, fixture.Storage.Files.Count); // Original upload + frozen master only.
         Assert.Equal(1, fixture.GenerationCalls);
-        if (failure == "zero_safe")
+        if (failure is "zero_safe" or "empty")
         {
-            Assert.Contains(fixture.Logger.Messages, x => x.Contains(
-                "AIResumeTailoringPatch Proposed=2 Accepted=0 Rejected=2 PreservationMode=original_docx", StringComparison.Ordinal));
+            var counts = failure == "empty"
+                ? "AIResumeTailoringPatch Proposed=0 Accepted=0 Rejected=0 PreservationMode=original_docx"
+                : "AIResumeTailoringPatch Proposed=2 Accepted=0 Rejected=2 PreservationMode=original_docx";
+            Assert.Contains(fixture.Logger.Messages, x => x.Contains(counts, StringComparison.Ordinal));
             Assert.Contains(fixture.Logger.Messages, x => x.Contains(
                 "AIResumeGenerationRejected Code=no_safe_tailoring_changes Stage=patch_guard_result", StringComparison.Ordinal));
         }
@@ -244,7 +296,11 @@ public sealed class AIResumeMasterWorkflowTests
         internal bool FailProvider { get; set; }
         internal Action? OnGeneration { get; set; }
         internal int GenerationCalls { get; private set; }
+        internal int GenerationEditableTargetCount { get; private set; }
+        internal int GenerationEvidenceCount { get; private set; }
+        internal string[] GenerationTargetIds { get; private set; } = [];
         internal List<string> GenerationSources { get; } = [];
+        internal ResumeAnalysis Analysis { get; set; } = MasterResumeFixture.Analysis;
         internal CaptureLogger Logger { get; } = new();
         internal JsonSerializerOptions Json { get; } = new(JsonSerializerDefaults.Web);
         internal static async Task<Workflow> Create()
@@ -262,10 +318,14 @@ public sealed class AIResumeMasterWorkflowTests
             fixture.Handler = new ClaudeAIResumeProviderTests.Handler(async (request, ct) =>
             {
                 using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
-                if (body.RootElement.GetProperty("max_tokens").GetInt32() == 1200) return ClaudeAIResumeProviderTests.Response(MasterResumeFixture.Analysis);
+                if (body.RootElement.GetProperty("max_tokens").GetInt32() == 1200) return ClaudeAIResumeProviderTests.Response(fixture.Analysis);
                 fixture.GenerationCalls++;
                 using var input = JsonDocument.Parse(body.RootElement.GetProperty("messages")[0].GetProperty("content").GetString()!);
                 fixture.GenerationSources.Add(input.RootElement.GetProperty("source").GetRawText());
+                fixture.GenerationEditableTargetCount = input.RootElement.GetProperty("editableTargets").GetArrayLength();
+                fixture.GenerationEvidenceCount = input.RootElement.GetProperty("sourceEvidence").GetArrayLength();
+                fixture.GenerationTargetIds = input.RootElement.GetProperty("editableTargets").EnumerateArray()
+                    .Select(x => x.GetProperty("id").GetString()!).ToArray();
                 fixture.OnGeneration?.Invoke();
                 ct.ThrowIfCancellationRequested();
                 if (fixture.FailProvider) throw new TaskCanceledException("Provider timeout fixture");
@@ -287,6 +347,23 @@ public sealed class AIResumeMasterWorkflowTests
                 new ClaudeAIResumeProviderTests.DevelopmentEnvironment(), new OriginalResumeDocuments(Storage, renderer));
         }
         public ValueTask DisposeAsync() => Db.DisposeAsync();
+    }
+
+    private static byte[] DocxFromText(string text)
+    {
+        XNamespace word = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+        var document = new XDocument(new XElement(word + "document", new XAttribute(XNamespace.Xmlns + "w", word),
+            new XElement(word + "body", text.Replace("\r", "", StringComparison.Ordinal).Split('\n').Select(line =>
+                new XElement(word + "p", line.StartsWith("- ", StringComparison.Ordinal)
+                    ? new XElement(word + "pPr", new XElement(word + "numPr", new XElement(word + "ilvl", new XAttribute(word + "val", "0")),
+                        new XElement(word + "numId", new XAttribute(word + "val", "1")))) : null,
+                    new XElement(word + "r", new XElement(word + "t", new XAttribute(XNamespace.Xml + "space", "preserve"), line)))),
+                new XElement(word + "sectPr"))));
+        using var output = new MemoryStream();
+        using (var archive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: true))
+        using (var writer = new StreamWriter(archive.CreateEntry("word/document.xml").Open(), new UTF8Encoding(false)))
+            document.Save(writer, SaveOptions.DisableFormatting);
+        return output.ToArray();
     }
     private sealed class CommitFailureInterceptor : SaveChangesInterceptor
     {
