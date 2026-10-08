@@ -4,6 +4,7 @@ using JobPortal.Application.Features.JobAggregation;
 using JobPortal.Shared.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 
 namespace JobPortal.API.Controllers;
 
@@ -11,7 +12,7 @@ namespace JobPortal.API.Controllers;
 [Authorize(Roles = "Administrator")]
 [Route("api/admin/job-sources")]
 [Produces("application/json")]
-public sealed class AdminJobSourcesController(IJobSourceManagementService sources) : ControllerBase
+public sealed class AdminJobSourcesController(IJobSourceManagementService sources, JobSourceRunService? runs = null) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<ApiResponse<PagedResponse<JobSourceResponse>>>> Search(
@@ -45,6 +46,17 @@ public sealed class AdminJobSourcesController(IJobSourceManagementService source
     }
 
     [HttpPost("{id:guid}/run")]
-    public async Task<ActionResult<ApiResponse<JobSourceRunResult>>> Run(Guid id, CancellationToken cancellationToken) =>
-        Ok(new ApiResponse<JobSourceRunResult>(await sources.RunAsync(id, cancellationToken)));
+    public async Task<ActionResult<ApiResponse<JobSourceRunResponse>>> Run(Guid id, CancellationToken cancellationToken)
+    {
+        Guid? requestedBy = Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId) ? userId : null;
+        var result = await RequiredRuns.EnqueueAsync(id, requestedBy, cancellationToken);
+        return AcceptedAtAction(nameof(GetRun), new { id, runId = result.RunId },
+            new ApiResponse<JobSourceRunResponse>(result, "Job source run accepted. Poll the run status for completion."));
+    }
+
+    [HttpGet("{id:guid}/runs/{runId:guid}")]
+    public async Task<ActionResult<ApiResponse<JobSourceRunResponse>>> GetRun(Guid id, Guid runId, CancellationToken cancellationToken) =>
+        Ok(new ApiResponse<JobSourceRunResponse>(await RequiredRuns.GetAsync(id, runId, cancellationToken)));
+
+    private JobSourceRunService RequiredRuns => runs ?? throw new InvalidOperationException("Durable job source queue is not registered.");
 }

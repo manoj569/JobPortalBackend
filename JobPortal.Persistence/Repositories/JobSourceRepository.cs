@@ -22,6 +22,7 @@ public sealed class JobSourceRepository(JobPortalDbContext context, IOptions<Job
         return context.JobSources.AsNoTracking()
             .Where(JobSourceSchedule.DuePredicate(nowUtc,
                 options?.Value.Scheduler.InterruptedRunCooldownMinutes ?? 60))
+            .Where(x => !context.JobSourceRuns.Where(JobSourceRunStore.ActivePredicate).Any(r => r.JobSourceId == x.Id))
             .OrderBy(x => x.LastRunAtUtc.HasValue)
             .ThenBy(x => x.LastRunAtUtc).ThenBy(x => x.Id)
             .Take(maxResults);

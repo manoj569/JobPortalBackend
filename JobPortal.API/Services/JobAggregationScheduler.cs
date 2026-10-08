@@ -75,6 +75,9 @@ public sealed class JobAggregationScheduler(
                 await using var distributed = await scope.ServiceProvider.GetRequiredService<IJobSourceExecutionLock>()
                     .TryAcquireAsync(sourceId, cancellationToken);
                 if (distributed is null) { SourceBusy(logger, sourceId, null); return; }
+                // A durable manual request may have arrived since the due-source query.
+                var queue = scope.ServiceProvider.GetService<IJobSourceRunStore>();
+                if (queue is not null && await queue.HasActiveAsync(sourceId, cancellationToken)) return;
                 // A manual run or edit may have finished since the due query. Recheck
                 // after acquiring the SAME guard used by admin runs/updates/deletes.
                 var source = await scope.ServiceProvider.GetRequiredService<IJobSourceRepository>()

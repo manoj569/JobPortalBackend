@@ -80,6 +80,7 @@ public sealed class JobPortalDbContext(DbContextOptions<JobPortalDbContext> opti
     public DbSet<AIApplyWorkerInstance> AIApplyWorkerInstances => Set<AIApplyWorkerInstance>();
     public DbSet<AIApplySiteOperationalState> AIApplySiteOperationalStates => Set<AIApplySiteOperationalState>();
     public DbSet<JobSource> JobSources => Set<JobSource>();
+    public DbSet<JobSourceRun> JobSourceRuns => Set<JobSourceRun>();
     public DbSet<AIResumeSession> AIResumeSessions => Set<AIResumeSession>();
     public DbSet<AIResumeCreditWallet> AIResumeCreditWallets => Set<AIResumeCreditWallet>();
     public DbSet<AIResumePurchase> AIResumePurchases => Set<AIResumePurchase>();

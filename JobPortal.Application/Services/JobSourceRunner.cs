@@ -15,7 +15,8 @@ public sealed partial class JobSourceRunner(
     ILogger<JobSourceRunner>? logger = null,
     IJobAutoPublishService? autoPublishService = null,
     IExternalJobMetadataEnricher? enricher = null,
-    IJobRepository? jobRepository = null) : IJobSourceRunner
+    IJobRepository? jobRepository = null,
+    JobPortal.Application.Features.JobAggregation.IJobSourceRunProgress? runProgress = null) : IJobSourceRunner
 {
     private static readonly Action<ILogger, Guid, string, int, double, Exception?> Progress =
         LoggerMessage.Define<Guid, string, int, double>(LogLevel.Information, new EventId(4325, nameof(Progress)),
@@ -155,6 +156,8 @@ public sealed partial class JobSourceRunner(
                 rawJobs = await provider.FetchJobsAsync(source, cancellationToken);
             }
             if (_logger is not null) Progress(_logger, source.Id, "Provider fetch completed", rawJobs.Count, runTimer.Elapsed.TotalMilliseconds, null);
+            runProgress?.Report(new("DbPreload", 0, new JobSourceRunResult
+            { JobSourceId = source.Id, TotalReceived = rawJobs.Count + (snapshot?.Skipped ?? 0) }));
             var processingTimer = System.Diagnostics.Stopwatch.StartNew();
             var enrichmentMilliseconds = 0d;
             var ingestionMilliseconds = 0d;
@@ -182,6 +185,15 @@ public sealed partial class JobSourceRunner(
             var disabled = 0;
             var qualityReasons = new Dictionary<JobQualityReasonCode, int>();
             var reasonCounts = new Dictionary<JobIngestionReasonCode, int>();
+
+            void ReportProgress(string phase) => runProgress?.Report(new(phase, processed, new JobSourceRunResult
+            {
+                JobSourceId = source.Id, TotalReceived = rawJobs.Count + (snapshot?.Skipped ?? 0),
+                Created = created, Updated = updated, Unchanged = unchanged, Matched = matched,
+                Skipped = skipped, Failed = failed, Published = published, NeedsReview = needsReview,
+                QualityRejected = qualityRejected, PublishFailed = publishFailed, AutoPublishDisabled = disabled
+            }));
+            ReportProgress("Ingestion");
 
             foreach (var rawJob in rawJobs)
             {
@@ -300,6 +312,7 @@ public sealed partial class JobSourceRunner(
                 finally
                 {
                     processed++;
+                    ReportProgress("Ingestion");
                     if (_logger is not null && processed % 25 == 0)
                         Progress(_logger, source.Id, "Enrichment and ingestion progress", processed, processingTimer.Elapsed.TotalMilliseconds, null);
                 }
@@ -307,6 +320,7 @@ public sealed partial class JobSourceRunner(
 
             cancellationToken.ThrowIfCancellationRequested();
             var closed = 0;
+            ReportProgress("Reconciliation");
             var externalIdsForReconciliation = rawJobs.Select(x => x.ExternalId)
                 .Where(x => !string.IsNullOrWhiteSpace(x))
                 .Select(x => x!.Trim())

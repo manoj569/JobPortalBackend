@@ -125,6 +125,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IJobSourceCategoryResolver, JobSourceCategoryResolver>();
         services.AddScoped<IJobSourceManagementService, JobSourceManagementService>();
         services.AddSingleton<JobSourceRunGuard>();
+        services.AddScoped<JobSourceRunService>();
+        services.AddScoped<IJobSourceRunProgress, JobSourceRunProgress>();
 
         return services;
     }

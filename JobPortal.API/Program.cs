@@ -142,6 +142,8 @@ builder.Services.Configure<JobAggregationOptions>(
 
 builder.Services.AddSingleton<JobAggregationScheduler>();
 builder.Services.AddHostedService<JobAggregationSchedulerHostedService>();
+builder.Services.AddSingleton<JobSourceRunWorker>();
+builder.Services.AddHostedService<JobSourceRunHostedService>();
 builder.Services.Configure<JobDiscoveryOptions>(builder.Configuration.GetSection(JobDiscoveryOptions.SectionName));
 builder.Services.AddHostedService<JobDiscoveryHostedService>();
 builder.Services.AddHostedService<RegistrationEmailHostedService>();

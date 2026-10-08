@@ -305,15 +305,14 @@ public sealed class JobSourceAdministrationTests
 public sealed class JobSourceManualRunTests
 {
     [Fact]
-    public async Task MappedCategoryCreatesDraftAndReturnsSafeControllerResult()
+    public async Task MappedCategoryCreatesDraftAndReturnsSafeRunnerResult()
     {
         using var f = new JobSourceFixture();
         f.Map(f.Category.Id.ToString());
-        var action = await new AdminJobSourcesController(f.Service).Run(f.Source.Id, default);
-        var response = Assert.IsType<ApiResponse<JobSourceRunResult>>(Assert.IsType<OkObjectResult>(action.Result).Value);
-        Assert.True(response.Data.Succeeded);
-        Assert.Equal(1, response.Data.Created);
-        Assert.Equal(1, response.Data.TotalReceived);
+        var result = await f.Service.RunAsync(f.Source.Id);
+        Assert.True(result.Succeeded);
+        Assert.Equal(1, result.Created);
+        Assert.Equal(1, result.TotalReceived);
         var job = await f.Context.Jobs.SingleAsync();
         Assert.Equal(f.Category.Id, job.CategoryId);
         Assert.Equal(JobStatus.Draft, job.Status);
@@ -469,7 +468,7 @@ public sealed class JobSourceAuthorizationTests
         Assert.Equal("Administrator", Assert.Single(attributes).Roles);
         Assert.Empty(controller.GetCustomAttributes<AllowAnonymousAttribute>());
         var actions = controller.GetMethods().Where(x => x.DeclaringType == controller && x.GetCustomAttributes<HttpMethodAttribute>().Any()).ToArray();
-        Assert.Equal(6, actions.Length);
+        Assert.Equal(7, actions.Length);
         Assert.All(actions, action => Assert.Empty(action.GetCustomAttributes<AllowAnonymousAttribute>()));
         var services = new ServiceCollection();
         services.AddLogging();
