@@ -26,10 +26,27 @@ public sealed partial class SuccessFactorsJobSourceProvider(
     private static readonly TimeSpan RequestSpacing = TimeSpan.FromMilliseconds(250);
     private static readonly Action<ILogger, Guid, Exception?> Started = LoggerMessage.Define<Guid>(LogLevel.Information,
         new EventId(4350, nameof(Started)), "SuccessFactorsSyncStarted Source={JobSourceId}.");
-    private static readonly Action<ILogger, Guid, string, int, Exception?> HttpFailure = LoggerMessage.Define<Guid, string, int>(
-        LogLevel.Warning, new EventId(4351, nameof(HttpFailure)), "SuccessFactorsSyncHttpFailure Source={JobSourceId} Stage={Stage} StatusCode={StatusCode}.");
     private static readonly Action<ILogger, Guid, int, int, int, double, Exception?> Completed = LoggerMessage.Define<Guid, int, int, int, double>(
         LogLevel.Information, new EventId(4352, nameof(Completed)), "SuccessFactorsSyncFetched Source={JobSourceId} Fetched={Fetched} Parsed={Parsed} Skipped={Skipped} DurationMs={DurationMs}.");
+
+    [LoggerMessage(EventId = 4360, Level = LogLevel.Warning,
+        Message = "SuccessFactorsSourceFailure Source={JobSourceId} Stage={Stage} PaginationOffset={PaginationOffset} ReasonCode={ReasonCode} StatusCode={StatusCode}.")]
+    private static partial void LogSourceFailure(ILogger logger, Guid jobSourceId, string stage,
+        int paginationOffset, string reasonCode, int? statusCode);
+
+    private const string ReasonDataKey = "SuccessFactorsFailureReason";
+    private static InvalidDataException InvalidDocument(FailureReason reason, string message)
+    {
+        var exception = new InvalidDataException(message);
+        exception.Data[ReasonDataKey] = reason;
+        return exception;
+    }
+    private void LogInvalidDocument(Guid sourceId, string stage, int offset, int? status, InvalidDataException exception)
+    {
+        // Only internal enum values reach logs, never exception messages, HTML or URLs.
+        var reason = exception.Data[ReasonDataKey] is FailureReason known ? known : FailureReason.ResponseReadInvalidData;
+        if (logger is not null) LogSourceFailure(logger, sourceId, stage, offset, reason.ToString(), status);
+    }
 
     public AtsType AtsType => AtsType.SuccessFactors;
 
@@ -48,31 +65,57 @@ public sealed partial class SuccessFactorsJobSourceProvider(
         var pages = new List<ListingEntry>();
         var expectedTotal = -1;
         var expectedLastOffset = -1;
+        var lastResponseStatus = (int?)null;
         for (var offset = 0; ; offset += PageSize)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var html = await GetHtmlAsync(client, ListingUri(boardUri, offset), source.Id, "listing", cancellationToken);
-            var page = ParseListingPage(html, offset, boardUri);
-            if (expectedTotal < 0)
+            var response = await GetHtmlAsync(client, ListingUri(boardUri, offset), source.Id, "listing_response", offset, cancellationToken);
+            lastResponseStatus = response.StatusCode;
+            var stage = "listing_parse";
+            ListingPage page;
+            try
             {
-                expectedTotal = page.TotalCount;
-                expectedLastOffset = page.LastOffset;
-                var calculatedLast = expectedTotal == 0 ? 0 : ((expectedTotal - 1) / PageSize) * PageSize;
-                if (expectedTotal > MaxJobs || calculatedLast != expectedLastOffset)
-                    throw new InvalidDataException("The SuccessFactors listing pagination did not provide a safe, bounded complete result set.");
+                page = ParseListingPage(response.Html, offset, boardUri);
+                stage = "listing_pagination";
+                if (expectedTotal < 0)
+                {
+                    expectedTotal = page.TotalCount;
+                    expectedLastOffset = page.LastOffset;
+                    var calculatedLast = expectedTotal == 0 ? 0 : ((expectedTotal - 1) / PageSize) * PageSize;
+                    if (expectedTotal > MaxJobs || calculatedLast != expectedLastOffset)
+                        throw InvalidDocument(expectedTotal > MaxJobs ? FailureReason.ListingRecordLimitExceeded : FailureReason.ListingLastOffsetMismatch,
+                        "The SuccessFactors listing pagination did not provide a safe, bounded complete result set.");
+                }
+                if (page.TotalCount != expectedTotal || page.LastOffset != expectedLastOffset ||
+                    page.FirstResult != offset + 1 || page.Results.Count != Math.Min(PageSize, Math.Max(0, expectedTotal - offset)))
+                    throw InvalidDocument(page.TotalCount != expectedTotal ? FailureReason.ListingTotalChanged :
+                        page.LastOffset != expectedLastOffset ? FailureReason.ListingLastOffsetChanged : FailureReason.ListingSnapshotChanged,
+                        "The SuccessFactors listing changed during pagination; refusing an incomplete snapshot.");
             }
-            if (page.TotalCount != expectedTotal || page.LastOffset != expectedLastOffset ||
-                page.FirstResult != offset + 1 || page.Results.Count != Math.Min(PageSize, Math.Max(0, expectedTotal - offset)))
-                throw new InvalidDataException("The SuccessFactors listing changed during pagination; refusing an incomplete snapshot.");
+            catch (InvalidDataException exception)
+            {
+                LogInvalidDocument(source.Id, stage, offset, response.StatusCode, exception);
+                throw;
+            }
 
             pages.AddRange(page.Results);
             if (offset == expectedLastOffset) break;
-            if (page.Results.Count == 0) throw new InvalidDataException("The SuccessFactors listing ended before its advertised last page.");
+            if (page.Results.Count == 0)
+            {
+                var exception = InvalidDocument(FailureReason.ListingEndedEarly, "The SuccessFactors listing ended before its advertised last page.");
+                LogInvalidDocument(source.Id, "listing_snapshot", offset, response.StatusCode, exception);
+                throw exception;
+            }
             await Task.Delay(RequestSpacing, cancellationToken);
         }
 
         if (pages.Count != expectedTotal || pages.Select(x => x.DetailUrl.AbsoluteUri).Distinct(StringComparer.Ordinal).Count() != expectedTotal)
-            throw new InvalidDataException("The SuccessFactors listing contained missing or duplicate job detail links.");
+        {
+            var exception = InvalidDocument(pages.Count != expectedTotal ? FailureReason.ListingSnapshotCountMismatch : FailureReason.ListingDuplicateDetailLinks,
+                "The SuccessFactors listing contained missing or duplicate job detail links.");
+            LogInvalidDocument(source.Id, "listing_snapshot", expectedLastOffset, lastResponseStatus, exception);
+            throw exception;
+        }
 
         var parsed = new ConcurrentDictionary<int, RawExternalJob>();
         var skipped = 0;
@@ -95,8 +138,9 @@ public sealed partial class SuccessFactorsJobSourceProvider(
                     }
                     finally { pace.Release(); }
 
-                    var detailHtml = await GetHtmlAsync(client, item.entry.DetailUrl, source.Id, "detail", token);
-                    var detail = ParseDetail(detailHtml, item.entry, source.Company?.Name ?? string.Empty);
+                    var detailResponse = await GetHtmlAsync(client, item.entry.DetailUrl, source.Id, "detail_response",
+                        (item.index / PageSize) * PageSize, token);
+                    var detail = ParseDetail(detailResponse.Html, item.entry, source.Company?.Name ?? string.Empty);
                     if (detail is null) Interlocked.Increment(ref skipped);
                     else parsed[item.index] = detail;
                     Interlocked.Increment(ref nextIndex);
@@ -121,35 +165,40 @@ public sealed partial class SuccessFactorsJobSourceProvider(
             !int.TryParse(totalMatch.Groups[1].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var first) ||
             !int.TryParse(totalMatch.Groups[2].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var last) ||
             !int.TryParse(totalMatch.Groups[3].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var total))
-            throw new InvalidDataException("The SuccessFactors listing page did not contain valid pagination metadata.");
+            throw InvalidDocument(FailureReason.ListingPaginationMetadataInvalid, "The SuccessFactors listing page did not contain valid pagination metadata.");
 
         var prefix = boardUri.AbsolutePath.TrimEnd('/') + "/";
         var boardRoot = new Uri(boardUri.AbsoluteUri.TrimEnd('/') + "/");
         if (!Uri.TryCreate(boardRoot, WebUtility.HtmlDecode(lastMatch.Groups[3].Value), out var lastUri) ||
             !SameOrigin(boardUri, lastUri) || !lastUri.AbsolutePath.StartsWith(prefix, StringComparison.Ordinal) ||
             !int.TryParse(lastUri.AbsolutePath[prefix.Length..].TrimEnd('/'), NumberStyles.None, CultureInfo.InvariantCulture, out var lastOffset))
-            throw new InvalidDataException("The SuccessFactors listing page did not contain a valid last-page link for this board.");
+            throw InvalidDocument(FailureReason.ListingLastPageLinkInvalid, "The SuccessFactors listing page did not contain a valid last-page link for this board.");
 
         var rows = ListingRowRegex().Matches(html).Select(x => x.Groups[2].Value).ToArray();
         var results = new List<ListingEntry>(rows.Length);
+        FailureReason? rowFailure = null;
         foreach (var row in rows)
         {
             var links = JobLinkRegex().Matches(row);
             var link = links.Cast<Match>().Select(x => x.Groups[3].Value).FirstOrDefault();
-            if (link is null) continue;
+            if (link is null) { rowFailure ??= FailureReason.ListingRowMissingJobLink; continue; }
             var titleMatch = JobTitleRegex().Match(row);
             var title = titleMatch.Success ? PlainText(titleMatch.Groups[4].Value) : string.Empty;
             var locationMatch = ClassSpanRegex("jobLocation").Match(row);
             var dateMatch = ClassSpanRegex("jobDate").Match(row);
             var location = locationMatch.Success ? PlainText(locationMatch.Groups[2].Value) : string.Empty;
             var postedText = dateMatch.Success ? PlainText(dateMatch.Groups[2].Value) : string.Empty;
-            if (title.Length == 0 || !TryDetailUrl(boardUri, link, out var detailUri) || !ParseListingDate(postedText, out var posted)) continue;
+            if (title.Length == 0) { rowFailure ??= FailureReason.ListingRowMissingTitle; continue; }
+            if (!TryDetailUrl(boardUri, link, out var detailUri)) { rowFailure ??= FailureReason.ListingRowInvalidDetailUrl; continue; }
+            if (!ParseListingDate(postedText, out var posted)) { rowFailure ??= FailureReason.ListingRowInvalidDate; continue; }
             results.Add(new(title, location, posted, detailUri));
         }
 
         var expectedCount = total == 0 ? 0 : Math.Min(PageSize, Math.Max(0, total - requestedOffset));
         if (first != requestedOffset + 1 || last < first || total < 0 || rows.Length != expectedCount || results.Count != expectedCount)
-            throw new InvalidDataException("The SuccessFactors listing page contained malformed or incomplete job rows.");
+            throw InvalidDocument(first != requestedOffset + 1 || last < first || total < 0 ? FailureReason.ListingRangeInvalid :
+                rows.Length != expectedCount ? FailureReason.ListingRowCountMismatch : rowFailure ?? FailureReason.ListingRowsUnparseable,
+                "The SuccessFactors listing page contained malformed or incomplete job rows.");
         return new(first, last, total, lastOffset, results);
     }
 
@@ -185,30 +234,45 @@ public sealed partial class SuccessFactorsJobSourceProvider(
         };
     }
 
-    private async Task<string> GetHtmlAsync(HttpClient client, Uri uri, Guid sourceId, string stage, CancellationToken cancellationToken)
+    private async Task<HtmlResponse> GetHtmlAsync(HttpClient client, Uri uri, Guid sourceId, string stage, int offset, CancellationToken cancellationToken)
     {
-        using var response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        if (!response.IsSuccessStatusCode)
+        int? status = null;
+        try
         {
-            if (logger is not null) HttpFailure(logger, sourceId, stage, (int)response.StatusCode, null);
+            using var response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            status = (int)response.StatusCode;
             response.EnsureSuccessStatusCode();
+            if (response.Content.Headers.ContentLength is > MaxHtmlBytes)
+                throw InvalidDocument(FailureReason.ResponseDeclaredSizeExceeded, "SuccessFactors returned an oversized public page.");
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var output = new MemoryStream();
+            var buffer = new byte[8192];
+            int count;
+            while ((count = await stream.ReadAsync(buffer, cancellationToken)) > 0)
+            {
+                if (output.Length + count > MaxHtmlBytes)
+                    throw InvalidDocument(FailureReason.ResponseReadSizeExceeded, "SuccessFactors returned an oversized public page.");
+                await output.WriteAsync(buffer.AsMemory(0, count), cancellationToken);
+            }
+            var charset = response.Content.Headers.ContentType?.CharSet?.Trim('"');
+            Encoding encoding;
+            try { encoding = string.IsNullOrWhiteSpace(charset) ? Encoding.UTF8 : Encoding.GetEncoding(charset); }
+            catch (ArgumentException) { encoding = Encoding.UTF8; }
+            return new(encoding.GetString(output.ToArray()), (int)response.StatusCode);
         }
-        if (response.Content.Headers.ContentLength is > MaxHtmlBytes)
-            throw new InvalidDataException("SuccessFactors returned an oversized public page.");
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        using var output = new MemoryStream();
-        var buffer = new byte[8192];
-        int count;
-        while ((count = await stream.ReadAsync(buffer, cancellationToken)) > 0)
+        catch (InvalidDataException exception)
         {
-            if (output.Length + count > MaxHtmlBytes) throw new InvalidDataException("SuccessFactors returned an oversized public page.");
-            await output.WriteAsync(buffer.AsMemory(0, count), cancellationToken);
+            LogInvalidDocument(sourceId, stage, offset, status, exception);
+            throw;
         }
-        var charset = response.Content.Headers.ContentType?.CharSet?.Trim('"');
-        Encoding encoding;
-        try { encoding = string.IsNullOrWhiteSpace(charset) ? Encoding.UTF8 : Encoding.GetEncoding(charset); }
-        catch (ArgumentException) { encoding = Encoding.UTF8; }
-        return encoding.GetString(output.ToArray());
+        catch (HttpRequestException exception)
+        {
+            if (logger is not null) LogSourceFailure(logger, sourceId, stage, offset,
+                status is >= 300 || exception.StatusCode is { } errorStatus && (int)errorStatus >= 300 ? "HttpStatusFailure" :
+                    status.HasValue ? "ResponseReadTransportFailure" : "HttpTransportFailure",
+                status ?? (exception.StatusCode is { } code ? (int)code : null));
+            throw;
+        }
     }
 
     internal static Uri ValidateSource(JobSource source)
@@ -337,4 +401,13 @@ public sealed partial class SuccessFactorsJobSourceProvider(
 
     internal sealed record ListingEntry(string Title, string Location, DateTimeOffset PostedAtUtc, Uri DetailUrl);
     internal sealed record ListingPage(int FirstResult, int LastResult, int TotalCount, int LastOffset, IReadOnlyList<ListingEntry> Results);
+    private sealed record HtmlResponse(string Html, int StatusCode);
+    private enum FailureReason
+    {
+        ListingPaginationMetadataInvalid, ListingLastPageLinkInvalid, ListingRangeInvalid, ListingRowCountMismatch,
+        ListingRowMissingJobLink, ListingRowMissingTitle, ListingRowInvalidDetailUrl, ListingRowInvalidDate, ListingRowsUnparseable,
+        ListingRecordLimitExceeded, ListingLastOffsetMismatch, ListingTotalChanged, ListingLastOffsetChanged, ListingSnapshotChanged,
+        ListingEndedEarly, ListingSnapshotCountMismatch, ListingDuplicateDetailLinks,
+        ResponseDeclaredSizeExceeded, ResponseReadSizeExceeded, ResponseReadInvalidData
+    }
 }
