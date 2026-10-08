@@ -168,6 +168,7 @@ public sealed class JobAggregationHardeningTests
     public async Task ManualSuccessAndProviderFailureReleaseLeaseAndAuditCounts()
     {
         using var f = new JobSourceFixture();
+        f.Map(f.Category.Id.ToString());
         await f.Service.RunAsync(f.Source.Id);
         Assert.Equal(1, f.Locks.SourceReleases);
         Assert.Contains(f.Audit.Events, x => x.Metadata?.GetValueOrDefault("received") == "1");

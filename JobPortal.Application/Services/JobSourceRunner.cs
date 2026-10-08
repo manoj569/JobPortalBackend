@@ -60,6 +60,19 @@ public sealed partial class JobSourceRunner(
     private static partial void LogSuccessFactorsSyncCompleted(ILogger logger, Guid jobSourceId, int fetched,
         int inserted, int updated, int unchanged, int closed, int failed, double durationMs);
 
+    [LoggerMessage(EventId = 4354, Level = LogLevel.Information,
+        Message = "JobSourceRunAttemptStarted Source={JobSourceId} AttemptAt={AttemptAt}.")]
+    private static partial void LogAttempt(ILogger logger, Guid jobSourceId, DateTime attemptAt);
+    [LoggerMessage(EventId = 4355, Level = LogLevel.Information,
+        Message = "JobSourceRunCancelled Source={JobSourceId} Processed={Processed} DurationMs={DurationMs}.")]
+    private static partial void LogCancelled(ILogger logger, Guid jobSourceId, int processed, double durationMs);
+    [LoggerMessage(EventId = 4356, Level = LogLevel.Information,
+        Message = "JobSourceRunSucceeded Source={JobSourceId} Processed={Processed} DurationMs={DurationMs}.")]
+    private static partial void LogSucceeded(ILogger logger, Guid jobSourceId, int processed, double durationMs);
+    [LoggerMessage(EventId = 4357, Level = LogLevel.Warning,
+        Message = "JobSourceRunFailed Source={JobSourceId} ErrorType={ErrorType}.")]
+    private static partial void LogFailed(ILogger logger, Guid jobSourceId, string errorType);
+
     public async Task<JobSourceRunResult> RunAsync(
         Guid jobSourceId,
         CancellationToken cancellationToken = default)
@@ -90,6 +103,15 @@ public sealed partial class JobSourceRunner(
             };
         }
 
+        // Admin and scheduler callers already hold the SAME local/distributed
+        // execution guards. Save the attempt before any provider/network work.
+        var attemptAt = timeProvider.GetUtcNow().UtcDateTime;
+        source.LastRunAtUtc = attemptAt;
+        sources.Update(source);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+        if (_logger is not null) LogAttempt(_logger, source.Id, attemptAt);
+        cancellationToken.ThrowIfCancellationRequested();
+
         var provider = providers.FirstOrDefault(
             x => x.AtsType == source.AtsType);
 
@@ -97,11 +119,11 @@ public sealed partial class JobSourceRunner(
         {
             // Unsupported configurations are failed attempts too: automatic polling
             // must respect their ScanIntervalMinutes rather than retry every poll.
-            source.LastRunAtUtc = timeProvider.GetUtcNow().UtcDateTime;
             source.LastError = $"No provider is registered for ATS type '{source.AtsType}'.";
             source.ConsecutiveFailures++;
             sources.Update(source);
             await unitOfWork.SaveChangesAsync(cancellationToken);
+            if (_logger is not null) LogFailed(_logger, source.Id, "UnsupportedProvider");
             return new JobSourceRunResult
             {
                 JobSourceId = source.Id,
@@ -112,7 +134,9 @@ public sealed partial class JobSourceRunner(
 
         var previousSuccessfulRun = source.LastSuccessfulRunAtUtc;
         var previousFailures = source.ConsecutiveFailures;
+        var previousError = source.LastError;
         var runTimer = System.Diagnostics.Stopwatch.StartNew();
+        var processed = 0;
 
         try
         {
@@ -135,7 +159,6 @@ public sealed partial class JobSourceRunner(
             var enrichmentMilliseconds = 0d;
             var ingestionMilliseconds = 0d;
             (categoryResolver as IJobSourceCategoryRunCache)?.BeginRun();
-            var processed = 0;
             if (_logger is not null) Progress(_logger, source.Id, "Enrichment and ingestion started", rawJobs.Count, 0, null);
 
             // Prefetch canonical URL duplicates in one database round trip.
@@ -282,6 +305,7 @@ public sealed partial class JobSourceRunner(
                 }
             }
 
+            cancellationToken.ThrowIfCancellationRequested();
             var closed = 0;
             var externalIdsForReconciliation = rawJobs.Select(x => x.ExternalId)
                 .Where(x => !string.IsNullOrWhiteSpace(x))
@@ -296,6 +320,10 @@ public sealed partial class JobSourceRunner(
                 closed = await _jobRepository.CloseSourceJobsMissingFromSnapshotAsync(
                     source.Id, externalIdsForReconciliation, timeProvider.GetUtcNow().UtcDateTime, cancellationToken);
             }
+            // CloseSourceJobsMissingFromSnapshotAsync only stages tracked changes.
+            // The final Save below commits closures and success bookkeeping together.
+            // Cancellation before that save discards both, not already committed jobs.
+            cancellationToken.ThrowIfCancellationRequested();
             if (_logger is not null)
             {
                 Progress(_logger, source.Id, "Enrichment completed", processed, enrichmentMilliseconds, null);
@@ -307,10 +335,9 @@ public sealed partial class JobSourceRunner(
 
             var now = timeProvider.GetUtcNow().UtcDateTime;
 
-            source.LastRunAtUtc = now;
             // A complete-source provider's partial scan must never claim a successful
             // full run. Already committed items remain resumable on the next attempt.
-            var successful = snapshot is null || canReconcile;
+            var successful = snapshot is null ? skipped == 0 && failed == 0 : canReconcile;
             source.LastSuccessfulRunAtUtc = successful ? now : previousSuccessfulRun;
             source.LastError = successful ? null : "External job source scan was incomplete or had failed/skipped items.";
             source.ConsecutiveFailures = successful ? 0 : previousFailures + 1;
@@ -352,6 +379,8 @@ public sealed partial class JobSourceRunner(
 
             if (_logger is not null)
             {
+                if (successful) LogSucceeded(_logger, source.Id, processed, runTimer.Elapsed.TotalMilliseconds);
+                else LogFailed(_logger, source.Id, "IncompleteOrUnsafeScan");
                 Progress(_logger, source.Id, "Enrichment and ingestion completed", processed, processingTimer.Elapsed.TotalMilliseconds, null);
                 Progress(_logger, source.Id, "Run completed", processed, runTimer.Elapsed.TotalMilliseconds, null);
                 PublicationCompleted(_logger, source.Id, published, needsReview, qualityRejected, publishFailed, disabled, null);
@@ -382,9 +411,13 @@ public sealed partial class JobSourceRunner(
             when (cancellationToken.IsCancellationRequested)
         {
             unitOfWork.ResetAfterFailure();
+            source.LastSuccessfulRunAtUtc = previousSuccessfulRun;
+            source.LastError = previousError;
+            source.ConsecutiveFailures = previousFailures;
+            if (_logger is not null) LogCancelled(_logger, source.Id, processed, runTimer.Elapsed.TotalMilliseconds);
             throw;
         }
-        catch (Exception)
+        catch (Exception exception)
         {
             // Infrastructure/provider-wide failure: distinguishable from the
             // per-item failures above. The raw exception is logged structurally
@@ -394,11 +427,9 @@ public sealed partial class JobSourceRunner(
             if (_logger is not null)
             {
                 SourceRunFailed(_logger, source.Id, null);
+                LogFailed(_logger, source.Id, exception.GetType().Name);
             }
 
-            var now = timeProvider.GetUtcNow().UtcDateTime;
-
-            source.LastRunAtUtc = now;
             // Exception messages can contain response bodies, URLs or credentials.
             source.LastError = "External job source run failed.";
             source.LastSuccessfulRunAtUtc = previousSuccessfulRun;

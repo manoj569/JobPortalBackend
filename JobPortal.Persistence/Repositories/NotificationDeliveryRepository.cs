@@ -62,6 +62,19 @@ public sealed class NotificationDeliveryRepository(JobPortalDbContext db) : INot
 
         switch (delivery.Source)
         {
+            case NotificationSource.ReferralRequested:
+            case NotificationSource.ReferralAccepted:
+            case NotificationSource.ReferralRequestRejected:
+            case NotificationSource.ReferralSubmitted:
+            case NotificationSource.ReferralConfirmed:
+            case NotificationSource.ReferralNotReceived:
+                return await db.ReferralRequests.AnyAsync(r => r.Id == delivery.SourceId &&
+                    ((delivery.Source == NotificationSource.ReferralRequested && r.ReferrerUserId == delivery.UserId && r.Status == ReferralRequestStatus.Requested && r.ExpiresAtUtc > now) ||
+                     (delivery.Source == NotificationSource.ReferralAccepted && r.CandidateUserId == delivery.UserId && r.AcceptedAtUtc != null) ||
+                     (delivery.Source == NotificationSource.ReferralRequestRejected && r.CandidateUserId == delivery.UserId && r.RejectedAtUtc != null) ||
+                     (delivery.Source == NotificationSource.ReferralSubmitted && r.CandidateUserId == delivery.UserId && r.ReferralSubmittedAtUtc != null) ||
+                     (delivery.Source == NotificationSource.ReferralConfirmed && r.ReferrerUserId == delivery.UserId && r.CandidateConfirmedAtUtc != null) ||
+                     (delivery.Source == NotificationSource.ReferralNotReceived && r.ReferrerUserId == delivery.UserId && r.NotReceivedAtUtc != null)), ct);
             case NotificationSource.MembershipPurchase:
                 return await db.Payments.AnyAsync(p => p.Id == delivery.SourceId &&
                     p.UserId == delivery.UserId && p.Status == PaymentStatus.Paid && p.PaidAtUtc != null &&

@@ -46,7 +46,7 @@ public class JobSourceRunnerTests
     }
 
     [Fact]
-    public async Task RunAsync_SuccessfulRun_UpdatesSourceAndCounters()
+    public async Task RunAsync_PartiallyFailedRun_UpdatesSourceAndCountersWithoutSuccess()
     {
         _source.ConsecutiveFailures = 3;
         _source.LastError = "Previous failure";
@@ -81,7 +81,7 @@ public class JobSourceRunnerTests
 
         var result = await _runner.RunAsync(_source.Id);
 
-        Assert.True(result.Succeeded);
+        Assert.False(result.Succeeded);
         Assert.Equal(4, result.TotalReceived);
         Assert.Equal(1, result.Created);
         Assert.Equal(1, result.Matched);
@@ -89,12 +89,12 @@ public class JobSourceRunnerTests
         Assert.Equal(1, result.Failed);
 
         Assert.NotNull(_source.LastRunAtUtc);
-        Assert.NotNull(_source.LastSuccessfulRunAtUtc);
-        Assert.Null(_source.LastError);
-        Assert.Equal(0, _source.ConsecutiveFailures);
+        Assert.Null(_source.LastSuccessfulRunAtUtc);
+        Assert.NotNull(_source.LastError);
+        Assert.Equal(4, _source.ConsecutiveFailures);
 
-        Assert.Equal(1, _sources.UpdateCalls);
-        Assert.Equal(1, _unitOfWork.SaveCalls);
+        Assert.Equal(2, _sources.UpdateCalls);
+        Assert.Equal(2, _unitOfWork.SaveCalls);
     }
 
     [Fact]
@@ -155,7 +155,7 @@ public class JobSourceRunnerTests
 
         var result = await _runner.RunAsync(_source.Id);
 
-        Assert.True(result.Succeeded);
+        Assert.False(result.Succeeded);
         Assert.Equal(3, result.TotalReceived);
         Assert.Equal(2, result.Created);
         Assert.Equal(1, result.Failed);
@@ -163,7 +163,7 @@ public class JobSourceRunnerTests
         Assert.Equal(3, _ingestion.CallCount);
         Assert.Equal(1, _unitOfWork.ResetCalls);
 
-        Assert.NotNull(_source.LastSuccessfulRunAtUtc);
+        Assert.Null(_source.LastSuccessfulRunAtUtc);
     }
 
     [Fact]
@@ -195,8 +195,8 @@ public class JobSourceRunnerTests
         Assert.DoesNotContain("\n", _source.LastError);
 
         Assert.Equal(1, _unitOfWork.ResetCalls);
-        Assert.Equal(1, _unitOfWork.SaveCalls);
-        Assert.Equal(1, _sources.UpdateCalls);
+        Assert.Equal(2, _unitOfWork.SaveCalls);
+        Assert.Equal(2, _sources.UpdateCalls);
     }
 
     [Fact]
@@ -244,7 +244,7 @@ public class JobSourceRunnerTests
             result.Error);
 
         Assert.Equal(0, _provider.FetchCalls);
-        Assert.Equal(1, _unitOfWork.SaveCalls);
+        Assert.Equal(2, _unitOfWork.SaveCalls);
         Assert.NotNull(_source.LastRunAtUtc);
         Assert.Null(_source.LastSuccessfulRunAtUtc);
         Assert.Equal(1, _source.ConsecutiveFailures);
@@ -313,7 +313,7 @@ public class JobSourceRunnerTests
 
         var result = await _runner.RunAsync(_source.Id);
 
-        Assert.True(result.Succeeded);
+        Assert.False(result.Succeeded);
 
         Assert.Equal(5, result.TotalReceived);
         Assert.Equal(1, result.Created);
@@ -369,7 +369,7 @@ public class JobSourceRunnerTests
 
         var result = await _runner.RunAsync(_source.Id);
 
-        Assert.True(result.Succeeded);
+        Assert.False(result.Succeeded);
         Assert.Equal(2, result.TotalReceived);
         Assert.Equal(1, result.Created);
         Assert.Equal(1, result.Failed);
@@ -505,7 +505,7 @@ public class JobSourceRunnerTests
 
         var result = await runner.RunAsync(_source.Id);
 
-        Assert.True(result.Succeeded);
+        Assert.False(result.Succeeded);
 
         // Both jobs were successfully ingested as Draft jobs.
         Assert.Equal(2, result.Created);

@@ -120,7 +120,9 @@ public sealed class JobAggregationPipelineTests
         var audit = new PublicationAudit { FailFirst = true };
         f.Provider.Jobs = [Valid(f), Valid(f) with { Title = "Accountant", ApplicationUrl = "https://example.test/accountant" }];
         var result = await Runner(f, true, audit).RunAsync(f.Source.Id);
-        Assert.True(result.Succeeded);
+        Assert.False(result.Succeeded);
+        Assert.Null(f.Source.LastSuccessfulRunAtUtc);
+        Assert.NotNull(f.Source.LastRunAtUtc);
         Assert.Equal(2, result.Created);
         Assert.Equal(1, result.Failed);
         Assert.Equal(1, result.PublishFailed);

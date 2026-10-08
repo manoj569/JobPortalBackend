@@ -112,7 +112,7 @@ public sealed class JobAggregationDueSourceTests
         var predicate = sql[sql.IndexOf("WHERE", StringComparison.Ordinal)..];
         Assert.Contains("\"ScanIntervalMinutes\"", predicate, StringComparison.Ordinal);
         Assert.Contains("\"LastRunAtUtc\"", predicate, StringComparison.Ordinal);
-        Assert.DoesNotContain("LastSuccessfulRunAtUtc", predicate, StringComparison.Ordinal);
+        Assert.Contains("\"LastSuccessfulRunAtUtc\"", predicate, StringComparison.Ordinal);
     }
 
     private static JobSource Source(Guid companyId, Guid id, DateTime? lastRun = null) => new()
@@ -314,6 +314,7 @@ public sealed class JobAggregationSchedulerConfigurationTests
         Assert.Equal(60, options.PollIntervalSeconds);
         Assert.Equal(25, options.BatchSize);
         Assert.Equal(3, options.MaxConcurrentSources);
+        Assert.Equal(60, options.InterruptedRunCooldownMinutes);
     }
 
     [Theory]
@@ -323,6 +324,8 @@ public sealed class JobAggregationSchedulerConfigurationTests
     [InlineData("BatchSize", "101")]
     [InlineData("MaxConcurrentSources", "0")]
     [InlineData("MaxConcurrentSources", "11")]
+    [InlineData("InterruptedRunCooldownMinutes", "0")]
+    [InlineData("InterruptedRunCooldownMinutes", "10081")]
     public void InvalidConfigurationIsRejected(string key, string value)
     {
         using var provider = BuildOptions(key, value);
@@ -378,10 +381,12 @@ internal sealed class SchedulerFixture : IDisposable
     public SafeLogger Logger { get; } = new();
     public JobAggregationScheduler Scheduler { get; }
 
-    public SchedulerFixture(bool enabled = true, int batchSize = 25, int concurrency = 3, JobSourceRunGuard? guard = null, IJobSourceExecutionLock? executionLock = null)
+    public SchedulerFixture(bool enabled = true, int batchSize = 25, int concurrency = 3, JobSourceRunGuard? guard = null, IJobSourceExecutionLock? executionLock = null,
+        int cooldownMinutes = 60)
     {
         Guard = guard ?? new();
-        options = Options.Create(new JobAggregationOptions { Scheduler = new() { Enabled = enabled, BatchSize = batchSize, MaxConcurrentSources = concurrency } });
+        options = Options.Create(new JobAggregationOptions { Scheduler = new() { Enabled = enabled, BatchSize = batchSize, MaxConcurrentSources = concurrency,
+            InterruptedRunCooldownMinutes = cooldownMinutes } });
         var services = new ServiceCollection();
         services.AddSingleton(Store);
         services.AddSingleton<IJobSourceExecutionLock>(executionLock ?? new TestAggregationLocks());

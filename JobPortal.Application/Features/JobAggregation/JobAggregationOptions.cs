@@ -28,4 +28,8 @@ public sealed class JobAggregationSchedulerOptions
     public int BatchSize { get; set; } = 25;
 
     public int MaxConcurrentSources { get; set; } = 3;
+
+    // Minimum automatic retry delay after an unsuccessful/interrupted attempt.
+    // The existing source scan interval still applies when it is longer.
+    public int InterruptedRunCooldownMinutes { get; set; } = 60;
 }

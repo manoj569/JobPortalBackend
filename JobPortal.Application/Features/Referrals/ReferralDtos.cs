@@ -10,7 +10,8 @@ public sealed record SubmitJobReferralRequest(
     string? SourceUrl,
     bool ShowLinkedIn,
     bool ShowEmail,
-    bool ShowPhone);
+    bool ShowPhone,
+    int ReferralSlots = 1);
 
 public sealed record JobReferralResponse(
     Guid Id,
@@ -28,7 +29,12 @@ public sealed record JobReferralResponse(
     string? RejectionReason,
     DateTime CreatedAtUtc,
     DateTime? ReviewedAtUtc,
-    DateTime? ApprovedAtUtc = null);
+    DateTime? ApprovedAtUtc = null)
+{
+    public int ReferralSlots { get; init; }
+    public int AcceptedReferralCount { get; init; }
+    public int RemainingReferralSlots => Math.Max(0, ReferralSlots - AcceptedReferralCount);
+}
 public sealed record ReviewJobReferralRequest(
     JobReferralApprovalStatus Decision,
     string? RejectionReason);
@@ -36,7 +42,7 @@ public sealed record ReviewJobReferralRequest(
 /// <summary>What a paying job seeker sees after unlocking — only the fields the referrer
 /// chose to expose for this specific job are populated.</summary>
 public sealed record ReferrerContactDetailsResponse(
-    string ReferrerName,
+    string ReferrerLabel,
     string? LinkedInUrl,
     string? Email,
     string? PhoneNumber);
@@ -46,7 +52,7 @@ public sealed record PublicReferralJobResponse(
     string JobTitle,
     string CompanyName,
     string? Location,
-    string ReferrerName)
+    string ReferrerLabel)
 {
     public Guid ReferralId { get; init; }
     public Guid CompanyId { get; init; }
@@ -63,15 +69,15 @@ public sealed record PublicReferralJobResponse(
     public bool ReferralAvailable { get; init; }
     public string? ReferrerCurrentRole { get; init; }
     public string? ReferrerCompanyName { get; init; }
-    public DateOnly? ReferrerCompanyStartDate { get; init; }
-    public int? ReferrerCompletedYearsAtCompany { get; init; }
-    public string? ReferrerProfileImageUrl { get; init; }
+    public int ReferralSlots { get; init; }
+    public int AcceptedReferralCount { get; init; }
+    public int RemainingReferralSlots => Math.Max(0, ReferralSlots - AcceptedReferralCount);
     public ReferralUnlockStatus ContactAccessStatus { get; init; } = ReferralUnlockStatus.LoginRequired;
     public bool CanViewReferrerContact => ContactAccessStatus == ReferralUnlockStatus.Granted;
     public bool IsContactLocked => !CanViewReferrerContact;
 }
 
-public enum ReferralUnlockStatus { Granted = 1, LoginRequired, MembershipRequired }
+public enum ReferralUnlockStatus { Granted = 1, LoginRequired, MembershipRequired, RequestRequired }
 
 public sealed record ExtractFromUrlRequest(string Url);
 

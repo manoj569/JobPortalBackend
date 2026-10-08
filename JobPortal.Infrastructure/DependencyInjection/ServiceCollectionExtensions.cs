@@ -69,8 +69,9 @@ public static class ServiceCollectionExtensions
             .Validate(options => options.GreenhouseDetailConcurrency is >= 1 and <= 4,
                 "Greenhouse detail concurrency must be between 1 and 4.")
             .Validate(options => options.Scheduler is
-                { PollIntervalSeconds: >= 10 and <= 3600, BatchSize: >= 1 and <= 100, MaxConcurrentSources: >= 1 and <= 10 },
-                "JobAggregation scheduler requires PollIntervalSeconds 10–3600, BatchSize 1–100 and MaxConcurrentSources 1–10.")
+                { PollIntervalSeconds: >= 10 and <= 3600, BatchSize: >= 1 and <= 100, MaxConcurrentSources: >= 1 and <= 10,
+                  InterruptedRunCooldownMinutes: >= 1 and <= 10080 },
+                "JobAggregation scheduler requires PollIntervalSeconds 10–3600, BatchSize 1–100, MaxConcurrentSources 1–10 and InterruptedRunCooldownMinutes 1–10080.")
             .ValidateOnStart();
         services.AddOptions<JobPortal.Application.Features.CareerGuidance.CareerGuidanceSchedulingOptions>()
             .Bind(configuration.GetSection(JobPortal.Application.Features.CareerGuidance.CareerGuidanceSchedulingOptions.SectionName))

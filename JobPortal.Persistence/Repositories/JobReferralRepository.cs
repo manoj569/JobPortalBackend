@@ -8,6 +8,9 @@ namespace JobPortal.Persistence.Repositories;
 
 public sealed class JobReferralRepository(JobPortalDbContext context) : IJobReferralRepository
 {
+    public async Task<IReadOnlyDictionary<Guid, int>> AcceptedCountsAsync(IReadOnlyCollection<Guid> referralIds, CancellationToken ct) =>
+        await context.ReferralRequests.IgnoreQueryFilters().AsNoTracking().Where(x => referralIds.Contains(x.JobReferralId) && x.AcceptedAtUtc != null)
+            .GroupBy(x => x.JobReferralId).Select(g => new { Id = g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Id, x => x.Count, ct);
     private IQueryable<JobReferral> WithIncludes() =>
         context.JobReferrals
             .Include(x => x.Job).ThenInclude(x => x.Company)

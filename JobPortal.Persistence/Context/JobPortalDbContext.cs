@@ -47,6 +47,7 @@ public sealed class JobPortalDbContext(DbContextOptions<JobPortalDbContext> opti
     public DbSet<JobRecruiterContact> JobRecruiterContacts => Set<JobRecruiterContact>();
     public DbSet<JobReferral> JobReferrals => Set<JobReferral>();
     public DbSet<ReferralUnlock> ReferralUnlocks => Set<ReferralUnlock>();
+    public DbSet<ReferralRequest> ReferralRequests => Set<ReferralRequest>();
     public DbSet<Skill> Skills => Set<Skill>();
     public DbSet<JobSkill> JobSkills => Set<JobSkill>();
     public DbSet<SavedJob> SavedJobs => Set<SavedJob>();

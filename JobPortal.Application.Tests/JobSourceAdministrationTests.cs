@@ -360,14 +360,16 @@ public sealed class JobSourceManualRunTests
     }
 
     [Fact]
-    public async Task NewUnmappedJobIsSkippedWithoutRejectingSource()
+    public async Task NewUnmappedJobIsSkippedWithoutClaimingSuccessfulRun()
     {
         using var f = new JobSourceFixture();
         var result = await f.Service.RunAsync(f.Source.Id);
-        Assert.True(result.Succeeded);
+        Assert.False(result.Succeeded);
         Assert.Equal(1, result.Skipped);
         Assert.Empty(await f.Context.Jobs.ToArrayAsync());
-        Assert.NotNull(f.Source.LastSuccessfulRunAtUtc);
+        Assert.Null(f.Source.LastSuccessfulRunAtUtc);
+        Assert.NotNull(f.Source.LastRunAtUtc);
+        Assert.Equal(1, f.Source.ConsecutiveFailures);
     }
 
     [Fact]

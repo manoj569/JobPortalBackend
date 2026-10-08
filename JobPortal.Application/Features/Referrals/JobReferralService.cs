@@ -18,7 +18,8 @@ public sealed class JobReferralService(
     IUnitOfWork unitOfWork,
     TimeProvider timeProvider,
     JobPortal.Application.Features.Notifications.NotificationOutbox outbox,
-    IDashboardRepository? dashboard = null) : IJobReferralService
+    IDashboardRepository? dashboard = null,
+    ReferralMarketplaceService? marketplace = null) : IJobReferralService
 {
     private const string ReferralContactPlanCode = "ReferralContactAccess";
 
@@ -29,6 +30,8 @@ public sealed class JobReferralService(
         SubmitJobReferralRequest request,
         CancellationToken cancellationToken = default)
     {
+        if (request.ReferralSlots is < 1 or > 1000)
+            throw new BadRequestException("Referral slots must be between 1 and 1000.", "validation_error");
         if (!request.ShowLinkedIn && !request.ShowEmail && !request.ShowPhone)
         {
             throw new BadRequestException(
@@ -47,6 +50,7 @@ public sealed class JobReferralService(
         var referral = new JobReferral
         {
             JobId = composed.Id,
+            ReferralSlots = request.ReferralSlots,
             ReferrerUserId = referrerUserId,
             SourceUrl = request.SourceUrl,
             ShowLinkedIn = request.ShowLinkedIn,
@@ -237,6 +241,7 @@ public sealed class JobReferralService(
             pageSize,
             cancellationToken);
 
+        var counts = await referrals.AcceptedCountsAsync(items.Select(x => x.Id).ToArray(), cancellationToken);
         var responses = new List<JobReferralResponse>(items.Count);
 
         foreach (var referral in items)
@@ -249,7 +254,7 @@ public sealed class JobReferralService(
         }
 
         return new PagedResponse<JobReferralResponse>(
-            responses,
+            responses.Select(x => x with { AcceptedReferralCount = counts.GetValueOrDefault(x.Id) }).ToArray(),
             pageNumber,
             pageSize,
             totalCount);
@@ -269,7 +274,10 @@ public sealed class JobReferralService(
             cancellationToken);
 
         var access = await ContactAccessAsync(seekerUserId, cancellationToken);
-        var responses = items.Select(referral => ToPublicResponse(referral, access)).ToList();
+        // Membership alone never advertises unlocked contact. Request detail is the authorized source.
+        if (access == ReferralUnlockStatus.Granted) access = ReferralUnlockStatus.RequestRequired;
+        var counts = await referrals.AcceptedCountsAsync(items.Select(x => x.Id).ToArray(), cancellationToken);
+        var responses = items.Select(referral => ToPublicResponse(referral, access, counts.GetValueOrDefault(referral.Id))).ToList();
 
         return new PagedResponse<PublicReferralJobResponse>(
             responses,
@@ -309,9 +317,15 @@ public sealed class JobReferralService(
         {
             return new ReferralUnlockResponse(
                 ReferralUnlockStatus.MembershipRequired,
-                "Subscribe for ₹299 / 30 days to unlock referrer contact details.");
+                "Active Referral Access and referrer acceptance are required to view contact details.");
         }
 
+        if (marketplace is null)
+            return new ReferralUnlockResponse(ReferralUnlockStatus.RequestRequired, "Request and acceptance are required before contact access.");
+        // Resolve only this candidate's request; historical unlock records cannot authorize access.
+        var request = await marketplace.ContactForOpportunityAsync(seekerUserId!.Value, referral.Id, cancellationToken);
+        if (request is null)
+            return new ReferralUnlockResponse(ReferralUnlockStatus.RequestRequired, "Request and acceptance are required before contact access.");
         await referrals.RecordUnlockAsync(
             referral.Id,
             seekerUserId!.Value,
@@ -319,25 +333,10 @@ public sealed class JobReferralService(
 
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
-        var referrerName =
-            $"{referral.ReferrerUser.FirstName} {referral.ReferrerUser.LastName}".Trim();
-
-        var contact = new ReferrerContactDetailsResponse(
-            referrerName,
-            referral.ShowLinkedIn
-                ? referral.ReferrerUser.LinkedInUrl
-                : null,
-            referral.ShowEmail
-                ? referral.ReferrerUser.Email
-                : null,
-            referral.ShowPhone
-                ? referral.ReferrerUser.PhoneNumber
-                : null);
-
         return new ReferralUnlockResponse(
             ReferralUnlockStatus.Granted,
             "Contact details unlocked.",
-            contact);
+            request);
     }
 
     private async Task<ReferralUnlockStatus> ContactAccessAsync(Guid? seekerUserId, CancellationToken ct)
@@ -350,7 +349,7 @@ public sealed class JobReferralService(
             ? ReferralUnlockStatus.Granted : ReferralUnlockStatus.MembershipRequired;
     }
 
-    private PublicReferralJobResponse ToPublicResponse(JobReferral referral, ReferralUnlockStatus access)
+    private PublicReferralJobResponse ToPublicResponse(JobReferral referral, ReferralUnlockStatus access, int acceptedCount)
     {
         var job = referral.Job;
         var user = referral.ReferrerUser;
@@ -362,13 +361,7 @@ public sealed class JobReferralService(
         var experience = published && portfolio!.SectionSettings.Any(x => !x.IsDeleted && x.SectionType == PortfolioSectionType.Experience && x.IsVisible)
             ? user.CandidateExperiences.Where(x => !x.IsDeleted && x.IsCurrent && x.EndDate == null && x.StartDate <= today)
                 .OrderByDescending(x => x.StartDate).ThenBy(x => x.Id).FirstOrDefault() : null;
-        int? years = null;
-        if (experience is not null)
-        {
-            years = today.Year - experience.StartDate.Year;
-            if (experience.StartDate.AddYears(years.Value) > today) years--;
-        }
-        return new(job.Id, job.Title, job.Company.Name, job.Location, $"{user.FirstName} {user.LastName}".Trim())
+        return new(job.Id, job.Title, job.Company.Name, job.Location, "Employee Referrer")
         {
             ReferralId = referral.Id, CompanyId = job.CompanyId, CompanyLogoUrl = job.Company.LogoUrl,
             CompanyIsVerified = job.Company.IsVerified, JobSlug = job.Slug, ApplicationUrl = job.ApplicationUrl,
@@ -377,10 +370,9 @@ public sealed class JobReferralService(
             Skills = job.JobSkills.Where(x => !x.IsDeleted && !x.Skill.IsDeleted).Select(x => x.Skill.Name)
                 .Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()).Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToArray(),
-            ApprovalStatus = referral.ApprovalStatus, ReferralAvailable = referral.ApprovalStatus == JobReferralApprovalStatus.Approved,
+            ApprovalStatus = referral.ApprovalStatus, ReferralAvailable = referral.ApprovalStatus == JobReferralApprovalStatus.Approved && acceptedCount < referral.ReferralSlots,
             ReferrerCurrentRole = experience?.JobTitle, ReferrerCompanyName = experience?.CompanyName,
-            ReferrerCompanyStartDate = experience?.StartDate, ReferrerCompletedYearsAtCompany = years,
-            ReferrerProfileImageUrl = published ? user.ProfileImageUrl : null,
+            ReferralSlots = referral.ReferralSlots, AcceptedReferralCount = acceptedCount,
             ContactAccessStatus = access
         };
     }
@@ -412,6 +404,6 @@ public sealed class JobReferralService(
                 referral.ReviewedAtUtc,
                 referral.ApprovalStatus == JobReferralApprovalStatus.Approved
                     ? referral.ReviewedAtUtc
-                    : null));
+                    : null) { ReferralSlots = referral.ReferralSlots });
     }
 }

@@ -37,22 +37,25 @@ public sealed class JobSource : BaseEntity
     public int ScanIntervalMinutes { get; set; } = 720; // Default: 12 hours
 
     /// <summary>
-    /// Timestamp of the last aggregation run (successful or not).
+    /// UTC start timestamp of the last attempted aggregation run, durably saved
+    /// before provider fetching. Does not imply completion or success.
     /// </summary>
     public DateTime? LastRunAtUtc { get; set; }
 
     /// <summary>
-    /// Timestamp of the last successful aggregation run.
+    /// UTC completion timestamp of the last complete successful aggregation run.
     /// </summary>
     public DateTime? LastSuccessfulRunAtUtc { get; set; }
 
     /// <summary>
-    /// Error message from the most recent failed run.
+    /// Sanitized outcome of the last completed failed run; cleared on success.
+    /// An interrupted/cancelled attempt preserves this previous outcome.
     /// </summary>
     public string? LastError { get; set; }
 
     /// <summary>
-    /// Count of consecutive failed runs (for circuit breaker pattern).
+    /// Count of consecutive completed failures; reset on success. Normal host
+    /// shutdown cancellation does not increment this counter.
     /// </summary>
     public int ConsecutiveFailures { get; set; }
 }

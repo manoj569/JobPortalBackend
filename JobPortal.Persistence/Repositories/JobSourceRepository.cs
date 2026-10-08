@@ -4,10 +4,11 @@ using JobPortal.Domain.Entities;
 using JobPortal.Domain.Enums;
 using JobPortal.Persistence.Context;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace JobPortal.Persistence.Repositories;
 
-public sealed class JobSourceRepository(JobPortalDbContext context)
+public sealed class JobSourceRepository(JobPortalDbContext context, IOptions<JobAggregationOptions>? options = null)
     : IJobSourceManagementRepository
 {
     public async Task<IReadOnlyCollection<JobSource>> GetDueSourcesAsync(
@@ -19,8 +20,8 @@ public sealed class JobSourceRepository(JobPortalDbContext context)
         ArgumentOutOfRangeException.ThrowIfLessThan(maxResults, 1);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(maxResults, 100);
         return context.JobSources.AsNoTracking()
-            .Where(x => x.IsActive && !x.IsDeleted &&
-                (x.LastRunAtUtc == null || x.LastRunAtUtc.Value.AddMinutes(x.ScanIntervalMinutes) <= nowUtc))
+            .Where(JobSourceSchedule.DuePredicate(nowUtc,
+                options?.Value.Scheduler.InterruptedRunCooldownMinutes ?? 60))
             .OrderBy(x => x.LastRunAtUtc.HasValue)
             .ThenBy(x => x.LastRunAtUtc).ThenBy(x => x.Id)
             .Take(maxResults);

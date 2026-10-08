@@ -49,6 +49,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<JobPortal.Application.Features.Support.ISupportTicketService,
             JobPortal.Application.Features.Support.SupportTicketService>();
         services.AddScoped<JobPortal.Application.Features.Notifications.NotificationOutbox>();
+        services.AddScoped<JobPortal.Application.Features.Referrals.ReferralMarketplaceService>();
         services.AddScoped<JobPortal.Application.Features.Notifications.NotificationDispatcher>();
         services.AddScoped<JobPortal.Application.Features.CareerGuidance.ICareerGuidanceService,
             JobPortal.Application.Features.CareerGuidance.CareerGuidanceService>();

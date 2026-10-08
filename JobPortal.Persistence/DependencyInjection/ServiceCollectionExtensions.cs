@@ -54,6 +54,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IJobSourceRepository, JobSourceRepository>();
         services.AddScoped<IJobSourceManagementRepository, JobSourceRepository>();
         services.AddScoped<IJobReferralRepository, JobReferralRepository>();
+        services.AddScoped<JobPortal.Application.Features.Referrals.IReferralMarketplaceRepository, ReferralMarketplaceRepository>();
         services.AddScoped<IPublicJobRepository, PublicJobRepository>();
         services.AddScoped<IMembershipRepository, MembershipRepository>();
         services.AddScoped<IPaymentRepository, PaymentRepository>();

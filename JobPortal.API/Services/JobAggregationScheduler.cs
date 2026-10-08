@@ -14,7 +14,7 @@ public sealed class JobAggregationScheduler(
     private static readonly Action<ILogger, int, Exception?> DueFound = LoggerMessage.Define<int>(
         LogLevel.Information, new EventId(4301, nameof(DueFound)), "Job aggregation found {DueSourceCount} due sources.");
     private static readonly Action<ILogger, Guid, Exception?> SourceStarted = LoggerMessage.Define<Guid>(
-        LogLevel.Information, new EventId(4302, nameof(SourceStarted)), "Scheduled aggregation starting for {JobSourceId}.");
+        LogLevel.Information, new EventId(4302, nameof(SourceStarted)), "JobSourceSchedulerDue Source={JobSourceId}; scheduled aggregation starting.");
     private static readonly Action<ILogger, Guid, int, int, int, int, bool, Exception?> SourceCompleted =
         LoggerMessage.Define<Guid, int, int, int, int, bool>(LogLevel.Information, new EventId(4303, nameof(SourceCompleted)),
             "Scheduled aggregation {JobSourceId}: Created {Created}, Matched {Matched}, Skipped {Skipped}, Failed {Failed}, Succeeded {Succeeded}.");
@@ -26,6 +26,9 @@ public sealed class JobAggregationScheduler(
         LogLevel.Information, new EventId(4306, nameof(SourceBusy)), "Skipping aggregation {JobSourceId}: distributed execution lock busy.");
     private static readonly Action<ILogger, Guid, int, Exception?> SourceReceived = LoggerMessage.Define<Guid, int>(
         LogLevel.Information, new EventId(4307, nameof(SourceReceived)), "Aggregation {JobSourceId} received {Received} records.");
+    private static readonly Action<ILogger, Guid, DateTime, DateTime, Exception?> RecentAttempt =
+        LoggerMessage.Define<Guid, DateTime, DateTime>(LogLevel.Information, new EventId(4308, nameof(RecentAttempt)),
+            "JobSourceSchedulerSkippedRecentAttempt Source={JobSourceId} LastAttempt={LastAttempt} CooldownUntil={CooldownUntil}.");
 
     public async Task RunOnceAsync(CancellationToken cancellationToken = default)
     {
@@ -59,6 +62,7 @@ public sealed class JobAggregationScheduler(
 
     private async Task RunSourceAsync(Guid sourceId, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         IDisposable lease;
         try { lease = guard.Acquire(sourceId); }
         catch (ConflictException exception) when (exception.Code == "job_source_busy") { return; }
@@ -75,10 +79,18 @@ public sealed class JobAggregationScheduler(
                 // after acquiring the SAME guard used by admin runs/updates/deletes.
                 var source = await scope.ServiceProvider.GetRequiredService<IJobSourceRepository>()
                     .GetByIdAsync(sourceId, cancellationToken);
-                if (source is null || !source.IsActive || source.IsDeleted ||
-                    (source.LastRunAtUtc.HasValue &&
-                     source.LastRunAtUtc.Value.AddMinutes(source.ScanIntervalMinutes) > clock.GetUtcNow().UtcDateTime))
+                if (source is null) return;
+                var now = clock.GetUtcNow().UtcDateTime;
+                var cooldown = options.Value.Scheduler.InterruptedRunCooldownMinutes;
+                if (!JobSourceSchedule.DuePredicate(now, cooldown).Compile()(source))
+                {
+                    if (source.IsActive && !source.IsDeleted && source.LastRunAtUtc is { } attempt &&
+                        (source.LastSuccessfulRunAtUtc is null || source.LastSuccessfulRunAtUtc < attempt) &&
+                        attempt.AddMinutes(Math.Max(source.ScanIntervalMinutes, cooldown)) > now)
+                        RecentAttempt(logger, sourceId, attempt,
+                            attempt.AddMinutes(Math.Max(source.ScanIntervalMinutes, cooldown)), null);
                     return;
+                }
 
                 SourceStarted(logger, sourceId, null);
                 var result = await scope.ServiceProvider.GetRequiredService<IJobSourceRunner>()

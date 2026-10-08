@@ -66,7 +66,6 @@ public sealed class JobReferralServiceTests
         Assert.True(card.IsContactLocked);
         Assert.Null(card.ReferrerCurrentRole);
         Assert.Null(card.ReferrerCompanyName);
-        Assert.Null(card.ReferrerCompletedYearsAtCompany);
         var json = System.Text.Json.JsonSerializer.Serialize(card);
         Assert.DoesNotContain(fixture.Referrer.Email, json);
         Assert.DoesNotContain(fixture.Referrer.PhoneNumber!, json);
@@ -75,7 +74,7 @@ public sealed class JobReferralServiceTests
 
     [Theory]
     [InlineData("CareerHarborMembership", 30, ReferralUnlockStatus.MembershipRequired)]
-    [InlineData("ReferralContactAccess", 30, ReferralUnlockStatus.Granted)]
+    [InlineData("ReferralContactAccess", 30, ReferralUnlockStatus.RequestRequired)]
     [InlineData("ReferralContactAccess", 0, ReferralUnlockStatus.MembershipRequired)]
     public async Task CardsAndUnlockUseSamePlanAndExpiryRules(string plan, int days, ReferralUnlockStatus expected)
     {
@@ -123,7 +122,6 @@ public sealed class JobReferralServiceTests
         var card = Assert.Single((await fixture.Service.GetApprovedPublicAsync(1, 20)).Items);
         Assert.Equal(published && visible ? "Test role" : null, card.ReferrerCurrentRole);
         Assert.Equal(published && visible ? "Referrer employer" : null, card.ReferrerCompanyName);
-        Assert.Equal(published && visible ? (int?)2 : null, card.ReferrerCompletedYearsAtCompany);
     }
 
     [Fact]
@@ -204,11 +202,8 @@ public sealed class JobReferralServiceTests
 
         fixture.Memberships.ActiveMembershipUserId = seekerId;
         var granted = await fixture.Service.UnlockContactAsync(seekerId, fixture.ComposedJobId);
-        Assert.Equal(ReferralUnlockStatus.Granted, granted.Status);
-        Assert.NotNull(granted.Contact);
-        Assert.Equal(fixture.Referrer.LinkedInUrl, granted.Contact!.LinkedInUrl);
-        Assert.Null(granted.Contact.Email); // ShowEmail was false
-        Assert.Equal(fixture.Referrer.PhoneNumber, granted.Contact.PhoneNumber);
+        Assert.Equal(ReferralUnlockStatus.RequestRequired, granted.Status);
+        Assert.Null(granted.Contact); // Payment alone cannot reveal contact.
     }
 
     [Fact]
@@ -483,6 +478,8 @@ public sealed class JobReferralServiceTests
         Job job) : IJobReferralRepository
     {
         private readonly List<JobReferral> _referrals = [];
+        public Task<IReadOnlyDictionary<Guid, int>> AcceptedCountsAsync(IReadOnlyCollection<Guid> referralIds, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyDictionary<Guid, int>>(new Dictionary<Guid, int>());
 
         public Task AddAsync(
      JobReferral referral,

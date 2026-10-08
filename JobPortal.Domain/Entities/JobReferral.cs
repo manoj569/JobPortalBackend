@@ -10,6 +10,7 @@ namespace JobPortal.Domain.Entities;
 /// </summary>
 public sealed class JobReferral : BaseEntity
 {
+    public int ReferralSlots { get; set; } = 1;
     public Guid JobId { get; set; }
 
     public Job Job { get; set; } = null!;

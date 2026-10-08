@@ -323,7 +323,8 @@ public sealed class JobReferralConfiguration : IEntityTypeConfiguration<JobRefer
     public void Configure(EntityTypeBuilder<JobReferral> builder)
     {
         builder.Property(x => x.ApprovalStatus).IsConcurrencyToken();
-        builder.ToTable("JobReferrals");
+        builder.ToTable("JobReferrals", table => table.HasCheckConstraint("CK_JobReferrals_Slots", "\"ReferralSlots\" > 0"));
+        builder.Property(x => x.ReferralSlots).HasDefaultValue(1);
         builder.ConfigureBaseEntity();
 
         builder.Property(x => x.SourceUrl)

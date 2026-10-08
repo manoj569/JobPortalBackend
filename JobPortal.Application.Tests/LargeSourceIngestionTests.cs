@@ -5,7 +5,14 @@ using JobPortal.Application.Abstractions.Persistence;
 using JobPortal.Application.Services;
 using JobPortal.Domain.Enums;
 using JobPortal.Persistence.Repositories;
+using JobPortal.Persistence.Context;
+using JobPortal.API.Services;
+using JobPortal.Application.Features.JobAggregation;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -62,27 +69,56 @@ public sealed class LargeSourceIngestionTests(ITestOutputHelper output)
         Assert.False(((Probe<IJobRepository>)(object)jobProbe).Calls.ContainsKey(nameof(IJobRepository.FindByExternalUrlAsync)));
     }
 
-    [Fact]
-    public async Task Interrupted475JobRunResumesWithoutDuplicatesAndOnlyCompleteRerunClosesStaleJobs()
+    [Theory]
+    [InlineData(1)]
+    [InlineData(475)]
+    [InlineData(840)]
+    [InlineData(1490)]
+    public async Task InterruptedJobRunResumesWithoutDuplicatesAndOnlyCompleteRerunClosesStaleJobs(int interruptedAfter)
     {
         using var f = new JobSourceFixture();
         var feed = new SnapshotFeed(Synthetic(f, 1500));
         var (runner, unit) = Runner(f, feed);
         using var cancellation = new CancellationTokenSource();
-        unit.AfterSave = () => { if (unit.Saves == 475) cancellation.Cancel(); };
+        unit.AfterSave = () => { if (unit.JobSaves == interruptedAfter) cancellation.Cancel(); };
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => runner.RunAsync(f.Source.Id, cancellation.Token));
-        Assert.Equal(475, await f.Context.Jobs.CountAsync());
+        Assert.Equal(interruptedAfter, await f.Context.Jobs.CountAsync());
         Assert.Null((await f.Repository.GetByIdAsync(f.Source.Id))!.LastSuccessfulRunAtUtc);
+        Assert.NotNull((await f.Repository.GetByIdAsync(f.Source.Id))!.LastRunAtUtc);
         Assert.Equal(f.Locks.CreationAcquisitions, f.Locks.CreationReleases);
         Assert.Equal(unit.RunLocks!.Created, unit.RunLocks.Disposed);
 
+        if (interruptedAfter == 840)
+        {
+            // Process B: independent scheduler, guard and EF contexts sharing only
+            // the persisted test database. No process-A run/cache flag is reused.
+            var databaseOptions = (DbContextOptions<JobPortalDbContext>)f.Context.GetService<IDbContextOptions>();
+            var probe = new RestartProbe();
+            var settings = Options.Create(new JobAggregationOptions { Scheduler = new() { Enabled = true } });
+            var services = new ServiceCollection();
+            services.AddSingleton<IOptions<JobAggregationOptions>>(settings);
+            services.AddScoped(_ => new JobPortalDbContext(databaseOptions));
+            services.AddScoped<IJobSourceRepository, JobSourceRepository>();
+            services.AddSingleton<IJobSourceRunner>(probe);
+            services.AddSingleton<IJobSourceExecutionLock>(f.Locks);
+            using var processB = services.BuildServiceProvider();
+            var attempt = (await f.Context.JobSources.AsNoTracking().SingleAsync()).LastRunAtUtc!.Value;
+            var scheduler = new JobAggregationScheduler(processB.GetRequiredService<IServiceScopeFactory>(), settings,
+                new JobSourceRunGuard(), new RestartClock(attempt.AddMinutes(1)), NullLogger<JobAggregationScheduler>.Instance);
+            await scheduler.RunOnceAsync();
+            Assert.Equal(0, probe.Calls);
+        }
+
         unit.AfterSave = null;
-        var resumed = await runner.RunAsync(f.Source.Id);
+        // Manual Run Now deliberately ignores automatic timing/Enabled settings.
+        var resumed = await f.CreateService(runner, unit).RunAsync(f.Source.Id);
         Assert.True(resumed.Succeeded);
-        Assert.Equal(1025, resumed.Created);
-        Assert.Equal(475, resumed.Unchanged);
+        Assert.Equal(1500 - interruptedAfter, resumed.Created);
+        Assert.Equal(interruptedAfter, resumed.Unchanged);
         Assert.Equal(1500, await f.Context.Jobs.CountAsync());
         Assert.Equal(1500, await f.Context.Jobs.Select(x => x.ExternalJobId).Distinct().CountAsync());
+
+        if (interruptedAfter != 475) return;
 
         feed.Jobs = feed.Jobs.Skip(20).ToArray();
         feed.Complete = false;
@@ -140,7 +176,7 @@ public sealed class LargeSourceIngestionTests(ITestOutputHelper output)
         using var f = new JobSourceFixture();
         var feed = new SnapshotFeed(Synthetic(f, 50));
         var (runner, unit) = Runner(f, feed);
-        unit.FailSave = 25;
+        unit.FailSave = 26; // Attempt bookkeeping is now saved before the first job.
         var failed = await runner.RunAsync(f.Source.Id);
         Assert.False(failed.Succeeded);
         Assert.Equal(1, failed.Failed);
@@ -213,6 +249,12 @@ public sealed class LargeSourceIngestionTests(ITestOutputHelper output)
     private void Report<T>(string label, T proxy) where T : class =>
         output.WriteLine(label + " " + string.Join(", ", ((Probe<T>)(object)proxy).Calls.OrderBy(x => x.Key).Select(x => $"{x.Key}={x.Value}")));
     private static void Reset<T>(T proxy) where T : class => ((Probe<T>)(object)proxy).Calls.Clear();
+    internal static IJobRepository MeasureRepository(IJobRepository inner, Action afterReconciliation)
+    {
+        var proxy = Measure(inner);
+        ((Probe<IJobRepository>)(object)proxy).AfterReconciliation = afterReconciliation;
+        return proxy;
+    }
     private static T Measure<T>(T inner) where T : class
     {
         var proxy = DispatchProxy.Create<T, Probe<T>>();
@@ -224,11 +266,22 @@ public sealed class LargeSourceIngestionTests(ITestOutputHelper output)
     {
         public T Inner { get; set; } = null!;
         public Dictionary<string, int> Calls { get; } = new(StringComparer.Ordinal);
+        public Action? AfterReconciliation { get; set; }
         protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
         {
             ArgumentNullException.ThrowIfNull(targetMethod);
             Calls[targetMethod.Name] = Calls.GetValueOrDefault(targetMethod.Name) + 1;
-            return targetMethod.Invoke(Inner, args);
+            var result = targetMethod.Invoke(Inner, args);
+            if (targetMethod.Name == nameof(IJobRepository.CloseSourceJobsMissingFromSnapshotAsync) &&
+                AfterReconciliation is { } callback && result is Task<int> task)
+                return AfterAsync(task, callback);
+            return result;
+        }
+        private static async Task<int> AfterAsync(Task<int> task, Action callback)
+        {
+            var count = await task;
+            callback();
+            return count;
         }
     }
 
@@ -236,6 +289,7 @@ public sealed class LargeSourceIngestionTests(ITestOutputHelper output)
     {
         public int Saves { get; private set; }
         public int PeakTrackedJobs { get; private set; }
+        public int JobSaves { get; private set; }
         public Action? AfterSave { get; set; }
         public int? FailSave { get; set; }
         public RunLockFactory? RunLocks { get; set; }
@@ -244,12 +298,15 @@ public sealed class LargeSourceIngestionTests(ITestOutputHelper output)
             Saves++;
             if (Saves == FailSave) throw new InvalidOperationException("Synthetic save failure.");
             PeakTrackedJobs = Math.Max(PeakTrackedJobs, fixture.Context.ChangeTracker.Entries<JobPortal.Domain.Entities.Job>().Count());
+            var hasJobChanges = fixture.Context.ChangeTracker.Entries<JobPortal.Domain.Entities.Job>()
+                .Any(x => x.State is EntityState.Added or EntityState.Modified);
             var result = await fixture.Context.SaveChangesAsync(cancellationToken);
+            if (hasJobChanges) JobSaves++;
             AfterSave?.Invoke();
             return result;
         }
         public void ResetAfterFailure() => fixture.Context.ChangeTracker.Clear();
-        public void Reset() { Saves = 0; PeakTrackedJobs = 0; }
+        public void Reset() { Saves = 0; PeakTrackedJobs = 0; JobSaves = 0; }
     }
 
     private sealed class RunLockFactory(TestAggregationLocks inner) : IExternalJobCreationLock, IExternalJobCreationLockRunFactory
@@ -277,5 +334,19 @@ public sealed class LargeSourceIngestionTests(ITestOutputHelper output)
         public Task<ExternalJobSourceSnapshot> FetchSnapshotAsync(JobPortal.Domain.Entities.JobSource source, CancellationToken cancellationToken = default) =>
             Task.FromResult(new ExternalJobSourceSnapshot(Jobs, Skipped, Complete));
         public Task<IReadOnlyCollection<RawExternalJob>> FetchJobsAsync(JobPortal.Domain.Entities.JobSource source, CancellationToken cancellationToken = default) => Task.FromResult(Jobs);
+    }
+
+    private sealed class RestartClock(DateTime now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => new(now);
+    }
+    private sealed class RestartProbe : IJobSourceRunner
+    {
+        public int Calls;
+        public Task<JobSourceRunResult> RunAsync(Guid jobSourceId, CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            return Task.FromResult(new JobSourceRunResult { JobSourceId = jobSourceId });
+        }
     }
 }
