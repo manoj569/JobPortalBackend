@@ -10,8 +10,8 @@ public sealed record CompanySearchQuery(
     bool? IsVerified = null, bool? IsDeleted = false,
     string SortBy = "createdAt", string SortDirection = "desc");
 public sealed record CreateCompanyRequest(
-    string Name, string? Slug, string? Description, string? WebsiteUrl,
-    string? LogoUrl, string? Industry, string? Location, int? EmployeeCount, bool IsVerified,
+    string Name, string? Slug = null, string? Description = null, string? WebsiteUrl = null,
+    string? LogoUrl = null, string? Industry = null, string? Location = null, int? EmployeeCount = null, bool IsVerified = false,
     CompanyType? CompanyType = null);
 public sealed record UpdateCompanyRequest(
     string Name, string? Slug, string? Description, string? WebsiteUrl,

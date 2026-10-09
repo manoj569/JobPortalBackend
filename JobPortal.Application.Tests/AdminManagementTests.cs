@@ -104,6 +104,9 @@ new JobSearchQueryValidator(), TimeProvider.System);
             Task.FromResult(Entity?.Id == id ? Response(Entity) : null);
         public Task<bool> SlugExistsAsync(string slug, Guid? excludingId = null, CancellationToken cancellationToken = default) =>
             Task.FromResult(DuplicateSlug);
+        public Task<bool> NameExistsAsync(string normalizedName, Guid? excludingId = null, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Entity is { IsDeleted: false } && Entity.Id != excludingId &&
+                JobPortal.Application.Features.CandidateCompanies.CompanyNameNormalizer.Normalize(Entity.Name) == normalizedName);
         public Task<bool> HasJobsAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult(HasJobs);
         public Task AddAsync(Company company, CancellationToken cancellationToken = default) { Entity = company; return Task.CompletedTask; }
         public void Remove(Company company) => company.IsDeleted = true;

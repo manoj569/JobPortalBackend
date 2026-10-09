@@ -689,6 +689,9 @@ public class JobIngestionServiceTests
         ICompanyManagementRepository
     {
         public Company? Company { get; set; }
+        public Task<bool> NameExistsAsync(string normalizedName, Guid? excludingId = null, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Company is { IsDeleted: false } && Company.Id != excludingId &&
+                JobPortal.Application.Features.CandidateCompanies.CompanyNameNormalizer.Normalize(Company.Name) == normalizedName);
 
         public Task<Company?> FindByNameOrSlugAsync(
             string normalizedName,

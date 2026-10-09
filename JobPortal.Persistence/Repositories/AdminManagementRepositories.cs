@@ -49,6 +49,10 @@ public sealed class CompanyManagementRepository(JobPortalDbContext context) : IC
     public Task<bool> SlugExistsAsync(string slug, Guid? excludingId = null, CancellationToken cancellationToken = default) =>
         context.Companies.AnyAsync(x => x.Slug == slug && (!excludingId.HasValue || x.Id != excludingId), cancellationToken);
 
+    public Task<bool> NameExistsAsync(string normalizedName, Guid? excludingId = null, CancellationToken cancellationToken = default) =>
+        context.Companies.AnyAsync(x => x.NormalizedName == normalizedName &&
+            (!excludingId.HasValue || x.Id != excludingId), cancellationToken);
+
     public Task<bool> HasJobsAsync(Guid id, CancellationToken cancellationToken = default) =>
         context.Jobs.AnyAsync(x => x.CompanyId == id, cancellationToken);
 

@@ -4,6 +4,7 @@ using JobPortal.Application.Abstractions.Auditing;
 using JobPortal.Application.Abstractions.Persistence;
 using JobPortal.Application.Common.Exceptions;
 using JobPortal.Application.Common.Text;
+using JobPortal.Application.Features.CandidateCompanies;
 using JobPortal.Domain.Entities;
 using JobPortal.Domain.Enums;
 using JobPortal.Shared.Models;
@@ -33,6 +34,7 @@ public sealed class CompanyManagementService(
         Guid administratorUserId, CreateCompanyRequest request, CancellationToken cancellationToken = default)
     {
         await createValidator.ValidateAndThrowAsync(request, cancellationToken);
+        await EnsureUniqueNameAsync(request.Name, null, cancellationToken);
         var slug = RequiredSlug(request.Slug, request.Name);
         await EnsureUniqueSlugAsync(slug, null, cancellationToken);
         var company = new Company { OwnerUserId = administratorUserId };
@@ -54,6 +56,7 @@ public sealed class CompanyManagementService(
         await updateValidator.ValidateAndThrowAsync(request, cancellationToken);
         var company = await companies.GetByIdAsync(id, cancellationToken)
             ?? throw new NotFoundException($"Company '{id}' was not found.");
+        await EnsureUniqueNameAsync(request.Name, id, cancellationToken);
         var slug = RequiredSlug(request.Slug, request.Name);
         await EnsureUniqueSlugAsync(slug, id, cancellationToken);
         Apply(company, request.Name, slug, request.Description, request.WebsiteUrl, request.LogoUrl,
@@ -84,6 +87,12 @@ public sealed class CompanyManagementService(
     {
         if (await companies.SlugExistsAsync(slug, excludingId, cancellationToken))
             throw new ConflictException($"An active company with slug '{slug}' already exists.");
+    }
+
+    private async Task EnsureUniqueNameAsync(string name, Guid? excludingId, CancellationToken cancellationToken)
+    {
+        if (await companies.NameExistsAsync(CompanyNameNormalizer.Normalize(name), excludingId, cancellationToken))
+            throw new ConflictException("An active company with this name already exists.", "duplicate_company_name");
     }
 
     private static string RequiredSlug(string? requested, string name)

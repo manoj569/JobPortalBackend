@@ -11,6 +11,7 @@ public interface ICompanyManagementRepository
         Task.FromResult<Company?>(null);
     Task<CompanyResponse?> GetResponseAsync(Guid id, CancellationToken cancellationToken = default);
     Task<bool> SlugExistsAsync(string slug, Guid? excludingId = null, CancellationToken cancellationToken = default);
+    Task<bool> NameExistsAsync(string normalizedName, Guid? excludingId = null, CancellationToken cancellationToken = default);
     Task<bool> HasJobsAsync(Guid id, CancellationToken cancellationToken = default);
     Task AddAsync(Company company, CancellationToken cancellationToken = default);
     void Remove(Company company);

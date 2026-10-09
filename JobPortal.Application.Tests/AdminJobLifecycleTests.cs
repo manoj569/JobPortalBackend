@@ -324,6 +324,9 @@ new JobSearchQueryValidator(),
 
     private sealed class CompanyManagementRepositoryFake(Company company) : ICompanyManagementRepository
     {
+        public Task<bool> NameExistsAsync(string normalizedName, Guid? excludingId = null, CancellationToken cancellationToken = default) =>
+            Task.FromResult(!company.IsDeleted && company.Id != excludingId &&
+                JobPortal.Application.Features.CandidateCompanies.CompanyNameNormalizer.Normalize(company.Name) == normalizedName);
         public Task<Company?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
             Task.FromResult<Company?>(id == company.Id ? company : null);
         public Task<(IReadOnlyCollection<CompanyResponse> Items, int TotalCount)> SearchAsync(CompanySearchQuery query, CancellationToken cancellationToken = default) => throw new NotSupportedException();
