@@ -27,6 +27,9 @@ public sealed partial class WorkdayJobSourceProvider(
     // Workday's public CXS listing endpoint is capped at 20 items per request.
     private const int PageSize = 20;
     private const int MaxJobs = 10_000;
+    // Some Workday searches advertise exactly 2,000 despite larger facet counts.
+    // Treat that boundary as capped, never as proof of full inventory.
+    private const int SuspectedSearchCap = 2_000;
     private const int MaxJsonBytes = 4 * 1024 * 1024;
     private const int DetailConcurrency = 4;
 
@@ -89,6 +92,8 @@ public sealed partial class WorkdayJobSourceProvider(
         var postings = new List<ListingEntry>();
         var seenPaths = new HashSet<string>(StringComparer.Ordinal);
         var rawEntriesRead = 0;
+        var duplicatePaths = 0;
+        var placeholderRows = 0;
         int? expectedTotal = null;
 
         for (var offset = 0; ; offset += PageSize)
@@ -103,6 +108,7 @@ public sealed partial class WorkdayJobSourceProvider(
                 cancellationToken);
 
             rawEntriesRead += page.RawEntryCount;
+            placeholderRows += page.RawEntryCount - page.Postings.Count;
 
             if (expectedTotal is null)
             {
@@ -146,13 +152,12 @@ public sealed partial class WorkdayJobSourceProvider(
             foreach (var posting in page.Postings)
             {
                 if (!seenPaths.Add(posting.ExternalPath))
-                    throw LoggedInvalidDocument(
-                        source.Id,
-                        "listing_snapshot",
-                        offset,
-                        page.StatusCode,
-                        FailureReason.ListingDuplicatePaths,
-                        "The Workday listing contained duplicate external paths.");
+                {
+                    // Workday can repeat a posting across pages. Count raw slots
+                    // for pagination but fetch each unique job only once.
+                    duplicatePaths++;
+                    continue;
+                }
 
                 postings.Add(posting);
             }
@@ -249,7 +254,13 @@ public sealed partial class WorkdayJobSourceProvider(
             .Distinct(StringComparer.Ordinal)
             .Count();
 
+        // Duplicates/placeholders and the 2,000-result search boundary mean
+        // this is not a proven exhaustive inventory. Incomplete snapshots
+        // must never be used by downstream reconciliation to expire jobs.
         var isComplete =
+            duplicatePaths == 0 &&
+            placeholderRows == 0 &&
+            expectedTotal < SuspectedSearchCap &&
             skipped == 0 &&
             processed == postings.Count &&
             ordered.Length == postings.Count &&
@@ -258,6 +269,11 @@ public sealed partial class WorkdayJobSourceProvider(
             rawEntriesRead >= expectedTotal;
 
         if (logger is not null)
+        {
+            logger.LogInformation(
+                "WorkdayListingSummary Source={JobSourceId} RawSlots={RawSlots} UniquePaths={UniquePaths} Duplicates={Duplicates} Placeholders={Placeholders} AdvertisedTotal={AdvertisedTotal} IsComplete={IsComplete}",
+                source.Id, rawEntriesRead, postings.Count, duplicatePaths,
+                placeholderRows, expectedTotal, isComplete);
             Completed(
                 logger,
                 source.Id,
@@ -266,6 +282,7 @@ public sealed partial class WorkdayJobSourceProvider(
                 skipped,
                 stopwatch.Elapsed.TotalMilliseconds,
                 null);
+        }
 
         return new ExternalJobSourceSnapshot(
             ordered,
