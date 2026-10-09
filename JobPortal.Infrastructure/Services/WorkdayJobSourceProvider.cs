@@ -66,6 +66,20 @@ public sealed partial class WorkdayJobSourceProvider(
         string reasonCode,
         int? statusCode);
 
+    [LoggerMessage(
+        EventId = 4373,
+        Level = LogLevel.Information,
+        Message = "WorkdayListingSummary Source={JobSourceId} RawSlots={RawSlots} UniquePaths={UniquePaths} Duplicates={Duplicates} Placeholders={Placeholders} AdvertisedTotal={AdvertisedTotal} IsComplete={IsComplete}")]
+    private static partial void LogListingSummary(
+        ILogger logger,
+        Guid jobSourceId,
+        int rawSlots,
+        int uniquePaths,
+        int duplicates,
+        int placeholders,
+        int? advertisedTotal,
+        bool isComplete);
+
     private const string ReasonDataKey = "WorkdayFailureReason";
 
     public AtsType AtsType => AtsType.Workday;
@@ -270,10 +284,15 @@ public sealed partial class WorkdayJobSourceProvider(
 
         if (logger is not null)
         {
-            logger.LogInformation(
-                "WorkdayListingSummary Source={JobSourceId} RawSlots={RawSlots} UniquePaths={UniquePaths} Duplicates={Duplicates} Placeholders={Placeholders} AdvertisedTotal={AdvertisedTotal} IsComplete={IsComplete}",
-                source.Id, rawEntriesRead, postings.Count, duplicatePaths,
-                placeholderRows, expectedTotal, isComplete);
+            LogListingSummary(
+                logger,
+                source.Id,
+                rawEntriesRead,
+                postings.Count,
+                duplicatePaths,
+                placeholderRows,
+                expectedTotal,
+                isComplete);
             Completed(
                 logger,
                 source.Id,
