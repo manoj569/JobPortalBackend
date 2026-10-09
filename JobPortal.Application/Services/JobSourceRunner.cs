@@ -142,7 +142,6 @@ public sealed partial class JobSourceRunner(
 
         try
         {
-            publicationPolicy?.Validate(source);
             publicationPolicy?.ApplyLicensedLogo(source);
             ExternalJobSourceSnapshot? snapshot = null;
             IReadOnlyCollection<RawExternalJob> rawJobs;
@@ -208,8 +207,6 @@ public sealed partial class JobSourceRunner(
             foreach (var rawJob in rawJobs)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                // Long fetch/import runs must not outlive their publication permission.
-                publicationPolicy?.Validate(source);
 
                 var publicationAttempt = false;
                 try
@@ -333,7 +330,6 @@ public sealed partial class JobSourceRunner(
             cancellationToken.ThrowIfCancellationRequested();
             var closed = 0;
             ReportProgress("Reconciliation");
-            publicationPolicy?.Validate(source);
             var externalIdsForReconciliation = observedJobs.Select(x => x.ExternalId)
                 .Where(x => !string.IsNullOrWhiteSpace(x))
                 .Select(x => x!.Trim())
@@ -370,7 +366,6 @@ public sealed partial class JobSourceRunner(
             source.ConsecutiveFailures = successful ? 0 : previousFailures + 1;
 
             sources.Update(source);
-            publicationPolicy?.Validate(source);
             await unitOfWork.SaveChangesAsync(cancellationToken);
 
             // Provider-wide fetch failures never reach this per-item tally, but

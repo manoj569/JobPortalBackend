@@ -25,7 +25,7 @@ namespace JobPortal.Application.Tests;
 public sealed class JobSourceDurableRunTests
 {
     [Fact]
-    public async Task HttpRunReturns202AndLocationWithoutCallingProviderAndDisconnectCannotCancelWorker()
+    public async Task HttpRunWithoutApprovalsReturns202AndDisconnectCannotCancelWorker()
     {
         using var f = new Fixture();
         using var old = new JobSourceFixture();
@@ -220,6 +220,17 @@ public sealed class JobSourceDurableRunTests
         var row = f.Store.Rows.Single();
         Assert.Equal(JobSourceRunStatus.Failed, row.Status);
         Assert.Equal(475, row.Processed); Assert.Equal(475, row.Created); Assert.Equal(1500, row.TotalReceived);
+    }
+
+    [Fact]
+    public async Task SchedulerExecutesEligibleSourceWithoutApprovalConfiguration()
+    {
+        using var f = new Fixture();
+        var scheduler = new JobAggregationScheduler(f.Services.GetRequiredService<IServiceScopeFactory>(),
+            Options.Create(new JobAggregationOptions { Scheduler = new() { Enabled = true } }), new(), f.Clock,
+            NullLogger<JobAggregationScheduler>.Instance);
+        await scheduler.RunOnceAsync();
+        Assert.Equal(1, f.Calls);
     }
 
     [Fact]

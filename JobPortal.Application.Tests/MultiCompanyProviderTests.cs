@@ -23,6 +23,42 @@ public sealed class MultiCompanyProviderTests
     [InlineData(AtsType.Greenhouse, "greenhouse.json", 2)]
     [InlineData(AtsType.Lever, "lever.json", 1)]
     [InlineData(AtsType.Ashby, "ashby.json", 1)]
+    public async Task RealProviderPipelineImportsAndReusesJobsWithoutSourceApprovals(AtsType type, string fixture, int count)
+    {
+        using var f = new JobSourceFixture();
+        var configured = Source(type);
+        f.Source.AtsType = type;
+        f.Source.AtsIdentifier = configured.AtsIdentifier;
+        f.Source.CareerPageUrl = configured.CareerPageUrl;
+        f.Map(f.Category.Id.ToString());
+        var json = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "Fixtures", "PublicAts", fixture));
+        using var factory = new Factory(_ => json);
+        var repository = new JobRepository(f.Context);
+        var unit = new UnitOfWork(f.Context);
+        var fingerprint = new JobFingerprintService();
+        var canonicalizer = new UrlCanonicalizer();
+        var ingestion = new JobIngestionService(repository, new CompanyManagementRepository(f.Context),
+            new CategoryManagementRepository(f.Context), new JobDeduplicationService(repository, fingerprint, canonicalizer),
+            fingerprint, unit, new Clock(), f.Locks, canonicalizer);
+        var policy = new JobSourcePublicationPolicy(Options.Create(new JobAggregationOptions()), new Clock());
+        var runner = new JobSourceRunner(f.Repository, [Provider(type, factory)], ingestion, unit, new Clock(), f.Resolver,
+            new ExternalJobNormalizer(), jobRepository: repository, publicationPolicy: policy);
+        var first = await runner.RunAsync(f.Source.Id);
+        Assert.True(first.Succeeded);
+        Assert.Equal(count, first.Created);
+        var second = await runner.RunAsync(f.Source.Id);
+        Assert.True(second.Succeeded);
+        Assert.Equal(0, second.Created);
+        Assert.Equal(count, second.Unchanged);
+        Assert.Equal(count, await f.Context.Jobs.CountAsync());
+        Assert.NotNull(f.Source.LastSuccessfulRunAtUtc);
+        Assert.Null(f.Company.LogoUrl);
+    }
+
+    [Theory]
+    [InlineData(AtsType.Greenhouse, "greenhouse.json", 2)]
+    [InlineData(AtsType.Lever, "lever.json", 1)]
+    [InlineData(AtsType.Ashby, "ashby.json", 1)]
     public async Task OfficialContractsYieldCompleteStableOwnedIdentities(AtsType type, string fixture, int count)
     {
         var json = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "Fixtures", "PublicAts", fixture));
@@ -263,17 +299,43 @@ public sealed class MultiCompanyProviderTests
     }
 
     [Fact]
-    public void PublicAccessibilityDoesNotGrantPublicationPermission()
+    public void MissingOrExpiredRightsDoNotBlockImportSelection()
     {
         var source = Source(AtsType.Greenhouse);
         var policy = new JobSourcePublicationPolicy(Options.Create(new JobAggregationOptions()), new Clock());
-        Assert.Equal("job_source_publication_not_approved", Assert.Throws<BadRequestException>(() => policy.Validate(source)).Code);
+        var snapshot = new ExternalJobSourceSnapshot([new RawExternalJob { Location = "India" }], 0, true);
+        Assert.Single(policy.Select(source, snapshot).Jobs);
         var approved = Approval(source);
         approved.RightsExpireAtUtc = new(JobSourceFixture.Now);
-        Assert.Throws<BadRequestException>(() => Policy(source, approved).Validate(source));
+        Assert.Single(Policy(source, approved).Select(source, snapshot).Jobs);
         approved.RightsExpireAtUtc = new(JobSourceFixture.Now.AddDays(1));
         source.AtsIdentifier = "another-board";
-        Assert.Throws<BadRequestException>(() => Policy(source, approved).Validate(source));
+        Assert.Single(Policy(source, approved).Select(source, snapshot).Jobs);
+    }
+
+    [Fact]
+    public void OptionalTestCapWithoutRightsRemainsIncompleteAndMissingLogoIsHarmless()
+    {
+        var source = Source(AtsType.Greenhouse);
+        var settings = new JobSourcePublicationApproval { TestImportLimit = 1 };
+        var policy = Policy(source, settings);
+        var selected = policy.Select(source, new([
+            new RawExternalJob { ExternalId = "1", Location = "India" },
+            new RawExternalJob { ExternalId = "2", Location = "India" }], 0, true));
+        Assert.Single(selected.Jobs);
+        Assert.False(selected.IsComplete);
+        policy.ApplyLicensedLogo(source);
+        Assert.Null(source.Company.LogoUrl);
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(1001)]
+    public void InvalidOptionalImportCapStillFailsClosed(int limit)
+    {
+        var source = Source(AtsType.Greenhouse);
+        var error = Assert.Throws<BadRequestException>(() => Policy(source, limit).Select(source, new([], 0, true)));
+        Assert.Equal("invalid_test_import_limit", error.Code);
     }
 
     [Theory]
@@ -312,30 +374,38 @@ public sealed class MultiCompanyProviderTests
         Assert.Single(await f.Context.Jobs.AsNoTracking().ToArrayAsync());
     }
 
-    [Fact]
-    public async Task UnapprovedRunnerNeverCallsProviderOrTouchesExistingJobs()
+    [Theory]
+    [InlineData(AtsType.Greenhouse)]
+    [InlineData(AtsType.Lever)]
+    [InlineData(AtsType.Ashby)]
+    [InlineData(AtsType.SuccessFactors)]
+    public async Task RunnerWithoutApprovalsCallsProviderAndCompletes(AtsType type)
     {
         using var f = new JobSourceFixture();
+        f.Source.AtsType = type;
         var policy = new JobSourcePublicationPolicy(Options.Create(new JobAggregationOptions()), new Clock());
-        var runner = new JobSourceRunner(f.Repository, [f.Provider], new NeverIngest(), new UnitOfWork(f.Context),
+        var runner = new JobSourceRunner(f.Repository, [new EmptyProvider(type)], new NeverIngest(), new UnitOfWork(f.Context),
             new Clock(), f.Resolver, new ExternalJobNormalizer(), publicationPolicy: policy);
-        Assert.False((await runner.RunAsync(f.Source.Id)).Succeeded);
-        Assert.Equal(0, f.Provider.Calls);
+        Assert.True((await runner.RunAsync(f.Source.Id)).Succeeded);
         Assert.Empty(f.Context.Jobs);
-        Assert.Null(f.Source.LastSuccessfulRunAtUtc);
+        Assert.NotNull(f.Source.LastSuccessfulRunAtUtc);
     }
 
     [Fact]
-    public void ApprovalCannotBeBorrowedByAnotherCompanyOrUnverifiedCompany()
+    public void LogoCannotBeBorrowedByAnotherCompanyOrUnverifiedCompany()
     {
         var source = Source(AtsType.Greenhouse);
         var approval = Approval(source);
+        approval.LogoUrl = "https://assets.example.test/logo.png";
+        approval.LogoRightsEvidence = "fixture-logo-license";
         var policy = Policy(source, approval);
         source.Company.IsVerified = false;
-        Assert.Throws<BadRequestException>(() => policy.Validate(source));
+        policy.ApplyLicensedLogo(source);
+        Assert.Null(source.Company.LogoUrl);
         source.Company.IsVerified = true;
         source.CompanyId = Guid.NewGuid();
-        Assert.Throws<BadRequestException>(() => policy.Validate(source));
+        policy.ApplyLicensedLogo(source);
+        Assert.Null(source.Company.LogoUrl);
     }
 
     [Theory]
@@ -381,7 +451,7 @@ public sealed class MultiCompanyProviderTests
     }
 
     [Fact]
-    public async Task ApprovalExpiringDuringImportStopsBeforeNextItemAndNeverReconciles()
+    public async Task ApprovalExpiringDuringImportDoesNotInterruptValidRun()
     {
         using var f = new JobSourceFixture();
         f.Company.IsVerified = true;
@@ -395,10 +465,10 @@ public sealed class MultiCompanyProviderTests
         var result = await new JobSourceRunner(f.Repository, [f.Provider], ingestion, new UnitOfWork(f.Context),
             clock, f.Resolver, new ExternalJobNormalizer(), jobRepository: new JobRepository(f.Context),
             publicationPolicy: policy).RunAsync(f.Source.Id);
-        Assert.Equal(1, ingestion.Calls);
-        Assert.False(result.Succeeded);
+        Assert.Equal(2, ingestion.Calls);
+        Assert.True(result.Succeeded);
         Assert.Equal(0, result.Closed);
-        Assert.Null(f.Source.LastSuccessfulRunAtUtc);
+        Assert.NotNull(f.Source.LastSuccessfulRunAtUtc);
     }
 
     [Fact]
@@ -505,7 +575,15 @@ public sealed class MultiCompanyProviderTests
     private sealed class NeverIngest : IJobIngestionService
     {
         public Task<JobIngestionResult> IngestAsync(RawExternalJob job, CancellationToken cancellationToken = default) =>
-            throw new InvalidOperationException("Unapproved jobs must not reach ingestion.");
+            throw new InvalidOperationException("An empty snapshot must not reach ingestion.");
+    }
+    private sealed class EmptyProvider(AtsType type) : ICompleteExternalJobProvider
+    {
+        public AtsType AtsType => type;
+        public Task<ExternalJobSourceSnapshot> FetchSnapshotAsync(JobSource source, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new ExternalJobSourceSnapshot([], 0, true));
+        public Task<IReadOnlyCollection<RawExternalJob>> FetchJobsAsync(JobSource source, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyCollection<RawExternalJob>>([]);
     }
     private sealed class Factory(Func<Uri, string> response, HttpStatusCode status = HttpStatusCode.OK,
         HttpStatusCode detailStatus = HttpStatusCode.OK) : HttpMessageHandler, IHttpClientFactory

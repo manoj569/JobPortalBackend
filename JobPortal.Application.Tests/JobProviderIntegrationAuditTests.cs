@@ -1,6 +1,5 @@
 using JobPortal.Application.Common.Exceptions;
 using JobPortal.Application.Features.Dashboard;
-using JobPortal.Application.Features.JobAggregation;
 using JobPortal.Application.Features.Jobs;
 using JobPortal.Application.Features.PublicJobs;
 using JobPortal.Domain.Entities;
@@ -8,7 +7,6 @@ using JobPortal.Domain.Enums;
 using JobPortal.Persistence;
 using JobPortal.Persistence.Repositories;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
 using Xunit;
 using static JobPortal.Application.Features.Jobs.JobSearchQueryValidator;
 
@@ -64,55 +62,52 @@ public sealed class JobProviderIntegrationAuditTests
     }
 
     [Theory]
-    [InlineData("missing")]
-    [InlineData("expired")]
+    [InlineData("valid")]
+    [InlineData("deleted")]
     [InlineData("disabled")]
     [InlineData("wrong-company")]
-    public async Task FinalPublicationAuthorityRejectsUnapprovedSourceJobs(string condition)
+    public async Task PublicationNeedsNoApprovalButStillValidatesSourceOwnershipAndState(string condition)
     {
         using var f = new JobSourceFixture();
-        f.Company.IsVerified = true;
         var clock = new Clock();
-        var approval = Approval(f);
-        if (condition == "expired") approval.RightsExpireAtUtc = clock.GetUtcNow();
+        if (condition == "deleted") f.Source.IsDeleted = true;
         if (condition == "disabled") f.Source.IsActive = false;
-        if (condition == "wrong-company") approval.CompanyId = Guid.NewGuid();
-        var options = new JobAggregationOptions();
-        if (condition != "missing") options.SourceApprovals[f.Source.Id.ToString("D")] = approval;
+        if (condition == "wrong-company") f.Source.CompanyId = Guid.NewGuid();
         var job = Job(f, "unapproved");
         f.Context.Jobs.Add(job);
         await f.Context.SaveChangesAsync();
-        var service = Service(f, clock, options);
-        var error = await Assert.ThrowsAsync<BadRequestException>(() => service.PublishAsync(job.Id));
-        Assert.Equal("job_source_publication_not_approved", error.Code);
-        Assert.Equal(JobStatus.Draft, (await f.Context.Jobs.AsNoTracking().SingleAsync()).Status);
+        var service = Service(f, clock);
+        if (condition != "valid")
+        {
+            var error = await Assert.ThrowsAsync<BadRequestException>(() => service.PublishAsync(job.Id));
+            Assert.Equal("invalid_job_source", error.Code);
+            Assert.Equal(JobStatus.Draft, (await f.Context.Jobs.AsNoTracking().SingleAsync()).Status);
+        }
+        else Assert.Equal(JobStatus.Published, (await service.PublishAsync(job.Id)).Status);
     }
 
     [Fact]
-    public async Task CachedSourceNeverCachesApprovalAndManualPublicationRemainsCompatible()
+    public async Task SourceAndManualJobsCanBePublishedAndUnhiddenWithoutApproval()
     {
         using var f = new JobSourceFixture();
-        f.Company.IsVerified = true;
         var clock = new Clock();
-        var options = new JobAggregationOptions();
-        options.SourceApprovals[f.Source.Id.ToString("D")] = Approval(f);
         var first = Job(f, "first");
         var second = Job(f, "second");
         var manual = Job(f, "manual");
         manual.JobSourceId = null;
         f.Context.Jobs.AddRange(first, second, manual);
         await f.Context.SaveChangesAsync();
-        var service = Service(f, clock, options);
+        var service = Service(f, clock);
         Assert.Equal(JobStatus.Published, (await service.PublishAsync(first.Id)).Status);
-        clock.Now = clock.Now.AddDays(1); // Exact rights expiration boundary.
-        await Assert.ThrowsAsync<BadRequestException>(() => service.PublishAsync(second.Id));
+        clock.Now = clock.Now.AddDays(1);
+        Assert.Equal(JobStatus.Published, (await service.PublishAsync(second.Id)).Status);
         Assert.Equal(JobStatus.Published, (await service.PublishAsync(manual.Id)).Status);
         first.IsHidden = true;
         await f.Context.SaveChangesAsync();
-        await Assert.ThrowsAsync<BadRequestException>(() => service.SetHiddenAsync(first.Id, false));
+        await service.SetHiddenAsync(first.Id, false);
         f.Context.ChangeTracker.Clear();
-        Assert.True((await f.Context.Jobs.SingleAsync(x => x.Id == first.Id)).IsHidden);
-        Assert.Equal(JobStatus.Draft, (await f.Context.Jobs.SingleAsync(x => x.Id == second.Id)).Status);
+        Assert.False((await f.Context.Jobs.SingleAsync(x => x.Id == first.Id)).IsHidden);
+        Assert.Equal(JobStatus.Published, (await f.Context.Jobs.SingleAsync(x => x.Id == second.Id)).Status);
     }
 
     [Theory]
@@ -188,16 +183,10 @@ public sealed class JobProviderIntegrationAuditTests
         EmploymentType = EmploymentType.FullTime, WorkplaceType = WorkplaceType.Remote, ExperienceLevel = ExperienceLevel.Mid,
         ExpiresAtUtc = JobSourceFixture.Now.AddDays(10)
     };
-    private static JobSourcePublicationApproval Approval(JobSourceFixture f) => new()
-    {
-        CompanyId = f.Company.Id, AtsType = f.Source.AtsType, AtsIdentifier = f.Source.AtsIdentifier!,
-        CareerPageUrl = f.Source.CareerPageUrl, RightsEvidence = "synthetic-test-permission",
-        RightsExpireAtUtc = new(JobSourceFixture.Now.AddDays(1))
-    };
-    private static JobService Service(JobSourceFixture f, Clock clock, JobAggregationOptions options) => new(
+    private static JobService Service(JobSourceFixture f, Clock clock) => new(
         new JobRepository(f.Context), new UnitOfWork(f.Context), f.Audit, new CreateJobRequestValidator(),
         new UpdateJobRequestValidator(), new UpdateRecruiterContactRequestValidator(), new JobSearchQueryValidator(),
-        clock, sources: f.Repository, publicationPolicy: new JobSourcePublicationPolicy(Options.Create(options), clock));
+        clock, sources: f.Repository);
     private sealed class Clock : TimeProvider
     {
         public DateTimeOffset Now { get; set; } = new(JobSourceFixture.Now);

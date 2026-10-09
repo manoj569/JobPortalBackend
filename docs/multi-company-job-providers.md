@@ -1,5 +1,29 @@
 # Multi-company public feeds and company logos
 
+## Update: optional source metadata, not an approval gate
+
+The mandatory publication-approval prerequisite described in the original notes below has been removed.
+Valid sources can be activated, queued, scheduled, imported and published without any `SourceApprovals` entry,
+`RightsEvidence` or `RightsExpireAtUtc`. Ordinary source validation and publication quality checks still apply.
+No migration or production configuration change is required for this update.
+
+`JobAggregation:SourceApprovals` is retained as an **optional legacy configuration key** for India eligibility
+overrides, `TestImportLimit`, and licensed-logo metadata. Without an entry, selection defaults to India-only,
+no guessed city mappings, no worldwide-remote opt-in, no import cap, and no automatic logo assignment.
+Existing positive caps remain incomplete even if rights metadata is absent/expired: no stale closure and
+no successful-run timestamp. Invalid caps still fail closed. Missing provider deadlines preserve existing expiry.
+Logo assignment alone still requires matching, unexpired metadata and explicit logo evidence; existing admin logos win.
+Importing does not establish commercial republication rights or an employer partnership; operators remain responsible
+for reviewing source terms. No sources were activated and no live jobs were imported by this change.
+
+Validation of this update: non-incremental Release API build passed (0 warnings/errors); affected
+provider/aggregation/Saved Jobs/referral regression suite passed (864 passed, 0 failed, 5 skipped).
+The requested full application suite completed with 2,103 passed, 83 failed, 11 skipped (2,197 total).
+Failures were confined to untouched Career Guidance and notification tests: principally booking fixtures
+expecting Confirmed rather than AwaitingConsultant, dependent session eligibility, and stale model assertions.
+They were not changed in this task. Opt-in PostgreSQL tests were skipped because no disposable test database
+was configured; no production database was accessed. The full repository suite is not green.
+
 See the [integration audit](multi-company-integration-audit.md) for the subsequent Saved Jobs contract fix, final publication/expiry checks, referral privacy/pagination fixes and refreshed aggregate inventory. The original implementation and safe local capped-run procedure below remain in place.
 
 ## Architecture and safety

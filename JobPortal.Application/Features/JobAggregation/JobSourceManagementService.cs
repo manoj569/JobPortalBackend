@@ -22,8 +22,7 @@ public sealed class JobSourceManagementService(
     IAuditWriter audit,
     IValidator<SaveJobSourceRequest> saveValidator,
     IValidator<JobSourceSearchQuery> searchValidator,
-    IJobSourceExecutionLock executionLock,
-    IJobSourcePublicationPolicy? publicationPolicy = null) : IJobSourceManagementService
+    IJobSourceExecutionLock executionLock) : IJobSourceManagementService
 {
     public async Task<PagedResponse<JobSourceResponse>> SearchAsync(
         JobSourceSearchQuery query, CancellationToken cancellationToken = default)
@@ -47,7 +46,6 @@ public sealed class JobSourceManagementService(
         await EnsureUniqueAsync(request, identifier, null, cancellationToken);
         var source = new JobSource();
         Apply(source, request, company, identifier);
-        if (source.IsActive) publicationPolicy?.Validate(source);
         await sources.AddAsync(source, cancellationToken);
         await audit.AppendAsync(new(AuditAction.Create, "JobSource", source.Id.ToString()), cancellationToken);
         await SaveAsync(cancellationToken);
@@ -64,7 +62,6 @@ public sealed class JobSourceManagementService(
         var identifier = TextNormalizer.TrimOrNull(request.AtsIdentifier);
         await EnsureUniqueAsync(request, identifier, id, cancellationToken);
         Apply(source, request, company, identifier);
-        if (source.IsActive) publicationPolicy?.Validate(source);
         // The source is tracked; do not call the runner's bookkeeping-only Update.
         await audit.AppendAsync(new(AuditAction.Update, "JobSource", id.ToString()), cancellationToken);
         await SaveAsync(cancellationToken);

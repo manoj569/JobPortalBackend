@@ -9,7 +9,8 @@ public sealed class JobAggregationOptions
 
     public int GreenhouseDetailConcurrency { get; set; } = 2;
 
-    // No public feed is licensed merely because it can be read without authentication.
+    // Optional legacy configuration key retained for geographic filters, test limits and licensed logos.
+    // No entry or rights evidence is required to execute or publish a source. Defaults remain India-only.
     // Keys are persistent JobSource IDs, never guessed company/board names.
     public Dictionary<string, JobSourcePublicationApproval> SourceApprovals { get; set; } =
         new(StringComparer.OrdinalIgnoreCase);

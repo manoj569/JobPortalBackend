@@ -1,5 +1,9 @@
 # Multi-company integration audit — 2026-10-09
 
+Historical audit: its mandatory publication-approval checks have since been removed. See the
+[current optional source-metadata behavior](multi-company-job-providers.md#update-optional-source-metadata-not-an-approval-gate).
+The other safety, expiry, Saved Jobs and referral fixes remain in effect.
+
 This follow-up preserves the existing local provider implementation. It does not activate sources, import live jobs, assert partnerships, or grant republication/logo rights. No production/unknown database was accessed.
 
 ## Confirmed defects fixed

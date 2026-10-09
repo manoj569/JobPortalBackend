@@ -8,34 +8,26 @@ namespace JobPortal.Application.Features.JobAggregation;
 
 public interface IJobSourcePublicationPolicy
 {
-    void Validate(JobSource source);
     ExternalJobSourceSnapshot Select(JobSource source, ExternalJobSourceSnapshot snapshot);
     void ApplyLicensedLogo(JobSource source);
 }
 
-// Operator approvals refer to reviewed rights evidence; this is enforcement, not an automated legal determination.
+// Optional import/geography and licensed-logo metadata. Never a publication authorization gate.
 public sealed partial class JobSourcePublicationPolicy(IOptions<JobAggregationOptions> options, TimeProvider clock)
     : IJobSourcePublicationPolicy
 {
-    public void Validate(JobSource source) => _ = Approval(source);
-
-    private JobSourcePublicationApproval Approval(JobSource source)
+    private JobSourcePublicationApproval Settings(JobSource source)
     {
-        if (!options.Value.SourceApprovals.TryGetValue(source.Id.ToString("D"), out var approval) ||
-            source.Company is null || !source.Company.IsVerified || source.Company.IsDeleted ||
-            source.CompanyId != source.Company.Id || approval.CompanyId != source.CompanyId ||
-            approval.AtsType != source.AtsType || approval.AtsIdentifier != source.AtsIdentifier?.Trim() ||
-            !SafeUrl(source.CareerPageUrl, out var career) || !SafeUrl(approval.CareerPageUrl, out var approvedCareer) ||
-            career != approvedCareer || string.IsNullOrWhiteSpace(approval.RightsEvidence) ||
-            approval.RightsExpireAtUtc <= clock.GetUtcNow() || approval.TestImportLimit is < 0 or > 1000)
-            throw new BadRequestException("Job source publication approval is missing, expired or does not match its configuration.",
-                "job_source_publication_not_approved");
-        return approval;
+        var settings = options.Value.SourceApprovals.GetValueOrDefault(source.Id.ToString("D"))
+            ?? new JobSourcePublicationApproval();
+        if (settings.TestImportLimit is < 0 or > 1000)
+            throw new BadRequestException("Test import limit must be between 0 and 1000.", "invalid_test_import_limit");
+        return settings;
     }
 
     public ExternalJobSourceSnapshot Select(JobSource source, ExternalJobSourceSnapshot snapshot)
     {
-        var approval = Approval(source);
+        var approval = Settings(source);
         var jobs = new List<RawExternalJob>();
         var unknownEligibility = false;
         foreach (var job in snapshot.Jobs)
@@ -63,7 +55,13 @@ public sealed partial class JobSourcePublicationPolicy(IOptions<JobAggregationOp
 
     public void ApplyLicensedLogo(JobSource source)
     {
-        var approval = Approval(source);
+        // Retain strict matching for optional logo assets only. Missing/expired metadata simply skips the logo.
+        if (!options.Value.SourceApprovals.TryGetValue(source.Id.ToString("D"), out var approval) ||
+            source.Company is null || source.Company.IsDeleted || !source.Company.IsVerified ||
+            source.CompanyId != source.Company.Id || approval.CompanyId != source.CompanyId ||
+            approval.AtsType != source.AtsType || approval.AtsIdentifier != source.AtsIdentifier?.Trim() ||
+            !SafeUrl(source.CareerPageUrl, out var career) || !SafeUrl(approval.CareerPageUrl, out var approvedCareer) ||
+            career != approvedCareer || approval.RightsExpireAtUtc <= clock.GetUtcNow()) return;
         // A manually configured/company-uploaded logo always wins. No download, image search, or name matching.
         if (!string.IsNullOrWhiteSpace(source.Company.LogoUrl) || string.IsNullOrWhiteSpace(approval.LogoRightsEvidence) ||
             !SafeUrl(approval.LogoUrl, out var logo) || !string.IsNullOrEmpty(logo!.Query)) return;

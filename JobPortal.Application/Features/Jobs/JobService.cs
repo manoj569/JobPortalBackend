@@ -6,7 +6,6 @@ using JobPortal.Application.Abstractions.Jobs;
 using JobPortal.Application.Abstractions.Persistence;
 using JobPortal.Application.Common.Exceptions;
 using JobPortal.Application.Common.Text;
-using JobPortal.Application.Features.JobAggregation;
 using JobPortal.Domain.Entities;
 using JobPortal.Domain.Enums;
 using JobPortal.Shared.Models;
@@ -24,8 +23,7 @@ public sealed class JobService(
     TimeProvider timeProvider,
     ICompanyManagementRepository? companies = null,
     ICategoryManagementRepository? categories = null,
-    IJobSourceRepository? sources = null,
-    IJobSourcePublicationPolicy? publicationPolicy = null) : IJobService
+    IJobSourceRepository? sources = null) : IJobService
 {
     private readonly Dictionary<Guid, JobSource> publicationSources = [];
 
@@ -500,18 +498,16 @@ public sealed class JobService(
     private async Task ValidateSourcePublicationAsync(Job job, CancellationToken cancellationToken)
     {
         if (job.JobSourceId is not { } sourceId) return; // Manual/referral jobs retain their existing rules.
-        if (publicationPolicy is null || sources is null)
-            throw new BadRequestException("Job source publication approval is unavailable.", "job_source_publication_not_approved");
+        if (sources is null)
+            throw new BadRequestException("Job source validation is unavailable.", "invalid_job_source");
         if (!publicationSources.TryGetValue(sourceId, out var source))
         {
             source = await sources.GetByIdAsync(sourceId, cancellationToken)
-                ?? throw new BadRequestException("Job source publication approval is unavailable.", "job_source_publication_not_approved");
+                ?? throw new BadRequestException("Job source was not found.", "invalid_job_source");
             publicationSources.Add(sourceId, source);
         }
         if (source.IsDeleted || !source.IsActive || source.CompanyId != job.CompanyId)
-            throw new BadRequestException("Job source publication approval does not match this job.", "job_source_publication_not_approved");
-        // Cache only source metadata for this scoped service, never the time-sensitive approval decision.
-        publicationPolicy.Validate(source);
+            throw new BadRequestException("Job source is inactive or does not match this job.", "invalid_job_source");
     }
 
     private async Task ValidateReferencesAsync(Guid companyId, Guid categoryId, CancellationToken cancellationToken)

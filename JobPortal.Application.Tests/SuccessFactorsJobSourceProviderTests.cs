@@ -16,7 +16,7 @@ public sealed class SuccessFactorsJobSourceProviderTests
     private const string BoardUrl = "https://careers.example.com/go/Example-Careers/123456";
 
     [Fact]
-    public async Task GenericProviderRepeatedRunnerScansAreIdempotentAndIncompleteScanDoesNotCloseOwnedJob()
+    public async Task GenericProviderWithoutApprovalsIsIdempotentAndIncompleteScanDoesNotCloseOwnedJob()
     {
         using var f = new JobSourceFixture();
         f.Source.AtsType = AtsType.SuccessFactors;
@@ -27,7 +27,7 @@ public sealed class SuccessFactorsJobSourceProviderTests
         var corruptDetail = false;
         var provider = Provider((uri, _) => Task.FromResult(uri.AbsolutePath.StartsWith("/job/", StringComparison.Ordinal)
             ? corruptDetail ? "<html>Access restricted</html>" : Detail(null)
-            : Listing(1, 1, 1, 0, Row(55))));
+            : Listing(1, 1, 1, 0, Row(55)).Replace("London, UK", "Pune, India", StringComparison.Ordinal)));
         var jobs = new JobRepository(f.Context);
         var unit = new UnitOfWork(f.Context);
         var fingerprints = new JobFingerprintService();
@@ -35,7 +35,10 @@ public sealed class SuccessFactorsJobSourceProviderTests
         var ingestion = new JobIngestionService(jobs, new CompanyManagementRepository(f.Context), new CategoryManagementRepository(f.Context),
             new JobDeduplicationService(jobs, fingerprints, canonicalizer), fingerprints, unit, TimeProvider.System, f.Locks, canonicalizer);
         var runner = new JobSourceRunner(f.Repository, [provider], ingestion, unit, TimeProvider.System, f.Resolver,
-            new ExternalJobNormalizer(), jobRepository: jobs);
+            new ExternalJobNormalizer(), jobRepository: jobs,
+            publicationPolicy: new JobPortal.Application.Features.JobAggregation.JobSourcePublicationPolicy(
+                Microsoft.Extensions.Options.Options.Create(new JobPortal.Application.Features.JobAggregation.JobAggregationOptions()),
+                TimeProvider.System));
 
         Assert.Equal(1, (await runner.RunAsync(f.Source.Id)).Created);
         var second = await runner.RunAsync(f.Source.Id);
