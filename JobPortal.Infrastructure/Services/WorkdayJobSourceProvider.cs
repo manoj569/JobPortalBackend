@@ -10,6 +10,8 @@ using JobPortal.Application.Abstractions.Jobs;
 using JobPortal.Domain.Entities;
 using JobPortal.Domain.Enums;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using JobPortal.Application.Features.JobAggregation;
 
 namespace JobPortal.Infrastructure.Services;
 
@@ -20,7 +22,10 @@ namespace JobPortal.Infrastructure.Services;
 /// </summary>
 public sealed partial class WorkdayJobSourceProvider(
     IHttpClientFactory clients,
-    ILogger<WorkdayJobSourceProvider>? logger = null) : ICompleteExternalJobProvider
+    ILogger<WorkdayJobSourceProvider>? logger = null,
+    IOptions<JobAggregationOptions>? options = null,
+    TimeProvider? timeProvider = null,
+    AggregationHttpRetryState? retryState = null) : IBatchedExternalJobProvider
 {
     public const string HttpClientName = "WorkdayJobAggregation";
 
@@ -31,7 +36,6 @@ public sealed partial class WorkdayJobSourceProvider(
     // Treat that boundary as capped, never as proof of full inventory.
     private const int SuspectedSearchCap = 2_000;
     private const int MaxJsonBytes = 4 * 1024 * 1024;
-    private const int DetailConcurrency = 4;
 
     // Accenture currently exposes India jobs through this Workday country facet.
     // Keep this provider-specific mapping fail-closed: other Workday tenants are
@@ -82,6 +86,14 @@ public sealed partial class WorkdayJobSourceProvider(
 
     private const string ReasonDataKey = "WorkdayFailureReason";
 
+    [LoggerMessage(EventId = 4374, Level = LogLevel.Information,
+        Message = "WorkdayBatchReady Source={SourceId} DetailAttempted={Attempted} DetailSucceeded={Succeeded} DetailFailed={Failed} DurationMs={DurationMs}.")]
+    private static partial void LogBatch(ILogger logger, Guid sourceId, int attempted, int succeeded, int failed, double durationMs);
+
+    [LoggerMessage(EventId = 4375, Level = LogLevel.Information,
+        Message = "WorkdayRunEnded Source={SourceId} ReasonCode={ReasonCode} DetailAttempted={Attempted} DurationMs={DurationMs}.")]
+    private static partial void LogRunEnded(ILogger logger, Guid sourceId, string reasonCode, int attempted, double durationMs);
+
     public AtsType AtsType => AtsType.Workday;
 
     public async Task<IReadOnlyCollection<RawExternalJob>> FetchJobsAsync(
@@ -89,224 +101,225 @@ public sealed partial class WorkdayJobSourceProvider(
         CancellationToken cancellationToken = default) =>
         (await FetchSnapshotAsync(source, cancellationToken)).Jobs;
 
+    private WorkdayFetchOptions Settings => options?.Value.Workday ?? new();
+    private TimeProvider Clock => timeProvider ?? TimeProvider.System;
+    private readonly AggregationHttpRetryState workdayRetryState = retryState ?? new();
+
     public async Task<ExternalJobSourceSnapshot> FetchSnapshotAsync(
+        JobSource source, CancellationToken cancellationToken = default)
+    {
+        var jobs = new List<RawExternalJob>();
+        var skipped = 0;
+        var complete = false;
+        await foreach (var batch in FetchBatchesAsync(source, cancellationToken))
+        {
+            jobs.AddRange(batch.Jobs);
+            skipped += batch.Skipped;
+            complete = batch.IsComplete;
+        }
+        return new(jobs, skipped, complete);
+    }
+
+    public async IAsyncEnumerable<ExternalJobSourceSnapshot> FetchBatchesAsync(
         JobSource source,
-        CancellationToken cancellationToken = default)
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(source);
-
         var target = ValidateSource(source);
-        cancellationToken.ThrowIfCancellationRequested();
-
+        var settings = Settings;
+        if (!settings.IsValid()) throw new InvalidOperationException("Invalid bounded Workday fetch settings.");
+        using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(settings.RunBudgetSeconds), Clock);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, budget.Token);
+        var token = linked.Token;
         var stopwatch = Stopwatch.StartNew();
-        if (logger is not null)
-            Started(logger, source.Id, null);
-
-        var client = clients.CreateClient(HttpClientName);
-        var postings = new List<ListingEntry>();
-        var seenPaths = new HashSet<string>(StringComparer.Ordinal);
-        var rawEntriesRead = 0;
-        var duplicatePaths = 0;
-        var placeholderRows = 0;
-        int? expectedTotal = null;
-
-        for (var offset = 0; ; offset += PageSize)
+        if (logger is not null) Started(logger, source.Id, null);
+        var succeeded = 0;
+        var failed = 0;
+        var attempted = 0;
+        var complete = false;
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            var client = clients.CreateClient(HttpClientName);
+            var postings = new List<ListingEntry>();
+            var seenPaths = new HashSet<string>(StringComparer.Ordinal);
+            var rawEntriesRead = 0;
+            var duplicatePaths = 0;
+            var placeholderRows = 0;
+            int? expectedTotal = null;
+            var listingChanged = false;
+            var pageSignatures = new HashSet<string>(StringComparer.Ordinal);
 
-            var page = await FetchListingPageAsync(
-                client,
-                target,
-                source.Id,
-                offset,
-                cancellationToken);
-
-            rawEntriesRead += page.RawEntryCount;
-            placeholderRows += page.RawEntryCount - page.Postings.Count;
-
-            if (expectedTotal is null)
+            for (var offset = 0; ; offset += PageSize)
             {
-                expectedTotal = page.Total;
+                token.ThrowIfCancellationRequested();
 
-                if (expectedTotal < 0 || expectedTotal > MaxJobs)
-                    throw LoggedInvalidDocument(
-                        source.Id,
-                        "listing_parse",
-                        offset,
-                        page.StatusCode,
-                        expectedTotal > MaxJobs
-                            ? FailureReason.ListingRecordLimitExceeded
-                            : FailureReason.ListingTotalInvalid,
-                        "The Workday listing total is invalid or exceeds the configured safe limit.");
-            }
+                var page = await FetchListingPageAsync(
+                    client,
+                    target,
+                    source.Id,
+                    offset,
+                    token);
 
-            if (expectedTotal == 0)
-            {
-                if (offset != 0 || page.RawEntryCount != 0 || page.Postings.Count != 0)
+                if (expectedTotal.HasValue && page.Total != expectedTotal.Value) listingChanged = true;
+                var signature = string.Join("|", page.Postings.Select(x => x.ExternalPath));
+                if (page.Postings.Count > 0 && !pageSignatures.Add(signature))
+                {
+                    listingChanged = true;
+                    if (logger is not null) LogSourceFailure(logger, source.Id, "listing_snapshot", offset, "RepeatedPage", page.StatusCode);
+                    break;
+                }
+                rawEntriesRead += page.RawEntryCount;
+                placeholderRows += page.RawEntryCount - page.Postings.Count;
+
+                if (expectedTotal is null)
+                {
+                    expectedTotal = page.Total;
+
+                    if (expectedTotal < 0 || expectedTotal > MaxJobs)
+                        throw LoggedInvalidDocument(
+                            source.Id,
+                            "listing_parse",
+                            offset,
+                            page.StatusCode,
+                            expectedTotal > MaxJobs
+                                ? FailureReason.ListingRecordLimitExceeded
+                                : FailureReason.ListingTotalInvalid,
+                            "The Workday listing total is invalid or exceeds the configured safe limit.");
+                }
+
+                if (expectedTotal == 0)
+                {
+                    if (offset != 0 || page.RawEntryCount != 0 || page.Postings.Count != 0)
+                        throw LoggedInvalidDocument(
+                            source.Id,
+                            "listing_snapshot",
+                            offset,
+                            page.StatusCode,
+                            FailureReason.ListingSnapshotChanged,
+                            "The Workday listing changed while reading the snapshot.");
+
+                    break;
+                }
+
+                if (page.RawEntryCount == 0)
                     throw LoggedInvalidDocument(
                         source.Id,
                         "listing_snapshot",
                         offset,
                         page.StatusCode,
-                        FailureReason.ListingSnapshotChanged,
-                        "The Workday listing changed while reading the snapshot.");
+                        FailureReason.ListingEndedEarly,
+                        "The Workday listing ended before the first-page total was reached.");
 
-                break;
-            }
-
-            if (page.RawEntryCount == 0)
-                throw LoggedInvalidDocument(
-                    source.Id,
-                    "listing_snapshot",
-                    offset,
-                    page.StatusCode,
-                    FailureReason.ListingEndedEarly,
-                    "The Workday listing ended before the first-page total was reached.");
-
-            foreach (var posting in page.Postings)
-            {
-                if (!seenPaths.Add(posting.ExternalPath))
+                foreach (var posting in page.Postings)
                 {
-                    // Workday can repeat a posting across pages. Count raw slots
-                    // for pagination but fetch each unique job only once.
-                    duplicatePaths++;
-                    continue;
+                    if (!seenPaths.Add(posting.ExternalPath))
+                    {
+                        // Workday can repeat a posting across pages. Count raw slots
+                        // for pagination but fetch each unique job only once.
+                        duplicatePaths++;
+                        continue;
+                    }
+
+                    postings.Add(posting);
                 }
 
-                postings.Add(posting);
-            }
+                if (rawEntriesRead >= expectedTotal)
+                    break;
 
-            if (rawEntriesRead >= expectedTotal)
-                break;
-
-            if (page.RawEntryCount < PageSize)
-                throw LoggedInvalidDocument(
-                    source.Id,
-                    "listing_snapshot",
-                    offset,
-                    page.StatusCode,
-                    FailureReason.ListingEndedEarly,
-                    "The Workday listing returned a short raw page before the first-page total was reached.");
-
-            await Task.Delay(RequestSpacing, cancellationToken);
-        }
-
-        if (expectedTotal is null || rawEntriesRead < expectedTotal)
-            throw LoggedInvalidDocument(
-                source.Id,
-                "listing_snapshot",
-                rawEntriesRead,
-                null,
-                FailureReason.ListingSnapshotCountMismatch,
-                "The Workday listing did not produce the complete advertised raw snapshot.");
-
-        var parsed = new ConcurrentDictionary<int, RawExternalJob>();
-        var skipped = 0;
-        var processed = 0;
-
-        using var concurrency = new SemaphoreSlim(DetailConcurrency, DetailConcurrency);
-        using var pace = new SemaphoreSlim(1, 1);
-        var lastRequestAt = DateTimeOffset.MinValue;
-
-        await Parallel.ForEachAsync(
-            postings.Select((entry, index) => (entry, index)),
-            new ParallelOptions
-            {
-                MaxDegreeOfParallelism = DetailConcurrency,
-                CancellationToken = cancellationToken
-            },
-            async (item, token) =>
-            {
-                await concurrency.WaitAsync(token);
-
-                try
-                {
-                    await pace.WaitAsync(token);
-                    try
-                    {
-                        var remaining = lastRequestAt + RequestSpacing - DateTimeOffset.UtcNow;
-                        if (remaining > TimeSpan.Zero)
-                            await Task.Delay(remaining, token);
-
-                        lastRequestAt = DateTimeOffset.UtcNow;
-                    }
-                    finally
-                    {
-                        pace.Release();
-                    }
-
-                    var detail = await FetchDetailAsync(
-                        client,
-                        target,
-                        source,
-                        item.entry,
+                if (page.RawEntryCount < PageSize)
+                    throw LoggedInvalidDocument(
                         source.Id,
-                        item.index,
-                        token);
+                        "listing_snapshot",
+                        offset,
+                        page.StatusCode,
+                        FailureReason.ListingEndedEarly,
+                        "The Workday listing returned a short raw page before the first-page total was reached.");
 
-                    if (detail is null)
-                        Interlocked.Increment(ref skipped);
-                    else
-                        parsed[item.index] = detail;
+                await Task.Delay(RequestSpacing, token);
+            }
 
-                    Interlocked.Increment(ref processed);
-                }
-                finally
-                {
-                    concurrency.Release();
-                }
-            });
+            if (!listingChanged && (expectedTotal is null || rawEntriesRead < expectedTotal))
+                throw LoggedInvalidDocument(
+                    source.Id,
+                    "listing_snapshot",
+                    rawEntriesRead,
+                    null,
+                    FailureReason.ListingSnapshotCountMismatch,
+                    "The Workday listing did not produce the complete advertised raw snapshot.");
 
-        var ordered = parsed
-            .OrderBy(x => x.Key)
-            .Select(x => x.Value)
-            .ToArray();
 
-        var uniqueExternalIds = ordered
-            .Select(x => x.ExternalId)
-            .Where(x => !string.IsNullOrWhiteSpace(x))
-            .Distinct(StringComparer.Ordinal)
-            .Count();
-
-        // Duplicates/placeholders and the 2,000-result search boundary mean
-        // this is not a proven exhaustive inventory. Incomplete snapshots
-        // must never be used by downstream reconciliation to expire jobs.
-        var isComplete =
-            duplicatePaths == 0 &&
-            placeholderRows == 0 &&
-            expectedTotal < SuspectedSearchCap &&
-            skipped == 0 &&
-            processed == postings.Count &&
-            ordered.Length == postings.Count &&
-            uniqueExternalIds == postings.Count &&
-            expectedTotal is not null &&
-            rawEntriesRead >= expectedTotal;
-
-        if (logger is not null)
-        {
-            LogListingSummary(
-                logger,
-                source.Id,
-                rawEntriesRead,
-                postings.Count,
-                duplicatePaths,
-                placeholderRows,
-                expectedTotal,
-                isComplete);
-            Completed(
-                logger,
-                source.Id,
-                postings.Count,
-                ordered.Length,
-                skipped,
-                stopwatch.Elapsed.TotalMilliseconds,
-                null);
+            using var pace = new SemaphoreSlim(1, 1);
+            if (logger is not null)
+                LogListingSummary(logger, source.Id, rawEntriesRead, postings.Count, duplicatePaths, placeholderRows, expectedTotal, false);
+            var lastRequestAt = DateTimeOffset.MinValue;
+            var externalIds = new HashSet<string>(StringComparer.Ordinal);
+            var duplicateIds = false;
+            foreach (var chunk in postings.Chunk(settings.BatchSize))
+            {
+                token.ThrowIfCancellationRequested();
+                var parsed = new ConcurrentDictionary<int, RawExternalJob>();
+                var batchFailed = 0;
+                await Parallel.ForEachAsync(chunk.Select((entry, index) => (entry, index)),
+                    new ParallelOptions { MaxDegreeOfParallelism = settings.DetailConcurrency, CancellationToken = token },
+                    async (item, itemToken) =>
+                    {
+                        await pace.WaitAsync(itemToken);
+                        try
+                        {
+                            var remaining = lastRequestAt.AddMilliseconds(settings.RequestSpacingMilliseconds) - Clock.GetUtcNow();
+                            if (remaining > TimeSpan.Zero) await Task.Delay(remaining, Clock, itemToken);
+                            lastRequestAt = Clock.GetUtcNow();
+                        }
+                        finally { pace.Release(); }
+                        Interlocked.Increment(ref attempted);
+                        try
+                        {
+                            var detail = await FetchDetailAsync(client, target, source, item.entry, source.Id, item.index, itemToken);
+                            if (detail is null)
+                            {
+                                Interlocked.Increment(ref batchFailed);
+                                if (logger is not null) LogSourceFailure(logger, source.Id, "detail_parse", item.index, "InvalidOrIncompleteDetail", null);
+                            }
+                            else parsed[item.index] = detail;
+                        }
+                        catch (OperationCanceledException) when (itemToken.IsCancellationRequested) { throw; }
+                        catch (Exception exception) when (exception is HttpRequestException or TimeoutException or InvalidDataException)
+                        {
+                            Interlocked.Increment(ref batchFailed);
+                            if (logger is not null) LogSourceFailure(logger, source.Id, "detail_fetch", item.index,
+                                exception is TimeoutException ? "RequestTimeoutExhausted" :
+                                exception is InvalidDataException ? "InvalidDetailResponse" : "DetailHttpFailure",
+                                exception is HttpRequestException http ? (int?)http.StatusCode : null);
+                        }
+                    });
+                var jobs = parsed.OrderBy(x => x.Key).Select(x => x.Value).ToArray();
+                foreach (var job in jobs)
+                    if (!externalIds.Add(job.ExternalId!)) duplicateIds = true;
+                succeeded += jobs.Length;
+                failed += batchFailed;
+                if (logger is not null) LogBatch(logger, source.Id, attempted, succeeded, failed, stopwatch.Elapsed.TotalMilliseconds);
+                // Enumeration pauses here until ingestion commits these jobs. No detail tasks remain running.
+                yield return new(jobs, batchFailed, false);
+            }
+            token.ThrowIfCancellationRequested();
+            complete = !listingChanged && duplicatePaths == 0 && placeholderRows == 0 &&
+                expectedTotal < SuspectedSearchCap && failed == 0 && !duplicateIds &&
+                succeeded == postings.Count && rawEntriesRead == expectedTotal;
+            if (logger is not null)
+                LogListingSummary(logger, source.Id, rawEntriesRead, postings.Count, duplicatePaths, placeholderRows, expectedTotal, complete);
+            yield return new(Array.Empty<RawExternalJob>(), 0, complete);
         }
-
-        return new ExternalJobSourceSnapshot(
-            ordered,
-            skipped,
-            isComplete);
+        finally
+        {
+            if (logger is not null)
+            {
+                Completed(logger, source.Id, attempted, succeeded, failed, stopwatch.Elapsed.TotalMilliseconds, null);
+                LogRunEnded(logger, source.Id,
+                    cancellationToken.IsCancellationRequested ? "CallerCancelled" :
+                    budget.IsCancellationRequested ? "RunBudgetExceeded" :
+                    complete ? "Complete" : "Incomplete", attempted, stopwatch.Elapsed.TotalMilliseconds);
+            }
+        }
     }
 
     internal static WorkdayTarget ValidateSource(JobSource source)
@@ -391,6 +404,7 @@ public sealed partial class WorkdayJobSourceProvider(
 
             if (root.ValueKind != JsonValueKind.Object ||
                 !root.TryGetProperty("total", out var totalElement) ||
+                totalElement.ValueKind != JsonValueKind.Number ||
                 !totalElement.TryGetInt32(out var total) ||
                 !root.TryGetProperty("jobPostings", out var postingsElement) ||
                 postingsElement.ValueKind != JsonValueKind.Array)
@@ -401,6 +415,8 @@ public sealed partial class WorkdayJobSourceProvider(
             }
 
             var rawEntryCount = postingsElement.GetArrayLength();
+            if (rawEntryCount > PageSize)
+                throw InvalidDocument(FailureReason.ListingSchemaInvalid, "Workday returned more than the requested page size.");
             var postings = new List<ListingEntry>();
 
             foreach (var item in postingsElement.EnumerateArray())
@@ -465,7 +481,7 @@ public sealed partial class WorkdayJobSourceProvider(
             using var document = JsonDocument.Parse(json);
             var root = document.RootElement;
 
-            if (!root.TryGetProperty("jobPostingInfo", out var info) ||
+            if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("jobPostingInfo", out var info) ||
                 info.ValueKind != JsonValueKind.Object)
             {
                 return null;
@@ -496,9 +512,6 @@ public sealed partial class WorkdayJobSourceProvider(
 
             var countryCodes = new HashSet<string>(
                 StringComparer.OrdinalIgnoreCase);
-
-            if (IsAccentureIndiaSource(target))
-                countryCodes.Add("IN");
 
             if (info.TryGetProperty("jobRequisitionLocation", out var reqLocation) &&
                 reqLocation.ValueKind == JsonValueKind.Object &&
@@ -534,6 +547,15 @@ public sealed partial class WorkdayJobSourceProvider(
                 {
                     countryCodes.Add("IN");
                 }
+            }
+
+            if (IsAccentureIndiaSource(target))
+            {
+                // The verified listing facet proves India eligibility when detail
+                // geography is absent. Explicit contradictory geography must fail closed.
+                if (countryCodes.Any(code => code.Trim().ToUpperInvariant() is not ("IN" or "IND" or "INDIA")))
+                    return null;
+                countryCodes.Add("IN");
             }
 
             var timeType = GetString(info, "timeType")?.Trim();
@@ -686,6 +708,64 @@ public sealed partial class WorkdayJobSourceProvider(
     }
 
     private async Task<JsonResponse> SendAsync(
+        HttpClient client, HttpRequestMessage request, Guid sourceId, string stage,
+        int offset, CancellationToken cancellationToken)
+    {
+        // Recreate the public, read-only CXS search POST as well as GET requests.
+        // A retry never reuses a previously sent HttpRequestMessage.
+        var content = request.Content is null ? null : await request.Content.ReadAsByteArrayAsync(cancellationToken);
+        var rateLimitKey = "Workday:" + request.RequestUri!.Host;
+        for (var attempt = 1; ; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var deferred = workdayRetryState.Remaining(rateLimitKey, Clock.GetUtcNow());
+            if (deferred > TimeSpan.FromSeconds(30))
+                throw new HttpRequestException("Workday host remains rate limited.", null, HttpStatusCode.TooManyRequests);
+            if (deferred > TimeSpan.Zero) await Task.Delay(deferred, Clock, cancellationToken);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(Settings.RequestTimeoutSeconds), Clock);
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
+            using var copy = new HttpRequestMessage(request.Method, request.RequestUri);
+            foreach (var header in request.Headers) copy.Headers.TryAddWithoutValidation(header.Key, header.Value);
+            if (content is not null)
+            {
+                copy.Content = new ByteArrayContent(content);
+                foreach (var header in request.Content!.Headers) copy.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
+            }
+            var delay = TimeSpan.FromMilliseconds(Math.Pow(2, attempt - 1) * 1000 + Random.Shared.Next(0, 251));
+            try
+            {
+                return await SendAttemptAsync(client, copy, sourceId, stage, offset, linked.Token);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                if (logger is not null) LogSourceFailure(logger, sourceId, stage, offset, "CallerOrRunBudgetCancelled", null);
+                throw;
+            }
+            catch (OperationCanceledException)
+            {
+                if (logger is not null) LogSourceFailure(logger, sourceId, stage, offset, "RequestTimeout", null);
+                if (attempt >= Settings.MaximumAttempts) throw new TimeoutException("Workday request attempts timed out.");
+            }
+            catch (HttpRequestException exception) when (exception.StatusCode is null or HttpStatusCode.TooManyRequests or
+                HttpStatusCode.InternalServerError or HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable or HttpStatusCode.GatewayTimeout)
+            {
+                if (exception.Data["RetryAfter"] is TimeSpan retryAfter)
+                {
+                    if (exception.StatusCode == HttpStatusCode.TooManyRequests && retryAfter > TimeSpan.Zero)
+                        workdayRetryState.Defer(rateLimitKey, Clock.GetUtcNow() + retryAfter);
+                    // Never retry earlier than Retry-After. Long throttles fail this detail closed
+                    // instead of tying up a worker; the next cooled-down run can safely replay it.
+                    if (retryAfter > TimeSpan.FromSeconds(30)) throw;
+                    if (retryAfter > delay) delay = retryAfter;
+                }
+                if (attempt >= Settings.MaximumAttempts) throw;
+            }
+            if (logger is not null) LogSourceFailure(logger, sourceId, stage, offset, "TransientRetry", null);
+            await Task.Delay(delay, Clock, cancellationToken);
+        }
+    }
+
+    private async Task<JsonResponse> SendAttemptAsync(
         HttpClient client,
         HttpRequestMessage request,
         Guid sourceId,
@@ -703,6 +783,14 @@ public sealed partial class WorkdayJobSourceProvider(
                 cancellationToken);
 
             status = (int)response.StatusCode;
+            if (!response.IsSuccessStatusCode)
+            {
+                var failure = new HttpRequestException("Workday returned an unsuccessful HTTP status.", null, response.StatusCode);
+                var retryAfter = response.Headers.RetryAfter;
+                if (retryAfter is not null)
+                    failure.Data["RetryAfter"] = retryAfter.Delta ?? (retryAfter.Date!.Value - Clock.GetUtcNow());
+                throw failure;
+            }
             response.EnsureSuccessStatusCode();
 
             var mediaType = response.Content.Headers.ContentType?.MediaType;

@@ -68,6 +68,7 @@ public static class ServiceCollectionExtensions
             .Bind(configuration.GetSection(JobAggregationOptions.SectionName))
             .Validate(options => options.GreenhouseDetailConcurrency is >= 1 and <= 4,
                 "Greenhouse detail concurrency must be between 1 and 4.")
+            .Validate(options => options.Workday is not null && options.Workday.IsValid(), "Invalid bounded Workday fetch settings.")
             .Validate(options => options.Scheduler is
             {
                 PollIntervalSeconds: >= 10 and <= 3600, BatchSize: >= 1 and <= 100, MaxConcurrentSources: >= 1 and <= 10,
@@ -113,8 +114,7 @@ public static class ServiceCollectionExtensions
             client.DefaultRequestHeaders.UserAgent.ParseAdd("CareerHarborJobAggregation/1.0 (+https://careerharbor.in)");
             client.DefaultRequestHeaders.Accept.ParseAdd("application/json");
             client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("en-US");
-        }).ConfigurePrimaryHttpMessageHandler(SuccessFactorsHttpTransport.CreateHandler)
-            .AddHttpMessageHandler<AggregationHttpRetryHandler>();
+        }).ConfigurePrimaryHttpMessageHandler(SuccessFactorsHttpTransport.CreateHandler);
         services.AddScoped<IExternalJobProvider, WorkdayJobSourceProvider>();
 
         services.Configure<AiExtractionOptions>(configuration.GetSection(AiExtractionOptions.SectionName));

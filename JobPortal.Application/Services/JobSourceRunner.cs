@@ -139,53 +139,27 @@ public sealed partial class JobSourceRunner(
         var previousError = source.LastError;
         var runTimer = System.Diagnostics.Stopwatch.StartNew();
         var processed = 0;
+        var partialResult = new JobSourceRunResult { JobSourceId = source.Id };
 
         try
         {
             publicationPolicy?.ApplyLicensedLogo(source);
             ExternalJobSourceSnapshot? snapshot = null;
-            IReadOnlyCollection<RawExternalJob> rawJobs;
-            IReadOnlyCollection<RawExternalJob> observedJobs;
-            if (provider is ICompleteExternalJobProvider completeProvider)
-            {
-                snapshot = await completeProvider.FetchSnapshotAsync(source, cancellationToken);
-                // Import eligibility is not evidence that a vacancy disappeared. Preserve all
-                // validated provider identities before geographic filtering for reconciliation.
-                observedJobs = snapshot.Jobs;
-                if (publicationPolicy is not null) snapshot = publicationPolicy.Select(source, snapshot);
-                rawJobs = snapshot.Jobs.Select(x => x with
-                {
-                    CompanyId = source.CompanyId,
-                    JobSourceId = string.IsNullOrWhiteSpace(x.ExternalId) ? null : source.Id
-                }).ToArray();
-            }
-            else
-            {
-                rawJobs = await provider.FetchJobsAsync(source, cancellationToken);
-                observedJobs = rawJobs;
-            }
-            if (_logger is not null) Progress(_logger, source.Id, "Provider fetch completed", rawJobs.Count, runTimer.Elapsed.TotalMilliseconds, null);
-            runProgress?.Report(new("DbPreload", 0, new JobSourceRunResult
-            { JobSourceId = source.Id, TotalReceived = rawJobs.Count + (snapshot?.Skipped ?? 0) }));
+            var rawJobs = new List<RawExternalJob>();
+            var observedJobs = new List<RawExternalJob>();
             var processingTimer = System.Diagnostics.Stopwatch.StartNew();
             var enrichmentMilliseconds = 0d;
             var ingestionMilliseconds = 0d;
+            var savedCalls = 0;
+            var saveMilliseconds = 0d;
+            var batchPrepared = false;
             (categoryResolver as IJobSourceCategoryRunCache)?.BeginRun();
-            if (_logger is not null) Progress(_logger, source.Id, "Enrichment and ingestion started", rawJobs.Count, 0, null);
-
-            // Prefetch canonical URL duplicates in one database round trip.
-            // PrepareRunAsync only reads raw ApplicationUrl values, so normalization,
-            // enrichment and category resolution remain isolated per provider item below.
-            var preloadTimer = System.Diagnostics.Stopwatch.StartNew();
-            if (ingestionService is IBulkJobIngestionService bulkIngestion)
-                await bulkIngestion.PrepareRunAsync(rawJobs, cancellationToken);
-            if (_logger is not null) Progress(_logger, source.Id, "DB preload completed", rawJobs.Count, preloadTimer.Elapsed.TotalMilliseconds, null);
 
             var created = 0;
             var updated = 0;
             var unchanged = 0;
             var matched = 0;
-            var skipped = snapshot?.Skipped ?? 0;
+            var skipped = 0;
             var failed = 0;
             var published = 0;
             var needsReview = 0;
@@ -195,138 +169,176 @@ public sealed partial class JobSourceRunner(
             var qualityReasons = new Dictionary<JobQualityReasonCode, int>();
             var reasonCounts = new Dictionary<JobIngestionReasonCode, int>();
 
-            void ReportProgress(string phase) => runProgress?.Report(new(phase, processed, new JobSourceRunResult
+            void ReportProgress(string phase)
             {
-                JobSourceId = source.Id, TotalReceived = rawJobs.Count + (snapshot?.Skipped ?? 0),
-                Created = created, Updated = updated, Unchanged = unchanged, Matched = matched,
-                Skipped = skipped, Failed = failed, Published = published, NeedsReview = needsReview,
-                QualityRejected = qualityRejected, PublishFailed = publishFailed, AutoPublishDisabled = disabled
-            }));
+                partialResult = new JobSourceRunResult
+                {
+                    JobSourceId = source.Id, TotalReceived = rawJobs.Count + (snapshot?.Skipped ?? 0),
+                    Created = created, Updated = updated, Unchanged = unchanged, Matched = matched,
+                    Skipped = skipped, Failed = failed, Published = published, NeedsReview = needsReview,
+                    QualityRejected = qualityRejected, PublishFailed = publishFailed, AutoPublishDisabled = disabled
+                };
+                runProgress?.Report(new(phase, processed, partialResult));
+            }
             ReportProgress("Ingestion");
 
-            foreach (var rawJob in rawJobs)
+            await foreach (var batch in FetchBatchesAsync(provider, source, cancellationToken))
             {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                var publicationAttempt = false;
-                try
+                observedJobs.AddRange(batch.Jobs);
+                var providerSkipped = (snapshot?.Skipped ?? 0) + batch.Skipped;
+                snapshot = provider is ICompleteExternalJobProvider ? new(observedJobs, providerSkipped, batch.IsComplete) : null;
+                // Apply the policy cumulatively: a configured 20-job cap must not
+                // become 20 jobs PER batch, and ambiguous geography stays incomplete.
+                var selected = snapshot is not null && publicationPolicy is not null
+                    ? publicationPolicy.Select(source, snapshot) : snapshot;
+                if (selected is not null) snapshot = selected;
+                var accepted = selected?.Jobs ?? observedJobs;
+                var newJobs = accepted.Skip(rawJobs.Count).Select(x => provider is ICompleteExternalJobProvider ? x with
                 {
-                    var enrichmentStart = System.Diagnostics.Stopwatch.GetTimestamp();
-                    RawExternalJob preparedJob;
+                    CompanyId = source.CompanyId,
+                    JobSourceId = string.IsNullOrWhiteSpace(x.ExternalId) ? null : source.Id
+                } : x).ToArray();
+                rawJobs.AddRange(newJobs);
+                if (_logger is not null) Progress(_logger, source.Id, "Eligible batch received", newJobs.Length, runTimer.Elapsed.TotalMilliseconds, null);
+                skipped += batch.Skipped;
+                ReportProgress("DbPreload");
+                if (newJobs.Length > 0 && ingestionService is IBulkJobIngestionService bulkIngestion)
+                {
+                    if (batchPrepared && bulkIngestion.RunMetrics is { } previousMetrics)
+                    {
+                        savedCalls += previousMetrics.SaveCalls;
+                        saveMilliseconds += previousMetrics.SaveMilliseconds;
+                    }
+                    var preloadTimer = System.Diagnostics.Stopwatch.StartNew();
+                    await bulkIngestion.PrepareRunAsync(newJobs, cancellationToken);
+                    batchPrepared = true;
+                    if (_logger is not null) Progress(_logger, source.Id, "DB batch preload completed", newJobs.Length, preloadTimer.Elapsed.TotalMilliseconds, null);
+                }
+
+                foreach (var rawJob in newJobs)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    var publicationAttempt = false;
                     try
                     {
-                        var normalized = normalizer.Normalize(rawJob);
-                        normalized = enricher?.Enrich(normalized) ?? normalized;
-                        var categoryId = await categoryResolver.ResolveCategoryIdAsync(source, normalized, cancellationToken);
-                        preparedJob = normalized with { CategoryId = categoryId };
-                    }
-                    finally { enrichmentMilliseconds += System.Diagnostics.Stopwatch.GetElapsedTime(enrichmentStart).TotalMilliseconds; }
+                        var enrichmentStart = System.Diagnostics.Stopwatch.GetTimestamp();
+                        RawExternalJob preparedJob;
+                        try
+                        {
+                            var normalized = normalizer.Normalize(rawJob);
+                            normalized = enricher?.Enrich(normalized) ?? normalized;
+                            var categoryId = await categoryResolver.ResolveCategoryIdAsync(source, normalized, cancellationToken);
+                            preparedJob = normalized with { CategoryId = categoryId };
+                        }
+                        finally { enrichmentMilliseconds += System.Diagnostics.Stopwatch.GetElapsedTime(enrichmentStart).TotalMilliseconds; }
 
-                    var ingestionStart = System.Diagnostics.Stopwatch.GetTimestamp();
-                    JobIngestionResult result;
-                    try { result = await ingestionService.IngestAsync(preparedJob, cancellationToken); }
-                    finally { ingestionMilliseconds += System.Diagnostics.Stopwatch.GetElapsedTime(ingestionStart).TotalMilliseconds; }
+                        var ingestionStart = System.Diagnostics.Stopwatch.GetTimestamp();
+                        JobIngestionResult result;
+                        try { result = await ingestionService.IngestAsync(preparedJob, cancellationToken); }
+                        finally { ingestionMilliseconds += System.Diagnostics.Stopwatch.GetElapsedTime(ingestionStart).TotalMilliseconds; }
 
-                    switch (result.Outcome)
-                    {
-                        case JobIngestionOutcome.Created:
-                            created++;
+                        switch (result.Outcome)
+                        {
+                            case JobIngestionOutcome.Created:
+                                created++;
 
-                            // Only newly created aggregated jobs are considered.
-                            // Existing duplicates must never be republished here.
-                            if (result.JobId.HasValue &&
-                                autoPublishService is not null)
-                            {
-                                publicationAttempt = true;
-                                var publication = await autoPublishService.TryPublishAsync(
-                                    result.JobId.Value,
-                                    cancellationToken);
-                                switch (publication.Outcome)
+                                // Only newly created aggregated jobs are considered.
+                                // Existing duplicates must never be republished here.
+                                if (result.JobId.HasValue &&
+                                    autoPublishService is not null)
                                 {
-                                    case JobAutoPublishOutcome.Published: published++; break;
-                                    case JobAutoPublishOutcome.NeedsReview: needsReview++; break;
-                                    case JobAutoPublishOutcome.Rejected: qualityRejected++; break;
-                                    case JobAutoPublishOutcome.Disabled: disabled++; break;
-                                    case JobAutoPublishOutcome.JobNotFound:
-                                        publishFailed++;
-                                        failed++;
-                                        reasonCounts[JobIngestionReasonCode.AutoPublishFailed] =
-                                            reasonCounts.GetValueOrDefault(JobIngestionReasonCode.AutoPublishFailed) + 1;
-                                        break;
+                                    publicationAttempt = true;
+                                    var publication = await autoPublishService.TryPublishAsync(
+                                        result.JobId.Value,
+                                        cancellationToken);
+                                    switch (publication.Outcome)
+                                    {
+                                        case JobAutoPublishOutcome.Published: published++; break;
+                                        case JobAutoPublishOutcome.NeedsReview: needsReview++; break;
+                                        case JobAutoPublishOutcome.Rejected: qualityRejected++; break;
+                                        case JobAutoPublishOutcome.Disabled: disabled++; break;
+                                        case JobAutoPublishOutcome.JobNotFound:
+                                            publishFailed++;
+                                            failed++;
+                                            reasonCounts[JobIngestionReasonCode.AutoPublishFailed] =
+                                                reasonCounts.GetValueOrDefault(JobIngestionReasonCode.AutoPublishFailed) + 1;
+                                            break;
+                                    }
+                                    foreach (var reason in publication.Reasons.Distinct())
+                                        qualityReasons[reason] = qualityReasons.GetValueOrDefault(reason) + 1;
                                 }
-                                foreach (var reason in publication.Reasons.Distinct())
-                                    qualityReasons[reason] = qualityReasons.GetValueOrDefault(reason) + 1;
-                            }
 
-                            break;
+                                break;
 
-                        case JobIngestionOutcome.Updated:
-                            updated++;
-                            break;
+                            case JobIngestionOutcome.Updated:
+                                updated++;
+                                break;
 
-                        case JobIngestionOutcome.Unchanged:
-                            unchanged++;
-                            break;
+                            case JobIngestionOutcome.Unchanged:
+                                unchanged++;
+                                break;
 
-                        case JobIngestionOutcome.MatchedByUrl:
-                        case JobIngestionOutcome.MatchedByFingerprint:
-                        case JobIngestionOutcome.MatchedByFuzzy:
-                            matched++;
-                            break;
+                            case JobIngestionOutcome.MatchedByUrl:
+                            case JobIngestionOutcome.MatchedByFingerprint:
+                            case JobIngestionOutcome.MatchedByFuzzy:
+                                matched++;
+                                break;
 
-                        case JobIngestionOutcome.CompanyNotFound:
-                            skipped++;
-                            break;
+                            case JobIngestionOutcome.CompanyNotFound:
+                                skipped++;
+                                break;
 
-                        case JobIngestionOutcome.Invalid:
-                            skipped++;
-                            break;
+                            case JobIngestionOutcome.Invalid:
+                                skipped++;
+                                break;
 
-                        default:
-                            failed++;
-                            break;
+                            default:
+                                failed++;
+                                break;
+                        }
+
+                        // Tally the machine-readable reason for every item result.
+                        if (result.ReasonCode != JobIngestionReasonCode.None)
+                        {
+                            reasonCounts[result.ReasonCode] =
+                                reasonCounts.GetValueOrDefault(result.ReasonCode) + 1;
+                        }
                     }
-
-                    // Tally the machine-readable reason for every item result.
-                    if (result.ReasonCode != JobIngestionReasonCode.None)
+                    catch (OperationCanceledException)
+                        when (cancellationToken.IsCancellationRequested)
                     {
-                        reasonCounts[result.ReasonCode] =
-                            reasonCounts.GetValueOrDefault(result.ReasonCode) + 1;
+                        throw;
                     }
-                }
-                catch (OperationCanceledException)
-                    when (cancellationToken.IsCancellationRequested)
-                {
-                    throw;
-                }
-                catch
-                {
-                    // A malformed/problematic individual record must not
-                    // abort processing of the remaining provider records.
-                    // Raw exception text may contain URLs or credentials and is
-                    // therefore never persisted; only the structured reason tally
-                    // records the failure classification.
-                    unitOfWork.ResetAfterFailure();
-                    (ingestionService as IBulkJobIngestionService)?.ResetRunAfterFailure();
-                    failed++;
-                    if (publicationAttempt) publishFailed++;
-                    var failureReason = publicationAttempt
-                        ? JobIngestionReasonCode.AutoPublishFailed : JobIngestionReasonCode.PersistenceError;
-                    reasonCounts[failureReason] = reasonCounts.GetValueOrDefault(failureReason) + 1;
-                    if (_logger is not null)
+                    catch
                     {
-                        ItemFailed(_logger, source.Id, null);
+                        // A malformed/problematic individual record must not
+                        // abort processing of the remaining provider records.
+                        // Raw exception text may contain URLs or credentials and is
+                        // therefore never persisted; only the structured reason tally
+                        // records the failure classification.
+                        unitOfWork.ResetAfterFailure();
+                        (ingestionService as IBulkJobIngestionService)?.ResetRunAfterFailure();
+                        failed++;
+                        if (publicationAttempt) publishFailed++;
+                        var failureReason = publicationAttempt
+                            ? JobIngestionReasonCode.AutoPublishFailed : JobIngestionReasonCode.PersistenceError;
+                        reasonCounts[failureReason] = reasonCounts.GetValueOrDefault(failureReason) + 1;
+                        if (_logger is not null)
+                        {
+                            ItemFailed(_logger, source.Id, null);
+                        }
+                    }
+                    finally
+                    {
+                        processed++;
+                        ReportProgress("Ingestion");
+                        if (_logger is not null && processed % 25 == 0)
+                            Progress(_logger, source.Id, "Enrichment and ingestion progress", processed, processingTimer.Elapsed.TotalMilliseconds, null);
                     }
                 }
-                finally
-                {
-                    processed++;
-                    ReportProgress("Ingestion");
-                    if (_logger is not null && processed % 25 == 0)
-                        Progress(_logger, source.Id, "Enrichment and ingestion progress", processed, processingTimer.Elapsed.TotalMilliseconds, null);
-                }
+
             }
-
             cancellationToken.ThrowIfCancellationRequested();
             var closed = 0;
             ReportProgress("Reconciliation");
@@ -337,6 +349,8 @@ public sealed partial class JobSourceRunner(
             var hasCompleteIdentities = externalIdsForReconciliation.Length == observedJobs.Count &&
                 externalIdsForReconciliation.Distinct(StringComparer.Ordinal).Count() == observedJobs.Count;
             var canReconcile = snapshot is { IsComplete: true, Skipped: 0 } && hasCompleteIdentities && skipped == 0 && failed == 0;
+            if (_logger is not null) Progress(_logger, source.Id, canReconcile ? "Reconciliation allowed" : "Reconciliation blocked: incomplete or unsafe snapshot",
+                observedJobs.Count, runTimer.Elapsed.TotalMilliseconds, null);
             var reconciliationTimer = System.Diagnostics.Stopwatch.StartNew();
             if (canReconcile && _jobRepository is not null)
             {
@@ -352,7 +366,7 @@ public sealed partial class JobSourceRunner(
                 Progress(_logger, source.Id, "Enrichment completed", processed, enrichmentMilliseconds, null);
                 Progress(_logger, source.Id, "Insert/update processing completed (includes saves)", processed, ingestionMilliseconds, null);
                 if ((ingestionService as IBulkJobIngestionService)?.RunMetrics is { } metrics)
-                    Progress(_logger, source.Id, "Item SaveChanges attempts", metrics.SaveCalls, metrics.SaveMilliseconds, null);
+                    Progress(_logger, source.Id, "Item SaveChanges attempts", savedCalls + metrics.SaveCalls, saveMilliseconds + metrics.SaveMilliseconds, null);
                 Progress(_logger, source.Id, "Reconciliation completed", closed, reconciliationTimer.Elapsed.TotalMilliseconds, null);
             }
 
@@ -461,12 +475,7 @@ public sealed partial class JobSourceRunner(
             sources.Update(source);
             await unitOfWork.SaveChangesAsync(cancellationToken);
 
-            return new JobSourceRunResult
-            {
-                JobSourceId = source.Id,
-                Succeeded = false,
-                Error = source.LastError
-            };
+            return partialResult with { Succeeded = false, Error = source.LastError };
         }
         finally
         {
@@ -474,5 +483,19 @@ public sealed partial class JobSourceRunner(
             if (ingestionService is IBulkJobIngestionService bulk) await bulk.CompleteRunAsync();
             if (_logger is not null) Progress(_logger, source.Id, "Total duration (including cleanup)", 0, runTimer.Elapsed.TotalMilliseconds, null);
         }
+    }
+
+    private static async IAsyncEnumerable<ExternalJobSourceSnapshot> FetchBatchesAsync(
+        IExternalJobProvider provider, JobPortal.Domain.Entities.JobSource source,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        if (provider is IBatchedExternalJobProvider batched)
+        {
+            await foreach (var batch in batched.FetchBatchesAsync(source, cancellationToken)) yield return batch;
+        }
+        else if (provider is ICompleteExternalJobProvider complete)
+            yield return await complete.FetchSnapshotAsync(source, cancellationToken);
+        else
+            yield return new(await provider.FetchJobsAsync(source, cancellationToken), 0, false);
     }
 }

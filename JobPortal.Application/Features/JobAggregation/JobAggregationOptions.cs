@@ -9,6 +9,8 @@ public sealed class JobAggregationOptions
 
     public int GreenhouseDetailConcurrency { get; set; } = 2;
 
+    public WorkdayFetchOptions Workday { get; set; } = new();
+
     // Optional legacy configuration key retained for geographic filters, test limits and licensed logos.
     // No entry or rights evidence is required to execute or publish a source. Defaults remain India-only.
     // Keys are persistent JobSource IDs, never guessed company/board names.
@@ -23,6 +25,19 @@ public sealed class JobAggregationOptions
         new(StringComparer.OrdinalIgnoreCase);
 
     public JobAggregationSchedulerOptions Scheduler { get; set; } = new();
+}
+
+public sealed class WorkdayFetchOptions
+{
+    public int BatchSize { get; set; } = 20;
+    public int DetailConcurrency { get; set; } = 4;
+    public int RequestTimeoutSeconds { get; set; } = 15;
+    public int RunBudgetSeconds { get; set; } = 1800;
+    public int MaximumAttempts { get; set; } = 3;
+    public int RequestSpacingMilliseconds { get; set; } = 250;
+    public bool IsValid() => BatchSize is >= 1 and <= 100 && DetailConcurrency is >= 1 and <= 4 &&
+        RequestTimeoutSeconds is >= 1 and <= 60 && RunBudgetSeconds is >= 1 and <= 7200 &&
+        MaximumAttempts is >= 1 and <= 5 && RequestSpacingMilliseconds is >= 250 and <= 5000;
 }
 
 public sealed class JobSourcePublicationApproval

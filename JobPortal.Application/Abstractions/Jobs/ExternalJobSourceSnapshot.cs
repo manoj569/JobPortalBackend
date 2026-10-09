@@ -18,3 +18,14 @@ public interface ICompleteExternalJobProvider : IExternalJobProvider
         JobSource source,
         CancellationToken cancellationToken = default);
 }
+
+/// <summary>
+/// Bounded batches with backpressure. Only the final batch may certify completeness
+/// of the entire enumeration; early disposal, cancellation or failure is incomplete.
+/// Jobs in earlier batches are durable replay checkpoints, not evidence of absence.
+/// </summary>
+public interface IBatchedExternalJobProvider : ICompleteExternalJobProvider
+{
+    IAsyncEnumerable<ExternalJobSourceSnapshot> FetchBatchesAsync(
+        JobSource source, CancellationToken cancellationToken = default);
+}

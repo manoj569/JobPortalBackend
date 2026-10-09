@@ -80,7 +80,8 @@ public sealed partial class JobSourceRunWorker(IServiceScopeFactory scopes, JobS
         }
         catch (OperationCanceledException) when (execution.IsCancellationRequested)
         {
-            Warning(logger, run.Id, run.JobSourceId, "worker_interrupted");
+            Warning(logger, run.Id, run.JobSourceId, stoppingToken.IsCancellationRequested
+                ? "host_shutdown_cancelled" : "heartbeat_or_lease_cancelled");
         }
         catch (Exception)
         {
