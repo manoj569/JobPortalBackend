@@ -160,19 +160,34 @@ public sealed partial class SuccessFactorsJobSourceProvider(
     {
         ArgumentNullException.ThrowIfNull(html);
         var totalMatch = ListingTotalRegex().Match(html);
-        var lastMatch = LastPageRegex().Match(html);
-        if (!totalMatch.Success || !lastMatch.Success ||
+        if (!totalMatch.Success ||
             !int.TryParse(totalMatch.Groups[1].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var first) ||
             !int.TryParse(totalMatch.Groups[2].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var last) ||
             !int.TryParse(totalMatch.Groups[3].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var total))
             throw InvalidDocument(FailureReason.ListingPaginationMetadataInvalid, "The SuccessFactors listing page did not contain valid pagination metadata.");
 
-        var prefix = boardUri.AbsolutePath.TrimEnd('/') + "/";
-        var boardRoot = new Uri(boardUri.AbsoluteUri.TrimEnd('/') + "/");
-        if (!Uri.TryCreate(boardRoot, WebUtility.HtmlDecode(lastMatch.Groups[3].Value), out var lastUri) ||
-            !SameOrigin(boardUri, lastUri) || !lastUri.AbsolutePath.StartsWith(prefix, StringComparison.Ordinal) ||
-            !int.TryParse(lastUri.AbsolutePath[prefix.Length..].TrimEnd('/'), NumberStyles.None, CultureInfo.InvariantCulture, out var lastOffset))
-            throw InvalidDocument(FailureReason.ListingLastPageLinkInvalid, "The SuccessFactors listing page did not contain a valid last-page link for this board.");
+        var calculatedLastOffset = total == 0 ? 0 : ((total - 1) / PageSize) * PageSize;
+        var lastOffset = 0;
+
+        // Single-page SuccessFactors boards may omit paginationItemLast entirely.
+        // Multi-page boards must still expose a validated last-page link so snapshot
+        // completeness remains fail-closed.
+        if (calculatedLastOffset > 0)
+        {
+            var lastMatch = LastPageRegex().Match(html);
+            if (!lastMatch.Success)
+                throw InvalidDocument(FailureReason.ListingPaginationMetadataInvalid, "The SuccessFactors listing page did not contain valid last-page pagination metadata.");
+
+            var prefix = boardUri.AbsolutePath.TrimEnd('/') + "/";
+            var boardRoot = new Uri(boardUri.AbsoluteUri.TrimEnd('/') + "/");
+            if (!Uri.TryCreate(boardRoot, WebUtility.HtmlDecode(lastMatch.Groups[3].Value), out var lastUri) ||
+                !SameOrigin(boardUri, lastUri) || !lastUri.AbsolutePath.StartsWith(prefix, StringComparison.Ordinal) ||
+                !int.TryParse(lastUri.AbsolutePath[prefix.Length..].TrimEnd('/'), NumberStyles.None, CultureInfo.InvariantCulture, out lastOffset))
+                throw InvalidDocument(FailureReason.ListingLastPageLinkInvalid, "The SuccessFactors listing page did not contain a valid last-page link for this board.");
+        }
+
+        if (lastOffset != calculatedLastOffset)
+            throw InvalidDocument(FailureReason.ListingLastOffsetMismatch, "The SuccessFactors listing last-page offset did not match the calculated result count.");
 
         var rows = ListingRowRegex().Matches(html).Select(x => x.Groups[2].Value).ToArray();
         var results = new List<ListingEntry>(rows.Length);
@@ -384,7 +399,7 @@ public sealed partial class SuccessFactorsJobSourceProvider(
     private static partial Regex JobLinkRegex();
     [GeneratedRegex("""(?is)<a\b(?=[^>]*\bclass\s*=\s*(['"])[^'"]*\bjobTitle-link\b[^'"]*\1)[^>]*\bhref\s*=\s*(['"])(.*?)\2[^>]*>(.*?)</a>""", RegexOptions.CultureInvariant)]
     private static partial Regex JobTitleRegex();
-    [GeneratedRegex(@"(?is)Results\s+(\d+)\s+to\s+(\d+)\s+of\s+(\d+)", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"(?is)Results\s+(\d+)\s+(?:to|[-–—])\s+(\d+)\s+of\s+(\d+)", RegexOptions.CultureInvariant)]
     private static partial Regex ListingTotalRegex();
     [GeneratedRegex("""(?is)<a\b(?=[^>]*\bclass\s*=\s*(['"])[^'"]*\bpaginationItemLast\b[^'"]*\1)[^>]*\bhref\s*=\s*(['"])(.*?)\2[^>]*>""", RegexOptions.CultureInvariant)]
     private static partial Regex LastPageRegex();
