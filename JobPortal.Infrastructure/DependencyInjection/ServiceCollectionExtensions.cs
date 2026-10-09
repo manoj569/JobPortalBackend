@@ -69,8 +69,10 @@ public static class ServiceCollectionExtensions
             .Validate(options => options.GreenhouseDetailConcurrency is >= 1 and <= 4,
                 "Greenhouse detail concurrency must be between 1 and 4.")
             .Validate(options => options.Scheduler is
-                { PollIntervalSeconds: >= 10 and <= 3600, BatchSize: >= 1 and <= 100, MaxConcurrentSources: >= 1 and <= 10,
-                  InterruptedRunCooldownMinutes: >= 1 and <= 10080 },
+            {
+                PollIntervalSeconds: >= 10 and <= 3600, BatchSize: >= 1 and <= 100, MaxConcurrentSources: >= 1 and <= 10,
+                InterruptedRunCooldownMinutes: >= 1 and <= 10080
+            },
                 "JobAggregation scheduler requires PollIntervalSeconds 10–3600, BatchSize 1–100, MaxConcurrentSources 1–10 and InterruptedRunCooldownMinutes 1–10080.")
             .ValidateOnStart();
         services.AddOptions<JobPortal.Application.Features.CareerGuidance.CareerGuidanceSchedulingOptions>()
@@ -105,6 +107,15 @@ public static class ServiceCollectionExtensions
         }).ConfigurePrimaryHttpMessageHandler(SuccessFactorsHttpTransport.CreateHandler)
             .AddHttpMessageHandler<AggregationHttpRetryHandler>();
         services.AddScoped<IExternalJobProvider, SuccessFactorsJobSourceProvider>();
+        services.AddHttpClient(WorkdayJobSourceProvider.HttpClientName, client =>
+        {
+            client.Timeout = Timeout.InfiniteTimeSpan;
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("CareerHarborJobAggregation/1.0 (+https://careerharbor.in)");
+            client.DefaultRequestHeaders.Accept.ParseAdd("application/json");
+            client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("en-US");
+        }).ConfigurePrimaryHttpMessageHandler(SuccessFactorsHttpTransport.CreateHandler)
+            .AddHttpMessageHandler<AggregationHttpRetryHandler>();
+        services.AddScoped<IExternalJobProvider, WorkdayJobSourceProvider>();
 
         services.Configure<AiExtractionOptions>(configuration.GetSection(AiExtractionOptions.SectionName));
         services.AddHttpClient(ClaudeJobUrlExtractionService.PageFetchClientName, client =>

@@ -19,6 +19,7 @@ public sealed class JobAggregationDependencyInjectionTests
 {
     [Theory]
     [InlineData(AtsType.SuccessFactors, typeof(SuccessFactorsJobSourceProvider))]
+    [InlineData(AtsType.Workday, typeof(WorkdayJobSourceProvider))]
     [InlineData(AtsType.Greenhouse, typeof(GreenhouseExternalJobProvider))]
     [InlineData(AtsType.Lever, typeof(LeverExternalJobProvider))]
     [InlineData(AtsType.Ashby, typeof(AshbyExternalJobProvider))]
@@ -47,6 +48,7 @@ public sealed class JobAggregationDependencyInjectionTests
             Assert.IsType(expectedProviderType, resolved);
         }
         Assert.Equal(4, (int)AtsType.SuccessFactors);
+        Assert.Equal(5, (int)AtsType.Workday);
     }
 
     [Fact]
@@ -117,7 +119,7 @@ public sealed class JobAggregationDependencyInjectionTests
             .GetServices<IExternalJobProvider>()
             .ToArray();
 
-        Assert.Equal(4, providers.Length);
+        Assert.Equal(5, providers.Length);
 
         Assert.Contains(
             providers,
@@ -131,7 +133,13 @@ public sealed class JobAggregationDependencyInjectionTests
             providers,
             x => x is AshbyExternalJobProvider);
 
-        Assert.Contains(providers, x => x is SuccessFactorsJobSourceProvider);
+        Assert.Contains(
+            providers,
+            x => x is SuccessFactorsJobSourceProvider);
+
+        Assert.Contains(
+            providers,
+            x => x is WorkdayJobSourceProvider);
 
         Assert.DoesNotContain(
             providers,
@@ -164,9 +172,33 @@ public sealed class JobAggregationDependencyInjectionTests
             new Uri("https://api.ashbyhq.com/"),
             ashby.BaseAddress);
 
-        using var deloitte = clients.CreateClient(SuccessFactorsJobSourceProvider.HttpClientName);
-        Assert.Contains("CareerHarborJobAggregation", deloitte.DefaultRequestHeaders.UserAgent.ToString(), StringComparison.Ordinal);
-        Assert.Contains("text/html", deloitte.DefaultRequestHeaders.Accept.ToString(), StringComparison.Ordinal);
+        using var successFactors =
+            clients.CreateClient(
+                SuccessFactorsJobSourceProvider.HttpClientName);
+
+        Assert.Contains(
+            "CareerHarborJobAggregation",
+            successFactors.DefaultRequestHeaders.UserAgent.ToString(),
+            StringComparison.Ordinal);
+
+        Assert.Contains(
+            "text/html",
+            successFactors.DefaultRequestHeaders.Accept.ToString(),
+            StringComparison.Ordinal);
+
+        using var workday =
+            clients.CreateClient(
+                WorkdayJobSourceProvider.HttpClientName);
+
+        Assert.Contains(
+            "CareerHarborJobAggregation",
+            workday.DefaultRequestHeaders.UserAgent.ToString(),
+            StringComparison.Ordinal);
+
+        Assert.Contains(
+            "application/json",
+            workday.DefaultRequestHeaders.Accept.ToString(),
+            StringComparison.Ordinal);
     }
 
     private static void AssertScoped<TService, TImplementation>(
