@@ -549,7 +549,8 @@ public sealed class CandidateService(
         var dashboardQuery = new DashboardQuery(query.PageNumber, query.PageSize);
         var result = await dashboard.GetSavedJobsAsync(userId, dashboardQuery, cancellationToken);
         return new(result.Items.Select(x => new CandidateSavedJobResponse(
-            x.SavedJobId, x.SavedAtUtc, x.Job.Id, x.Job.Title, x.Job.Slug, x.Job.CompanyName)).ToArray(),
+            x.SavedJobId, x.SavedAtUtc, x.Job.Id, x.Job.Title, x.Job.Slug, x.Job.CompanyName,
+            x.Job.CompanyId, x.Job.CompanyLogoUrl)).ToArray(),
             query.PageNumber, query.PageSize, result.TotalCount);
     }
 

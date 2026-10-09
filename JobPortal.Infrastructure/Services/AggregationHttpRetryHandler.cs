@@ -23,7 +23,7 @@ public sealed class AggregationHttpRetryHandler(TimeProvider clock, ILogger<Aggr
         if (request.Method != HttpMethod.Get) return await base.SendAsync(request, cancellationToken);
         var provider = request.RequestUri?.Host switch
         {
-            "boards-api.greenhouse.io" => "Greenhouse", "api.lever.co" => "Lever", "api.ashbyhq.com" => "Ashby",
+            "boards-api.greenhouse.io" => "Greenhouse", "api.lever.co" or "api.eu.lever.co" => "Lever", "api.ashbyhq.com" => "Ashby",
             "southasiacareers.deloitte.com" => "Deloitte", _ => "ATS"
         };
         var remaining = retryState.Remaining(provider, clock.GetUtcNow());
@@ -51,7 +51,7 @@ public sealed class AggregationHttpRetryHandler(TimeProvider clock, ILogger<Aggr
             {
                 response = await base.SendAsync(copy, linked.Token);
                 // Buffer within the per-attempt timeout, including stalled body reads.
-                await response.Content.LoadIntoBufferAsync(linked.Token);
+                await response.Content.LoadIntoBufferAsync(16 * 1024 * 1024, linked.Token);
                 status = (int)response.StatusCode;
                 if (response.StatusCode == HttpStatusCode.TooManyRequests) RateLimited(logger, provider, null);
                 if (response.StatusCode == HttpStatusCode.TooManyRequests && response.Headers.RetryAfter is not null)

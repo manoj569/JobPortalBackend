@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace JobPortal.Persistence.Repositories;
 
-public sealed class JobReferralRepository(JobPortalDbContext context) : IJobReferralRepository
+public sealed class JobReferralRepository(JobPortalDbContext context, TimeProvider? timeProvider = null) : IJobReferralRepository
 {
     public async Task<IReadOnlyDictionary<Guid, int>> AcceptedCountsAsync(IReadOnlyCollection<Guid> referralIds, CancellationToken ct) =>
         await context.ReferralRequests.IgnoreQueryFilters().AsNoTracking().Where(x => referralIds.Contains(x.JobReferralId) && x.AcceptedAtUtc != null)
@@ -30,7 +30,7 @@ public sealed class JobReferralRepository(JobPortalDbContext context) : IJobRefe
     {
         var query = WithIncludes()
             .Where(x => x.ApprovalStatus == JobReferralApprovalStatus.Pending)
-            .OrderBy(x => x.CreatedAtUtc);
+            .OrderBy(x => x.CreatedAtUtc).ThenBy(x => x.Id);
 
         var totalCount = await query.CountAsync(cancellationToken);
         var items = await query
@@ -44,6 +44,7 @@ public sealed class JobReferralRepository(JobPortalDbContext context) : IJobRefe
     public async Task<(IReadOnlyCollection<JobReferral> Items, int TotalCount)> GetApprovedAsync(
         int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
+        var utcNow = (timeProvider ?? TimeProvider.System).GetUtcNow().UtcDateTime;
         var query = WithIncludes()
             .AsNoTracking().AsSplitQuery()
             .Include(x => x.Job).ThenInclude(x => x.JobSkills).ThenInclude(x => x.Skill)
@@ -52,8 +53,10 @@ public sealed class JobReferralRepository(JobPortalDbContext context) : IJobRefe
             .Where(x => x.ApprovalStatus == JobReferralApprovalStatus.Approved &&
                 !x.ReferrerUser.IsDeleted && x.ReferrerUser.Status == UserStatus.Active &&
                 x.Job.Status == JobStatus.Published &&
+                !x.Job.Company.IsDeleted && !x.Job.Category.IsDeleted &&
+                x.Job.PublishedAtUtc.HasValue &&
                 !x.Job.IsHidden && !x.Job.IsDeleted &&
-                (!x.Job.ExpiresAtUtc.HasValue || x.Job.ExpiresAtUtc > DateTime.UtcNow))
+                (!x.Job.ExpiresAtUtc.HasValue || x.Job.ExpiresAtUtc > utcNow))
             .OrderByDescending(x => x.CreatedAtUtc).ThenBy(x => x.Id);
 
         var totalCount = await query.CountAsync(cancellationToken);
@@ -91,7 +94,7 @@ public sealed class JobReferralRepository(JobPortalDbContext context) : IJobRefe
             query = query.Where(x => x.ApprovalStatus == status.Value);
         }
 
-        query = query.OrderByDescending(x => x.CreatedAtUtc);
+        query = query.OrderByDescending(x => x.CreatedAtUtc).ThenBy(x => x.Id);
 
         var totalCount = await query.CountAsync(cancellationToken);
 

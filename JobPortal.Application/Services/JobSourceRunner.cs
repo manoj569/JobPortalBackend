@@ -16,7 +16,8 @@ public sealed partial class JobSourceRunner(
     IJobAutoPublishService? autoPublishService = null,
     IExternalJobMetadataEnricher? enricher = null,
     IJobRepository? jobRepository = null,
-    JobPortal.Application.Features.JobAggregation.IJobSourceRunProgress? runProgress = null) : IJobSourceRunner
+    JobPortal.Application.Features.JobAggregation.IJobSourceRunProgress? runProgress = null,
+    JobPortal.Application.Features.JobAggregation.IJobSourcePublicationPolicy? publicationPolicy = null) : IJobSourceRunner
 {
     private static readonly Action<ILogger, Guid, string, int, double, Exception?> Progress =
         LoggerMessage.Define<Guid, string, int, double>(LogLevel.Information, new EventId(4325, nameof(Progress)),
@@ -141,19 +142,28 @@ public sealed partial class JobSourceRunner(
 
         try
         {
+            publicationPolicy?.Validate(source);
+            publicationPolicy?.ApplyLicensedLogo(source);
             ExternalJobSourceSnapshot? snapshot = null;
             IReadOnlyCollection<RawExternalJob> rawJobs;
+            IReadOnlyCollection<RawExternalJob> observedJobs;
             if (provider is ICompleteExternalJobProvider completeProvider)
             {
                 snapshot = await completeProvider.FetchSnapshotAsync(source, cancellationToken);
+                // Import eligibility is not evidence that a vacancy disappeared. Preserve all
+                // validated provider identities before geographic filtering for reconciliation.
+                observedJobs = snapshot.Jobs;
+                if (publicationPolicy is not null) snapshot = publicationPolicy.Select(source, snapshot);
                 rawJobs = snapshot.Jobs.Select(x => x with
                 {
+                    CompanyId = source.CompanyId,
                     JobSourceId = string.IsNullOrWhiteSpace(x.ExternalId) ? null : source.Id
                 }).ToArray();
             }
             else
             {
                 rawJobs = await provider.FetchJobsAsync(source, cancellationToken);
+                observedJobs = rawJobs;
             }
             if (_logger is not null) Progress(_logger, source.Id, "Provider fetch completed", rawJobs.Count, runTimer.Elapsed.TotalMilliseconds, null);
             runProgress?.Report(new("DbPreload", 0, new JobSourceRunResult
@@ -198,6 +208,8 @@ public sealed partial class JobSourceRunner(
             foreach (var rawJob in rawJobs)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                // Long fetch/import runs must not outlive their publication permission.
+                publicationPolicy?.Validate(source);
 
                 var publicationAttempt = false;
                 try
@@ -321,12 +333,13 @@ public sealed partial class JobSourceRunner(
             cancellationToken.ThrowIfCancellationRequested();
             var closed = 0;
             ReportProgress("Reconciliation");
-            var externalIdsForReconciliation = rawJobs.Select(x => x.ExternalId)
+            publicationPolicy?.Validate(source);
+            var externalIdsForReconciliation = observedJobs.Select(x => x.ExternalId)
                 .Where(x => !string.IsNullOrWhiteSpace(x))
                 .Select(x => x!.Trim())
                 .ToArray();
-            var hasCompleteIdentities = externalIdsForReconciliation.Length == rawJobs.Count &&
-                externalIdsForReconciliation.Distinct(StringComparer.Ordinal).Count() == rawJobs.Count;
+            var hasCompleteIdentities = externalIdsForReconciliation.Length == observedJobs.Count &&
+                externalIdsForReconciliation.Distinct(StringComparer.Ordinal).Count() == observedJobs.Count;
             var canReconcile = snapshot is { IsComplete: true, Skipped: 0 } && hasCompleteIdentities && skipped == 0 && failed == 0;
             var reconciliationTimer = System.Diagnostics.Stopwatch.StartNew();
             if (canReconcile && _jobRepository is not null)
@@ -357,6 +370,7 @@ public sealed partial class JobSourceRunner(
             source.ConsecutiveFailures = successful ? 0 : previousFailures + 1;
 
             sources.Update(source);
+            publicationPolicy?.Validate(source);
             await unitOfWork.SaveChangesAsync(cancellationToken);
 
             // Provider-wide fetch failures never reach this per-item tally, but

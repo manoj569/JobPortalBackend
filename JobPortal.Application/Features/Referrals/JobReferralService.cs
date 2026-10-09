@@ -232,6 +232,8 @@ public sealed class JobReferralService(
     {
         pageNumber = Math.Max(1, pageNumber);
         pageSize = Math.Clamp(pageSize, 1, 50);
+        if ((long)(pageNumber - 1) * pageSize > int.MaxValue)
+            throw new BadRequestException("The requested page is outside the supported range.", "validation_error");
 
         var (items, totalCount) = await referrals.GetByReferrerAsync(
             referrerUserId,

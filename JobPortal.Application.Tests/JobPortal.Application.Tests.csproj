@@ -16,6 +16,9 @@
     </PackageReference>
   </ItemGroup>
   <ItemGroup>
+    <None Update="Fixtures\PublicAts\*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\JobPortal.Maintenance\JobPortal.Maintenance.csproj" />
     <ProjectReference Include="..\JobPortal.API\JobPortal.API.csproj" />
     <ProjectReference Include="..\JobPortal.Application\JobPortal.Application.csproj" />

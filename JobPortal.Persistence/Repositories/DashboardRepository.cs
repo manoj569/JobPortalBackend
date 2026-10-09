@@ -20,6 +20,7 @@ public sealed class DashboardRepository(
         var utcNow = timeProvider.GetUtcNow().UtcDateTime;
         var source = context.SavedJobs.AsNoTracking().Where(x => x.UserId == userId &&
             x.Job.Status == JobStatus.Published && !x.Job.IsHidden && !x.Job.IsDeleted &&
+            !x.Job.Company.IsDeleted && !x.Job.Category.IsDeleted &&
             x.Job.PublishedAtUtc.HasValue &&
             (!x.Job.ExpiresAtUtc.HasValue || x.Job.ExpiresAtUtc > utcNow));
         var count = await source.CountAsync(cancellationToken);
@@ -35,6 +36,7 @@ public sealed class DashboardRepository(
         var utcNow = timeProvider.GetUtcNow().UtcDateTime;
         return context.Jobs.AsNoTracking().AnyAsync(x => x.Id == jobId &&
             x.Status == JobStatus.Published && !x.IsHidden && !x.IsDeleted &&
+            !x.Company.IsDeleted && !x.Category.IsDeleted &&
             x.PublishedAtUtc.HasValue &&
             (!x.ExpiresAtUtc.HasValue || x.ExpiresAtUtc > utcNow), cancellationToken);
     }

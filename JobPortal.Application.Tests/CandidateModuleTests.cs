@@ -1166,6 +1166,32 @@ public sealed class CandidateModuleTests
         Assert.Empty(recommended.Items);
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("https://assets.example.test/licensed-logo.png")]
+    public async Task SavedJobsPreserveSharedCompanyIdentityAndNullableLogo(string? logo)
+    {
+        var f = CreateFixture();
+        f.Job.Company.LogoUrl = logo;
+        f.Job.Category = new Category { Name = "Engineering" };
+        f.Job.PublishedAtUtc = Now;
+        var saved = new SavedJob { UserId = f.Candidate.Id, JobId = f.Job.Id, Job = f.Job };
+        f.Dashboard.SavedItems = [DashboardProjections.SavedJob.Compile()(saved)];
+        var page = await f.Service.GetSavedJobsAsync(f.Candidate.Id, new());
+        var dto = Assert.Single(page.Items);
+        Assert.Equal(f.Job.CompanyId, dto.CompanyId);
+        Assert.Equal(f.Job.Company.Name, dto.CompanyName);
+        Assert.Equal(logo, dto.CompanyLogoUrl);
+        Assert.Equal(f.Candidate.Id, f.Dashboard.SavedForUserId);
+        Assert.Equal(saved.Id, dto.SavedJobId);
+        Assert.Equal(f.Job.Id, dto.JobId);
+        Assert.Equal(1, page.TotalCount);
+        var json = JsonSerializer.Serialize(dto, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Assert.Contains("\"companyId\":", json);
+        Assert.Contains("\"companyLogoUrl\":", json);
+        await Assert.ThrowsAsync<UnauthorizedException>(() => f.Service.GetSavedJobsAsync(Guid.NewGuid(), new()));
+    }
+
     private static Fixture CreateFixture(DateTime? nowUtc = null, IMembershipRepository? membershipOverride = null)
     {
         var candidate = new User
@@ -1364,6 +1390,8 @@ public sealed class CandidateModuleTests
 
     private sealed class FakeDashboardRepository : IDashboardRepository
     {
+        public IReadOnlyCollection<SavedJobResponse> SavedItems { get; set; } = [];
+        public Guid? SavedForUserId { get; private set; }
         public bool JobAvailable { get; set; } = true;
         public bool AlreadySaved { get; set; }
         public List<SavedJob> Added { get; } = [];
@@ -1371,8 +1399,11 @@ public sealed class CandidateModuleTests
         public Task<User?> GetUserAsync(Guid userId, CancellationToken cancellationToken = default) =>
             Task.FromResult<User?>(null);
         public Task<(IReadOnlyCollection<SavedJobResponse> Items, int TotalCount)> GetSavedJobsAsync(
-            Guid userId, DashboardQuery query, CancellationToken cancellationToken = default) =>
-            Task.FromResult(((IReadOnlyCollection<SavedJobResponse>)[], 0));
+            Guid userId, DashboardQuery query, CancellationToken cancellationToken = default)
+        {
+            SavedForUserId = userId;
+            return Task.FromResult((SavedItems, SavedItems.Count));
+        }
         public Task<bool> IsAvailableJobAsync(Guid jobId, CancellationToken cancellationToken = default) =>
             Task.FromResult(JobAvailable);
         public Task<bool> IsJobSavedAsync(

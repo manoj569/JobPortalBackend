@@ -9,6 +9,11 @@ public sealed class JobAggregationOptions
 
     public int GreenhouseDetailConcurrency { get; set; } = 2;
 
+    // No public feed is licensed merely because it can be read without authentication.
+    // Keys are persistent JobSource IDs, never guessed company/board names.
+    public Dictionary<string, JobSourcePublicationApproval> SourceApprovals { get; set; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
     // String values deliberately allow invalid operator input to fail closed.
     public Dictionary<string, string?> SourceCategories { get; set; } =
         new(StringComparer.OrdinalIgnoreCase);
@@ -17,6 +22,24 @@ public sealed class JobAggregationOptions
         new(StringComparer.OrdinalIgnoreCase);
 
     public JobAggregationSchedulerOptions Scheduler { get; set; } = new();
+}
+
+public sealed class JobSourcePublicationApproval
+{
+    public Guid CompanyId { get; set; }
+    public JobPortal.Domain.Enums.AtsType AtsType { get; set; }
+    public string AtsIdentifier { get; set; } = string.Empty;
+    public string CareerPageUrl { get; set; } = string.Empty;
+    public string RightsEvidence { get; set; } = string.Empty;
+    public DateTimeOffset RightsExpireAtUtc { get; set; }
+    public bool IndiaOnly { get; set; } = true;
+    // Exact provider location labels whose Indian geography was independently verified by the operator.
+    public string[] VerifiedIndiaLocations { get; set; } = [];
+    public bool AllowExplicitWorldwideRemote { get; set; }
+    // Zero = normal scan. Any positive limit ALWAYS means an incomplete validation run.
+    public int TestImportLimit { get; set; }
+    public string? LogoUrl { get; set; }
+    public string? LogoRightsEvidence { get; set; }
 }
 
 public sealed class JobAggregationSchedulerOptions

@@ -6,6 +6,7 @@ using JobPortal.Application.Abstractions.Jobs;
 using JobPortal.Application.Abstractions.Persistence;
 using JobPortal.Application.Common.Exceptions;
 using JobPortal.Application.Common.Text;
+using JobPortal.Application.Features.JobAggregation;
 using JobPortal.Domain.Entities;
 using JobPortal.Domain.Enums;
 using JobPortal.Shared.Models;
@@ -22,8 +23,12 @@ public sealed class JobService(
     IValidator<JobSearchQuery> searchValidator,
     TimeProvider timeProvider,
     ICompanyManagementRepository? companies = null,
-    ICategoryManagementRepository? categories = null) : IJobService
+    ICategoryManagementRepository? categories = null,
+    IJobSourceRepository? sources = null,
+    IJobSourcePublicationPolicy? publicationPolicy = null) : IJobService
 {
+    private readonly Dictionary<Guid, JobSource> publicationSources = [];
+
     public async Task<ComposeJobResponse> ComposeAsync(Guid administratorUserId, ComposeJobRequest request,
         CancellationToken cancellationToken = default)
     {
@@ -272,6 +277,8 @@ public sealed class JobService(
                 "A published job must have an expiration date in the future.");
         job.Apply(request);
         job.Slug = $"{Slugify(request.Title)}-{job.Id.ToString("N")[..8]}";
+        if (job.Status == JobStatus.Published && !job.IsHidden)
+            await ValidateSourcePublicationAsync(job, cancellationToken);
         jobs.Update(job);
         await auditWriter.AppendAsync(new(
             AuditAction.Update,
@@ -319,6 +326,7 @@ public sealed class JobService(
             throw new BadRequestException(
                 "A job must have an expiration date in the future before it can be published.");
 
+        await ValidateSourcePublicationAsync(job, cancellationToken);
         job.Status = JobStatus.Published;
         job.PublishedAtUtc = UtcNow;
         job.IsFeatured = false;
@@ -465,6 +473,9 @@ public sealed class JobService(
         AuditAction? auditAction,
         CancellationToken cancellationToken)
     {
+        if (job.Status == JobStatus.Published && !job.IsHidden &&
+            auditAction is null or AuditAction.Publish or AuditAction.Feature)
+            await ValidateSourcePublicationAsync(job, cancellationToken);
         jobs.Update(job);
         if (auditAction.HasValue)
         {
@@ -485,6 +496,23 @@ public sealed class JobService(
     private async Task<Job> RequiredJobAsync(Guid id, bool includeDeleted, CancellationToken cancellationToken) =>
         await jobs.GetByIdAsync(id, includeDeleted, cancellationToken)
         ?? throw new NotFoundException($"Job '{id}' was not found.");
+
+    private async Task ValidateSourcePublicationAsync(Job job, CancellationToken cancellationToken)
+    {
+        if (job.JobSourceId is not { } sourceId) return; // Manual/referral jobs retain their existing rules.
+        if (publicationPolicy is null || sources is null)
+            throw new BadRequestException("Job source publication approval is unavailable.", "job_source_publication_not_approved");
+        if (!publicationSources.TryGetValue(sourceId, out var source))
+        {
+            source = await sources.GetByIdAsync(sourceId, cancellationToken)
+                ?? throw new BadRequestException("Job source publication approval is unavailable.", "job_source_publication_not_approved");
+            publicationSources.Add(sourceId, source);
+        }
+        if (source.IsDeleted || !source.IsActive || source.CompanyId != job.CompanyId)
+            throw new BadRequestException("Job source publication approval does not match this job.", "job_source_publication_not_approved");
+        // Cache only source metadata for this scoped service, never the time-sensitive approval decision.
+        publicationPolicy.Validate(source);
+    }
 
     private async Task ValidateReferencesAsync(Guid companyId, Guid categoryId, CancellationToken cancellationToken)
     {

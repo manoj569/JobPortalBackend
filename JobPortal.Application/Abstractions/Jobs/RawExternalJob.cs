@@ -6,7 +6,11 @@ public sealed record RawExternalJob
 {
     public string Title { get; init; } = string.Empty;
     public string CompanyName { get; init; } = string.Empty;
+    public Guid? CompanyId { get; init; }
     public string? Location { get; init; }
+    // Provider facts used for eligibility; not inferred from "remote" alone.
+    public IReadOnlyCollection<string> AdditionalLocations { get; init; } = [];
+    public IReadOnlyCollection<string> CountryCodes { get; init; } = [];
     public string? Description { get; init; }
     public string? Requirements { get; init; }
     public string? Responsibilities { get; init; }

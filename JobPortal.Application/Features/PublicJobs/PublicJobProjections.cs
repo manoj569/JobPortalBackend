@@ -1,5 +1,6 @@
 using System.Linq.Expressions;
 using JobPortal.Domain.Entities;
+using JobPortal.Domain.Enums;
 
 namespace JobPortal.Application.Features.PublicJobs;
 
@@ -17,9 +18,13 @@ public static class PublicJobProjections
             job.InternshipDurationMonths, job.IsFlexibleDuration,
             job.Department, job.RoleCategory, job.EducationRequirement,
             job.PostedByType, job.Company.CompanyType, job.Company.Industry,
-            job.Referral != null,
-            job.Referral == null ? null : job.Referral.Id,
-            job.Referral == null ? null : (job.Referral.ReferrerUser.FirstName + " " + job.Referral.ReferrerUser.LastName).Trim(),
-            job.Referral == null ? null : job.Referral.ReviewedAtUtc,
+            job.Referral != null && job.Referral.ApprovalStatus == JobReferralApprovalStatus.Approved &&
+                !job.Referral.ReferrerUser.IsDeleted && job.Referral.ReferrerUser.Status == UserStatus.Active,
+            job.Referral != null && job.Referral.ApprovalStatus == JobReferralApprovalStatus.Approved &&
+                !job.Referral.ReferrerUser.IsDeleted && job.Referral.ReferrerUser.Status == UserStatus.Active ? job.Referral.Id : null,
+            job.Referral != null && job.Referral.ApprovalStatus == JobReferralApprovalStatus.Approved &&
+                !job.Referral.ReferrerUser.IsDeleted && job.Referral.ReferrerUser.Status == UserStatus.Active ? "Employee Referrer" : null,
+            job.Referral != null && job.Referral.ApprovalStatus == JobReferralApprovalStatus.Approved &&
+                !job.Referral.ReferrerUser.IsDeleted && job.Referral.ReferrerUser.Status == UserStatus.Active ? job.Referral.ReviewedAtUtc : null,
             null, null, null);
 }

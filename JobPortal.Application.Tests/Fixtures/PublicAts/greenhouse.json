@@ -1,0 +1,7 @@
+{
+  "meta": { "total": 2 },
+  "jobs": [
+    { "id": 1001, "title": "Backend Engineer", "location": { "name": "Bengaluru, India" }, "content": "<p>Build C# APIs.</p><script>unsafe()</script>", "absolute_url": "https://job-boards.greenhouse.io/acme/jobs/1001", "updated_at": "2026-10-01T10:00:00Z", "departments": [{ "name": "Engineering" }] },
+    { "id": 1002, "title": "Graduate Engineer", "location": { "name": "Pune, India" }, "content": "<p>Graduate engineering vacancy.</p>", "absolute_url": "https://job-boards.greenhouse.io/acme/jobs/1002" }
+  ]
+}

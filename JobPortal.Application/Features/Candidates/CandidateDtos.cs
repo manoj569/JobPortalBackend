@@ -151,7 +151,8 @@ public sealed record CandidateBrowseJobsResponse(IReadOnlyCollection<CandidateBr
     public int TotalPages => (int)Math.Ceiling(TotalCount / (double)PageSize);
 }
 public sealed record CandidatePageQuery(int PageNumber = 1, int PageSize = 20);
-public sealed record CandidateSavedJobResponse(Guid SavedJobId, DateTime SavedAtUtc, Guid JobId, string Title, string Slug, string CompanyName);
+public sealed record CandidateSavedJobResponse(Guid SavedJobId, DateTime SavedAtUtc, Guid JobId, string Title, string Slug, string CompanyName,
+    Guid CompanyId = default, string? CompanyLogoUrl = null);
 public sealed record CreateJobApplicationRequest(string? CoverLetter = null,
     ApplicationMethod ApplicationMethod = ApplicationMethod.Portal);
 public sealed record ApplyJobResponse(Guid ApplicationId, Guid JobId,

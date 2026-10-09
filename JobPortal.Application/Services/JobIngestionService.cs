@@ -167,6 +167,7 @@ public sealed class JobIngestionService(
         var company = await ResolveCompanyAsync(
             companyName,
             companySlug,
+            rawJob.CompanyId,
             cancellationToken);
 
         if (company is null)
@@ -359,7 +360,9 @@ public sealed class JobIngestionService(
         var responsibilities = TextNormalizer.TrimOrNull(raw.Responsibilities);
         var requirements = TextNormalizer.TrimOrNull(raw.Requirements);
         var benefits = TextNormalizer.TrimOrNull(raw.Benefits);
-        DateTime? expiry = raw.ExpiresAtUtc is { Kind: DateTimeKind.Utc } expires ? expires : null;
+        // Missing provider metadata is not evidence that an existing deadline was withdrawn.
+        // Do not erase reviewed expiry or make an expired published job visible again.
+        DateTime? expiry = raw.ExpiresAtUtc is { Kind: DateTimeKind.Utc } expires ? expires : job.ExpiresAtUtc;
         DateTime? sourcePosted = raw.SourcePostedAtUtc is { Kind: DateTimeKind.Utc } posted ? posted : null;
         var education = TextNormalizer.TrimOrNull(raw.EducationRequirement);
         var canonicalUrlHash = ApplicationUrlIdentity.Hash(applicationUrl);
@@ -459,17 +462,17 @@ public sealed class JobIngestionService(
     private async Task<Company?> ResolveCompanyAsync(
         string companyName,
         string companySlug,
+        Guid? companyId,
         CancellationToken cancellationToken)
     {
-        var cacheKey = $"{companyName}\u001F{companySlug}";
+        var cacheKey = $"{companyId}\u001F{companyName}\u001F{companySlug}";
 
         if (_companyCache.TryGetValue(cacheKey, out var cached))
             return cached;
 
-        var company = await companies.FindByNameOrSlugAsync(
-            companyName,
-            companySlug,
-            cancellationToken);
+        var company = companyId.HasValue
+            ? await companies.GetByIdAsync(companyId.Value, cancellationToken)
+            : await companies.FindByNameOrSlugAsync(companyName, companySlug, cancellationToken);
 
         if (company is not null)
             _companyCache[cacheKey] = company;

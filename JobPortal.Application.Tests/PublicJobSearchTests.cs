@@ -75,6 +75,12 @@ public sealed class PublicJobSearchTests
         Assert.Contains("PublishedAtUtc", searchSql, StringComparison.Ordinal);
         Assert.Contains("LOWER", searchSql, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("GROUP BY", facetSql, StringComparison.OrdinalIgnoreCase);
+        var referralSql = repository.FilteredJobsQuery(query with { ReferralOnly = true })
+            .Select(PublicJobProjections.Summary).ToQueryString();
+        Assert.Contains("\"LogoUrl\"", referralSql, StringComparison.Ordinal);
+        Assert.Contains("ApprovalStatus", referralSql, StringComparison.Ordinal);
+        Assert.DoesNotContain("FirstName", referralSql, StringComparison.Ordinal);
+        Assert.DoesNotContain("LastName", referralSql, StringComparison.Ordinal);
     }
 
     [Fact]

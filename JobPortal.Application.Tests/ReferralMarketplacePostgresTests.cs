@@ -1,6 +1,8 @@
 using JobPortal.Application.Common.Exceptions;
 using JobPortal.Application.Features.Referrals;
 using JobPortal.Application.Features.Notifications;
+using JobPortal.Application.Features.Dashboard;
+using JobPortal.Application.Features.PublicJobs;
 using JobPortal.Domain.Entities;
 using JobPortal.Persistence.Context;
 using JobPortal.Persistence.Repositories;
@@ -12,6 +14,33 @@ namespace JobPortal.Application.Tests;
 
 public sealed class ReferralMarketplacePostgresTests
 {
+    [LocalReferralPostgresFact]
+    public async Task PublicReferralAndSavedPagingReuseCompanyLogoWithoutPrivateReferrerData()
+    {
+        await Isolated(async (f, _) =>
+        {
+            var secondId = await f.AddOpportunity(5);
+            var jobs = await f.Db.Jobs.Include(x => x.Company).ToArrayAsync();
+            jobs[0].Company.LogoUrl = "https://assets.example.test/licensed.png";
+            foreach (var job in jobs) f.Db.SavedJobs.Add(new SavedJob { UserId = f.CandidateId, JobId = job.Id });
+            await f.Db.SaveChangesAsync();
+            var publicJobs = new PublicJobRepository(f.Db, f.Clock);
+            var first = await publicJobs.SearchAsync(new(ReferralOnly: true, Search: "Software", PageSize: 1));
+            var second = await publicJobs.SearchAsync(new(ReferralOnly: true, Search: "Software", PageNumber: 2, PageSize: 1));
+            Assert.Equal(2, first.TotalCount);
+            Assert.NotEqual(Assert.Single(first.Items).Id, Assert.Single(second.Items).Id);
+            Assert.Equal("Employee Referrer", first.Items.Single().ReferrerName);
+            var saved = await new DashboardRepository(f.Db, f.Clock).GetSavedJobsAsync(f.CandidateId, new(1, 1));
+            Assert.Equal(2, saved.TotalCount);
+            Assert.Equal(jobs[0].Company.LogoUrl, Assert.Single(saved.Items).Job.CompanyLogoUrl);
+            Assert.Empty((await new DashboardRepository(f.Db, f.Clock).GetSavedJobsAsync(Guid.NewGuid(), new())).Items);
+            var referral = await f.Db.JobReferrals.Include(x => x.Job).SingleAsync(x => x.Id == secondId);
+            referral.Job.ExpiresAtUtc = f.Clock.Utc;
+            await f.Db.SaveChangesAsync();
+            Assert.Equal(1, (await new JobReferralRepository(f.Db, f.Clock).GetApprovedAsync(1, 20)).TotalCount);
+        });
+    }
+
     [LocalReferralPostgresFact]
     public async Task CompetingAcceptancesCannotExceedOneRemainingOpportunitySlot()
     {

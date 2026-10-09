@@ -114,7 +114,7 @@ public sealed class ExternalJobCoverageTests
         Assert.Equal("Build services", result.Description);
         Assert.Equal(EmploymentType.FullTime, result.EmploymentType);
         Assert.Equal(WorkplaceType.Remote, result.WorkplaceType);
-        Assert.Equal("https://jobs.ashbyhq.com/acme/abc", result.ApplicationUrl);
+        Assert.Equal("https://jobs.ashbyhq.com/acme/abc/apply", result.ApplicationUrl);
         Assert.Null(result.ExternalId);
         Assert.Null(result.SalaryMin);
         Assert.Null(result.SalaryMax);

@@ -247,6 +247,14 @@ public sealed class JobReferralServiceTests
         Assert.Equal("Placeholder", result.Items.Single().JobTitle);
     }
 
+    [Fact]
+    public async Task MySubmissionPaginationRejectsOverflow()
+    {
+        var f = CreateFixture();
+        await Assert.ThrowsAsync<BadRequestException>(() =>
+            f.Service.GetMySubmissionsAsync(f.ReferrerUserId, null, null, int.MaxValue, 50));
+    }
+
     private static Fixture CreateFixture()
     {
         var referrerUserId = Guid.NewGuid();

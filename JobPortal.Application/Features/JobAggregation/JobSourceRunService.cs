@@ -54,13 +54,15 @@ public sealed record JobSourceRunResponse(
         row.ErrorCode); // Fixed internal codes only; no provider messages/URLs.
 }
 
-public sealed class JobSourceRunService(IJobSourceRepository sources, IJobSourceRunStore store, TimeProvider clock)
+public sealed class JobSourceRunService(IJobSourceRepository sources, IJobSourceRunStore store, TimeProvider clock,
+    IJobSourcePublicationPolicy? publicationPolicy = null)
 {
     public async Task<JobSourceRunResponse> EnqueueAsync(Guid sourceId, Guid? requestedBy, CancellationToken ct)
     {
         var source = await sources.GetByIdAsync(sourceId, ct)
             ?? throw new NotFoundException("Job source was not found.");
         if (!source.IsActive) throw new BadRequestException("Job source is inactive.", "job_source_inactive");
+        publicationPolicy?.Validate(source);
         return JobSourceRunResponse.From(await store.EnqueueAsync(sourceId, requestedBy, clock.GetUtcNow().UtcDateTime, ct));
     }
 

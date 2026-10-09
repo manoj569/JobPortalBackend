@@ -70,6 +70,7 @@ public sealed class ReferralJobSkillsTests
             x => Assert.Equal(JobSkill.DefaultProficiencyLevel, x.ProficiencyLevel));
 
         job.Status = JobStatus.Published;
+        job.PublishedAtUtc = DateTime.UtcNow;
         if (submitReferral)
             (await db.JobReferrals.SingleAsync(x => x.JobId == job.Id)).ApprovalStatus = JobReferralApprovalStatus.Approved;
         else

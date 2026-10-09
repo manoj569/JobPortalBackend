@@ -80,19 +80,22 @@ public static class ServiceCollectionExtensions
         {
             client.BaseAddress = new Uri("https://boards-api.greenhouse.io/");
             client.Timeout = Timeout.InfiniteTimeSpan;
-        }).AddHttpMessageHandler<AggregationHttpRetryHandler>();
+        }).ConfigurePrimaryHttpMessageHandler(SuccessFactorsHttpTransport.CreateHandler)
+            .AddHttpMessageHandler<AggregationHttpRetryHandler>();
         services.AddScoped<IExternalJobProvider, GreenhouseExternalJobProvider>();
         services.AddHttpClient(LeverExternalJobProvider.HttpClientName, client =>
         {
             client.BaseAddress = new Uri("https://api.lever.co/");
             client.Timeout = Timeout.InfiniteTimeSpan;
-        }).AddHttpMessageHandler<AggregationHttpRetryHandler>();
+        }).ConfigurePrimaryHttpMessageHandler(SuccessFactorsHttpTransport.CreateHandler)
+            .AddHttpMessageHandler<AggregationHttpRetryHandler>();
         services.AddScoped<IExternalJobProvider, LeverExternalJobProvider>();
         services.AddHttpClient(AshbyExternalJobProvider.HttpClientName, client =>
         {
             client.BaseAddress = new Uri("https://api.ashbyhq.com/");
             client.Timeout = Timeout.InfiniteTimeSpan;
-        }).AddHttpMessageHandler<AggregationHttpRetryHandler>();
+        }).ConfigurePrimaryHttpMessageHandler(SuccessFactorsHttpTransport.CreateHandler)
+            .AddHttpMessageHandler<AggregationHttpRetryHandler>();
         services.AddScoped<IExternalJobProvider, AshbyExternalJobProvider>();
         services.AddHttpClient(SuccessFactorsJobSourceProvider.HttpClientName, client =>
         {

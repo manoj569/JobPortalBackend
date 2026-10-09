@@ -304,6 +304,7 @@ public sealed class PublicJobRepository(
         var utcNow = timeProvider.GetUtcNow().UtcDateTime;
         return context.Jobs.AsNoTracking().Where(job =>
             job.Status == JobStatus.Published &&
+            !job.Company.IsDeleted && !job.Category.IsDeleted &&
             !job.IsHidden &&
             !job.IsDeleted &&
             job.PublishedAtUtc.HasValue &&
@@ -319,6 +320,7 @@ public sealed class PublicJobRepository(
         if (query.ReferralOnly)
             source = source.Where(job => job.Referral != null &&
                 job.Referral.ApprovalStatus == JobReferralApprovalStatus.Approved &&
+                !job.Referral.ReferrerUser.IsDeleted && job.Referral.ReferrerUser.Status == UserStatus.Active &&
                 job.Status == JobStatus.Published);
         var keyword = FirstValue(query.Keyword, query.Search);
         if (keyword is not null)

@@ -1,0 +1,7 @@
+{
+  "apiVersion": "1",
+  "jobs": [
+    { "title": "Backend Engineer", "isListed": true, "location": "New York", "address": { "postalAddress": { "addressCountry": "USA" } }, "secondaryLocations": [{ "location": "Bengaluru, India", "address": { "addressCountry": "IND" } }], "descriptionPlain": "Build backend services.", "jobUrl": "https://jobs.ashbyhq.com/acme/e2b68cda-f6f9-4f03-a302-68f1e0a3ed74", "applyUrl": "https://jobs.ashbyhq.com/acme/e2b68cda-f6f9-4f03-a302-68f1e0a3ed74/application", "publishedAt": "2026-10-01T15:30:00+05:30", "workplaceType": "Remote", "employmentType": "FullTime" },
+    { "title": "Private link vacancy", "isListed": false, "jobUrl": "https://jobs.ashbyhq.com/acme/81a7a7bb-3950-441d-b1e7-98b12de86d32", "descriptionPlain": "Must not be published." }
+  ]
+}
