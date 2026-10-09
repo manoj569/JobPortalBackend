@@ -29,6 +29,14 @@ public sealed partial class WorkdayJobSourceProvider(
     private const int MaxJobs = 10_000;
     private const int MaxJsonBytes = 4 * 1024 * 1024;
     private const int DetailConcurrency = 4;
+
+    // Accenture currently exposes India jobs through this Workday country facet.
+    // Keep this provider-specific mapping fail-closed: other Workday tenants are
+    // left unfiltered until their country facet is explicitly verified.
+    private const string AccentureTenant = "accenture";
+    private const string AccentureSite = "AccentureCareers";
+    private const string IndiaCountryFacetId = "c4f78be1a8f14da0ab49ce1162348a5e";
+
     private static readonly TimeSpan RequestSpacing = TimeSpan.FromMilliseconds(250);
 
     private static readonly Action<ILogger, Guid, Exception?> Started =
@@ -80,6 +88,7 @@ public sealed partial class WorkdayJobSourceProvider(
         var client = clients.CreateClient(HttpClientName);
         var postings = new List<ListingEntry>();
         var seenPaths = new HashSet<string>(StringComparer.Ordinal);
+        var rawEntriesRead = 0;
         int? expectedTotal = null;
 
         for (var offset = 0; ; offset += PageSize)
@@ -92,6 +101,8 @@ public sealed partial class WorkdayJobSourceProvider(
                 source.Id,
                 offset,
                 cancellationToken);
+
+            rawEntriesRead += page.RawEntryCount;
 
             if (expectedTotal is null)
             {
@@ -111,7 +122,7 @@ public sealed partial class WorkdayJobSourceProvider(
 
             if (expectedTotal == 0)
             {
-                if (offset != 0 || page.Postings.Count != 0)
+                if (offset != 0 || page.RawEntryCount != 0 || page.Postings.Count != 0)
                     throw LoggedInvalidDocument(
                         source.Id,
                         "listing_snapshot",
@@ -123,7 +134,7 @@ public sealed partial class WorkdayJobSourceProvider(
                 break;
             }
 
-            if (page.Postings.Count == 0)
+            if (page.RawEntryCount == 0)
                 throw LoggedInvalidDocument(
                     source.Id,
                     "listing_snapshot",
@@ -144,40 +155,31 @@ public sealed partial class WorkdayJobSourceProvider(
                         "The Workday listing contained duplicate external paths.");
 
                 postings.Add(posting);
-
-                if (postings.Count > expectedTotal)
-                    throw LoggedInvalidDocument(
-                        source.Id,
-                        "listing_snapshot",
-                        offset,
-                        page.StatusCode,
-                        FailureReason.ListingSnapshotChanged,
-                        "The Workday listing grew beyond the first-page total during pagination.");
             }
 
-            if (postings.Count == expectedTotal)
+            if (rawEntriesRead >= expectedTotal)
                 break;
 
-            if (page.Postings.Count < PageSize)
+            if (page.RawEntryCount < PageSize)
                 throw LoggedInvalidDocument(
                     source.Id,
                     "listing_snapshot",
                     offset,
                     page.StatusCode,
                     FailureReason.ListingEndedEarly,
-                    "The Workday listing returned a short page before the first-page total was reached.");
+                    "The Workday listing returned a short raw page before the first-page total was reached.");
 
             await Task.Delay(RequestSpacing, cancellationToken);
         }
 
-        if (expectedTotal is null || postings.Count != expectedTotal)
+        if (expectedTotal is null || rawEntriesRead < expectedTotal)
             throw LoggedInvalidDocument(
                 source.Id,
                 "listing_snapshot",
-                postings.Count,
+                rawEntriesRead,
                 null,
                 FailureReason.ListingSnapshotCountMismatch,
-                "The Workday listing did not produce the complete advertised snapshot.");
+                "The Workday listing did not produce the complete advertised raw snapshot.");
 
         var parsed = new ConcurrentDictionary<int, RawExternalJob>();
         var skipped = 0;
@@ -250,8 +252,10 @@ public sealed partial class WorkdayJobSourceProvider(
         var isComplete =
             skipped == 0 &&
             processed == postings.Count &&
-            ordered.Length == expectedTotal &&
-            uniqueExternalIds == expectedTotal;
+            ordered.Length == postings.Count &&
+            uniqueExternalIds == postings.Count &&
+            expectedTotal is not null &&
+            rawEntriesRead >= expectedTotal;
 
         if (logger is not null)
             Completed(
@@ -360,6 +364,7 @@ public sealed partial class WorkdayJobSourceProvider(
                     "Workday listing response did not contain the expected total/jobPostings schema.");
             }
 
+            var rawEntryCount = postingsElement.GetArrayLength();
             var postings = new List<ListingEntry>();
 
             foreach (var item in postingsElement.EnumerateArray())
@@ -374,16 +379,25 @@ public sealed partial class WorkdayJobSourceProvider(
                 var locationsText = GetString(item, "locationsText")?.Trim();
                 var postedOn = GetString(item, "postedOn")?.Trim();
 
-                if (string.IsNullOrWhiteSpace(title) ||
+                var titleMissing = string.IsNullOrWhiteSpace(title);
+                var pathMissing = string.IsNullOrWhiteSpace(externalPath);
+
+                // Some Workday tenants return non-job placeholder cards containing
+                // only bulletFields. A row with neither a title nor an externalPath
+                // cannot be fetched and is ignored without hiding partially corrupt jobs.
+                if (titleMissing && pathMissing)
+                    continue;
+
+                if (titleMissing ||
                     !TryValidateExternalPath(externalPath, out var normalizedPath))
                 {
                     throw InvalidDocument(
                         FailureReason.ListingEntryInvalid,
-                        "Workday listing contained a posting without a valid title/externalPath.");
+                        "Workday listing contained a partially malformed posting.");
                 }
 
                 postings.Add(new ListingEntry(
-                    title,
+                    title!,
                     normalizedPath,
                     locationsText,
                     postedOn,
@@ -392,6 +406,7 @@ public sealed partial class WorkdayJobSourceProvider(
 
             return new ListingPage(
                 total,
+                rawEntryCount,
                 postings);
         }
         catch (JsonException exception)
@@ -445,6 +460,9 @@ public sealed partial class WorkdayJobSourceProvider(
 
             var countryCodes = new HashSet<string>(
                 StringComparer.OrdinalIgnoreCase);
+
+            if (IsAccentureIndiaSource(target))
+                countryCodes.Add("IN");
 
             if (info.TryGetProperty("jobRequisitionLocation", out var reqLocation) &&
                 reqLocation.ValueKind == JsonValueKind.Object &&
@@ -514,6 +532,30 @@ public sealed partial class WorkdayJobSourceProvider(
         }
     }
 
+    private static Dictionary<string, string[]> GetAppliedFacets(
+        WorkdayTarget target)
+    {
+        if (IsAccentureIndiaSource(target))
+        {
+            return new Dictionary<string, string[]>
+            {
+                ["locationCountry"] = [IndiaCountryFacetId]
+            };
+        }
+
+        return [];
+    }
+
+    private static bool IsAccentureIndiaSource(WorkdayTarget target) =>
+        string.Equals(
+            target.Tenant,
+            AccentureTenant,
+            StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(
+            target.Site,
+            AccentureSite,
+            StringComparison.OrdinalIgnoreCase);
+
     private async Task<ListingPageWithStatus> FetchListingPageAsync(
         HttpClient client,
         WorkdayTarget target,
@@ -530,7 +572,7 @@ public sealed partial class WorkdayJobSourceProvider(
         {
             Content = JsonContent.Create(new
             {
-                appliedFacets = new Dictionary<string, string[]>(),
+                appliedFacets = GetAppliedFacets(target),
                 limit = PageSize,
                 offset,
                 searchText = string.Empty
@@ -567,6 +609,7 @@ public sealed partial class WorkdayJobSourceProvider(
 
         return new ListingPageWithStatus(
             parsed.Total,
+            parsed.RawEntryCount,
             parsed.Postings,
             response.StatusCode);
     }
@@ -979,10 +1022,12 @@ public sealed partial class WorkdayJobSourceProvider(
 
     internal sealed record ListingPage(
         int Total,
+        int RawEntryCount,
         IReadOnlyCollection<ListingEntry> Postings);
 
     private sealed record ListingPageWithStatus(
         int Total,
+        int RawEntryCount,
         IReadOnlyCollection<ListingEntry> Postings,
         int StatusCode);
 
