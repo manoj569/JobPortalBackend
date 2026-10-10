@@ -57,6 +57,16 @@ public interface IJobRepository
     Task<IReadOnlyCollection<Job>?> FindSourceOwnedJobsAsync(Guid sourceId, IReadOnlyCollection<string> externalIds,
         CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyCollection<Job>?>(null);
     Job TrackAggregationJob(Job job) => job;
+
+    // Both URL and fingerprint bulk results must be complete for their requested
+    // keys. Legacy adapters cannot accidentally treat unsupported reads as misses.
+    bool SupportsAggregationBatchPreload => false;
+
+    Task<IReadOnlyCollection<Job>?> FindAggregationReviewJobsAsync(IReadOnlyCollection<Guid> ids,
+        CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyCollection<Job>?>(null);
+
+    Task<IReadOnlyCollection<Job>?> FindByFingerprintHashesAsync(IReadOnlyCollection<string> hashes,
+        CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyCollection<Job>?>(null);
     void ReleaseSavedAggregationTracking() { }
 
     Task<int> CloseSourceJobsMissingFromSnapshotAsync(Guid jobSourceId, IReadOnlyCollection<string> activeExternalJobIds,

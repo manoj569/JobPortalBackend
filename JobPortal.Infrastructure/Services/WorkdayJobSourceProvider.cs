@@ -6,6 +6,7 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Threading.Channels;
 using JobPortal.Application.Abstractions.Jobs;
 using JobPortal.Domain.Entities;
 using JobPortal.Domain.Enums;
@@ -25,7 +26,7 @@ public sealed partial class WorkdayJobSourceProvider(
     ILogger<WorkdayJobSourceProvider>? logger = null,
     IOptions<JobAggregationOptions>? options = null,
     TimeProvider? timeProvider = null,
-    AggregationHttpRetryState? retryState = null) : IBatchedExternalJobProvider
+    AggregationHttpRetryState? retryState = null) : IBatchedExternalJobProvider, IDisposable
 {
     public const string HttpClientName = "WorkdayJobAggregation";
 
@@ -94,6 +95,10 @@ public sealed partial class WorkdayJobSourceProvider(
         Message = "WorkdayRunEnded Source={SourceId} ReasonCode={ReasonCode} DetailAttempted={Attempted} DurationMs={DurationMs}.")]
     private static partial void LogRunEnded(ILogger logger, Guid sourceId, string reasonCode, int attempted, double durationMs);
 
+    [LoggerMessage(EventId = 4376, Level = LogLevel.Information,
+        Message = "WorkdayStage Source={SourceId} Stage={Stage} Items={Items} DurationMs={DurationMs} EffectiveConcurrency={Concurrency}.")]
+    private static partial void LogStage(ILogger logger, Guid sourceId, string stage, int items, double durationMs, int concurrency);
+
     public AtsType AtsType => AtsType.Workday;
 
     public async Task<IReadOnlyCollection<RawExternalJob>> FetchJobsAsync(
@@ -104,6 +109,27 @@ public sealed partial class WorkdayJobSourceProvider(
     private WorkdayFetchOptions Settings => options?.Value.Workday ?? new();
     private TimeProvider Clock => timeProvider ?? TimeProvider.System;
     private readonly AggregationHttpRetryState workdayRetryState = retryState ?? new();
+    private int adaptiveConcurrency = 16;
+    private readonly SemaphoreSlim requestPace = new(1, 1);
+    private DateTimeOffset lastRequestAt = DateTimeOffset.MinValue;
+
+    public void Dispose()
+    {
+        requestPace.Dispose();
+        GC.SuppressFinalize(this);
+    }
+
+    private async Task PaceRequestAsync(CancellationToken token)
+    {
+        await requestPace.WaitAsync(token);
+        try
+        {
+            var remaining = lastRequestAt.AddMilliseconds(Settings.RequestSpacingMilliseconds) - Clock.GetUtcNow();
+            if (remaining > TimeSpan.Zero) await Task.Delay(remaining, Clock, token);
+            lastRequestAt = Clock.GetUtcNow();
+        }
+        finally { requestPace.Release(); }
+    }
 
     public async Task<ExternalJobSourceSnapshot> FetchSnapshotAsync(
         JobSource source, CancellationToken cancellationToken = default)
@@ -124,6 +150,37 @@ public sealed partial class WorkdayJobSourceProvider(
         JobSource source,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        if (!Settings.IsValid()) throw new InvalidOperationException("Invalid bounded Workday fetch settings.");
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var channel = Channel.CreateBounded<ExternalJobSourceSnapshot>(new BoundedChannelOptions(2)
+        { SingleReader = true, SingleWriter = true, FullMode = BoundedChannelFullMode.Wait });
+        var producer = ProduceAsync();
+        try
+        {
+            await foreach (var batch in channel.Reader.ReadAllAsync(cancellationToken)) yield return batch;
+        }
+        finally
+        {
+            await stop.CancelAsync();
+            await producer;
+        }
+
+        async Task ProduceAsync()
+        {
+            try
+            {
+                await foreach (var batch in FetchSequentialBatchesAsync(source, stop.Token))
+                    await channel.Writer.WriteAsync(batch, stop.Token);
+                channel.Writer.TryComplete();
+            }
+            catch (Exception exception) { channel.Writer.TryComplete(exception); }
+        }
+    }
+
+    private async IAsyncEnumerable<ExternalJobSourceSnapshot> FetchSequentialBatchesAsync(
+        JobSource source,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    {
         ArgumentNullException.ThrowIfNull(source);
         var target = ValidateSource(source);
         var settings = Settings;
@@ -140,6 +197,7 @@ public sealed partial class WorkdayJobSourceProvider(
         try
         {
             var client = clients.CreateClient(HttpClientName);
+            var listingTimer = Stopwatch.StartNew();
             var postings = new List<ListingEntry>();
             var seenPaths = new HashSet<string>(StringComparer.Ordinal);
             var rawEntriesRead = 0;
@@ -248,29 +306,22 @@ public sealed partial class WorkdayJobSourceProvider(
                     "The Workday listing did not produce the complete advertised raw snapshot.");
 
 
-            using var pace = new SemaphoreSlim(1, 1);
+            if (logger is not null) LogStage(logger, source.Id, "Listing", rawEntriesRead,
+                listingTimer.Elapsed.TotalMilliseconds, 1);
             if (logger is not null)
                 LogListingSummary(logger, source.Id, rawEntriesRead, postings.Count, duplicatePaths, placeholderRows, expectedTotal, false);
-            var lastRequestAt = DateTimeOffset.MinValue;
             var externalIds = new HashSet<string>(StringComparer.Ordinal);
             var duplicateIds = false;
             foreach (var chunk in postings.Chunk(settings.BatchSize))
             {
+                var detailTimer = Stopwatch.StartNew();
                 token.ThrowIfCancellationRequested();
                 var parsed = new ConcurrentDictionary<int, RawExternalJob>();
                 var batchFailed = 0;
                 await Parallel.ForEachAsync(chunk.Select((entry, index) => (entry, index)),
-                    new ParallelOptions { MaxDegreeOfParallelism = settings.DetailConcurrency, CancellationToken = token },
+                    new ParallelOptions { MaxDegreeOfParallelism = Math.Min(settings.DetailConcurrency, Volatile.Read(ref adaptiveConcurrency)), CancellationToken = token },
                     async (item, itemToken) =>
                     {
-                        await pace.WaitAsync(itemToken);
-                        try
-                        {
-                            var remaining = lastRequestAt.AddMilliseconds(settings.RequestSpacingMilliseconds) - Clock.GetUtcNow();
-                            if (remaining > TimeSpan.Zero) await Task.Delay(remaining, Clock, itemToken);
-                            lastRequestAt = Clock.GetUtcNow();
-                        }
-                        finally { pace.Release(); }
                         Interlocked.Increment(ref attempted);
                         try
                         {
@@ -298,7 +349,10 @@ public sealed partial class WorkdayJobSourceProvider(
                 succeeded += jobs.Length;
                 failed += batchFailed;
                 if (logger is not null) LogBatch(logger, source.Id, attempted, succeeded, failed, stopwatch.Elapsed.TotalMilliseconds);
-                // Enumeration pauses here until ingestion commits these jobs. No detail tasks remain running.
+                if (logger is not null) LogStage(logger, source.Id, "DetailBatch", chunk.Length,
+                    detailTimer.Elapsed.TotalMilliseconds, Math.Min(settings.DetailConcurrency, Volatile.Read(ref adaptiveConcurrency)));
+                // Bounded producer can fetch the next detail batch while the sole
+                // DbContext consumer commits this one. Backpressure bounds memory.
                 yield return new(jobs, batchFailed, false);
             }
             token.ThrowIfCancellationRequested();
@@ -718,13 +772,21 @@ public sealed partial class WorkdayJobSourceProvider(
         for (var attempt = 1; ; attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var deferred = workdayRetryState.Remaining(rateLimitKey, Clock.GetUtcNow());
-            if (deferred > TimeSpan.FromSeconds(30))
-                throw new HttpRequestException("Workday host remains rate limited.", null, HttpStatusCode.TooManyRequests);
-            if (deferred > TimeSpan.Zero) await Task.Delay(deferred, Clock, cancellationToken);
+            while (true)
+            {
+                var deferred = workdayRetryState.Remaining(rateLimitKey, Clock.GetUtcNow());
+                if (deferred > TimeSpan.FromSeconds(30))
+                    throw new HttpRequestException("Workday host remains rate limited.", null, HttpStatusCode.TooManyRequests);
+                if (deferred > TimeSpan.Zero) await Task.Delay(deferred, Clock, cancellationToken);
+                // Every attempt respects spacing; recheck cooldown after waiting
+                // because another in-flight request may just have returned 429.
+                await PaceRequestAsync(cancellationToken);
+                if (workdayRetryState.Remaining(rateLimitKey, Clock.GetUtcNow()) <= TimeSpan.Zero) break;
+            }
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(Settings.RequestTimeoutSeconds), Clock);
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
-            using var copy = new HttpRequestMessage(request.Method, request.RequestUri);
+            using var copy = new HttpRequestMessage(request.Method, request.RequestUri)
+            { Version = client.DefaultRequestVersion, VersionPolicy = client.DefaultVersionPolicy };
             foreach (var header in request.Headers) copy.Headers.TryAddWithoutValidation(header.Key, header.Value);
             if (content is not null)
             {
@@ -749,6 +811,16 @@ public sealed partial class WorkdayJobSourceProvider(
             catch (HttpRequestException exception) when (exception.StatusCode is null or HttpStatusCode.TooManyRequests or
                 HttpStatusCode.InternalServerError or HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable or HttpStatusCode.GatewayTimeout)
             {
+                if (exception.StatusCode == HttpStatusCode.TooManyRequests)
+                {
+                    int observed;
+                    int reduced;
+                    do
+                    {
+                        observed = Volatile.Read(ref adaptiveConcurrency);
+                        reduced = Math.Max(1, Math.Min(Settings.DetailConcurrency, observed) / 2);
+                    } while (Interlocked.CompareExchange(ref adaptiveConcurrency, reduced, observed) != observed);
+                }
                 if (exception.Data["RetryAfter"] is TimeSpan retryAfter)
                 {
                     if (exception.StatusCode == HttpStatusCode.TooManyRequests && retryAfter > TimeSpan.Zero)

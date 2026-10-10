@@ -109,3 +109,9 @@ public interface IJobDeduplicationService
         Guid? companyId,
         CancellationToken cancellationToken = default);
 }
+
+public interface IFuzzyJobDeduplicationService
+{
+    Task<DeduplicationResult> FindFuzzyDuplicateAsync(string title, string companyName, string? location,
+        Guid? companyId, CancellationToken cancellationToken = default);
+}

@@ -11,11 +11,12 @@ using JobPortal.Persistence.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Xunit;
+using Xunit.Abstractions;
 using static JobPortal.Application.Features.Jobs.JobSearchQueryValidator;
 
 namespace JobPortal.Application.Tests;
 
-public sealed class WorkdayBatchIngestionTests
+public sealed class WorkdayBatchIngestionTests(ITestOutputHelper output)
 {
     [Fact]
     public async Task DuplicatePathsAndPlaceholdersAreSkippedButNeverCertifyCompleteness()
@@ -186,19 +187,20 @@ public sealed class WorkdayBatchIngestionTests
     {
         using var f = Fixture();
         using var cancellation = new CancellationTokenSource();
+        var firstCommit = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var cancel = true;
         using var http = new HttpClient(new Handler(async (request, ct) =>
         {
             if (request.Method == HttpMethod.Post) return Json(Listing(4, 0, 4));
             if (cancel && request.RequestUri!.AbsolutePath.EndsWith("_2", StringComparison.Ordinal))
             {
-                Assert.Equal(2, await f.Context.Jobs.AsNoTracking().CountAsync());
+                await firstCommit.Task.WaitAsync(ct);
                 cancellation.Cancel();
                 ct.ThrowIfCancellationRequested();
             }
             return Json(Detail(request));
         }));
-        var runner = Runner(f, Provider(http));
+        var runner = Runner(f, Provider(http), unitOverride: new CommitSignalUnit(f, firstCommit));
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => runner.RunAsync(f.Source.Id, cancellation.Token));
         Assert.Equal(2, await f.Context.Jobs.CountAsync());
         Assert.Null((await f.Repository.GetByIdAsync(f.Source.Id))!.LastSuccessfulRunAtUtc);
@@ -411,10 +413,11 @@ public sealed class WorkdayBatchIngestionTests
     }
 
     private static JobSourceRunner Runner(JobSourceFixture f, IExternalJobProvider provider,
-        IJobSourcePublicationPolicy? policy = null, bool publish = false)
+        IJobSourcePublicationPolicy? policy = null, bool publish = false, JobPortal.Application.Abstractions.Persistence.IUnitOfWork? unitOverride = null,
+        IExternalJobMetadataEnricher? enrichment = null)
     {
         var jobs = new JobRepository(f.Context);
-        var unit = new UnitOfWork(f.Context);
+        var unit = unitOverride ?? new UnitOfWork(f.Context);
         var fingerprints = new JobFingerprintService();
         var canonical = new UrlCanonicalizer();
         var ingestion = new JobIngestionService(jobs, new CompanyManagementRepository(f.Context), new CategoryManagementRepository(f.Context),
@@ -424,7 +427,7 @@ public sealed class WorkdayBatchIngestionTests
         var publisher = new JobAutoPublishService(jobs, new JobQualityGate(), jobService,
             Options.Create(new JobAggregationOptions { AutoPublishEnabled = publish }), TimeProvider.System);
         return new(f.Repository, [provider], ingestion, unit, TimeProvider.System, f.Resolver, new ExternalJobNormalizer(),
-            autoPublishService: publisher, jobRepository: jobs, publicationPolicy: policy);
+            autoPublishService: publisher, jobRepository: jobs, publicationPolicy: policy, enricher: enrichment);
     }
 
     private static WorkdayJobSourceProvider Provider(HttpClient client, int attempts = 1, int budget = 60) =>
@@ -453,6 +456,125 @@ public sealed class WorkdayBatchIngestionTests
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => send(request, cancellationToken);
     }
     private sealed class Factory(HttpClient client) : IHttpClientFactory { public HttpClient CreateClient(string name) => client; }
+    private sealed class CommitSignalUnit(JobSourceFixture fixture, TaskCompletionSource signal)
+        : JobPortal.Application.Abstractions.Persistence.IUnitOfWork
+    {
+        public async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            var result = await fixture.Context.SaveChangesAsync(cancellationToken);
+            if (fixture.Context.ChangeTracker.Entries<Job>().Any()) signal.TrySetResult();
+            return result;
+        }
+        public void ResetAfterFailure() => fixture.Context.ChangeTracker.Clear();
+    }
+
+    [Fact]
+    public async Task DetailFetchOverlapsPausedConsumerAndCancellationJoinsProducer()
+    {
+        var second = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var http = new HttpClient(new Handler((request, _) =>
+        {
+            if (request.Method == HttpMethod.Post) return Task.FromResult(Json(Listing(6, 0, 6)));
+            if (request.RequestUri!.AbsolutePath.EndsWith("_2", StringComparison.Ordinal)) second.TrySetResult();
+            return Task.FromResult(Json(Detail(request)));
+        }));
+        await using var enumerator = Provider(http).FetchBatchesAsync(Source()).GetAsyncEnumerator();
+        Assert.True(await enumerator.MoveNextAsync());
+        Assert.Equal(2, enumerator.Current.Jobs.Count);
+        await second.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        // Disposing a stopped consumer must cancel and await the bounded producer,
+        // including when it is waiting for channel capacity.
+    }
+
+    [Theory]
+    [InlineData(8)]
+    [InlineData(12)]
+    [InlineData(16)]
+    public async Task ConfiguredDetailConcurrencyIsBoundedAndMeasurable(int concurrency)
+    {
+        var active = 0;
+        var peak = 0;
+        using var http = new HttpClient(new Handler(async (request, token) =>
+        {
+            if (request.Method == HttpMethod.Post)
+            {
+                using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(token));
+                var offset = body.RootElement.GetProperty("offset").GetInt32();
+                return Json(Listing(40, offset, 20));
+            }
+            var current = Interlocked.Increment(ref active);
+            int observed;
+            do { observed = Volatile.Read(ref peak); }
+            while (current > observed && Interlocked.CompareExchange(ref peak, current, observed) != observed);
+            try { await Task.Delay(25, token); return Json(Detail(request)); }
+            finally { Interlocked.Decrement(ref active); }
+        }));
+        var provider = new WorkdayJobSourceProvider(new Factory(http), options: Options.Create(new JobAggregationOptions
+        { Workday = new() { DetailConcurrency = concurrency, BatchSize = 50, MaximumAttempts = 1 } }), timeProvider: new FastClock());
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var snapshot = await provider.FetchSnapshotAsync(Source());
+        Assert.True(snapshot.IsComplete);
+        Assert.Equal(40, snapshot.Jobs.Count);
+        Assert.InRange(peak, 2, concurrency);
+        Assert.Equal(0, active);
+        output.WriteLine($"MOCK DETAIL concurrency={concurrency} peak={peak} elapsedMs={watch.ElapsedMilliseconds}");
+    }
+
+    [Theory]
+    [InlineData(500, 8)]
+    [InlineData(500, 12)]
+    [InlineData(500, 16)]
+    [InlineData(1000, 8)]
+    [InlineData(1000, 12)]
+    [InlineData(1000, 16)]
+    public async Task MeasureSyntheticWorkdayPipelineWithRealRepositories(int count, int concurrency)
+    {
+        using var f = Fixture();
+        using var http = new HttpClient(new Handler(async (request, token) =>
+        {
+            if (request.Method == HttpMethod.Post)
+            {
+                using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(token));
+                var offset = body.RootElement.GetProperty("offset").GetInt32();
+                return Json(Listing(count, offset, Math.Min(20, count - offset)));
+            }
+            await Task.Delay(25, token);
+            return Json(Detail(request));
+        }));
+        var provider = new WorkdayJobSourceProvider(new Factory(http), options: Options.Create(new JobAggregationOptions
+        { Workday = new() { DetailConcurrency = concurrency, BatchSize = 100, MaximumAttempts = 1 } }), timeProvider: new FastClock());
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var result = await Runner(f, provider, publish: true, enrichment: new ExternalJobMetadataEnricher()).RunAsync(f.Source.Id);
+        output.WriteLine($"SYNTHETIC PIPELINE jobs={count} concurrency={concurrency} batch=100 elapsedMs={watch.ElapsedMilliseconds} " +
+            $"created={result.Created} updated={result.Updated} failed={result.Failed} needsReview={result.NeedsReview} published={result.Published}");
+        Assert.True(result.Succeeded);
+        Assert.Equal(count, result.Created);
+        Assert.Equal(count, result.NeedsReview);
+        Assert.Equal(0, result.Published);
+        Assert.Equal(count, await f.Context.Jobs.CountAsync());
+        Assert.Equal(f.Locks.CreationAcquisitions, f.Locks.CreationReleases);
+    }
+
+    [Fact]
+    public async Task RetryAttemptsShareTheSameMinimumRequestSpacing()
+    {
+        var starts = new System.Collections.Concurrent.ConcurrentQueue<long>();
+        var attempts = new System.Collections.Concurrent.ConcurrentDictionary<string, int>();
+        using var http = new HttpClient(new Handler((request, _) =>
+        {
+            starts.Enqueue(System.Diagnostics.Stopwatch.GetTimestamp());
+            if (request.Method == HttpMethod.Post) return Task.FromResult(Json(Listing(3, 0, 3)));
+            var attempt = attempts.AddOrUpdate(request.RequestUri!.AbsolutePath, 1, (_, previous) => previous + 1);
+            return Task.FromResult(attempt == 1 ? new HttpResponseMessage(HttpStatusCode.ServiceUnavailable) : Json(Detail(request)));
+        }));
+        using var provider = new WorkdayJobSourceProvider(new Factory(http), options: Options.Create(new JobAggregationOptions
+        { Workday = new() { BatchSize = 3, DetailConcurrency = 8, MaximumAttempts = 2 } }));
+        Assert.True((await provider.FetchSnapshotAsync(Source())).IsComplete);
+        var recorded = starts.ToArray();
+        Assert.Equal(7, recorded.Length);
+        for (var i = 1; i < recorded.Length; i++)
+            Assert.True(System.Diagnostics.Stopwatch.GetElapsedTime(recorded[i - 1], recorded[i]) >= TimeSpan.FromMilliseconds(220));
+    }
     // Advance mocked network timestamps to avoid spending real time on request spacing.
     // Actual timeout timers still run, exercising request/run cancellation deterministically.
     private sealed class FastClock : TimeProvider

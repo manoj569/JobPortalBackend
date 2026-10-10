@@ -10,8 +10,33 @@ public sealed class JobAutoPublishService(
     IJobQualityGate qualityGate,
     IJobService jobService,
     IOptions<JobAggregationOptions> options,
-    TimeProvider timeProvider) : IJobAutoPublishService
+    TimeProvider timeProvider) : IJobAutoPublishService, IJobAutoPublishBatchReview
 {
+    public async Task<IReadOnlyDictionary<Guid, JobAutoPublishResult>> ReviewBatchAsync(IReadOnlyCollection<Guid> jobIds,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var results = new Dictionary<Guid, JobAutoPublishResult>();
+        if (!options.Value.AutoPublishEnabled)
+        {
+            foreach (var id in jobIds) results[id] = new() { Outcome = JobAutoPublishOutcome.Disabled };
+            return results;
+        }
+        var snapshots = await jobs.FindAggregationReviewJobsAsync(jobIds, cancellationToken);
+        if (snapshots is null) return results;
+        foreach (var job in snapshots)
+        {
+            var quality = qualityGate.Evaluate(job, timeProvider.GetUtcNow().UtcDateTime);
+            if (quality.Decision is JobQualityDecision.Rejected or JobQualityDecision.NeedsReview)
+                results[job.Id] = new()
+                {
+                    Outcome = quality.Decision == JobQualityDecision.Rejected ? JobAutoPublishOutcome.Rejected : JobAutoPublishOutcome.NeedsReview,
+                    Reasons = quality.Reasons
+                };
+        }
+        return results;
+    }
+
     public async Task<JobAutoPublishResult> TryPublishAsync(
         Guid jobId,
         CancellationToken cancellationToken = default)

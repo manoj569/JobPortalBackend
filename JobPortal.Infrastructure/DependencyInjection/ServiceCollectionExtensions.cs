@@ -111,6 +111,8 @@ public static class ServiceCollectionExtensions
         services.AddHttpClient(WorkdayJobSourceProvider.HttpClientName, client =>
         {
             client.Timeout = Timeout.InfiniteTimeSpan;
+            client.DefaultRequestVersion = System.Net.HttpVersion.Version20;
+            client.DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower;
             client.DefaultRequestHeaders.UserAgent.ParseAdd("CareerHarborJobAggregation/1.0 (+https://careerharbor.in)");
             client.DefaultRequestHeaders.Accept.ParseAdd("application/json");
             client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("en-US");

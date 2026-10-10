@@ -14,3 +14,10 @@ public interface IExternalJobCreationLockRunFactory
 }
 
 public interface IExternalJobCreationLockRun : IExternalJobCreationLock, IAsyncDisposable { }
+
+// The union is acquired in global key order and retained through the batch commit.
+public interface IExternalJobCreationBatchLock
+{
+    Task<IAsyncDisposable> AcquireBatchAsync(IReadOnlyCollection<(string? Url, string Fingerprint)> identities,
+        CancellationToken cancellationToken = default);
+}

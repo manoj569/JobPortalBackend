@@ -4,7 +4,7 @@ using JobPortal.Persistence.Postgres;
 
 namespace JobPortal.Application.Tests;
 
-internal sealed class TestAggregationLocks : IJobSourceExecutionLock, IExternalJobCreationLock
+internal sealed class TestAggregationLocks : IJobSourceExecutionLock, IExternalJobCreationLock, IExternalJobCreationBatchLock
 {
     private readonly ConcurrentDictionary<Guid, byte> sources = new();
     private readonly ConcurrentDictionary<long, SemaphoreSlim> creations = new();
@@ -22,11 +22,18 @@ internal sealed class TestAggregationLocks : IJobSourceExecutionLock, IExternalJ
     }
 
     public async Task<IAsyncDisposable> AcquireAsync(string? canonicalUrl, string fingerprintHash, CancellationToken cancellationToken = default)
+        => await AcquireKeysAsync(PostgresExternalJobCreationLock.CreateKeys(canonicalUrl, fingerprintHash), cancellationToken);
+
+    public Task<IAsyncDisposable> AcquireBatchAsync(IReadOnlyCollection<(string? Url, string Fingerprint)> identities,
+        CancellationToken cancellationToken = default) => AcquireKeysAsync(identities
+            .SelectMany(x => PostgresExternalJobCreationLock.CreateKeys(x.Url, x.Fingerprint)).Distinct().Order().ToArray(), cancellationToken);
+
+    private async Task<IAsyncDisposable> AcquireKeysAsync(long[] keys, CancellationToken cancellationToken)
     {
         var held = new List<SemaphoreSlim>();
         try
         {
-            foreach (var key in PostgresExternalJobCreationLock.CreateKeys(canonicalUrl, fingerprintHash))
+            foreach (var key in keys)
             {
                 var gate = creations.GetOrAdd(key, _ => new(1, 1));
                 await gate.WaitAsync(cancellationToken);

@@ -26,3 +26,10 @@ public interface IJobAutoPublishService
         Guid jobId,
         CancellationToken cancellationToken = default);
 }
+
+public interface IJobAutoPublishBatchReview
+{
+    // Non-publishing decisions only; eligible jobs still use the existing authority.
+    Task<IReadOnlyDictionary<Guid, JobAutoPublishResult>> ReviewBatchAsync(IReadOnlyCollection<Guid> jobIds,
+        CancellationToken cancellationToken = default);
+}

@@ -210,14 +210,75 @@ public sealed partial class JobSourceRunner(
                         saveMilliseconds += previousMetrics.SaveMilliseconds;
                     }
                     var preloadTimer = System.Diagnostics.Stopwatch.StartNew();
-                    await bulkIngestion.PrepareRunAsync(newJobs, cancellationToken);
+                    var deferredPreload = source.AtsType == JobPortal.Domain.Enums.AtsType.Workday &&
+                        newJobs.All(x => !x.ExpiresAtUtc.HasValue) && ingestionService is IBatchedJobIngestionService;
+                    if (!deferredPreload)
+                        await bulkIngestion.PrepareRunAsync(newJobs, cancellationToken);
                     batchPrepared = true;
-                    if (_logger is not null) Progress(_logger, source.Id, "DB batch preload completed", newJobs.Length, preloadTimer.Elapsed.TotalMilliseconds, null);
+                    if (_logger is not null && !deferredPreload) Progress(_logger, source.Id, "DB batch preload completed", newJobs.Length, preloadTimer.Elapsed.TotalMilliseconds, null);
                 }
 
+                IReadOnlyList<JobIngestionResult>? committedBatch = null;
+                RawExternalJob[]? preparedBatch = null;
+                if (newJobs.Length > 0 && source.AtsType == JobPortal.Domain.Enums.AtsType.Workday &&
+                    newJobs.All(x => !x.ExpiresAtUtc.HasValue) && ingestionService is IBatchedJobIngestionService batchedIngestion)
+                {
+                    try
+                    {
+                        var preparationStart = System.Diagnostics.Stopwatch.GetTimestamp();
+                        preparedBatch = new RawExternalJob[newJobs.Length];
+                        for (var i = 0; i < newJobs.Length; i++)
+                        {
+                            var normalized = normalizer.Normalize(newJobs[i]);
+                            normalized = enricher?.Enrich(normalized) ?? normalized;
+                            preparedBatch[i] = normalized with
+                            { CategoryId = await categoryResolver.ResolveCategoryIdAsync(source, normalized, cancellationToken) };
+                        }
+                        enrichmentMilliseconds += System.Diagnostics.Stopwatch.GetElapsedTime(preparationStart).TotalMilliseconds;
+                        var commitStart = System.Diagnostics.Stopwatch.GetTimestamp();
+                        if (preparedBatch.All(x => !x.ExpiresAtUtc.HasValue))
+                            committedBatch = await batchedIngestion.IngestBatchAsync(preparedBatch, cancellationToken);
+                        else
+                            preparedBatch = null; // Preserve interleaved publication for newly enriched expiry.
+                        if (committedBatch is { Count: 0 }) committedBatch = null;
+                        ingestionMilliseconds += System.Diagnostics.Stopwatch.GetElapsedTime(commitStart).TotalMilliseconds;
+                        if (_logger is not null && committedBatch is not null)
+                        {
+                            if ((ingestionService as IBulkJobIngestionService)?.RunMetrics is { } batchMetrics)
+                                Progress(_logger, source.Id, "DB locked batch preload completed", newJobs.Length, batchMetrics.PreloadMilliseconds, null);
+                            Progress(_logger, source.Id, "Bounded batch committed", newJobs.Length,
+                                System.Diagnostics.Stopwatch.GetElapsedTime(commitStart).TotalMilliseconds, null);
+                        }
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+                    catch
+                    {
+                        // Isolate malformed records/failed commits using the existing
+                        // per-item path. Ambiguous commits are rechecked under locks.
+                        unitOfWork.ResetAfterFailure();
+                        (ingestionService as IBulkJobIngestionService)?.ResetRunAfterFailure();
+                        preparedBatch = null;
+                        if (_logger is not null) ItemFailed(_logger, source.Id, null);
+                    }
+                }
+
+                IReadOnlyDictionary<Guid, JobAutoPublishResult>? batchReview = null;
+                if (committedBatch is not null && autoPublishService is IJobAutoPublishBatchReview reviews)
+                {
+                    try
+                    {
+                        batchReview = await reviews.ReviewBatchAsync(committedBatch
+                            .Where(x => x.Outcome == JobIngestionOutcome.Created && x.JobId.HasValue)
+                            .Select(x => x.JobId!.Value).ToArray(), cancellationToken);
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    { /* Count already committed outcomes below, then propagate cancellation. */ }
+                    catch { /* Existing per-item publication handling isolates failures. */ }
+                }
+                var batchIndex = 0;
                 foreach (var rawJob in newJobs)
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
+                    if (committedBatch is null) cancellationToken.ThrowIfCancellationRequested();
 
                     var publicationAttempt = false;
                     try
@@ -226,16 +287,20 @@ public sealed partial class JobSourceRunner(
                         RawExternalJob preparedJob;
                         try
                         {
-                            var normalized = normalizer.Normalize(rawJob);
-                            normalized = enricher?.Enrich(normalized) ?? normalized;
-                            var categoryId = await categoryResolver.ResolveCategoryIdAsync(source, normalized, cancellationToken);
-                            preparedJob = normalized with { CategoryId = categoryId };
+                            if (preparedBatch is not null) preparedJob = preparedBatch[batchIndex];
+                            else
+                            {
+                                var normalized = normalizer.Normalize(rawJob);
+                                normalized = enricher?.Enrich(normalized) ?? normalized;
+                                var categoryId = await categoryResolver.ResolveCategoryIdAsync(source, normalized, cancellationToken);
+                                preparedJob = normalized with { CategoryId = categoryId };
+                            }
                         }
                         finally { enrichmentMilliseconds += System.Diagnostics.Stopwatch.GetElapsedTime(enrichmentStart).TotalMilliseconds; }
 
                         var ingestionStart = System.Diagnostics.Stopwatch.GetTimestamp();
                         JobIngestionResult result;
-                        try { result = await ingestionService.IngestAsync(preparedJob, cancellationToken); }
+                        try { result = committedBatch is not null ? committedBatch[batchIndex] : await ingestionService.IngestAsync(preparedJob, cancellationToken); }
                         finally { ingestionMilliseconds += System.Diagnostics.Stopwatch.GetElapsedTime(ingestionStart).TotalMilliseconds; }
 
                         switch (result.Outcome)
@@ -246,12 +311,11 @@ public sealed partial class JobSourceRunner(
                                 // Only newly created aggregated jobs are considered.
                                 // Existing duplicates must never be republished here.
                                 if (result.JobId.HasValue &&
-                                    autoPublishService is not null)
+                                    autoPublishService is not null && !cancellationToken.IsCancellationRequested)
                                 {
                                     publicationAttempt = true;
-                                    var publication = await autoPublishService.TryPublishAsync(
-                                        result.JobId.Value,
-                                        cancellationToken);
+                                    var publication = batchReview is not null && batchReview.TryGetValue(result.JobId.Value, out var reviewed)
+                                        ? reviewed : await autoPublishService.TryPublishAsync(result.JobId.Value, cancellationToken);
                                     switch (publication.Outcome)
                                     {
                                         case JobAutoPublishOutcome.Published: published++; break;
@@ -308,7 +372,7 @@ public sealed partial class JobSourceRunner(
                     catch (OperationCanceledException)
                         when (cancellationToken.IsCancellationRequested)
                     {
-                        throw;
+                        if (committedBatch is null) throw;
                     }
                     catch
                     {
@@ -331,6 +395,7 @@ public sealed partial class JobSourceRunner(
                     }
                     finally
                     {
+                        batchIndex++;
                         processed++;
                         ReportProgress("Ingestion");
                         if (_logger is not null && processed % 25 == 0)

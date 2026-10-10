@@ -20,11 +20,36 @@ public static class AggregationLockRegistration
     }
 }
 
-public sealed class PostgresExternalJobCreationLock(IConfiguration configuration) : IExternalJobCreationLock, IExternalJobCreationLockRunFactory
+public sealed class PostgresExternalJobCreationLock(IConfiguration configuration) : IExternalJobCreationLock, IExternalJobCreationLockRunFactory, IExternalJobCreationBatchLock
 {
     private readonly string connectionString = PostgresAdvisorySession.ConnectionString(configuration);
 
     public IExternalJobCreationLockRun CreateRun() => new CreationRun(() => new NpgsqlConnection(connectionString));
+
+    public async Task<IAsyncDisposable> AcquireBatchAsync(
+        IReadOnlyCollection<(string? Url, string Fingerprint)> identities, CancellationToken cancellationToken = default)
+    {
+        var keys = identities.SelectMany(x => CreateKeys(x.Url, x.Fingerprint)).Distinct().Order().ToArray();
+        var connection = new NpgsqlConnection(connectionString);
+        try
+        {
+            await connection.OpenAsync(cancellationToken);
+            // Ordered, parameterized commands in one protocol batch. The exact same
+            // keys/order coordinate with existing individual writers on other instances.
+            await using var batch = new NpgsqlBatch(connection) { Timeout = 30 };
+            foreach (var key in keys)
+            {
+                var command = new NpgsqlBatchCommand("SELECT pg_advisory_lock($1);");
+                command.Parameters.Add(new NpgsqlParameter<long> { TypedValue = key });
+                batch.BatchCommands.Add(command);
+            }
+            if (keys.Length > 0) await batch.ExecuteNonQueryAsync(cancellationToken);
+            // Pooling=false and Multiplexing=false: disposing physically closes this
+            // pinned session, releasing every acquired lock even after partial acquisition.
+            return connection;
+        }
+        catch { await connection.DisposeAsync(); throw; }
+    }
 
     internal sealed class CreationRun(Func<DbConnection> connections) : IExternalJobCreationLockRun
     {

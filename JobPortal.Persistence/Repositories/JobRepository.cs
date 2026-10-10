@@ -9,6 +9,7 @@ namespace JobPortal.Persistence.Repositories;
 
 public sealed class JobRepository(JobPortalDbContext context) : IJobRepository
 {
+    public bool SupportsAggregationBatchPreload => true;
     public Task<Job?> GetByIdAsync(Guid id, bool includeDeleted = false, CancellationToken cancellationToken = default)
     {
         IQueryable<Job> query = context.Jobs;
@@ -35,6 +36,7 @@ public sealed class JobRepository(JobPortalDbContext context) : IJobRepository
                 x.Company.Name.Contains(term) || x.Category.Name.Contains(term));
         }
         if (query.CompanyId.HasValue) source = source.Where(x => x.CompanyId == query.CompanyId);
+        if (query.JobSourceId.HasValue) source = source.Where(x => x.JobSourceId == query.JobSourceId);
         if (query.CategoryId.HasValue) source = source.Where(x => x.CategoryId == query.CategoryId);
         if (query.Status.HasValue) source = source.Where(x => x.Status == query.Status);
         if (query.EmploymentType.HasValue) source = source.Where(x => x.EmploymentType == query.EmploymentType);
@@ -110,6 +112,24 @@ public sealed class JobRepository(JobPortalDbContext context) : IJobRepository
             .Include(x => x.Company)
             .Include(x => x.Category)
             .FirstOrDefaultAsync(x => x.FingerprintHash == fingerprintHash && !x.IsDeleted, cancellationToken);
+
+    public async Task<IReadOnlyCollection<Job>?> FindByFingerprintHashesAsync(IReadOnlyCollection<string> hashes,
+        CancellationToken cancellationToken = default)
+    {
+        var keys = hashes.Distinct(StringComparer.Ordinal).ToArray();
+        return await context.Jobs.AsNoTracking().Include(x => x.Company).Include(x => x.Category)
+            .Where(x => !x.IsDeleted && x.FingerprintHash != null && keys.Contains(x.FingerprintHash))
+            .ToArrayAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyCollection<Job>?> FindAggregationReviewJobsAsync(IReadOnlyCollection<Guid> ids,
+        CancellationToken cancellationToken = default)
+    {
+        var keys = ids.Distinct().ToArray();
+        return await context.Jobs.AsNoTracking().Include(x => x.Company).Include(x => x.Category)
+            .Where(x => keys.Contains(x.Id) && !x.IsDeleted)
+            .ToArrayAsync(cancellationToken);
+    }
 
     public async Task<IReadOnlyList<Job>> FindCandidatesForFuzzyMatchAsync(
         Guid companyId, string title, string location, int maxResults, CancellationToken cancellationToken = default)

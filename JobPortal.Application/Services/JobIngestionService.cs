@@ -15,7 +15,7 @@ public sealed class JobIngestionService(
     IUnitOfWork unitOfWork,
     TimeProvider timeProvider,
     IExternalJobCreationLock creationLock,
-    IUrlCanonicalizer canonicalizer) : IJobIngestionService, IBulkJobIngestionService
+    IUrlCanonicalizer canonicalizer) : IJobIngestionService, IBulkJobIngestionService, IBatchedJobIngestionService
 {
     // JobSourceRunner processes a source sequentially inside one DI scope.
     // Cache successful company resolutions so a source containing many jobs
@@ -33,17 +33,97 @@ public sealed class JobIngestionService(
     private readonly HashSet<Guid> _validCategories = [];
     private IExternalJobCreationLockRun? _creationRun;
     private bool _runPrepared;
+    private bool _batchMode;
+    private bool _exactBatchPrepared;
+    private readonly Dictionary<string, Job> _fingerprintMatches = new(StringComparer.Ordinal);
+    private readonly HashSet<Guid> _stagedMetadataRepairs = [];
     private int _saveCalls;
     private double _saveMilliseconds;
     private int _preloadedOwnedCount;
-    public JobIngestionRunMetrics RunMetrics => new(_saveCalls, _saveMilliseconds, _preloadedOwnedCount);
+    private double _preloadMilliseconds;
+    public JobIngestionRunMetrics RunMetrics => new(_saveCalls, _saveMilliseconds, _preloadedOwnedCount, _preloadMilliseconds);
 
     private async Task PersistAsync(CancellationToken token)
     {
+        if (_batchMode) return;
         var start = System.Diagnostics.Stopwatch.GetTimestamp();
         _saveCalls++;
         try { await unitOfWork.SaveChangesAsync(token); }
         finally { _saveMilliseconds += System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds; }
+    }
+
+    public async Task<IReadOnlyList<JobIngestionResult>> IngestBatchAsync(IReadOnlyList<RawExternalJob> rawJobs,
+        CancellationToken cancellationToken = default)
+    {
+        // Publishing within a batch changes fuzzy eligibility. Keep the old item
+        // lifecycle for any potentially publishable job and unsupported lock adapters.
+        if (rawJobs.Count > 200) throw new ArgumentOutOfRangeException(nameof(rawJobs));
+        if (rawJobs.Any(x => x.ExpiresAtUtc.HasValue || !x.JobSourceId.HasValue || string.IsNullOrWhiteSpace(x.ExternalId)) ||
+            !jobs.SupportsAggregationBatchPreload || creationLock is not IExternalJobCreationBatchLock batchLocks)
+        {
+            await PrepareRunAsync(rawJobs.ToArray(), cancellationToken);
+            return Array.Empty<JobIngestionResult>();
+        }
+
+        var identities = new List<(string? Url, string Fingerprint)>(rawJobs.Count);
+        foreach (var raw in rawJobs)
+        {
+            var name = TextNormalizer.TrimOrNull(raw.CompanyName) ?? string.Empty;
+            var company = await ResolveCompanyAsync(name, SlugGenerator.Generate(name), raw.CompanyId, cancellationToken);
+            identities.Add((raw.ApplicationUrl is null ? null : canonicalizer.Canonicalize(raw.ApplicationUrl),
+                fingerprintService.GenerateFingerprint(raw.Title ?? string.Empty, company?.Name ?? name, raw.Location)));
+        }
+        var lease = await batchLocks.AcquireBatchAsync(identities, cancellationToken);
+        _batchMode = true;
+        try
+        {
+            // Fresh reads AFTER all creation locks are held; absent exact matches
+            // are authoritative only until this lease is released.
+            var preloadStart = System.Diagnostics.Stopwatch.GetTimestamp();
+            await PrepareRunAsync(rawJobs.ToArray(), cancellationToken);
+            if (_ownedJobs.Values.Any(x => x.Status == JobStatus.Published))
+            {
+                // Updating published fuzzy candidates changes later-item matching.
+                // Release the batch lease before the original item lifecycle.
+                return Array.Empty<JobIngestionResult>();
+            }
+            var matches = await jobs.FindByFingerprintHashesAsync(identities.Select(x => x.Fingerprint).ToArray(), cancellationToken);
+            _preloadMilliseconds = System.Diagnostics.Stopwatch.GetElapsedTime(preloadStart).TotalMilliseconds;
+            if (matches is null || deduplicationService is not IFuzzyJobDeduplicationService ||
+                matches.GroupBy(x => x.FingerprintHash).Any(x => x.Count() > 1))
+            {
+                // Fingerprints are deliberately non-unique. Preserve fresh selection
+                // when an owned update could invalidate one of several stored matches.
+                // Reuse the original item path for ambiguous stored matches.
+                _batchMode = false;
+                await PrepareRunAsync(rawJobs.ToArray(), cancellationToken);
+                return Array.Empty<JobIngestionResult>();
+            }
+            foreach (var job in matches) _fingerprintMatches.TryAdd(job.FingerprintHash!, job);
+            _exactBatchPrepared = true;
+            var results = new List<JobIngestionResult>(rawJobs.Count);
+            foreach (var raw in rawJobs) results.Add(await IngestAsync(raw, cancellationToken));
+            _batchMode = false;
+            await PersistAsync(cancellationToken);
+            jobs.ReleaseSavedAggregationTracking();
+            return results;
+        }
+        catch
+        {
+            // EF SaveChanges is atomic for this bounded batch. No outcome is reported
+            // before commit, and earlier batches remain durable on cancellation/failure.
+            unitOfWork.ResetAfterFailure();
+            ResetRunAfterFailure();
+            throw;
+        }
+        finally
+        {
+            _batchMode = false;
+            _exactBatchPrepared = false;
+            _fingerprintMatches.Clear();
+            _stagedMetadataRepairs.Clear();
+            await lease.DisposeAsync();
+        }
     }
 
     public async Task PrepareRunAsync(
@@ -52,11 +132,16 @@ public sealed class JobIngestionService(
     {
         cancellationToken.ThrowIfCancellationRequested();
 
+        var cachedCompanies = _batchMode ? _companyCache.ToArray() : [];
+        var cachedCategories = _batchMode ? _validCategories.ToArray() : [];
         await CompleteRunAsync();
         _saveCalls = 0;
         _saveMilliseconds = 0;
         _preloadedOwnedCount = 0;
+        _preloadMilliseconds = 0;
         _companyCache.Clear();
+        foreach (var entry in cachedCompanies) _companyCache[entry.Key] = entry.Value;
+        foreach (var category in cachedCategories) _validCategories.Add(category);
         foreach (var source in rawJobs.Where(x => x.JobSourceId.HasValue && !string.IsNullOrWhiteSpace(x.ExternalId))
             .GroupBy(x => x.JobSourceId!.Value))
         {
@@ -127,6 +212,9 @@ public sealed class JobIngestionService(
         _bulkTouchedJobIds.Clear();
         _companyCache.Clear();
         _validCategories.Clear();
+        _fingerprintMatches.Clear();
+        _stagedMetadataRepairs.Clear();
+        _exactBatchPrepared = false;
     }
 
     public async Task CompleteRunAsync()
@@ -202,7 +290,7 @@ public sealed class JobIngestionService(
                 if (_runPrepared)
                 {
                     RememberSavedOwned(owned, oldUrl);
-                    jobs.ReleaseSavedAggregationTracking();
+                    if (!_batchMode) jobs.ReleaseSavedAggregationTracking();
                 }
                 return new JobIngestionResult
                 {
@@ -218,7 +306,7 @@ public sealed class JobIngestionService(
             title, company, location, applicationUrl, cancellationToken);
 
         await using var creationLease =
-            duplicate.IsDuplicate
+            duplicate.IsDuplicate || _batchMode
                 ? null
                 : await (_creationRun ?? creationLock).AcquireAsync(
                     applicationUrl is null ? null : canonicalizer.Canonicalize(applicationUrl),
@@ -238,7 +326,7 @@ public sealed class JobIngestionService(
                 concurrentOwned.FirstSeenAtUtc ??= concurrentOwned.LastSeenAtUtc;
                 await PersistAsync(cancellationToken);
                 if (_runPrepared) RememberSavedOwned(concurrentOwned, oldUrl);
-                if (_runPrepared) jobs.ReleaseSavedAggregationTracking();
+                if (_runPrepared && !_batchMode) jobs.ReleaseSavedAggregationTracking();
                 return new JobIngestionResult { Outcome = changed ? JobIngestionOutcome.Updated : JobIngestionOutcome.Unchanged,
                     JobId = concurrentOwned.Id, ExplicitReasonCode = JobIngestionReasonCode.None };
             }
@@ -254,7 +342,9 @@ public sealed class JobIngestionService(
             // Normal fast path: established duplicates already have a canonical
             // fingerprint. Touch only aggregation timestamps directly in SQL.
             // No curated job fields are overwritten.
-            if (!string.IsNullOrWhiteSpace(matchedSnapshot.FingerprintHash))
+            if (!string.IsNullOrWhiteSpace(matchedSnapshot.FingerprintHash) &&
+                (!_batchMode || (!_ownedJobs.Values.Any(x => x.Id == matchedSnapshot.Id) &&
+                    !_stagedMetadataRepairs.Contains(matchedSnapshot.Id))))
             {
                 if (_bulkTouchedJobIds.Contains(matchedSnapshot.Id))
                     return DuplicateResult(duplicate, matchedSnapshot.Id);
@@ -274,7 +364,8 @@ public sealed class JobIngestionService(
 
             // Legacy/fallback path. A missing fingerprint must be calculated from
             // the stored canonical job, not from potentially different fuzzy input.
-            var matchedJob = await jobs.GetByIdAsync(
+            var matchedJob = _batchMode && !string.IsNullOrWhiteSpace(matchedSnapshot.FingerprintHash)
+                ? jobs.TrackAggregationJob(matchedSnapshot) : await jobs.GetByIdAsync(
                 matchedSnapshot.Id, cancellationToken: cancellationToken);
 
             if (matchedJob is null)
@@ -289,10 +380,13 @@ public sealed class JobIngestionService(
             {
                 matchedJob.FingerprintHash = fingerprintService.GenerateFingerprint(
                     matchedJob.Title, matchedJob.Company.Name, matchedJob.Location);
+                if (_batchMode) _stagedMetadataRepairs.Add(matchedJob.Id);
             }
 
             await PersistAsync(cancellationToken);
-            if (_runPrepared) jobs.ReleaseSavedAggregationTracking();
+            if (_batchMode && matchedJob.FingerprintHash is not null)
+                _fingerprintMatches.TryAdd(matchedJob.FingerprintHash, matchedJob);
+            if (_runPrepared && !_batchMode) jobs.ReleaseSavedAggregationTracking();
             return DuplicateResult(duplicate, matchedJob.Id);
         }
 
@@ -339,10 +433,11 @@ public sealed class JobIngestionService(
         };
 
         await jobs.AddAsync(job, cancellationToken);
+        if (_batchMode) _fingerprintMatches.TryAdd(job.FingerprintHash!, job);
         await PersistAsync(cancellationToken);
         if (_runPrepared && job.JobSourceId.HasValue && sourceExternalId is not null)
             RememberSavedOwned(job, null);
-        if (_runPrepared) jobs.ReleaseSavedAggregationTracking();
+        if (_runPrepared && !_batchMode) jobs.ReleaseSavedAggregationTracking();
 
         return new JobIngestionResult
         {
@@ -406,6 +501,10 @@ public sealed class JobIngestionService(
 
     private void RememberSavedOwned(Job job, string? oldUrl)
     {
+        if (_batchMode)
+            foreach (var oldFingerprint in _fingerprintMatches.Where(x => x.Value.Id == job.Id && x.Key != job.FingerprintHash)
+                .Select(x => x.Key).ToArray()) _fingerprintMatches.Remove(oldFingerprint);
+        if (_batchMode && job.FingerprintHash is not null) _fingerprintMatches.TryAdd(job.FingerprintHash, job);
         _ownedJobs[(job.JobSourceId!.Value, job.ExternalJobId!)] = job;
         var oldKey = oldUrl is null ? null : canonicalizer.Canonicalize(oldUrl);
         var newKey = canonicalizer.Canonicalize(job.ApplicationUrl);
@@ -432,6 +531,17 @@ public sealed class JobIngestionService(
                 return DeduplicationResult.SourceUrlMatch(cachedJob);
             }
         }
+
+        if (_exactBatchPrepared)
+        {
+            var fingerprint = fingerprintService.GenerateFingerprint(title, company.Name, location);
+            if (_fingerprintMatches.TryGetValue(fingerprint, out var matched))
+                return DeduplicationResult.FingerprintMatch(matched);
+            return await ((IFuzzyJobDeduplicationService)deduplicationService)
+                .FindFuzzyDuplicateAsync(title, company.Name, location, company.Id, cancellationToken);
+        }
+        if (_batchMode)
+            return await deduplicationService.FindDuplicateAsync(title, company.Name, location, applicationUrl, company.Id, cancellationToken);
 
         // Bulk URL hits are safe positives. For misses, skip the redundant unlocked
         // three-query pass: the full fresh dedup check still runs while holding the lock.

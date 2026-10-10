@@ -7,7 +7,7 @@ namespace JobPortal.Application.Services;
 /// <summary>
 /// Implements job deduplication using a tiered detection approach.
 /// </summary>
-public sealed class JobDeduplicationService : IJobDeduplicationService
+public sealed class JobDeduplicationService : IJobDeduplicationService, IFuzzyJobDeduplicationService
 {
     private readonly IJobRepository _jobRepository;
     private readonly IJobFingerprintService _fingerprintService;
@@ -57,6 +57,14 @@ public sealed class JobDeduplicationService : IJobDeduplicationService
         if (byFingerprint != null)
             return DeduplicationResult.FingerprintMatch(byFingerprint);
 
+        return await FindFuzzyDuplicateAsync(title, companyName, location, companyId, cancellationToken);
+    }
+
+    // Exact matches may be preloaded only while holding their creation locks.
+    // Fuzzy candidates remain a fresh query, preserving the existing selection semantics.
+    public async Task<DeduplicationResult> FindFuzzyDuplicateAsync(string title, string companyName,
+        string? location, Guid? companyId, CancellationToken cancellationToken = default)
+    {
         // Step 3: Fuzzy match within same company scope (if companyId known)
         if (companyId.HasValue)
         {
