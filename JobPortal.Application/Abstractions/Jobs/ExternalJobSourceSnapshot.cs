@@ -6,7 +6,11 @@ namespace JobPortal.Application.Abstractions.Jobs;
 public sealed record ExternalJobSourceSnapshot(
     IReadOnlyCollection<RawExternalJob> Jobs,
     int Skipped,
-    bool IsComplete);
+    bool IsComplete)
+{
+    // Selection diagnostics only: these items never reached ingestion validation.
+    public IReadOnlyDictionary<string, int>? SelectionReasonCounts { get; init; }
+}
 
 /// <summary>
 /// Optional extension for sources whose complete snapshot can be reconciled safely.

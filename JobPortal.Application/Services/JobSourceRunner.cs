@@ -35,6 +35,11 @@ public sealed partial class JobSourceRunner(
             new EventId(4321, nameof(RunReason)),
             "Job source run {JobSourceId} reason {ReasonCode}: {Count}.");
 
+    private static readonly Action<ILogger, Guid, string, string, int, Exception?> IngestionReason =
+        LoggerMessage.Define<Guid, string, string, int>(LogLevel.Information,
+            new EventId(4386, nameof(IngestionReason)),
+            "JobSourceIngestionReason Source={JobSourceId} Stage={Stage} ReasonCode={ReasonCode} Count={Count}.");
+
     private static readonly Action<ILogger, Guid, int, int, int, int, int, Exception?> PublicationCompleted =
         LoggerMessage.Define<Guid, int, int, int, int, int>(LogLevel.Information,
             new EventId(4324, nameof(PublicationCompleted)),
@@ -179,7 +184,8 @@ public sealed partial class JobSourceRunner(
                     Skipped = skipped, Failed = failed, Published = published, NeedsReview = needsReview,
                     QualityRejected = qualityRejected, PublishFailed = publishFailed, AutoPublishDisabled = disabled,
                     ReasonCounts = new Dictionary<JobIngestionReasonCode, int>(reasonCounts),
-                    ValidationReasonCounts = new Dictionary<string, int>(validationReasons)
+                    ValidationReasonCounts = new Dictionary<string, int>(validationReasons),
+                    SelectionReasonCounts = snapshot?.SelectionReasonCounts
                 };
                 runProgress?.Report(new(phase, processed, partialResult));
             }
@@ -484,6 +490,7 @@ public sealed partial class JobSourceRunner(
                 QualityReasonCounts = qualityReasons.Count == 0 ? null : qualityReasons,
                 ReasonCounts = reasonCounts.Count == 0 ? null : reasonCounts,
                 ValidationReasonCounts = validationReasons.Count == 0 ? null : validationReasons,
+                SelectionReasonCounts = snapshot?.SelectionReasonCounts,
                 Succeeded = successful,
                 Error = source.LastError
             };
@@ -554,9 +561,11 @@ public sealed partial class JobSourceRunner(
             if (_logger is not null)
             {
                 foreach (var (reason, count) in partialResult.ReasonCounts ?? new Dictionary<JobIngestionReasonCode, int>())
-                    RunReason(_logger, source.Id, reason.ToString(), count, null);
+                    IngestionReason(_logger, source.Id, "Ingestion", reason.ToString(), count, null);
                 foreach (var (reason, count) in partialResult.ValidationReasonCounts ?? new Dictionary<string, int>())
-                    RunReason(_logger, source.Id, $"Validation.{reason}", count, null);
+                    IngestionReason(_logger, source.Id, "Validation", reason, count, null);
+                foreach (var (reason, count) in partialResult.SelectionReasonCounts ?? new Dictionary<string, int>())
+                    IngestionReason(_logger, source.Id, "Selection", reason, count, null);
             }
             (categoryResolver as IJobSourceCategoryRunCache)?.EndRun();
             if (ingestionService is IBulkJobIngestionService bulk) await bulk.CompleteRunAsync();

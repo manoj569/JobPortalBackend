@@ -29,6 +29,7 @@ public sealed partial class JobSourcePublicationPolicy(IOptions<JobAggregationOp
     {
         var approval = Settings(source);
         var jobs = new List<RawExternalJob>();
+        var selectionReasons = new Dictionary<string, int>(StringComparer.Ordinal);
         var unknownEligibility = false;
         foreach (var job in snapshot.Jobs)
         {
@@ -47,10 +48,18 @@ public sealed partial class JobSourcePublicationPolicy(IOptions<JobAggregationOp
             // Do not close jobs on an ambiguous geographic snapshot (including a generic "Remote").
             if (job.CountryCodes.Count == 0 || !job.CountryCodes.All(IsKnownCountry) || job.AdditionalLocations.Count > 0)
                 unknownEligibility = true;
+            var reason = job.CountryCodes.Count == 0 || !job.CountryCodes.All(IsKnownCountry) || job.AdditionalLocations.Count > 0
+                ? string.Equals(job.WorkplaceTypeText, "remote", StringComparison.OrdinalIgnoreCase)
+                    ? "AmbiguousRemoteEligibility" : "UnknownIndiaEligibility"
+                : "NonIndiaLocation";
+            selectionReasons[reason] = selectionReasons.GetValueOrDefault(reason) + 1;
         }
         var limited = approval.TestImportLimit > 0;
+        if (limited && jobs.Count > approval.TestImportLimit)
+            selectionReasons["TestImportLimit"] = jobs.Count - approval.TestImportLimit;
         return new(limited ? jobs.Take(approval.TestImportLimit).ToArray() : jobs,
-            snapshot.Skipped, snapshot.IsComplete && !unknownEligibility && !limited);
+            snapshot.Skipped, snapshot.IsComplete && !unknownEligibility && !limited)
+        { SelectionReasonCounts = selectionReasons.Count == 0 ? null : selectionReasons };
     }
 
     public void ApplyLicensedLogo(JobSource source)

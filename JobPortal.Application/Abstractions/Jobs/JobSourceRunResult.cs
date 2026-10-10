@@ -48,6 +48,7 @@ public sealed record JobSourceRunResult
     /// </summary>
     public IReadOnlyDictionary<JobIngestionReasonCode, int>? ReasonCounts { get; init; }
     public IReadOnlyDictionary<string, int>? ValidationReasonCounts { get; init; }
+    public IReadOnlyDictionary<string, int>? SelectionReasonCounts { get; init; }
 
     public bool Succeeded { get; init; }
 

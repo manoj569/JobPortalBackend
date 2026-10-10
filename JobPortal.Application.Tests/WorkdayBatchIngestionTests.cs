@@ -72,7 +72,9 @@ public sealed class WorkdayBatchIngestionTests(ITestOutputHelper output)
     [Theory]
     [InlineData(21, true)]
     [InlineData(2000, false)]
-    public async Task CompletePaginationKeepsSearchCapIncomplete(int total, bool expectedComplete)
+    [InlineData(2021, true)]
+    [InlineData(3879, true)]
+    public async Task CompletePaginationKeepsOnlySuspectedSearchCapIncomplete(int total, bool expectedComplete)
     {
         var offsets = new List<int>();
         using var http = new HttpClient(new Handler(async (request, ct) =>
@@ -86,11 +88,43 @@ public sealed class WorkdayBatchIngestionTests(ITestOutputHelper output)
             }
             return Json(Detail(request));
         }));
-        var result = await Provider(http, budget: 120).FetchSnapshotAsync(Source());
+        var source = Source();
+        if (total == 3879)
+        {
+            source.AtsIdentifier = "pwc/Global_Experienced_Careers";
+            source.CareerPageUrl = "https://pwc.wd3.myworkdayjobs.com/Global_Experienced_Careers";
+            source.Company!.Name = "PwC";
+        }
+        var result = await Provider(http, budget: 120).FetchSnapshotAsync(source);
         Assert.Equal(Enumerable.Range(0, (total + 19) / 20).Select(x => x * 20), offsets);
         Assert.Equal(total, result.Jobs.Count);
         Assert.Equal(expectedComplete, result.IsComplete);
         Assert.Equal(total, result.Jobs.Select(x => x.ExternalId).Distinct().Count());
+    }
+
+    [Fact]
+    public async Task ChangedAdvertisedTotalCannotCertifyACompleteSnapshot()
+    {
+        using var http = new HttpClient(new Handler(async (request, ct) =>
+        {
+            if (request.Method == HttpMethod.Post)
+            {
+                using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
+                var offset = body.RootElement.GetProperty("offset").GetInt32();
+                return Json(Listing(offset == 0 ? 40 : 0, offset, 20));
+            }
+            return Json(Detail(request));
+        }));
+        var snapshot = await Provider(http).FetchSnapshotAsync(Source());
+        Assert.Equal(40, snapshot.Jobs.Count);
+        Assert.False(snapshot.IsComplete);
+    }
+
+    [Fact]
+    public async Task ShortListingBeforeAdvertisedTotalFailsClosed()
+    {
+        using var http = new HttpClient(new Handler((_, _) => Task.FromResult(Json(Listing(40, 0, 10)))));
+        await Assert.ThrowsAsync<InvalidDataException>(() => Provider(http).FetchSnapshotAsync(Source()));
     }
 
     [Fact]

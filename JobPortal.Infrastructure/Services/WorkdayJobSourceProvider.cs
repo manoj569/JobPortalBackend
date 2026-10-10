@@ -356,8 +356,15 @@ public sealed partial class WorkdayJobSourceProvider(
             }
             token.ThrowIfCancellationRequested();
             complete = !listingChanged && duplicatePaths == 0 && placeholderRows == 0 &&
-                expectedTotal < SuspectedSearchCap && failed == 0 && !duplicateIds &&
+                expectedTotal != SuspectedSearchCap && failed == 0 && !duplicateIds &&
                 succeeded == postings.Count && rawEntriesRead == expectedTotal;
+            if (!complete && logger is not null)
+                LogSourceFailure(logger, source.Id, "snapshot", rawEntriesRead,
+                    listingChanged ? "ListingSnapshotChanged" :
+                    duplicatePaths > 0 ? "DuplicateListingPaths" :
+                    placeholderRows > 0 ? "ListingPlaceholders" :
+                    expectedTotal == SuspectedSearchCap ? "SuspectedSearchCap" :
+                    failed > 0 ? "FailedDetails" : duplicateIds ? "DuplicateExternalIds" : "SnapshotCountMismatch", null);
             if (logger is not null)
                 LogListingSummary(logger, source.Id, rawEntriesRead, postings.Count, duplicatePaths, placeholderRows, expectedTotal, complete);
             yield return new(Array.Empty<RawExternalJob>(), 0, complete);
