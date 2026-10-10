@@ -11,7 +11,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace JobPortal.API.Controllers;
 
 [ApiController]
-[Authorize(Policy = InterviewInsightsMembershipPolicy.Name)]
+[Authorize(Roles = "Candidate")]
 [Route("api/candidate")]
 [Produces("application/json")]
 public sealed class CandidateInterviewInsightsController(IInterviewInsightService insights, ICandidateCompanyService companies) : ControllerBase
@@ -31,15 +31,18 @@ public sealed class CandidateInterviewInsightsController(IInterviewInsightServic
         Ok(new ApiResponse<IReadOnlyCollection<CompanyOption>>(
             await companies.SearchAsync(User.GetRequiredUserId(), query, limit, ct)));
 
+    [Authorize(Policy = InterviewInsightsMembershipPolicy.Name)]
     [HttpGet("interview-insights/{id:guid}")]
     public async Task<ActionResult<ApiResponse<InterviewInsightResponse>>> Get(Guid id, CancellationToken ct) =>
         Ok(new ApiResponse<InterviewInsightResponse>(await insights.GetAsync(User.GetRequiredUserId(), id, ct)));
 
+    [Authorize(Policy = InterviewInsightsMembershipPolicy.Name)]
     [HttpPatch("interview-insights/{id:guid}")]
     public async Task<ActionResult<ApiResponse<InterviewInsightResponse>>> Update(Guid id, UpdateInterviewInsightRequest request, CancellationToken ct) =>
         Ok(new ApiResponse<InterviewInsightResponse>(await insights.UpdateAsync(User.GetRequiredUserId(), id, request, ct),
             "Your updated experience is pending administrator review."));
 
+    [Authorize(Policy = InterviewInsightsMembershipPolicy.Name)]
     [HttpDelete("interview-insights/{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
@@ -47,31 +50,38 @@ public sealed class CandidateInterviewInsightsController(IInterviewInsightServic
         return NoContent();
     }
 
+    [Authorize(Policy = InterviewInsightsMembershipPolicy.Name)]
     [HttpPost("interview-schedules")]
     public async Task<ActionResult<ApiResponse<InterviewScheduleResponse>>> CreateSchedule(CreateInterviewScheduleRequest request, CancellationToken ct) =>
         StatusCode(StatusCodes.Status201Created, new ApiResponse<InterviewScheduleResponse>(await insights.CreateScheduleAsync(User.GetRequiredUserId(), request, ct)));
 
+    [Authorize(Policy = InterviewInsightsMembershipPolicy.Name)]
     [HttpGet("interview-schedules")]
     public async Task<ActionResult<ApiResponse<IReadOnlyCollection<InterviewScheduleResponse>>>> Schedules(CancellationToken ct) =>
         Ok(new ApiResponse<IReadOnlyCollection<InterviewScheduleResponse>>(await insights.GetSchedulesAsync(User.GetRequiredUserId(), ct)));
 
+    [Authorize(Policy = InterviewInsightsMembershipPolicy.Name)]
     [HttpPatch("interview-schedules/{id:guid}")]
     public async Task<ActionResult<ApiResponse<InterviewScheduleResponse>>> UpdateSchedule(Guid id, UpdateInterviewScheduleRequest request, CancellationToken ct) =>
         Ok(new ApiResponse<InterviewScheduleResponse>(await insights.UpdateScheduleAsync(User.GetRequiredUserId(), id, request, ct)));
 
+    [Authorize(Policy = InterviewInsightsMembershipPolicy.Name)]
     [HttpPost("interview-insights/{id:guid}/feedback")]
     public async Task<ActionResult<ApiResponse<InsightFeedbackResponse>>> Feedback(Guid id, CreateInsightFeedbackRequest request, CancellationToken ct) =>
         StatusCode(StatusCodes.Status201Created, new ApiResponse<InsightFeedbackResponse>(await insights.AddFeedbackAsync(User.GetRequiredUserId(), id, request, ct),
             "Thanks. Your feedback improves the quality of Interview Insights."));
 
+    [Authorize(Policy = InterviewInsightsMembershipPolicy.Name)]
     [HttpPost("interview-insights/{id:guid}/report")]
     public async Task<ActionResult<ApiResponse<InsightReportResponse>>> Report(Guid id, CreateInsightReportRequest request, CancellationToken ct) =>
         StatusCode(StatusCodes.Status201Created, new ApiResponse<InsightReportResponse>(await insights.ReportAsync(User.GetRequiredUserId(), id, request, ct)));
 
+    [Authorize(Policy = InterviewInsightsMembershipPolicy.Name)]
     [HttpGet("interview-insights/my-contributions")]
     public async Task<ActionResult<ApiResponse<MyInterviewContributionsResponse>>> Contributions(CancellationToken ct) =>
         Ok(new ApiResponse<MyInterviewContributionsResponse>(await insights.ContributionsAsync(User.GetRequiredUserId(), ct)));
 
+    [Authorize(Policy = InterviewInsightsMembershipPolicy.Name)]
     [HttpGet("interview-insights/company/{companyId:guid}/summary")]
     public async Task<ActionResult<ApiResponse<CompanyInterviewInsightSummaryResponse>>> CompanySummary(Guid companyId, CancellationToken ct) =>
         Ok(new ApiResponse<CompanyInterviewInsightSummaryResponse>(await insights.CompanySummaryAsync(User.GetRequiredUserId(), companyId, ct)));

@@ -13,6 +13,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Routing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace JobPortal.Application.Tests;
@@ -90,11 +91,81 @@ public sealed class InterviewInsightsMembershipAuthorizationTests
         Assert.DoesNotContain(userId.ToString(), json, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Fact]
-    public void EveryCandidateInsightScheduleAndCompanyActionUsesSharedPolicy()
+    [Theory]
+    [InlineData("Search", false, true)]
+    [InlineData("Create", false, true)]
+    [InlineData("Companies", false, true)]
+    [InlineData("Get", false, false)]
+    [InlineData("Search", true, true)]
+    [InlineData("Create", true, true)]
+    [InlineData("Get", true, true)]
+    public async Task InsightActionsEnforceMembershipOnlyWhereRequired(string action, bool premium, bool allowed)
     {
-        AssertPolicy(typeof(CandidateInterviewInsightsController));
-        AssertPolicy(typeof(CandidateCompaniesController));
+        var userId = Guid.NewGuid();
+        await using var db = Db();
+        if (premium)
+        {
+            var membership = Membership(userId, MembershipStatus.Active, Now.AddDays(-1), Now.AddDays(29));
+            db.Add(membership);
+            db.Add(new Payment { UserId = userId, MembershipId = membership.Id, Status = PaymentStatus.Paid,
+                Amount = 99m, CurrencyCode = "INR", PaidAtUtc = Now.AddDays(-1) });
+            await db.SaveChangesAsync();
+        }
+        var policy = await ActionPolicy(typeof(CandidateInterviewInsightsController), action);
+        var context = new AuthorizationHandlerContext(policy.Requirements, Candidate(userId), new DefaultHttpContext());
+        await new Microsoft.AspNetCore.Authorization.Infrastructure.PassThroughAuthorizationHandler().HandleAsync(context);
+        await new ActiveInterviewInsightsMembershipHandler(new MembershipRepository(db, new FixedTimeProvider())).HandleAsync(context);
+        Assert.Equal(allowed, context.HasSucceeded);
+    }
+
+    [Theory]
+    [InlineData(typeof(CandidateInterviewInsightsController), "Create")]
+    [InlineData(typeof(CandidateInterviewInsightsController), "Search")]
+    [InlineData(typeof(CandidateCompaniesController), "Search")]
+    [InlineData(typeof(CandidateCompaniesController), "Create")]
+    public async Task FreeActionsStillRequireAuthenticatedCandidate(Type controller, string action)
+    {
+        var policy = await ActionPolicy(controller, action);
+        Assert.DoesNotContain(policy.Requirements, r => r is ActiveInterviewInsightsMembershipRequirement);
+        foreach (var user in new[] { new ClaimsPrincipal(new ClaimsIdentity()),
+            new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Role, "Employer")], "test")) })
+        {
+            var context = new AuthorizationHandlerContext(policy.Requirements, user, null);
+            await new Microsoft.AspNetCore.Authorization.Infrastructure.PassThroughAuthorizationHandler().HandleAsync(context);
+            Assert.False(context.HasSucceeded);
+        }
+    }
+
+    [Theory]
+    [InlineData("Get")]
+    [InlineData("Update")]
+    [InlineData("Delete")]
+    [InlineData("CreateSchedule")]
+    [InlineData("Schedules")]
+    [InlineData("UpdateSchedule")]
+    [InlineData("Feedback")]
+    [InlineData("Report")]
+    [InlineData("Contributions")]
+    [InlineData("CompanySummary")]
+    public async Task OtherActionsRetainMembershipRequirement(string action)
+    {
+        var policy = await ActionPolicy(typeof(CandidateInterviewInsightsController), action);
+        Assert.Contains(policy.Requirements, r => r is ActiveInterviewInsightsMembershipRequirement);
+    }
+
+    private static async Task<AuthorizationPolicy> ActionPolicy(Type controller, string action)
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddAuthorization(options => options.AddPolicy(InterviewInsightsMembershipPolicy.Name,
+            policy => policy.RequireAuthenticatedUser().RequireRole("Candidate")
+                .AddRequirements(new ActiveInterviewInsightsMembershipRequirement())));
+        using var provider = services.BuildServiceProvider();
+        var method = controller.GetMethod(action)!;
+        Assert.Empty(method.GetCustomAttributes(typeof(AllowAnonymousAttribute), true));
+        var attributes = controller.GetCustomAttributes(typeof(AuthorizeAttribute), true)
+            .Concat(method.GetCustomAttributes(typeof(AuthorizeAttribute), true)).Cast<AuthorizeAttribute>();
+        return (await AuthorizationPolicy.CombineAsync(provider.GetRequiredService<IAuthorizationPolicyProvider>(), attributes))!;
     }
 
     [Fact]
@@ -104,17 +175,6 @@ public sealed class InterviewInsightsMembershipAuthorizationTests
             .GetCustomAttributes(typeof(AuthorizeAttribute), true).Cast<AuthorizeAttribute>());
         Assert.Equal("Administrator", attribute.Roles);
         Assert.Null(attribute.Policy);
-    }
-
-    private static void AssertPolicy(Type controller)
-    {
-        var attribute = Assert.Single(controller.GetCustomAttributes(typeof(AuthorizeAttribute), true)
-            .Cast<AuthorizeAttribute>());
-        Assert.Equal(InterviewInsightsMembershipPolicy.Name, attribute.Policy);
-        Assert.Null(attribute.Roles);
-        Assert.All(controller.GetMethods().Where(x => x.IsPublic && x.DeclaringType == controller &&
-            x.GetCustomAttributes(typeof(HttpMethodAttribute), true).Length > 0),
-            action => Assert.Empty(action.GetCustomAttributes(typeof(AllowAnonymousAttribute), true)));
     }
 
     private static AuthorizationHandlerContext AuthorizationContext(Guid userId) => new(
