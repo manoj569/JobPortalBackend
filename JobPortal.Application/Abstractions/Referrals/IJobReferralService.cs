@@ -63,6 +63,7 @@ public interface IJobReferralService
 
 public interface IJobReferralRepository
 {
+    Task<IReadOnlyCollection<Guid>> ActiveAdministratorIdsAsync(CancellationToken ct);
     Task<IReadOnlyDictionary<Guid, int>> AcceptedCountsAsync(IReadOnlyCollection<Guid> referralIds, CancellationToken ct);
     Task AddAsync(
         JobReferral referral,

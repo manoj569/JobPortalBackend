@@ -49,7 +49,17 @@ public enum NotificationType
     Membership,
     Security,
     System,
-    ReferralApproved
+    ReferralApproved,
+    ReferralJobSubmitted,
+    ReferralRejected,
+    ReferralRequested,
+    ReferralAccepted,
+    ReferralRequestRejected,
+    ReferralSubmitted,
+    ReferralConfirmed,
+    ReferralNotReceived,
+    ReferralExpired,
+    ReferralRequestReminder
 }
 public enum AuditAction
 {

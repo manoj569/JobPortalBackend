@@ -42,7 +42,8 @@ public sealed class NotificationOutbox(INotificationOutbox repository, TimeProvi
     }
 
     public static bool IsSafeActionUrl(string? url) => url is null ||
-        url is "/dashboard/interview-insights" or "/dashboard/referrals";
+        url is "/dashboard/interview-insights" or "/dashboard/referrals" or "/dashboard/referral-requests" or "/dashboard/my-referral-requests" ||
+        JobPortal.Application.Features.Referrals.ReferralNotifications.IsAdminPath(url);
 
     private static Guid DeterministicId(string key) => new(SHA256.HashData(Encoding.UTF8.GetBytes(key)).AsSpan(0, 16));
 }

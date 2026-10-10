@@ -12,6 +12,16 @@ public sealed partial class NotificationDeliveryHostedService(IServiceScopeFacto
         {
             try
             {
+                await using (var scope = scopes.CreateAsyncScope())
+                {
+                    try
+                    {
+                        await scope.ServiceProvider.GetRequiredService<JobPortal.Application.Features.Referrals.IReferralNotificationScheduler>()
+                            .EnqueueDueAsync(stoppingToken);
+                    }
+                    catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { throw; }
+                    catch (Exception) { DeliveryFailed(logger); }
+                }
                 for (var i = 0; i < options.Value.BatchSize && !stoppingToken.IsCancellationRequested; i++)
                 {
                     await using var scope = scopes.CreateAsyncScope();

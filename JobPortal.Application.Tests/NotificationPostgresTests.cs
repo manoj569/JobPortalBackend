@@ -17,7 +17,8 @@ public sealed class NotificationPostgresTests
         var settings = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("NOTIFICATION_TEST_POSTGRES"));
         Assert.True(settings.Host is "localhost" or "127.0.0.1" or "::1");
         Assert.Equal("notification_test", settings.Database);
-        settings.IncludeErrorDetail = false; settings.Pooling = false; settings.Timeout = 5; settings.CommandTimeout = 15;
+        // Disposable Docker databases can start/connect slowly on a busy Windows host.
+        settings.IncludeErrorDetail = false; settings.Pooling = false; settings.Timeout = 60; settings.CommandTimeout = 120;
         var schema = "notification_" + Guid.NewGuid().ToString("N");
         await using var admin = new NpgsqlConnection(settings.ConnectionString);
         await admin.OpenAsync();
@@ -33,7 +34,7 @@ public sealed class NotificationPostgresTests
                 CREATE TABLE "Notifications" ("Id" uuid PRIMARY KEY, "UserId" uuid NOT NULL, "BusinessKey" varchar(220), "Title" varchar(250) NOT NULL,
                   "Message" varchar(4000) NOT NULL, "Type" integer NOT NULL, "ActionUrl" varchar(2048), "IsRead" boolean NOT NULL,
                   "ReadAtUtc" timestamptz, "ReferralId" uuid, "JobId" uuid, "CreatedAtUtc" timestamptz NOT NULL,
-                  "UpdatedAtUtc" timestamptz, "IsDeleted" boolean NOT NULL, "DeletedAtUtc" timestamptz);
+                  "UpdatedAtUtc" timestamptz, "IsDeleted" boolean NOT NULL, "DeletedAtUtc" timestamptz, "UserId1" uuid);
                 CREATE UNIQUE INDEX "notification_key" ON "Notifications" ("UserId", "BusinessKey") WHERE "BusinessKey" IS NOT NULL;
                 CREATE TABLE "CandidateInterviewSchedules" ("Id" uuid PRIMARY KEY, "CandidateId" uuid NOT NULL, "ReminderRevision" uuid NOT NULL,
                   "ReminderRequested" boolean NOT NULL, "Status" integer NOT NULL, "InterviewAtUtc" timestamptz NOT NULL, "IsDeleted" boolean NOT NULL DEFAULT FALSE);

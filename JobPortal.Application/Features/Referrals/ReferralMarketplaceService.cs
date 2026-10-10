@@ -174,8 +174,9 @@ public sealed class ReferralMarketplaceService(IReferralMarketplaceRepository re
     }
     private async Task Event(ReferralRequest row, NotificationSource source, Guid recipient, string name, CancellationToken ct)
     {
+        var content = ReferralNotifications.Request(row, source, recipient);
         outbox.Enqueue(source, row.Id, Guid.Empty, recipient, $"referral-request:{row.Id:D}:{name}",
-            "Referral request update", "Your referral request has an update. Open CareerHarbor to review it.", "/dashboard/referrals");
+            content.Title, content.Message, content.Route);
         await audit.AppendAsync(new(AuditAction.Update, "ReferralRequest", row.Id.ToString(),
             new Dictionary<string, string?> { ["event"] = name }), ct);
     }

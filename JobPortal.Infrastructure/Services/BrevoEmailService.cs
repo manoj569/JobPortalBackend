@@ -2,6 +2,8 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json;
+using JobPortal.Application.Features.Referrals;
 using JobPortal.Application.Abstractions.Authentication;
 using JobPortal.Domain.Entities;
 using JobPortal.Domain.Enums;
@@ -113,7 +115,7 @@ public sealed class BrevoEmailService(
 
     private async Task<EmailDeliveryResult> SendAsync(
         string recipient, string subject, string body, string messageType,
-        CancellationToken cancellationToken, bool classifyFailure = false)
+        CancellationToken cancellationToken, bool classifyFailure = false, string? html = null, Guid? idempotencyKey = null)
     {
         if (!configuration.GetValue("Email:Enabled", false))
         {
@@ -128,12 +130,15 @@ public sealed class BrevoEmailService(
             request.Content = JsonContent.Create(new BrevoEmailRequest(
                 new(SanitizeHeaderValue(configuration["Email:FromName"]!),
                     configuration["Email:FromAddress"]!),
-                [new(recipient)], subject, body));
+                [new(recipient)], subject, body, html,
+                idempotencyKey.HasValue ? new Dictionary<string, string> { ["idempotencyKey"] = idempotencyKey.Value.ToString("D") } : null));
 
             using var response = await httpClientFactory.CreateClient(HttpClientName)
                 .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             if (response.IsSuccessStatusCode)
                 return EmailDeliveryResult.Sent;
+            if (idempotencyKey.HasValue && response.StatusCode == HttpStatusCode.BadRequest &&
+                await IsIdempotencyDuplicateAsync(response, cancellationToken)) return EmailDeliveryResult.Sent;
 
             DeliveryFailed(logger, messageType, (int)response.StatusCode, CorrelationId, null);
             if (classifyFailure && (int)response.StatusCode is >= 400 and < 500 &&
@@ -166,16 +171,52 @@ public sealed class BrevoEmailService(
         if (notification.UserId != user.Id ||
             !JobPortal.Application.Features.Notifications.NotificationOutbox.IsSafeActionUrl(notification.ActionUrl))
             return Task.FromResult(EmailDeliveryResult.PermanentFailure);
+        var referral = ReferralNotifications.IsReferral(notification);
+        if (referral && (!user.EmailConfirmed || notification.ActionUrl is null)) return Task.FromResult(EmailDeliveryResult.PermanentFailure);
         var body = notification.Message;
+        Uri? action = null;
         if (notification.ActionUrl is { } route)
         {
             if (!Uri.TryCreate(configuration["AppUrls:FrontendBaseUrl"], UriKind.Absolute, out var frontend) ||
                 frontend.Scheme is not ("https" or "http") || !string.IsNullOrEmpty(frontend.UserInfo))
                 return Task.FromResult(EmailDeliveryResult.PermanentFailure);
             var link = new UriBuilder(frontend) { Path = frontend.AbsolutePath.TrimEnd('/') + route, Query = "", Fragment = "" };
+            action = link.Uri;
             body += $"{Environment.NewLine}{Environment.NewLine}{link.Uri.AbsoluteUri}";
         }
-        return SendAsync(user.Email, SanitizeHeaderValue(notification.Title), body, "notification", cancellationToken, true);
+        return SendAsync(user.Email, SanitizeHeaderValue(notification.Title), body, "notification", cancellationToken, true,
+            referral ? ReferralHtml(notification, action) : null, referral ? notification.Id : null);
+    }
+
+    private static string ReferralHtml(Notification notification, Uri? action)
+    {
+        var title = WebUtility.HtmlEncode(notification.Title);
+        var message = WebUtility.HtmlEncode(notification.Message);
+        var cta = action is null ? string.Empty : $"<p style=\"margin:28px 0\"><a href=\"{WebUtility.HtmlEncode(action.AbsoluteUri)}\" style=\"background:#155e75;color:#fff;padding:14px 22px;text-decoration:none;border-radius:6px;display:inline-block\">Sign in to CareerHarbor</a></p>";
+        return $"""
+            <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+            <body style="margin:0;background:#f1f5f9;font-family:Arial,sans-serif;color:#0f172a">
+            <table role="presentation" style="width:100%;border:0"><tr><td style="padding:24px 12px">
+            <div style="max-width:600px;margin:auto;background:#fff;padding:28px;border-radius:10px">
+            <p style="color:#155e75;font-size:22px;font-weight:bold">CareerHarbor</p>
+            <h1 style="font-size:24px">{title}</h1><p style="line-height:1.6">{message}</p>{cta}
+            <p style="font-size:12px;color:#64748b;border-top:1px solid #e2e8f0;padding-top:20px">CareerHarbor · This update concerns your referral activity. Sign in to your account to review details.</p>
+            </div></td></tr></table></body></html>
+            """;
+    }
+
+    private static async Task<bool> IsIdempotencyDuplicateAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        // Bounded parsing only; never log the provider's response or recipient/template data.
+        await response.Content.LoadIntoBufferAsync(4096, ct);
+        try
+        {
+            using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+            return json.RootElement.TryGetProperty("code", out var code) && code.ValueKind == JsonValueKind.String &&
+                code.GetString() == "duplicate_parameter" && json.RootElement.TryGetProperty("message", out var message) &&
+                message.ValueKind == JsonValueKind.String && message.GetString()!.Contains("idempotency", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (JsonException) { return false; }
     }
 
     private string CorrelationId =>
@@ -186,7 +227,9 @@ public sealed class BrevoEmailService(
         [property: JsonPropertyName("sender")] BrevoSender Sender,
         [property: JsonPropertyName("to")] IReadOnlyCollection<BrevoRecipient> To,
         [property: JsonPropertyName("subject")] string Subject,
-        [property: JsonPropertyName("textContent")] string TextContent);
+        [property: JsonPropertyName("textContent")] string TextContent,
+        [property: JsonPropertyName("htmlContent"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? HtmlContent,
+        [property: JsonPropertyName("headers"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyDictionary<string, string>? Headers);
 
     private sealed record BrevoSender(
         [property: JsonPropertyName("name")] string Name,

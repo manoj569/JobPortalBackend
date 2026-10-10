@@ -62,6 +62,19 @@ public sealed class NotificationDeliveryRepository(JobPortalDbContext db) : INot
 
         switch (delivery.Source)
         {
+            case NotificationSource.ReferralJobSubmitted:
+                return await db.Users.AnyAsync(u => u.Id == delivery.UserId && u.Role.Name == "Administrator", ct) &&
+                    await db.JobReferrals.AnyAsync(r => r.Id == delivery.SourceId && r.ApprovalStatus == JobReferralApprovalStatus.Pending, ct);
+            case NotificationSource.ReferralRequestReminder:
+                return await db.ReferralRequests.AnyAsync(r => r.Id == delivery.SourceId &&
+                    r.ReferrerUserId == delivery.UserId && r.JobReferral.ReferrerUserId == delivery.UserId &&
+                    r.Status == ReferralRequestStatus.Requested && r.ExpiresAtUtc > now, ct) &&
+                    !await db.NotificationDeliveries.AnyAsync(d => d.Source == NotificationSource.ReferralRequestReminder &&
+                        d.SourceId == delivery.SourceId && d.ScheduledForUtc > delivery.ScheduledForUtc, ct);
+            case NotificationSource.ReferralExpired:
+                return await db.ReferralRequests.AnyAsync(r => r.Id == delivery.SourceId &&
+                    (r.CandidateUserId == delivery.UserId || r.ReferrerUserId == delivery.UserId && r.JobReferral.ReferrerUserId == delivery.UserId) &&
+                    (r.Status == ReferralRequestStatus.Expired || r.Status == ReferralRequestStatus.Requested && r.ExpiresAtUtc <= now), ct);
             case NotificationSource.ReferralRequested:
             case NotificationSource.ReferralAccepted:
             case NotificationSource.ReferralRequestRejected:
@@ -69,7 +82,7 @@ public sealed class NotificationDeliveryRepository(JobPortalDbContext db) : INot
             case NotificationSource.ReferralConfirmed:
             case NotificationSource.ReferralNotReceived:
                 return await db.ReferralRequests.AnyAsync(r => r.Id == delivery.SourceId &&
-                    ((delivery.Source == NotificationSource.ReferralRequested && r.ReferrerUserId == delivery.UserId && r.Status == ReferralRequestStatus.Requested && r.ExpiresAtUtc > now) ||
+                    ((delivery.Source == NotificationSource.ReferralRequested && r.ReferrerUserId == delivery.UserId && r.JobReferral.ReferrerUserId == delivery.UserId && r.Status == ReferralRequestStatus.Requested && r.ExpiresAtUtc > now) ||
                      (delivery.Source == NotificationSource.ReferralAccepted && r.CandidateUserId == delivery.UserId && r.AcceptedAtUtc != null) ||
                      (delivery.Source == NotificationSource.ReferralRequestRejected && r.CandidateUserId == delivery.UserId && r.RejectedAtUtc != null) ||
                      (delivery.Source == NotificationSource.ReferralSubmitted && r.CandidateUserId == delivery.UserId && r.ReferralSubmittedAtUtc != null) ||
@@ -160,8 +173,8 @@ public sealed class NotificationDeliveryRepository(JobPortalDbContext db) : INot
                 await transaction.CommitAsync(ct);
                 return null;
             }
-            var type = delivery.Source == NotificationSource.ReferralApproved ? NotificationType.ReferralApproved : NotificationType.System;
-            Guid? referralId = delivery.Source is NotificationSource.ReferralApproved or NotificationSource.ReferralRejected ? delivery.SourceId : null;
+            var type = JobPortal.Application.Features.Referrals.ReferralNotifications.Type(delivery.Source);
+            Guid? referralId = delivery.Source is NotificationSource.ReferralApproved or NotificationSource.ReferralRejected or NotificationSource.ReferralJobSubmitted ? delivery.SourceId : null;
             // PK/business-key constraints arbitrate retries, including unknown commit outcomes.
             await db.Database.ExecuteSqlInterpolatedAsync($"""
                 INSERT INTO "Notifications" ("Id", "UserId", "BusinessKey", "Title", "Message", "Type", "ActionUrl", "ReferralId", "IsRead", "CreatedAtUtc", "IsDeleted")

@@ -9,6 +9,59 @@ namespace JobPortal.Application.Tests;
 
 public sealed class NotificationDispatcherTests
 {
+    [Theory]
+    [InlineData(true, NotificationDeliveryStatus.Sent, 1)]
+    [InlineData(false, NotificationDeliveryStatus.Cancelled, 0)]
+    public async Task ReferralEmailRequiresVerifiedAccountAndSuccessfulRetryDoesNotResend(bool verified, NotificationDeliveryStatus status, int calls)
+    {
+        var store = new Store(NotificationChannel.Email) { Source = NotificationSource.ReferralAccepted };
+        store.User.EmailConfirmed = verified;
+        var sender = new Email();
+        var processor = Processor(store, sender);
+        await processor.ProcessOneAsync(default);
+        Assert.Equal(status, store.Status);
+        Assert.False(await processor.ProcessOneAsync(default));
+        Assert.Equal(calls, sender.Calls);
+        Assert.NotNull(store.Inbox);
+    }
+
+    [Fact]
+    public async Task AdminEmailCanBeDisabledWithoutAffectingInbox()
+    {
+        var store = new Store(NotificationChannel.Email) { Source = NotificationSource.ReferralJobSubmitted };
+        store.User.EmailConfirmed = true;
+        var sender = new Email();
+        var processor = new NotificationDispatcher(store, sender, new Realtime(), new Clock(), Options.Create(new NotificationDeliveryOptions()),
+            Options.Create(new JobPortal.Application.Features.Referrals.ReferralNotificationOptions { AdminEmailEnabled = false }));
+        await processor.ProcessOneAsync(default);
+        Assert.Equal("admin_email_disabled", store.Code);
+        Assert.Equal(0, sender.Calls);
+        Assert.NotNull(store.Inbox);
+    }
+
+    [Fact]
+    public async Task AdministratorEmailRequiresConfiguredApprovalPageAndKeepsInbox()
+    {
+        var store = new Store(NotificationChannel.Email) { Source = NotificationSource.ReferralJobSubmitted };
+        store.User.EmailConfirmed = true;
+        var sender = new Email();
+        await Processor(store, sender).ProcessOneAsync(default);
+        Assert.Equal("admin_route_missing", store.Code);
+        Assert.Equal(0, sender.Calls);
+        Assert.NotNull(store.Inbox);
+    }
+
+    [Fact]
+    public async Task AdministratorEmailWithConfiguredPageAndVerifiedAccountUsesExistingSender()
+    {
+        var store = new Store(NotificationChannel.Email)
+        { Source = NotificationSource.ReferralJobSubmitted, ActionUrl = "/admin/referrals" };
+        store.User.EmailConfirmed = true;
+        var sender = new Email();
+        await Processor(store, sender).ProcessOneAsync(default);
+        Assert.Equal(NotificationDeliveryStatus.Sent, store.Status);
+        Assert.Equal(1, sender.Calls);
+    }
     private static readonly DateTime Now = new(2026, 10, 1, 12, 0, 0, DateTimeKind.Utc);
 
     [Theory]
@@ -104,8 +157,9 @@ public sealed class NotificationDispatcherTests
         public EmailDeliveryResult Result { get; init; } = EmailDeliveryResult.Sent;
         public bool Throw { get; init; }
         public User? Recipient { get; private set; }
+        public int Calls { get; private set; }
         public Task<EmailDeliveryResult> SendNotificationAsync(User user, Notification notification, CancellationToken cancellationToken)
-        { Recipient = user; return Throw ? Task.FromException<EmailDeliveryResult>(new InvalidOperationException("secret provider response")) : Task.FromResult(Result); }
+        { Calls++; Recipient = user; return Throw ? Task.FromException<EmailDeliveryResult>(new InvalidOperationException("secret provider response")) : Task.FromResult(Result); }
         public Task<EmailDeliveryResult> SendPasswordResetAsync(User user, string rawToken, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<EmailDeliveryResult> SendApplicationStatusAsync(User user, string jobTitle, JobApplicationStatus status, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<EmailDeliveryResult> SendRegistrationVerificationAsync(User user, string rawToken, CancellationToken cancellationToken) => throw new NotSupportedException();
@@ -117,6 +171,8 @@ public sealed class NotificationDispatcherTests
         private readonly NotificationChannel channel;
         private bool claimed;
         public int Attempts { get; init; } = 1;
+        public NotificationSource Source { get; init; }
+        public string? ActionUrl { get; init; }
         public bool Eligible { get; set; } = true;
         public bool CancelOnRecipientLookup { get; init; }
         public NotificationDeliveryStatus Status { get; private set; }
@@ -128,7 +184,7 @@ public sealed class NotificationDispatcherTests
         {
             if (claimed) return Task.FromResult<NotificationDelivery?>(null);
             claimed = true;
-            return Task.FromResult<NotificationDelivery?>(new() { UserId = User.Id, NotificationId = Inbox!.Id, Channel = channel, AttemptCount = Attempts });
+            return Task.FromResult<NotificationDelivery?>(new() { UserId = User.Id, NotificationId = Inbox!.Id, Source = Source, ActionUrl = ActionUrl, Channel = channel, AttemptCount = Attempts });
         }
         public Task<bool> IsEligibleAsync(NotificationDelivery delivery, DateTime now, CancellationToken ct) => Task.FromResult(Eligible);
         public Task<User?> RecipientAsync(Guid userId, CancellationToken ct)

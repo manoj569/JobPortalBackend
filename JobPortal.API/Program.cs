@@ -152,6 +152,8 @@ builder.Services.AddOptions<JobPortal.Application.Features.Notifications.Notific
 builder.Services.AddScoped<JobPortal.Application.Features.Notifications.INotificationRealtime, JobPortal.API.Hubs.NotificationRealtime>();
 builder.Services.AddSingleton<Microsoft.AspNetCore.SignalR.IUserIdProvider, JobPortal.API.Hubs.NotificationUserIdProvider>();
 builder.Services.AddHostedService<NotificationDeliveryHostedService>();
+builder.Services.AddOptions<JobPortal.Application.Features.Referrals.ReferralNotificationOptions>()
+    .BindConfiguration("ReferralNotifications").Validate(x => x.IsValid(), "Invalid referral notification settings.").ValidateOnStart();
 builder.Services.AddScoped<RegistrationEmailDispatcher>();
 builder.Services.AddHostedService<InterviewScheduleNotificationHostedService>();
 builder.Services.AddHostedService<CareerSessionReminderHostedService>();

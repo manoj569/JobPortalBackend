@@ -8,6 +8,9 @@ namespace JobPortal.Persistence.Repositories;
 
 public sealed class JobReferralRepository(JobPortalDbContext context, TimeProvider? timeProvider = null) : IJobReferralRepository
 {
+    public async Task<IReadOnlyCollection<Guid>> ActiveAdministratorIdsAsync(CancellationToken ct) =>
+        await context.Users.AsNoTracking().Where(x => x.Status == UserStatus.Active && x.Role.Name == "Administrator")
+            .Select(x => x.Id).ToArrayAsync(ct);
     public async Task<IReadOnlyDictionary<Guid, int>> AcceptedCountsAsync(IReadOnlyCollection<Guid> referralIds, CancellationToken ct) =>
         await context.ReferralRequests.IgnoreQueryFilters().AsNoTracking().Where(x => referralIds.Contains(x.JobReferralId) && x.AcceptedAtUtc != null)
             .GroupBy(x => x.JobReferralId).Select(g => new { Id = g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Id, x => x.Count, ct);

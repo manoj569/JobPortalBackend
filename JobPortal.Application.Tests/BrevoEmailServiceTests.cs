@@ -12,6 +12,62 @@ namespace JobPortal.Application.Tests;
 
 public sealed class BrevoEmailServiceTests
 {
+    [Fact]
+    public async Task ReferralHtmlEscapesContentUsesVerifiedRegisteredEmailAndOneSecureCta()
+    {
+        string? payload = null;
+        var logger = new CollectingLogger<BrevoEmailService>();
+        var service = CreateService(new DelegateHandler(async (request, ct) =>
+        { payload = await request.Content!.ReadAsStringAsync(ct); return new(HttpStatusCode.Created); }), logger, "test-key");
+        var user = new User { Email = "registered@example.test", EmailConfirmed = true };
+        var notification = new Notification { UserId = user.Id, Type = JobPortal.Domain.Enums.NotificationType.ReferralSubmitted,
+            Title = "Referral <script>title</script>", Message = "Job <img src=x> at A&B. Marked submitted; not employer confirmation.",
+            ActionUrl = "/dashboard/my-referral-requests" };
+        Assert.Equal(EmailDeliveryResult.Sent, await service.SendNotificationAsync(user, notification));
+        using var json = JsonDocument.Parse(payload!);
+        var html = json.RootElement.GetProperty("htmlContent").GetString()!;
+        Assert.Contains("&lt;img src=x&gt;", html);
+        Assert.Contains("A&amp;B", html);
+        Assert.DoesNotContain("<script>", html);
+        Assert.Contains("https://careerharbor.in/dashboard/my-referral-requests", html);
+        Assert.Contains("CareerHarbor", html);
+        Assert.Equal(1, html.Split("href=", StringSplitOptions.None).Length - 1);
+        Assert.Equal(user.Email, json.RootElement.GetProperty("to")[0].GetProperty("email").GetString());
+        Assert.Equal(notification.Id.ToString("D"), json.RootElement.GetProperty("headers").GetProperty("idempotencyKey").GetString());
+        Assert.DoesNotContain(logger.Messages, m => m.Contains(user.Email, StringComparison.Ordinal) || m.Contains("<img", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ReferralDeliveryRejectsUnverifiedAddressWithoutContactingBrevo()
+    {
+        var service = CreateService(new DelegateHandler((_, _) => throw new InvalidOperationException("Must not send")), new CollectingLogger<BrevoEmailService>(), "test-key");
+        var user = new User { Email = "unverified@example.test" };
+        Assert.Equal(EmailDeliveryResult.PermanentFailure, await service.SendNotificationAsync(user,
+            new Notification { UserId = user.Id, Type = JobPortal.Domain.Enums.NotificationType.ReferralApproved, ActionUrl = "/dashboard/referrals" }));
+    }
+
+    [Fact]
+    public async Task UnknownSendOutcomeRetriesWithSameProviderIdentityAndDuplicateIsSuccess()
+    {
+        var keys = new List<string>();
+        var delivered = 0;
+        var logger = new CollectingLogger<BrevoEmailService>();
+        var service = CreateService(new DelegateHandler(async (request, ct) =>
+        {
+            using var json = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
+            keys.Add(json.RootElement.GetProperty("headers").GetProperty("idempotencyKey").GetString()!);
+            if (keys.Count == 1) { delivered++; throw new TaskCanceledException("unknown outcome"); }
+            return new HttpResponseMessage(HttpStatusCode.BadRequest)
+            { Content = new StringContent("{\"code\":\"duplicate_parameter\",\"message\":\"idempotencyKey already used\"}") };
+        }), logger, "test-key");
+        var user = new User { Email = "registered@example.test", EmailConfirmed = true };
+        var notification = new Notification { UserId = user.Id, Type = JobPortal.Domain.Enums.NotificationType.ReferralAccepted,
+            Title = "Accepted", Message = "Not yet submitted", ActionUrl = "/dashboard/my-referral-requests" };
+        Assert.Equal(EmailDeliveryResult.Failed, await service.SendNotificationAsync(user, notification));
+        Assert.Equal(EmailDeliveryResult.Sent, await service.SendNotificationAsync(user, notification));
+        Assert.Equal(keys[0], keys[1]);
+        Assert.Equal(1, delivered);
+    }
     [Theory]
     [InlineData(null, "Create your CareerHarbor password", "create a password")]
     [InlineData("existing-hash", "Reset your Career Portal password", "reset your Career Portal password")]

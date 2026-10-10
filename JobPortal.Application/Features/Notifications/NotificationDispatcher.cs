@@ -33,7 +33,8 @@ public interface INotificationRealtime
 }
 
 public sealed class NotificationDispatcher(INotificationDeliveryRepository repository, IEmailService email,
-    INotificationRealtime realtime, TimeProvider clock, IOptions<NotificationDeliveryOptions> options)
+    INotificationRealtime realtime, TimeProvider clock, IOptions<NotificationDeliveryOptions> options,
+    IOptions<JobPortal.Application.Features.Referrals.ReferralNotificationOptions>? referralOptions = null)
 {
     public async Task<bool> ProcessOneAsync(CancellationToken ct)
     {
@@ -67,6 +68,12 @@ public sealed class NotificationDispatcher(INotificationDeliveryRepository repos
                 if (notification is null) { await Retry("inbox_not_ready", token); return true; }
                 var recipient = await repository.RecipientAsync(delivery.UserId, token);
                 if (recipient is null) { await Finish(NotificationDeliveryStatus.Cancelled, "recipient_ineligible", token); return true; }
+                if (JobPortal.Application.Features.Referrals.ReferralNotifications.IsReferral(delivery.Source) && !recipient.EmailConfirmed)
+                { await Finish(NotificationDeliveryStatus.Cancelled, "email_unverified", token); return true; }
+                if (delivery.Source == NotificationSource.ReferralJobSubmitted && referralOptions?.Value.AdminEmailEnabled == false)
+                { await Finish(NotificationDeliveryStatus.Cancelled, "admin_email_disabled", token); return true; }
+                if (delivery.Source == NotificationSource.ReferralJobSubmitted && delivery.ActionUrl is null)
+                { await Finish(NotificationDeliveryStatus.Cancelled, "admin_route_missing", token); return true; }
                 // Last eligibility check immediately before the external side effect. Never hold a transaction over HTTP.
                 if (!await repository.IsEligibleAsync(delivery, clock.GetUtcNow().UtcDateTime, token))
                 { await Finish(NotificationDeliveryStatus.Cancelled, "source_ineligible", token); return true; }

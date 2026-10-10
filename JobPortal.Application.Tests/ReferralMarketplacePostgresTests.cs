@@ -4,6 +4,7 @@ using JobPortal.Application.Features.Notifications;
 using JobPortal.Application.Features.Dashboard;
 using JobPortal.Application.Features.PublicJobs;
 using JobPortal.Domain.Entities;
+using JobPortal.Domain.Enums;
 using JobPortal.Persistence.Context;
 using JobPortal.Persistence.Repositories;
 using Microsoft.EntityFrameworkCore;
@@ -14,6 +15,65 @@ namespace JobPortal.Application.Tests;
 
 public sealed class ReferralMarketplacePostgresTests
 {
+    [LocalReferralPostgresFact]
+    public async Task Phase3aExpirySweepsAcrossWorkersDoNotDuplicateDurableIntents()
+    {
+        await Isolated(async (f, options) =>
+        {
+            var request = await f.Request();
+            f.Clock.Utc = request.ExpiresAtUtc;
+            await using var first = new JobPortalDbContext(options);
+            await using var second = new JobPortalDbContext(options);
+            var settings = Microsoft.Extensions.Options.Options.Create(new ReferralNotificationOptions());
+            await Task.WhenAll(new ReferralNotificationScheduler(first, f.Clock, settings).EnqueueDueAsync(default),
+                new ReferralNotificationScheduler(second, f.Clock, settings).EnqueueDueAsync(default));
+            Assert.Equal(4, await f.Db.NotificationDeliveries.CountAsync(d => d.Source == NotificationSource.ReferralExpired));
+            Assert.Equal(ReferralRequestStatus.Requested, (await f.Db.ReferralRequests.AsNoTracking().SingleAsync()).Status);
+        });
+    }
+
+    [LocalReferralPostgresFact]
+    public async Task Phase3aProviderFailureCannotUndoAcceptanceAndSuccessfulDeliveryIsNotRepeated()
+    {
+        await Isolated(async (f, _) =>
+        {
+            var request = await f.Request();
+            await f.Service.AcceptAsync(f.ReferrerId, request.Id, default);
+            var candidate = await f.Db.Users.SingleAsync(u => u.Id == f.CandidateId);
+            candidate.EmailConfirmed = true;
+            await f.Db.SaveChangesAsync();
+            var email = new Phase3aEmail();
+            var dispatcher = new NotificationDispatcher(new NotificationDeliveryRepository(f.Db), email, new Phase3aRealtime(), f.Clock,
+                Microsoft.Extensions.Options.Options.Create(new NotificationDeliveryOptions()));
+            while (await dispatcher.ProcessOneAsync(default)) { }
+            Assert.Equal(ReferralRequestStatus.Accepted, (await f.Db.ReferralRequests.AsNoTracking().SingleAsync()).Status);
+            Assert.Equal(1, email.Calls);
+            Assert.Equal(1, await f.Db.Notifications.CountAsync());
+            email.Result = JobPortal.Application.Abstractions.Authentication.EmailDeliveryResult.Sent;
+            f.Clock.Utc = f.Clock.Utc.AddMinutes(1);
+            while (await dispatcher.ProcessOneAsync(default)) { }
+            Assert.Equal(2, email.Calls);
+            Assert.False(await dispatcher.ProcessOneAsync(default));
+            Assert.Equal(2, email.Calls);
+            Assert.Equal(NotificationDeliveryStatus.Sent, (await f.Db.NotificationDeliveries.AsNoTracking()
+                .SingleAsync(d => d.Source == NotificationSource.ReferralAccepted && d.Channel == NotificationChannel.Email)).Status);
+        });
+    }
+
+    private sealed class Phase3aEmail : JobPortal.Application.Abstractions.Authentication.IEmailService
+    {
+        public JobPortal.Application.Abstractions.Authentication.EmailDeliveryResult Result { get; set; } = JobPortal.Application.Abstractions.Authentication.EmailDeliveryResult.Failed;
+        public int Calls { get; private set; }
+        public Task<JobPortal.Application.Abstractions.Authentication.EmailDeliveryResult> SendNotificationAsync(User user, Notification notification, CancellationToken cancellationToken = default)
+        { Calls++; return Task.FromResult(Result); }
+        public Task<JobPortal.Application.Abstractions.Authentication.EmailDeliveryResult> SendPasswordResetAsync(User user, string rawToken, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<JobPortal.Application.Abstractions.Authentication.EmailDeliveryResult> SendApplicationStatusAsync(User user, string jobTitle, JobApplicationStatus status, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<JobPortal.Application.Abstractions.Authentication.EmailDeliveryResult> SendRegistrationVerificationAsync(User user, string rawToken, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    }
+    private sealed class Phase3aRealtime : INotificationRealtime
+    {
+        public Task PublishAsync(Notification notification, CancellationToken ct) => Task.CompletedTask;
+    }
     [LocalReferralPostgresFact]
     public async Task PublicReferralAndSavedPagingReuseCompanyLogoWithoutPrivateReferrerData()
     {
@@ -100,7 +160,8 @@ public sealed class ReferralMarketplacePostgresTests
         var settings = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("REFERRAL_TEST_POSTGRES"));
         if (settings.Host is not ("localhost" or "127.0.0.1") || settings.Database != "careerharbor_referral_test")
             throw new InvalidOperationException("Referral integration tests require localhost/127.0.0.1 and database careerharbor_referral_test.");
-        settings.IncludeErrorDetail = false; settings.Pooling = false; settings.Timeout = 5; settings.CommandTimeout = 30;
+        // Disposable Docker databases can start/connect slowly on a busy Windows host.
+        settings.IncludeErrorDetail = false; settings.Pooling = false; settings.Timeout = 60; settings.CommandTimeout = 120;
         var schema = "referral_" + Guid.NewGuid().ToString("N");
         await using var admin = new NpgsqlConnection(settings.ConnectionString); await admin.OpenAsync();
         await using (var create = new NpgsqlCommand($"CREATE SCHEMA {schema}", admin)) await create.ExecuteNonQueryAsync();

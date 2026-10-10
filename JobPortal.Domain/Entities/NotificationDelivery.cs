@@ -5,7 +5,8 @@ namespace JobPortal.Domain.Entities;
 public enum NotificationChannel { InApp = 1, Email = 2 }
 public enum NotificationDeliveryStatus { Pending = 1, Processing = 2, Sent = 3, Failed = 4, Cancelled = 5 }
 public enum NotificationSource { InterviewReminder = 1, CareerConfirmation = 2, CareerReminder = 3, ReferralApproved = 4, ReferralRejected = 5, MembershipPurchase = 6,
-    ReferralRequested = 7, ReferralAccepted = 8, ReferralRequestRejected = 9, ReferralSubmitted = 10, ReferralConfirmed = 11, ReferralNotReceived = 12 }
+    ReferralRequested = 7, ReferralAccepted = 8, ReferralRequestRejected = 9, ReferralSubmitted = 10, ReferralConfirmed = 11, ReferralNotReceived = 12,
+    ReferralJobSubmitted = 13, ReferralExpired = 14, ReferralRequestReminder = 15 }
 
 /// <summary>Durable delivery intent, not a second inbox. Saved with its originating business transaction.</summary>
 public sealed class NotificationDelivery : BaseEntity

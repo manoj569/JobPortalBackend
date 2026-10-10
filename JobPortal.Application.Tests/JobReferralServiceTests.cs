@@ -15,6 +15,24 @@ namespace JobPortal.Application.Tests;
 
 public sealed class JobReferralServiceTests
 {
+    [Fact]
+    public async Task SubmissionEnlistsAdministratorAlertsWithNoPrivateContactData()
+    {
+        var f = CreateFixture();
+        f.Referrals.AdministratorIds = [f.AdminUserId];
+        var submitted = await f.Service.SubmitAsync(f.ReferrerUserId, new(new(new("Role")), null, true, false, false));
+        Assert.Equal(JobReferralApprovalStatus.Pending, submitted.ApprovalStatus);
+        Assert.Equal(2, f.Outbox.Deliveries.Count);
+        Assert.All(f.Outbox.Deliveries, d =>
+        {
+            Assert.Equal(NotificationSource.ReferralJobSubmitted, d.Source);
+            Assert.Equal(f.AdminUserId, d.UserId);
+            Assert.Contains("Placeholder", d.Message);
+            Assert.Contains("Acme", d.Message);
+            Assert.Contains("UTC", d.Message);
+            Assert.DoesNotContain(f.Referrer.Email, d.Message);
+        });
+    }
     [Theory]
     [InlineData(JobReferralApprovalStatus.Approved, NotificationSource.ReferralApproved)]
     [InlineData(JobReferralApprovalStatus.Rejected, NotificationSource.ReferralRejected)]
@@ -486,6 +504,8 @@ public sealed class JobReferralServiceTests
         Job job) : IJobReferralRepository
     {
         private readonly List<JobReferral> _referrals = [];
+        public IReadOnlyCollection<Guid> AdministratorIds { get; set; } = [];
+        public Task<IReadOnlyCollection<Guid>> ActiveAdministratorIdsAsync(CancellationToken ct) => Task.FromResult(AdministratorIds);
         public Task<IReadOnlyDictionary<Guid, int>> AcceptedCountsAsync(IReadOnlyCollection<Guid> referralIds, CancellationToken ct) =>
             Task.FromResult<IReadOnlyDictionary<Guid, int>>(new Dictionary<Guid, int>());
 
