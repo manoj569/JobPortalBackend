@@ -168,6 +168,7 @@ public sealed partial class JobSourceRunner(
             var disabled = 0;
             var qualityReasons = new Dictionary<JobQualityReasonCode, int>();
             var reasonCounts = new Dictionary<JobIngestionReasonCode, int>();
+            var validationReasons = new Dictionary<string, int>(StringComparer.Ordinal);
 
             void ReportProgress(string phase)
             {
@@ -176,7 +177,9 @@ public sealed partial class JobSourceRunner(
                     JobSourceId = source.Id, TotalReceived = rawJobs.Count + (snapshot?.Skipped ?? 0),
                     Created = created, Updated = updated, Unchanged = unchanged, Matched = matched,
                     Skipped = skipped, Failed = failed, Published = published, NeedsReview = needsReview,
-                    QualityRejected = qualityRejected, PublishFailed = publishFailed, AutoPublishDisabled = disabled
+                    QualityRejected = qualityRejected, PublishFailed = publishFailed, AutoPublishDisabled = disabled,
+                    ReasonCounts = new Dictionary<JobIngestionReasonCode, int>(reasonCounts),
+                    ValidationReasonCounts = new Dictionary<string, int>(validationReasons)
                 };
                 runProgress?.Report(new(phase, processed, partialResult));
             }
@@ -201,6 +204,9 @@ public sealed partial class JobSourceRunner(
                 rawJobs.AddRange(newJobs);
                 if (_logger is not null) Progress(_logger, source.Id, "Eligible batch received", newJobs.Length, runTimer.Elapsed.TotalMilliseconds, null);
                 skipped += batch.Skipped;
+                if (batch.Skipped > 0)
+                    reasonCounts[JobIngestionReasonCode.ProviderError] =
+                        reasonCounts.GetValueOrDefault(JobIngestionReasonCode.ProviderError) + batch.Skipped;
                 ReportProgress("DbPreload");
                 if (newJobs.Length > 0 && ingestionService is IBulkJobIngestionService bulkIngestion)
                 {
@@ -355,6 +361,8 @@ public sealed partial class JobSourceRunner(
 
                             case JobIngestionOutcome.Invalid:
                                 skipped++;
+                                var validation = JobIngestionReasonCodes.ValidationDetail(result.Message);
+                                validationReasons[validation] = validationReasons.GetValueOrDefault(validation) + 1;
                                 break;
 
                             default:
@@ -475,6 +483,7 @@ public sealed partial class JobSourceRunner(
                 AutoPublishDisabled = disabled,
                 QualityReasonCounts = qualityReasons.Count == 0 ? null : qualityReasons,
                 ReasonCounts = reasonCounts.Count == 0 ? null : reasonCounts,
+                ValidationReasonCounts = validationReasons.Count == 0 ? null : validationReasons,
                 Succeeded = successful,
                 Error = source.LastError
             };
@@ -501,10 +510,6 @@ public sealed partial class JobSourceRunner(
                     runResult.Failed,
                     null);
 
-                foreach (var (reason, count) in reasonCounts)
-                {
-                    RunReason(_logger, source.Id, reason.ToString(), count, null);
-                }
             }
 
             return runResult;
@@ -544,6 +549,15 @@ public sealed partial class JobSourceRunner(
         }
         finally
         {
+            // Keep partial-run evidence even when the provider budget/cancellation
+            // prevents the normal completion block from running.
+            if (_logger is not null)
+            {
+                foreach (var (reason, count) in partialResult.ReasonCounts ?? new Dictionary<JobIngestionReasonCode, int>())
+                    RunReason(_logger, source.Id, reason.ToString(), count, null);
+                foreach (var (reason, count) in partialResult.ValidationReasonCounts ?? new Dictionary<string, int>())
+                    RunReason(_logger, source.Id, $"Validation.{reason}", count, null);
+            }
             (categoryResolver as IJobSourceCategoryRunCache)?.EndRun();
             if (ingestionService is IBulkJobIngestionService bulk) await bulk.CompleteRunAsync();
             if (_logger is not null) Progress(_logger, source.Id, "Total duration (including cleanup)", 0, runTimer.Elapsed.TotalMilliseconds, null);

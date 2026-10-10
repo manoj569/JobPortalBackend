@@ -329,7 +329,6 @@ public sealed partial class WorkdayJobSourceProvider(
                             if (detail is null)
                             {
                                 Interlocked.Increment(ref batchFailed);
-                                if (logger is not null) LogSourceFailure(logger, source.Id, "detail_parse", item.index, "InvalidOrIncompleteDetail", null);
                             }
                             else parsed[item.index] = detail;
                         }
@@ -529,7 +528,12 @@ public sealed partial class WorkdayJobSourceProvider(
         WorkdayTarget target,
         JobSource source,
         ListingEntry listing)
+        => ParseDetail(json, target, source, listing, out _);
+
+    private static RawExternalJob? ParseDetail(string json, WorkdayTarget target,
+        JobSource source, ListingEntry listing, out string reason)
     {
+        reason = "DetailSchemaInvalid";
         try
         {
             using var document = JsonDocument.Parse(json);
@@ -553,6 +557,8 @@ public sealed partial class WorkdayJobSourceProvider(
                 string.IsNullOrWhiteSpace(description) ||
                 string.IsNullOrWhiteSpace(externalId))
             {
+                reason = string.IsNullOrWhiteSpace(title) ? "DetailTitleMissing" :
+                    string.IsNullOrWhiteSpace(description) ? "DetailDescriptionMissing" : "DetailIdentityMissing";
                 return null;
             }
 
@@ -608,7 +614,10 @@ public sealed partial class WorkdayJobSourceProvider(
                 // The verified listing facet proves India eligibility when detail
                 // geography is absent. Explicit contradictory geography must fail closed.
                 if (countryCodes.Any(code => code.Trim().ToUpperInvariant() is not ("IN" or "IND" or "INDIA")))
+                {
+                    reason = "DetailGeographyContradictsIndiaFacet";
                     return null;
+                }
                 countryCodes.Add("IN");
             }
 
@@ -640,6 +649,7 @@ public sealed partial class WorkdayJobSourceProvider(
         }
         catch (JsonException)
         {
+            reason = "DetailJsonInvalid";
             return null;
         }
     }
@@ -754,11 +764,14 @@ public sealed partial class WorkdayJobSourceProvider(
             index,
             cancellationToken);
 
-        return ParseDetail(
+        var detail = ParseDetail(
             response.Body,
             target,
             source,
-            listing);
+            listing, out var reason);
+        if (detail is null && logger is not null)
+            LogSourceFailure(logger, sourceId, "detail_parse", index, reason, (int)response.StatusCode);
+        return detail;
     }
 
     private async Task<JsonResponse> SendAsync(

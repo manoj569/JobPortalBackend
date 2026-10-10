@@ -88,6 +88,12 @@ public sealed class JobIngestionService(
                 return Array.Empty<JobIngestionResult>();
             }
             var matches = await jobs.FindByFingerprintHashesAsync(identities.Select(x => x.Fingerprint).ToArray(), cancellationToken);
+            if (matches is not null && rawJobs.Select(x => x.JobSourceId).Distinct().Count() == 1)
+                // Exact owned IDs were preloaded separately. Known identities from
+                // this source cannot be weak matches for another requisition, and
+                // their naturally repeated fingerprints must not disable batching.
+                matches = matches.Where(x => x.JobSourceId != rawJobs[0].JobSourceId ||
+                    string.IsNullOrWhiteSpace(x.ExternalJobId)).ToArray();
             _preloadMilliseconds = System.Diagnostics.Stopwatch.GetElapsedTime(preloadStart).TotalMilliseconds;
             if (matches is null || deduplicationService is not IFuzzyJobDeduplicationService ||
                 matches.GroupBy(x => x.FingerprintHash).Any(x => x.Count() > 1))
@@ -304,6 +310,7 @@ public sealed class JobIngestionService(
 
         var duplicate = await FindDuplicateAsync(
             title, company, location, applicationUrl, cancellationToken);
+        duplicate = RespectSourceIdentity(rawJob, duplicate);
 
         await using var creationLease =
             duplicate.IsDuplicate || _batchMode
@@ -332,6 +339,7 @@ public sealed class JobIngestionService(
             }
             duplicate = await deduplicationService.FindDuplicateAsync(
                 title, company.Name, location, applicationUrl, company.Id, cancellationToken);
+            duplicate = RespectSourceIdentity(rawJob, duplicate);
             now = timeProvider.GetUtcNow().UtcDateTime;
         }
 
@@ -512,6 +520,21 @@ public sealed class JobIngestionService(
             _canonicalUrlDuplicateCache.TryGetValue(oldKey, out var oldMatch) && oldMatch.Id == job.Id)
             _canonicalUrlDuplicateCache.Remove(oldKey);
         if (!string.IsNullOrWhiteSpace(newKey)) _canonicalUrlDuplicateCache[newKey] = job;
+    }
+
+    private static DeduplicationResult RespectSourceIdentity(RawExternalJob raw, DeduplicationResult match)
+    {
+        // Title/company/location similarity is not a requisition identity. A
+        // canonical URL remains strong evidence, but two explicit, different
+        // requisitions within the SAME source must not collapse on weak evidence.
+        if (match.MatchTypeEnum is JobPortal.Application.Abstractions.Jobs.MatchType.Fingerprint or
+            JobPortal.Application.Abstractions.Jobs.MatchType.Fuzzy &&
+            raw.JobSourceId.HasValue && match.MatchedJob?.JobSourceId == raw.JobSourceId &&
+            !string.IsNullOrWhiteSpace(raw.ExternalId) &&
+            !string.IsNullOrWhiteSpace(match.MatchedJob.ExternalJobId) &&
+            !string.Equals(raw.ExternalId.Trim(), match.MatchedJob.ExternalJobId.Trim(), StringComparison.Ordinal))
+            return DeduplicationResult.NoMatch();
+        return match;
     }
 
     private async Task<DeduplicationResult> FindDuplicateAsync(

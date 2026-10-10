@@ -136,6 +136,7 @@ public sealed class JobRepository(JobPortalDbContext context) : IJobRepository
     {
         return await context.Jobs
             .AsNoTracking()
+            .Include(x => x.Company)
             .Where(x => x.CompanyId == companyId && x.Status == JobStatus.Published && !x.IsDeleted)
             .OrderByDescending(x => x.PublishedAtUtc)
             .Take(maxResults)

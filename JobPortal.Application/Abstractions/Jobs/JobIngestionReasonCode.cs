@@ -43,6 +43,23 @@ public enum JobIngestionReasonCode
 
 public static class JobIngestionReasonCodes
 {
+    // Only fixed application-generated validation messages are classified; never
+    // emit provider text, URLs, descriptions or exception messages as reason keys.
+    public static string ValidationDetail(string? message) => message switch
+    {
+        "Job title is required." => "MissingTitle",
+        "Job title cannot exceed 250 characters." => "TitleTooLong",
+        "Company name is required." => "MissingCompanyName",
+        "Salary range is invalid." => "InvalidSalaryRange",
+        "Experience range is invalid." => "InvalidExperienceRange",
+        "ApplicationUrl must be an absolute HTTP or HTTPS URL." => "InvalidApplicationUrl",
+        "Matched job is no longer available." => "MatchedJobUnavailable",
+        "CategoryId is required when creating a new external job." => "MissingCategory",
+        not null when message.StartsWith("Category '", StringComparison.Ordinal) &&
+            message.EndsWith("' does not exist.", StringComparison.Ordinal) => "CategoryNotFound",
+        _ => "InvalidSourceData"
+    };
+
     /// <summary>
     /// Maps an ingestion outcome (and optional sanitized message) to a stable
     /// machine-readable reason code. Message sniffing is best-effort only; it

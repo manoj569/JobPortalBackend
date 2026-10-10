@@ -269,6 +269,26 @@ public class JobSourceRunnerTests
     }
 
     [Fact]
+    public async Task ValidationSkipsHaveSpecificCountersAndDoNotClaimSuccessfulScan()
+    {
+        _provider.Jobs = [CreateRawJob("Missing category"), CreateRawJob("Too long"), CreateRawJob("Fingerprint match")];
+        _ingestion.Results.Enqueue(new() { Outcome = JobIngestionOutcome.Invalid,
+            Message = "CategoryId is required when creating a new external job." });
+        _ingestion.Results.Enqueue(new() { Outcome = JobIngestionOutcome.Invalid,
+            Message = "Job title cannot exceed 250 characters." });
+        _ingestion.Results.Enqueue(new() { Outcome = JobIngestionOutcome.MatchedByFingerprint });
+        var result = await _runner.RunAsync(_source.Id);
+        Assert.False(result.Succeeded);
+        Assert.Equal(2, result.Skipped);
+        Assert.Equal(0, result.Failed);
+        Assert.Equal(1, result.Matched);
+        Assert.Equal(1, result.ValidationReasonCounts!["MissingCategory"]);
+        Assert.Equal(1, result.ValidationReasonCounts["TitleTooLong"]);
+        Assert.Equal(1, result.ReasonCounts![JobIngestionReasonCode.DuplicateFingerprint]);
+        Assert.Null(_source.LastSuccessfulRunAtUtc);
+    }
+
+    [Fact]
     public async Task RunAsync_Phase1Counters_GroupOutcomesCorrectly()
     {
         _provider.Jobs =

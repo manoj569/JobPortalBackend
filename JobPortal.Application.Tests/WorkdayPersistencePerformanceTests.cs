@@ -89,7 +89,7 @@ public sealed class WorkdayPersistencePerformanceTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public async Task PendingFingerprintDuplicatesDoNotInsertTwiceAndLocksRemainHeldUntilSave()
+    public async Task DistinctSourceRequisitionsWithTheSameFingerprintRemainDistinctAndLockedUntilSave()
     {
         using var f = new JobSourceFixture();
         var (service, unit, _) = Service(f);
@@ -103,9 +103,48 @@ public sealed class WorkdayPersistencePerformanceTests(ITestOutputHelper output)
         };
         var results = await service.IngestBatchAsync([raw, raw with { ExternalId = "second", ApplicationUrl = "https://synthetic.example/second" }]);
         Assert.Equal(JobIngestionOutcome.Created, results[0].Outcome);
-        Assert.Equal(JobIngestionOutcome.MatchedByFingerprint, results[1].Outcome);
-        Assert.Single(await f.Context.Jobs.ToArrayAsync());
+        Assert.Equal(JobIngestionOutcome.Created, results[1].Outcome);
+        Assert.Equal(2, await f.Context.Jobs.CountAsync());
         await using var released = await competitor!;
+    }
+
+    [Fact]
+    public async Task SameTitleLocationRequisitionsAreIdempotentAcrossBatchesAndReruns()
+    {
+        using var f = new JobSourceFixture();
+        var (service, _, _) = Service(f);
+        var jobs = Jobs(f, 30).Select(x => x with { Title = "Application Developer" }).ToArray();
+        foreach (var batch in jobs.Chunk(10))
+            Assert.All(await service.IngestBatchAsync(batch), x => Assert.Equal(JobIngestionOutcome.Created, x.Outcome));
+        foreach (var batch in jobs.Chunk(10))
+            Assert.All(await service.IngestBatchAsync(batch), x => Assert.Equal(JobIngestionOutcome.Unchanged, x.Outcome));
+        Assert.Equal(30, await f.Context.Jobs.CountAsync());
+        var sameUrl = await service.IngestAsync(jobs[0] with { ExternalId = "alias" });
+        Assert.Equal(JobIngestionOutcome.MatchedByUrl, sameUrl.Outcome);
+        Assert.Equal(30, await f.Context.Jobs.CountAsync());
+    }
+
+    [Fact]
+    public async Task PublishedSourceRequisitionCannotAbsorbADifferentRequisitionByFuzzyMatching()
+    {
+        using var f = new JobSourceFixture();
+        var (service, _, _) = Service(f);
+        const string title = "Application Developer Enterprise Business Technology Services";
+        var original = Jobs(f, 1)[0] with { Title = title };
+        await service.IngestAsync(original);
+        var existing = await f.Context.Jobs.SingleAsync();
+        existing.Status = JobStatus.Published;
+        existing.PublishedAtUtc = DateTime.UtcNow;
+        await f.Context.SaveChangesAsync();
+        var repo = new JobRepository(f.Context);
+        Assert.NotNull(Assert.Single(await repo.FindCandidatesForFuzzyMatchAsync(f.Company.Id, title, "Pune", 100)).Company);
+        var fuzzy = await new JobDeduplicationService(repo, new JobFingerprintService(), new UrlCanonicalizer())
+            .FindDuplicateAsync(title + "s", f.Company.Name, "Pune", "https://synthetic.example/new", f.Company.Id);
+        Assert.Equal(JobPortal.Application.Abstractions.Jobs.MatchType.Fuzzy, fuzzy.MatchTypeEnum); // Reproduce the old false match.
+        var result = await service.IngestAsync(original with { ExternalId = "different-requisition",
+            Title = title + "s", ApplicationUrl = "https://synthetic.example/new" });
+        Assert.Equal(JobIngestionOutcome.Created, result.Outcome);
+        Assert.Equal(2, await f.Context.Jobs.CountAsync());
     }
 
     [Fact]
@@ -328,7 +367,7 @@ public sealed class WorkdayPersistencePerformanceTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public async Task ExistingNonUniqueFingerprintsKeepTheOriginalFreshSelectionAfterOwnedUpdate()
+    public async Task OwnedFingerprintDoesNotHideAManualMatchAfterOwnedUpdate()
     {
         using var f = new JobSourceFixture();
         var raw = Jobs(f, 1)[0];
@@ -344,9 +383,7 @@ public sealed class WorkdayPersistencePerformanceTests(ITestOutputHelper output)
         var (service, _, _) = Service(f);
         RawExternalJob[] changes = [raw with { Title = "Changed title" },
             raw with { ExternalId = "new", ApplicationUrl = "https://synthetic.example/new" }];
-        Assert.Empty(await service.IngestBatchAsync(changes));
-        var results = new List<JobIngestionResult>();
-        foreach (var job in changes) results.Add(await service.IngestAsync(job));
+        var results = await service.IngestBatchAsync(changes);
         Assert.Equal(JobIngestionOutcome.Updated, results[0].Outcome);
         Assert.Equal(JobIngestionOutcome.MatchedByFingerprint, results[1].Outcome);
         Assert.Equal(manual.Id, results[1].JobId);

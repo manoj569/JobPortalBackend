@@ -47,6 +47,7 @@ public sealed record JobSourceRunResult
     /// items in this run (for example DuplicateCanonicalUrl = 15).
     /// </summary>
     public IReadOnlyDictionary<JobIngestionReasonCode, int>? ReasonCounts { get; init; }
+    public IReadOnlyDictionary<string, int>? ValidationReasonCounts { get; init; }
 
     public bool Succeeded { get; init; }
 
