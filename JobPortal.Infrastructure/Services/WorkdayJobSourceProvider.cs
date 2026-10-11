@@ -92,6 +92,11 @@ public sealed partial class WorkdayJobSourceProvider(
         Message = "WorkdayStage Source={SourceId} Stage={Stage} Items={Items} DurationMs={DurationMs} EffectiveConcurrency={Concurrency}.")]
     private static partial void LogStage(ILogger logger, Guid sourceId, string stage, int items, double durationMs, int concurrency);
 
+    [LoggerMessage(EventId = 4377, Level = LogLevel.Information,
+        Message = "WorkdayListingValidation Source={SourceId} Stage={Stage} Offset={Offset} ExpectedTotal={ExpectedTotal} ReportedTotal={ReportedTotal} RawSlots={RawSlots} TotalOmitted={TotalOmitted}.")]
+    private static partial void LogListingValidation(ILogger logger, Guid sourceId, string stage, int offset,
+        int expectedTotal, int reportedTotal, int rawSlots, bool totalOmitted);
+
     public AtsType AtsType => AtsType.Workday;
 
     public async Task<IReadOnlyCollection<RawExternalJob>> FetchJobsAsync(
@@ -198,6 +203,8 @@ public sealed partial class WorkdayJobSourceProvider(
             var placeholderRows = 0;
             int? expectedTotal = null;
             var listingChanged = false;
+            var continuationTotalOmitted = false;
+            ListingPageWithStatus? firstPage = null;
             var pageSignatures = new HashSet<string>(StringComparer.Ordinal);
 
             for (var offset = 0; ; offset += PageSize)
@@ -211,7 +218,18 @@ public sealed partial class WorkdayJobSourceProvider(
                     offset,
                     token);
 
-                if (expectedTotal.HasValue && page.Total != expectedTotal.Value) listingChanged = true;
+                // CXS may report total=0 on nonempty continuation pages while
+                // page zero alone reports the global total. Zero is not evidence
+                // of a changed census here; raw slots and a final anchor still validate it.
+                var totalOmitted = offset > 0 && expectedTotal > 0 && page.Total == 0 && page.RawEntryCount > 0;
+                continuationTotalOmitted |= totalOmitted;
+                if (expectedTotal.HasValue && !totalOmitted && page.Total != expectedTotal.Value)
+                {
+                    listingChanged = true;
+                    if (logger is not null) LogSourceFailure(logger, source.Id, "listing_snapshot", offset, "ListingTotalChanged", page.StatusCode);
+                }
+                if (logger is not null) LogListingValidation(logger, source.Id, "page", offset,
+                    expectedTotal ?? page.Total, page.Total, page.RawEntryCount, totalOmitted);
                 var signature = string.Join("|", page.Postings.Select(x => x.ExternalPath));
                 if (page.Postings.Count > 0 && !pageSignatures.Add(signature))
                 {
@@ -225,6 +243,7 @@ public sealed partial class WorkdayJobSourceProvider(
                 if (expectedTotal is null)
                 {
                     expectedTotal = page.Total;
+                    firstPage = page;
 
                     if (expectedTotal < 0 || expectedTotal > MaxJobs)
                         throw LoggedInvalidDocument(
@@ -298,6 +317,23 @@ public sealed partial class WorkdayJobSourceProvider(
                     FailureReason.ListingSnapshotCountMismatch,
                     "The Workday listing did not produce the complete advertised raw snapshot.");
 
+
+            // Never probe beyond the advertised total: some tenants wrap to
+            // page zero there. When continuation totals were omitted, re-read
+            // the original anchor within the existing HTTP retry/run budgets.
+            // A changing anchor cannot authorize closure, even if counts match.
+            if (continuationTotalOmitted && !listingChanged && firstPage is not null)
+            {
+                var anchor = await FetchListingPageAsync(client, target, source.Id, 0, token);
+                if (logger is not null) LogListingValidation(logger, source.Id, "anchor", 0,
+                    firstPage.Total, anchor.Total, anchor.RawEntryCount, false);
+                if (anchor.Total != firstPage.Total || anchor.RawEntryCount != firstPage.RawEntryCount ||
+                    !anchor.Postings.Select(x => x.ExternalPath).SequenceEqual(firstPage.Postings.Select(x => x.ExternalPath), StringComparer.Ordinal))
+                {
+                    listingChanged = true;
+                    if (logger is not null) LogSourceFailure(logger, source.Id, "listing_snapshot", 0, "ListingAnchorChanged", anchor.StatusCode);
+                }
+            }
 
             if (logger is not null) LogStage(logger, source.Id, "Listing", rawEntriesRead,
                 listingTimer.Elapsed.TotalMilliseconds, 1);

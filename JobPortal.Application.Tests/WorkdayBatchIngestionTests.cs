@@ -111,13 +111,145 @@ public sealed class WorkdayBatchIngestionTests(ITestOutputHelper output)
             {
                 using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
                 var offset = body.RootElement.GetProperty("offset").GetInt32();
-                return Json(Listing(offset == 0 ? 40 : 0, offset, 20));
+                return Json(Listing(offset == 0 ? 40 : 41, offset, 20));
             }
             return Json(Detail(request));
         }));
         var snapshot = await Provider(http).FetchSnapshotAsync(Source());
         Assert.Equal(40, snapshot.Jobs.Count);
         Assert.False(snapshot.IsComplete);
+    }
+
+    [Theory]
+    [InlineData(20, false, true)]
+    [InlineData(40, false, false)]
+    [InlineData(40, true, true)]
+    [InlineData(176, true, false)]
+    public async Task AdvertisedBoundaryStopsBeforeEmptyOrWrappedTerminalPages(int total, bool omitContinuationTotal, bool emptyTail)
+    {
+        var offsets = new List<int>();
+        using var http = new HttpClient(new Handler(async (request, ct) =>
+        {
+            if (request.Method != HttpMethod.Post) return Json(Detail(request));
+            using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
+            var offset = body.RootElement.GetProperty("offset").GetInt32();
+            offsets.Add(offset);
+            if (offset >= total) return Json(Listing(total, 0, emptyTail ? 0 : 20));
+            return Json(Listing(offset > 0 && omitContinuationTotal ? 0 : total, offset, Math.Min(20, total - offset)));
+        }));
+        var snapshot = await Provider(http).FetchSnapshotAsync(Source());
+        Assert.True(snapshot.IsComplete);
+        Assert.Equal(total, snapshot.Jobs.Count);
+        Assert.Equal(total, snapshot.Jobs.Select(x => x.ExternalId).Distinct().Count());
+        Assert.Equal(Enumerable.Range(0, (total + 19) / 20).Select(x => x * 20)
+            .Concat(omitContinuationTotal && total > 20 ? Enumerable.Repeat(0, 1) : Enumerable.Empty<int>()), offsets);
+        Assert.All(offsets, offset => Assert.InRange(offset, 0, total - 1));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OmittedContinuationTotalsRequireAnUnchangedFirstPageAnchor(bool changePaths)
+    {
+        var firstReads = 0;
+        using var http = new HttpClient(new Handler(async (request, ct) =>
+        {
+            if (request.Method != HttpMethod.Post) return Json(Detail(request));
+            using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
+            var offset = body.RootElement.GetProperty("offset").GetInt32();
+            if (offset == 0 && ++firstReads == 2)
+                return Json(Listing(changePaths ? 40 : 41, changePaths ? 100 : 0, 20));
+            return Json(Listing(offset == 0 ? 40 : 0, offset, 20));
+        }));
+        var snapshot = await Provider(http).FetchSnapshotAsync(Source());
+        Assert.False(snapshot.IsComplete);
+        Assert.Equal(40, snapshot.Jobs.Count);
+        Assert.Equal(0, snapshot.Skipped);
+        Assert.Equal(2, firstReads);
+        Assert.DoesNotContain(snapshot.Jobs, job => job.ExternalId == "REQ-100");
+    }
+
+    [Fact]
+    public async Task RepeatedZeroTotalContinuationPageRemainsUnsafeWithoutExtraAnchorRequests()
+    {
+        var posts = 0;
+        using var http = new HttpClient(new Handler((request, _) => Task.FromResult(request.Method == HttpMethod.Post
+            ? Json(Listing(++posts == 1 ? 40 : 0, 0, 20)) : Json(Detail(request)))));
+        var snapshot = await Provider(http).FetchSnapshotAsync(Source());
+        Assert.False(snapshot.IsComplete);
+        Assert.Equal(20, snapshot.Jobs.Count);
+        Assert.Equal(2, posts);
+    }
+
+    [Fact]
+    public async Task EmptyContinuationBeforeAdvertisedTotalStillFailsClosed()
+    {
+        var posts = 0;
+        using var http = new HttpClient(new Handler((_, _) => Task.FromResult(++posts == 1
+            ? Json(Listing(40, 0, 20)) : Json(Listing(0, 20, 0)))));
+        await Assert.ThrowsAsync<InvalidDataException>(() => Provider(http).FetchSnapshotAsync(Source()));
+        Assert.Equal(2, posts);
+    }
+
+    [Fact]
+    public async Task AnchorFailureUsesBoundedHttpRetriesAndCannotCertifyCompleteness()
+    {
+        var firstReads = 0;
+        using var http = new HttpClient(new Handler(async (request, ct) =>
+        {
+            using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
+            var offset = body.RootElement.GetProperty("offset").GetInt32();
+            if (offset == 0 && ++firstReads > 1) return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
+            return Json(Listing(offset == 0 ? 40 : 0, offset, 20));
+        }));
+        await Assert.ThrowsAsync<HttpRequestException>(() => Provider(http, attempts: 2).FetchSnapshotAsync(Source()));
+        Assert.Equal(3, firstReads); // Initial anchor plus exactly two failed validation attempts.
+    }
+
+    [Fact]
+    public async Task ChangedAnchorPreventsClosingMissingVacanciesAndRepeatRemainsIdempotent()
+    {
+        using var f = Fixture();
+        var total = 46;
+        var firstReads = 0;
+        var changeAnchor = false;
+        using var http = new HttpClient(new Handler(async (request, ct) =>
+        {
+            if (request.Method != HttpMethod.Post)
+                return request.RequestUri!.AbsolutePath.EndsWith("_44", StringComparison.Ordinal)
+                    ? Json("""{"jobPostingInfo":{"title":"Engineer 44","jobReqId":"REQ-44","location":"London","country":{"alpha2Code":"GB"}}}""")
+                    : Json(Detail(request));
+            using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
+            var offset = body.RootElement.GetProperty("offset").GetInt32();
+            var advertised = offset > 0 ? 0 : ++firstReads == 2 && changeAnchor ? total + 1 : total;
+            return Json(Listing(advertised, offset, Math.Min(20, total - offset)));
+        }));
+        var runner = Runner(f, Provider(http));
+        var initial = await runner.RunAsync(f.Source.Id);
+        Assert.True(initial.Succeeded);
+        Assert.Equal(45, initial.Created);
+        Assert.Equal(45, initial.Published);
+        var ids = await f.Context.Jobs.Select(x => x.Id).ToArrayAsync();
+        var previousSuccess = (await f.Repository.GetByIdAsync(f.Source.Id))!.LastSuccessfulRunAtUtc;
+        total = 45; firstReads = 0; changeAnchor = true;
+        var unsafeRun = await runner.RunAsync(f.Source.Id);
+        Assert.False(unsafeRun.ScanComplete);
+        Assert.False(unsafeRun.ReconciliationSafe);
+        Assert.Equal(0, unsafeRun.Created);
+        Assert.Equal(44, unsafeRun.Existing);
+        Assert.Equal(0, unsafeRun.Published);
+        Assert.Equal(0, unsafeRun.Closed);
+        Assert.Equal(previousSuccess, (await f.Repository.GetByIdAsync(f.Source.Id))!.LastSuccessfulRunAtUtc);
+        Assert.Equal(45, await f.Context.Jobs.CountAsync());
+        firstReads = 0; changeAnchor = false;
+        var safeRepeat = await runner.RunAsync(f.Source.Id);
+        Assert.True(safeRepeat.ScanComplete);
+        Assert.True(safeRepeat.ReconciliationSafe);
+        Assert.Equal(0, safeRepeat.Created);
+        Assert.Equal(44, safeRepeat.Existing);
+        Assert.Equal(0, safeRepeat.Published);
+        Assert.Equal(1, safeRepeat.Closed);
+        Assert.Equal(ids.Order(), (await f.Context.Jobs.Select(x => x.Id).ToArrayAsync()).Order());
     }
 
     [Fact]
