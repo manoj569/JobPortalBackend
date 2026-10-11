@@ -230,6 +230,7 @@ public sealed class JobConfiguration : IEntityTypeConfiguration<Job>
         builder.Property(x => x.Benefits).HasMaxLength(4000);
         builder.Property(x => x.ApplicationUrl).HasMaxLength(2048).IsRequired();
         builder.Property(x => x.CanonicalApplicationUrlHash).HasMaxLength(64);
+        builder.Property(x => x.SourceMetadataJson).HasColumnType("jsonb");
         builder.HasIndex(x => x.CanonicalApplicationUrlHash)
             .HasFilter("\"IsDeleted\" = FALSE AND \"CanonicalApplicationUrlHash\" IS NOT NULL");
         builder.Property(x => x.Location).HasMaxLength(250);

@@ -27,59 +27,51 @@ public sealed class JobQualityGateTests
     }
 
     [Fact]
-    public void Evaluate_MissingLocation_ReturnsNeedsReview()
+    public void Evaluate_MissingLocation_ReturnsEligible()
     {
         var job = CreateValidJob();
         job.Location = null;
 
         var result = _gate.Evaluate(job, Now);
 
-        Assert.Equal(JobQualityDecision.NeedsReview, result.Decision);
-        Assert.Contains(
-            JobQualityReasonCode.MissingLocation,
-            result.Reasons);
+        Assert.Equal(JobQualityDecision.Eligible, result.Decision);
+        Assert.Empty(result.Reasons);
     }
 
     [Fact]
-    public void Evaluate_MissingExpiry_ReturnsNeedsReview()
+    public void Evaluate_MissingExpiry_ReturnsEligible()
     {
         var job = CreateValidJob();
         job.ExpiresAtUtc = null;
 
         var result = _gate.Evaluate(job, Now);
 
-        Assert.Equal(JobQualityDecision.NeedsReview, result.Decision);
-        Assert.Contains(
-            JobQualityReasonCode.MissingExpiry,
-            result.Reasons);
+        Assert.Equal(JobQualityDecision.Eligible, result.Decision);
+        Assert.Empty(result.Reasons);
     }
 
     [Fact]
-    public void Evaluate_MissingWorkplaceType_ReturnsNeedsReview()
+    public void Evaluate_MissingWorkplaceType_ReturnsEligible()
     {
         var job = CreateValidJob();
         job.WorkplaceType = default;
 
         var result = _gate.Evaluate(job, Now);
 
-        Assert.Equal(JobQualityDecision.NeedsReview, result.Decision);
-        Assert.Contains(
-            JobQualityReasonCode.MissingWorkplaceType,
-            result.Reasons);
+        Assert.Equal(JobQualityDecision.Eligible, result.Decision);
+        Assert.Empty(result.Reasons);
     }
 
     [Fact]
-    public void Evaluate_MissingEmploymentType_ReturnsNeedsReview()
+    public void Evaluate_MissingEmploymentType_ReturnsEligible()
     {
         var job = CreateValidJob();
         job.EmploymentType = default;
 
         var result = _gate.Evaluate(job, Now);
 
-        Assert.Equal(JobQualityDecision.NeedsReview, result.Decision);
-        Assert.Contains(
-            JobQualityReasonCode.MissingEmploymentType,
-            result.Reasons);
+        Assert.Equal(JobQualityDecision.Eligible, result.Decision);
+        Assert.Empty(result.Reasons);
     }
 
     [Fact]
@@ -182,9 +174,7 @@ public sealed class JobQualityGateTests
         Assert.Equal(JobQualityDecision.Rejected, result.Decision);
 
         Assert.Contains(JobQualityReasonCode.MissingTitle, result.Reasons);
-        Assert.Contains(JobQualityReasonCode.MissingDescription, result.Reasons);
         Assert.Contains(JobQualityReasonCode.MissingCompany, result.Reasons);
-        Assert.Contains(JobQualityReasonCode.MissingCategory, result.Reasons);
         Assert.Contains(JobQualityReasonCode.MissingApplicationUrl, result.Reasons);
     }
 

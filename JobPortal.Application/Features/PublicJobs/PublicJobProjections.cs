@@ -10,7 +10,7 @@ public static class PublicJobProjections
         new PublicJobSummary(
             job.Id, job.ReferenceNumber, job.Title, job.Slug,
             job.CompanyId, job.Company.Name, job.Company.Slug, job.Company.LogoUrl,
-            job.CategoryId, job.Category.Name, job.Location,
+            job.CategoryId, (job.Category == null ? "Not specified" : job.Category.Name), job.Location,
             job.MinimumSalary, job.MaximumSalary, job.CurrencyCode,
             job.EmploymentType, job.WorkplaceType, job.ExperienceLevel,
             job.IsFeatured, job.PublishedAtUtc!.Value, job.ExpiresAtUtc,

@@ -3881,7 +3881,7 @@ namespace JobPortal.Persistence.Postgres.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
-                    b.Property<Guid>("CategoryId")
+                    b.Property<Guid?>("CategoryId")
                         .HasColumnType("uuid");
 
                     b.Property<Guid>("CompanyId")
@@ -3998,6 +3998,9 @@ namespace JobPortal.Persistence.Postgres.Migrations
                         .IsRequired()
                         .HasMaxLength(270)
                         .HasColumnType("character varying(270)");
+
+                    b.Property<string>("SourceMetadataJson")
+                        .HasColumnType("jsonb");
 
                     b.Property<DateTime?>("SourcePostedAtUtc")
                         .HasColumnType("timestamp with time zone");
@@ -4594,6 +4597,9 @@ namespace JobPortal.Persistence.Postgres.Migrations
 
                     b.Property<int>("Created")
                         .HasColumnType("integer");
+
+                    b.Property<string>("DiagnosticsJson")
+                        .HasColumnType("jsonb");
 
                     b.Property<string>("ErrorCode")
                         .HasMaxLength(64)
@@ -7470,8 +7476,7 @@ namespace JobPortal.Persistence.Postgres.Migrations
                     b.HasOne("JobPortal.Domain.Entities.Category", "Category")
                         .WithMany("Jobs")
                         .HasForeignKey("CategoryId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("JobPortal.Domain.Entities.Company", "Company")
                         .WithMany("Jobs")

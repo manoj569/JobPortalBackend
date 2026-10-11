@@ -24,8 +24,7 @@ public sealed class WorkdayIngestionDiagnosticsTests
         ], 0, true));
         Assert.Equal("india", Assert.Single(selected.Jobs).ExternalId);
         Assert.Equal(1, selected.SelectionReasonCounts!["NonIndiaLocation"]);
-        Assert.Equal(1, selected.SelectionReasonCounts["UnknownIndiaEligibility"]);
-        Assert.Equal(1, selected.SelectionReasonCounts["AmbiguousRemoteEligibility"]);
+        Assert.Equal(2, selected.SelectionReasonCounts["AmbiguousLocation"]);
         Assert.False(selected.IsComplete);
         Assert.Equal(0, selected.Skipped);
     }
@@ -55,7 +54,7 @@ public sealed class WorkdayIngestionDiagnosticsTests
         var first = await runner.RunAsync(f.Source.Id);
         Assert.True(first.Succeeded);
         Assert.Equal(2, first.Created);
-        Assert.Equal(0, first.Rejected);
+        Assert.Equal(1, first.Rejected);
         Assert.Equal(1, first.SelectionReasonCounts!["NonIndiaLocation"]);
         var repeated = await runner.RunAsync(f.Source.Id);
         Assert.True(repeated.Succeeded);

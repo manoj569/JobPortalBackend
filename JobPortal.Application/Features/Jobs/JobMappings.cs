@@ -8,7 +8,7 @@ public static class JobMappings
     public static JobResponse ToResponse(this Job job) => new(
         job.Id, job.ReferenceNumber, job.Title, job.Slug, job.Description,
         job.Responsibilities, job.Requirements, job.Benefits, job.ApplicationUrl,
-        job.Company.Name, job.CompanyId, job.Category.Name, job.CategoryId,
+        job.Company.Name, job.CompanyId, (job.Category == null ? "Not specified" : job.Category.Name), job.CategoryId,
         job.Location, job.MinimumSalary, job.MaximumSalary, job.CurrencyCode,
         job.EmploymentType, job.WorkplaceType, job.ExperienceLevel, job.Status,
         job.IsFeatured, job.IsHidden, job.PublishedAtUtc, job.ExpiresAtUtc,

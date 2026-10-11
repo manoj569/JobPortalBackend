@@ -6,6 +6,7 @@ using JobPortal.Application.Abstractions.Jobs;
 using JobPortal.Application.Abstractions.Persistence;
 using JobPortal.Application.Common.Exceptions;
 using JobPortal.Application.Common.Text;
+using JobPortal.Application.Services;
 using JobPortal.Domain.Entities;
 using JobPortal.Domain.Enums;
 using JobPortal.Shared.Models;
@@ -23,7 +24,9 @@ public sealed class JobService(
     TimeProvider timeProvider,
     ICompanyManagementRepository? companies = null,
     ICategoryManagementRepository? categories = null,
-    IJobSourceRepository? sources = null) : IJobService
+    IJobSourceRepository? sources = null,
+    IExternalJobCreationLock? creationLock = null,
+    IJobDeduplicationService? deduplication = null) : IJobService
 {
     private readonly Dictionary<Guid, JobSource> publicationSources = [];
 
@@ -41,8 +44,6 @@ public sealed class JobService(
         ValidateRelation(request.Category?.ExistingId, request.Category?.New, "category");
         if (request.Company is null || (!request.Company.ExistingId.HasValue && request.Company.New is null))
             throw new BadRequestException("A company is required by the current job schema.", "validation_error");
-        if (request.Category is null || (!request.Category.ExistingId.HasValue && request.Category.New is null))
-            throw new BadRequestException("A category is required by the current job schema.", "validation_error");
         if (request.Job.MinimumSalary < 0 || request.Job.MaximumSalary < 0 ||
             request.Job.MinimumSalary > request.Job.MaximumSalary)
             throw new BadRequestException("Maximum salary must be greater than or equal to minimum salary.", "validation_error");
@@ -81,7 +82,7 @@ public sealed class JobService(
             Company = company!,
             CompanyId = company!.Id,
             Category = category!,
-            CategoryId = category!.Id,
+            CategoryId = category?.Id,
             Status = JobStatus.Draft
         };
         if (recruiterRequest is not null)
@@ -150,6 +151,8 @@ public sealed class JobService(
             await jobs.AddSkillsAsync(newSkills, cancellationToken);
         }
 
+        NormalizeManualJob(job);
+        await using var creationLease = await ProtectManualCreationAsync(job, cancellationToken);
         await jobs.AddAsync(job, cancellationToken);
         if (companyCreated) await auditWriter.AppendAsync(new(AuditAction.Create, "Company", company!.Id.ToString()), cancellationToken);
         if (categoryCreated) await auditWriter.AppendAsync(new(AuditAction.Create, "Category", category!.Id.ToString()), cancellationToken);
@@ -248,6 +251,8 @@ public sealed class JobService(
             request.InternshipDurationMonths, request.IsFlexibleDuration, request.Department,
             request.RoleCategory, request.EducationRequirement, request.PostedByType));
 
+        NormalizeManualJob(job);
+        await using var creationLease = await ProtectManualCreationAsync(job, cancellationToken);
         await jobs.AddAsync(job, cancellationToken);
         await auditWriter.AppendAsync(new(
             AuditAction.Create,
@@ -270,10 +275,12 @@ public sealed class JobService(
         if (job.Status == JobStatus.Archived)
             throw new ConflictException("An archived job cannot be updated.");
         if (job.Status == JobStatus.Published &&
-            (!request.ExpiresAtUtc.HasValue || request.ExpiresAtUtc <= UtcNow))
+            (request.ExpiresAtUtc.HasValue && request.ExpiresAtUtc <= UtcNow))
             throw new BadRequestException(
                 "A published job must have an expiration date in the future.");
         job.Apply(request);
+        NormalizeManualJob(job);
+        await using var creationLease = await ProtectManualCreationAsync(job, cancellationToken);
         job.Slug = $"{Slugify(request.Title)}-{job.Id.ToString("N")[..8]}";
         if (job.Status == JobStatus.Published && !job.IsHidden)
             await ValidateSourcePublicationAsync(job, cancellationToken);
@@ -318,12 +325,16 @@ public sealed class JobService(
         if (job.Status == JobStatus.Archived)
             throw new ConflictException("An archived job cannot be published.");
 
+        if (ImportedJobIntegrity.Eligibility(job).ReasonCode == "MissingLocationAccepted")
+            job.Location = IndiaJobEligibilityPolicy.MissingLocationLabel;
         await updateValidator.ValidateAndThrowAsync(ToUpdateRequest(job), cancellationToken);
         await ValidateReferencesAsync(job.CompanyId, job.CategoryId, cancellationToken);
-        if (!job.ExpiresAtUtc.HasValue || job.ExpiresAtUtc <= UtcNow)
+        if (job.ExpiresAtUtc.HasValue && job.ExpiresAtUtc <= UtcNow)
             throw new BadRequestException(
                 "A job must have an expiration date in the future before it can be published.");
 
+        if (ImportedJobIntegrity.Eligibility(job).Decision != IndiaJobEligibilityDecision.Accepted)
+            throw new BadRequestException("Job location is not eligible for publication.", "job_location_ineligible");
         await ValidateSourcePublicationAsync(job, cancellationToken);
         job.Status = JobStatus.Published;
         job.PublishedAtUtc = UtcNow;
@@ -510,11 +521,11 @@ public sealed class JobService(
             throw new BadRequestException("Job source is inactive or does not match this job.", "invalid_job_source");
     }
 
-    private async Task ValidateReferencesAsync(Guid companyId, Guid categoryId, CancellationToken cancellationToken)
+    private async Task ValidateReferencesAsync(Guid companyId, Guid? categoryId, CancellationToken cancellationToken)
     {
         if (!await jobs.CompanyExistsAsync(companyId, cancellationToken))
             throw new BadRequestException($"Company '{companyId}' does not exist.", "invalid_company");
-        if (!await jobs.CategoryExistsAsync(categoryId, cancellationToken))
+        if (categoryId.HasValue && categoryId != Guid.Empty && !await jobs.CategoryExistsAsync(categoryId.Value, cancellationToken))
             throw new BadRequestException($"Category '{categoryId}' does not exist.", "invalid_category");
     }
 
@@ -526,6 +537,35 @@ public sealed class JobService(
         job.MinimumExperienceYears, job.MaximumExperienceYears,
         job.InternshipDurationMonths, job.IsFlexibleDuration, job.Department,
         job.RoleCategory, job.EducationRequirement, job.PostedByType);
+
+    private static void NormalizeManualJob(Job job)
+    {
+        if (!ImportedJobIntegrity.HasMeaningfulTitle(job.Title))
+            throw new BadRequestException("Job title is required.", "validation_error");
+        job.Title = ExternalJobNormalizer.NormalizeText(job.Title) ?? string.Empty;
+        job.Location = IndiaJobEligibilityPolicy.DisplayLocation(new ExternalJobNormalizer().Normalize(new() { Location = job.Location }).Location);
+        if (job.CategoryId == Guid.Empty) job.CategoryId = null;
+        var eligibility = IndiaJobEligibilityPolicy.Evaluate(new() { Location = job.Location, WorkplaceType = job.WorkplaceType });
+        if (eligibility.Decision == IndiaJobEligibilityDecision.Rejected)
+            throw new BadRequestException("Job hiring locations are outside India.", "job_location_ineligible");
+    }
+
+    private async Task<IAsyncDisposable?> ProtectManualCreationAsync(Job job, CancellationToken token)
+    {
+        var companyName = job.Company?.Name ?? (companies is null ? null : (await companies.GetByIdAsync(job.CompanyId, token))?.Name);
+        var canonical = new UrlCanonicalizer().Canonicalize(job.ApplicationUrl);
+        var fingerprint = new JobFingerprintService().GenerateFingerprint(job.Title, companyName ?? job.CompanyId.ToString(), job.Location);
+        var lease = creationLock is null ? null : await creationLock.AcquireAsync(canonical, fingerprint, token);
+        try
+        {
+            var duplicate = canonical is null ? null : await jobs.FindByExternalUrlAsync(canonical, token);
+            if (duplicate is null && companyName is not null && deduplication is not null)
+                duplicate = (await deduplication.FindDuplicateAsync(job.Title, companyName, job.Location, job.ApplicationUrl, job.CompanyId, token)).MatchedJob;
+            if (duplicate is not null && duplicate.Id != job.Id) throw new ConflictException("This vacancy already exists.", "duplicate_job");
+            return lease;
+        }
+        catch { if (lease is not null) await lease.DisposeAsync(); throw; }
+    }
 
     private static string Slugify(string value)
     {

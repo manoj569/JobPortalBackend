@@ -24,7 +24,7 @@ public sealed class JobAggregationPipelineTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task FlagControlsRealPublicationAndRerunsDoNotRepublish(bool enabled)
+    public async Task ImportedPublicationIgnoresLegacyFlagAndRerunsDoNotRepublish(bool enabled)
     {
         using var f = new JobSourceFixture();
         var audit = new PublicationAudit();
@@ -33,16 +33,16 @@ public sealed class JobAggregationPipelineTests
         var result = await runner.RunAsync(f.Source.Id);
         Assert.Equal(1, result.Created);
         Assert.Equal(1, result.Matched);
-        Assert.Equal(enabled ? 1 : 0, result.Published);
-        Assert.Equal(enabled ? 0 : 1, result.AutoPublishDisabled);
+        Assert.Equal(1, result.Published);
+        Assert.Equal(0, result.AutoPublishDisabled);
         f.Context.ChangeTracker.Clear();
         var saved = Assert.Single(f.Context.Jobs);
-        Assert.Equal(enabled ? JobStatus.Published : JobStatus.Draft, saved.Status);
+        Assert.Equal(JobStatus.Published, saved.Status);
         Assert.Equal(Valid(f).ExpiresAtUtc, saved.ExpiresAtUtc);
-        Assert.Equal(enabled ? 1 : 0, audit.Events.Count);
-        if (enabled) Assert.Equal(AuditAction.Publish, Assert.Single(audit.Events).Action);
+        Assert.Single(audit.Events);
+        Assert.Equal(AuditAction.Publish, Assert.Single(audit.Events).Action);
         var publicJobs = new PublicJobRepository(f.Context, new Clock());
-        Assert.Equal(enabled ? 1 : 0, (await publicJobs.SearchAsync(new PublicJobQuery())).TotalCount);
+        Assert.Equal(1, (await publicJobs.SearchAsync(new PublicJobQuery())).TotalCount);
 
         // Curated data must survive repeated source ingestion, including an extended source expiry.
         saved.Description = "Admin curated description";
@@ -56,7 +56,7 @@ public sealed class JobAggregationPipelineTests
         saved = Assert.Single(f.Context.Jobs);
         Assert.Equal("Admin curated description", saved.Description);
         Assert.Equal(Valid(f).ExpiresAtUtc, saved.ExpiresAtUtc);
-        Assert.Equal(enabled ? 1 : 0, audit.Events.Count);
+        Assert.Single(audit.Events);
     }
 
     [Theory]
@@ -64,29 +64,30 @@ public sealed class JobAggregationPipelineTests
     [InlineData("location", JobQualityReasonCode.MissingLocation)]
     [InlineData("workplace", JobQualityReasonCode.MissingWorkplaceType)]
     [InlineData("employment", JobQualityReasonCode.MissingEmploymentType)]
-    public async Task MissingSourceFieldsRemainDraftWithObservableReasons(string field, JobQualityReasonCode reason)
+    public async Task MissingOptionalSourceFieldsPublishWithoutFabrication(string field, JobQualityReasonCode reason)
     {
         using var f = new JobSourceFixture();
         var raw = Valid(f);
         f.Provider.Jobs = [field switch
         {
             "expiry" => raw with { ExpiresAtUtc = null },
-            "location" => raw with { Location = null },
+            "location" => raw with { Location = null, WorkplaceType = null },
             "workplace" => raw with { WorkplaceType = null },
             _ => raw with { EmploymentType = null }
         }];
         var audit = new PublicationAudit();
         var result = await Runner(f, true, audit).RunAsync(f.Source.Id);
         Assert.Equal(1, result.Created);
-        Assert.Equal(1, result.NeedsReview);
-        Assert.Equal(1, result.QualityReasonCounts![reason]);
-        Assert.Equal(JobStatus.Draft, Assert.Single(f.Context.Jobs).Status);
-        Assert.Empty(audit.Events);
+        Assert.Equal(0, result.NeedsReview);
+        Assert.Equal(1, result.Published);
+        Assert.Null(result.QualityReasonCounts);
+        Assert.Equal(JobStatus.Published, Assert.Single(f.Context.Jobs).Status);
+        Assert.Single(audit.Events);
+        _ = reason;
     }
 
     [Theory]
     [InlineData("expired", true)]
-    [InlineData("description", true)]
     [InlineData("url", false)]
     [InlineData("salary", false)]
     [InlineData("experience", false)]
@@ -135,7 +136,7 @@ public sealed class JobAggregationPipelineTests
     }
 
     [Fact]
-    public async Task MissingExperienceLevelRequiresReviewWithoutPublicationOrFabrication()
+    public async Task MissingExperienceLevelPublishesWithoutFabrication()
     {
         using var f = new JobSourceFixture();
 
@@ -157,9 +158,9 @@ public sealed class JobAggregationPipelineTests
 
         // Missing ExperienceLevel is now caught by the quality gate
         // before JobService.PublishAsync is attempted.
-        Assert.Equal(1, result.NeedsReview);
+        Assert.Equal(0, result.NeedsReview);
         Assert.Equal(0, result.PublishFailed);
-        Assert.Equal(0, result.Published);
+        Assert.Equal(1, result.Published);
 
         f.Context.ChangeTracker.Clear();
 
@@ -169,22 +170,20 @@ public sealed class JobAggregationPipelineTests
         Assert.Equal(default, job.ExperienceLevel);
 
         // Jobs requiring human review must remain Draft.
-        Assert.Equal(JobStatus.Draft, job.Status);
+        Assert.Equal(JobStatus.Published, job.Status);
 
         // No real publication was attempted.
-        Assert.Empty(audit.Events);
+        Assert.Single(audit.Events);
 
         // Verify the exact quality-gate reason.
         var quality = new JobQualityGate()
             .Evaluate(job, JobSourceFixture.Now);
 
         Assert.Equal(
-            JobQualityDecision.NeedsReview,
+            JobQualityDecision.Eligible,
             quality.Decision);
 
-        Assert.Contains(
-            JobQualityReasonCode.MissingExperienceLevel,
-            quality.Reasons);
+        Assert.Empty(quality.Reasons);
     }
 
     [Fact]
@@ -209,10 +208,10 @@ public sealed class JobAggregationPipelineTests
         var job = Assert.Single(f.Context.Jobs);
         var review = new JobQualityReviewService(new JobRepository(f.Context), new JobQualityGate(), new Clock());
         var result = await review.ReviewAsync(job.Id);
-        Assert.Equal(JobQualityDecision.NeedsReview, result.Decision);
-        Assert.Contains(JobQualityReasonCode.MissingExpiry, result.Reasons);
+        Assert.Equal(JobQualityDecision.Eligible, result.Decision);
+        Assert.Empty(result.Reasons);
         Assert.False(f.Context.ChangeTracker.HasChanges());
-        Assert.Equal(JobStatus.Draft, job.Status);
+        Assert.Equal(JobStatus.Published, job.Status);
         await Assert.ThrowsAsync<NotFoundException>(() => review.ReviewAsync(Guid.NewGuid()));
         var authorization = Assert.Single(typeof(JobsController).GetCustomAttributes(typeof(AuthorizeAttribute), true).Cast<AuthorizeAttribute>());
         Assert.Equal("Administrator", authorization.Roles);
@@ -238,9 +237,9 @@ public sealed class JobAggregationPipelineTests
         var runner = Runner(f, enabled, audit, new ExternalJobMetadataEnricher());
         var result = await runner.RunAsync(f.Source.Id);
         Assert.Equal(1, result.Created);
-        Assert.Equal(enabled && expiry ? 1 : 0, result.Published);
-        Assert.Equal(enabled && !expiry ? 1 : 0, result.NeedsReview);
-        Assert.Equal(enabled ? 0 : 1, result.AutoPublishDisabled);
+        Assert.Equal(1, result.Published);
+        Assert.Equal(0, result.NeedsReview);
+        Assert.Equal(0, result.AutoPublishDisabled);
         var job = Assert.Single(f.Context.Jobs);
         Assert.Equal(7, job.MinimumExperienceYears);
         Assert.Equal(EmploymentType.FullTime, job.EmploymentType);
@@ -272,7 +271,8 @@ public sealed class JobAggregationPipelineTests
             new CategoryManagementRepository(f.Context), new JobDeduplicationService(jobs, fingerprints, canonicalizer),
             fingerprints, unit, clock, f.Locks, canonicalizer);
         var jobService = new JobService(jobs, unit, audit, new CreateJobRequestValidator(),
-            new UpdateJobRequestValidator(), new UpdateRecruiterContactRequestValidator(), new JobSearchQueryValidator(), clock);
+            new UpdateJobRequestValidator(), new UpdateRecruiterContactRequestValidator(), new JobSearchQueryValidator(), clock,
+            sources: f.Repository);
         var publisher = new JobAutoPublishService(jobs, new JobQualityGate(), jobService,
             Options.Create(new JobAggregationOptions { AutoPublishEnabled = enabled }), clock);
         return new(f.Repository, [f.Provider], ingestion, unit, clock, f.Resolver, new ExternalJobNormalizer(), autoPublishService: publisher, enricher: enricher);

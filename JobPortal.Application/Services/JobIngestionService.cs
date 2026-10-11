@@ -237,7 +237,9 @@ public sealed class JobIngestionService(
         var title = TextNormalizer.TrimOrNull(rawJob.Title);
         var companyName = TextNormalizer.TrimOrNull(rawJob.CompanyName);
 
-        if (title is null) return Invalid("Job title is required.");
+        if (title is null || !ImportedJobIntegrity.HasMeaningfulTitle(title)) return Invalid("Job title is required.");
+        if (rawJob.JobSourceId.HasValue && !ImportedJobIntegrity.IsSafeApplicationUrl(rawJob.ApplicationUrl))
+            return Invalid("ApplicationUrl must be an absolute HTTP or HTTPS URL.");
         if (title.Length > 250) return Invalid("Job title cannot exceed 250 characters.");
         if (companyName is null) return Invalid("Company name is required.");
 
@@ -398,12 +400,12 @@ public sealed class JobIngestionService(
             return DuplicateResult(duplicate, matchedJob.Id);
         }
 
-        if (!rawJob.CategoryId.HasValue || rawJob.CategoryId.Value == Guid.Empty)
-            return Invalid("CategoryId is required when creating a new external job.");
-
-        if (!_validCategories.Contains(rawJob.CategoryId.Value) && !await categories.ExistsAsync(rawJob.CategoryId.Value, cancellationToken))
-            return Invalid($"Category '{rawJob.CategoryId.Value}' does not exist.");
-        if (_runPrepared) _validCategories.Add(rawJob.CategoryId.Value);
+        if (rawJob.CategoryId is { } categoryId && categoryId != Guid.Empty)
+        {
+            if (!_validCategories.Contains(categoryId) && !await categories.ExistsAsync(categoryId, cancellationToken))
+                return Invalid($"Category '{categoryId}' does not exist.");
+            if (_runPrepared) _validCategories.Add(categoryId);
+        }
 
         var id = Guid.NewGuid();
 
@@ -430,7 +432,8 @@ public sealed class JobIngestionService(
             MaximumExperienceYears = rawJob.MaximumExperienceYears,
             EducationRequirement = TextNormalizer.TrimOrNull(rawJob.EducationRequirement),
             CompanyId = company.Id,
-            CategoryId = rawJob.CategoryId.Value,
+            CategoryId = rawJob.CategoryId == Guid.Empty ? null : rawJob.CategoryId,
+            SourceMetadataJson = rawJob.SourceMetadataJson,
             Status = JobStatus.Draft,
             FingerprintHash = fingerprintService.GenerateFingerprint(title, company.Name, location),
             FirstSeenAtUtc = now,
@@ -471,7 +474,8 @@ public sealed class JobIngestionService(
         var canonicalUrlHash = ApplicationUrlIdentity.Hash(applicationUrl);
         var fingerprint = fingerprintService.GenerateFingerprint(title, company.Name, location);
         var slug = $"{SlugGenerator.Generate(title, 240)}-{job.Id.ToString("N")[..8]}";
-        var changed = job.Title != title || job.Description != description || job.Responsibilities != responsibilities ||
+        var metadataChanged = raw.SourceMetadataJson is not null && !ImportedJobIntegrity.MetadataEqual(raw.SourceMetadataJson, job.SourceMetadataJson);
+        var changed = metadataChanged || job.Title != title || job.Description != description || job.Responsibilities != responsibilities ||
             job.Requirements != requirements || job.Benefits != benefits || job.ApplicationUrl != (applicationUrl ?? string.Empty) ||
             job.CanonicalApplicationUrlHash != canonicalUrlHash || job.FingerprintHash != fingerprint || job.Slug != slug ||
             job.Location != location || job.ExpiresAtUtc != expiry || job.MinimumSalary != raw.SalaryMin ||
@@ -491,6 +495,7 @@ public sealed class JobIngestionService(
         job.CanonicalApplicationUrlHash = canonicalUrlHash;
         job.FingerprintHash = fingerprint;
         job.Location = location;
+        if (metadataChanged) job.SourceMetadataJson = raw.SourceMetadataJson;
         job.ExpiresAtUtc = expiry;
         job.MinimumSalary = raw.SalaryMin;
         job.MaximumSalary = raw.SalaryMax;
@@ -529,10 +534,10 @@ public sealed class JobIngestionService(
         // requisitions within the SAME source must not collapse on weak evidence.
         if (match.MatchTypeEnum is JobPortal.Application.Abstractions.Jobs.MatchType.Fingerprint or
             JobPortal.Application.Abstractions.Jobs.MatchType.Fuzzy &&
-            raw.JobSourceId.HasValue && match.MatchedJob?.JobSourceId == raw.JobSourceId &&
+            raw.JobSourceId.HasValue && match.MatchedJob?.JobSourceId.HasValue == true &&
             !string.IsNullOrWhiteSpace(raw.ExternalId) &&
             !string.IsNullOrWhiteSpace(match.MatchedJob.ExternalJobId) &&
-            !string.Equals(raw.ExternalId.Trim(), match.MatchedJob.ExternalJobId.Trim(), StringComparison.Ordinal))
+            (raw.JobSourceId != match.MatchedJob.JobSourceId || !string.Equals(raw.ExternalId.Trim(), match.MatchedJob.ExternalJobId.Trim(), StringComparison.Ordinal)))
             return DeduplicationResult.NoMatch();
         return match;
     }

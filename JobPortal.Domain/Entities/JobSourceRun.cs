@@ -20,6 +20,7 @@ public sealed class JobSourceRun
     public DateTime? LeaseExpiresAtUtc { get; set; }
     public int AttemptCount { get; set; }
     public string Phase { get; set; } = "Queued";
+    public string? DiagnosticsJson { get; set; }
     public string? ErrorCode { get; set; }
     public int Processed { get; set; }
     public int TotalReceived { get; set; }

@@ -11,6 +11,9 @@ public sealed record RawExternalJob
     // Provider facts used for eligibility; not inferred from "remote" alone.
     public IReadOnlyCollection<string> AdditionalLocations { get; init; } = [];
     public IReadOnlyCollection<string> CountryCodes { get; init; } = [];
+    public string? RemoteEligibilityText { get; init; }
+    public string? SourceMetadataJson { get; init; }
+    public string? EligibilityReasonCode { get; init; }
     public string? Description { get; init; }
     public string? Requirements { get; init; }
     public string? Responsibilities { get; init; }

@@ -35,7 +35,7 @@ public sealed class PublicJobRepository(
                 job.Responsibilities, job.Requirements, job.Benefits,
                 job.CompanyId, job.Company.Name, job.Company.Slug, job.Company.LogoUrl,
                 job.Company.Description, job.Company.WebsiteUrl,
-                job.CategoryId, job.Category.Name, job.Location,
+                job.CategoryId, (job.Category == null ? "Not specified" : job.Category.Name), job.Location,
                 job.MinimumSalary, job.MaximumSalary, job.CurrencyCode,
                 job.EmploymentType, job.WorkplaceType, job.ExperienceLevel,
                 job.IsFeatured, job.PublishedAtUtc!.Value, job.ExpiresAtUtc,
@@ -304,7 +304,7 @@ public sealed class PublicJobRepository(
         var utcNow = timeProvider.GetUtcNow().UtcDateTime;
         return context.Jobs.AsNoTracking().Where(job =>
             job.Status == JobStatus.Published &&
-            !job.Company.IsDeleted && !job.Category.IsDeleted &&
+            !job.Company.IsDeleted && (job.CategoryId == null || (job.Category != null && !job.Category.IsDeleted)) &&
             !job.IsHidden &&
             !job.IsDeleted &&
             job.PublishedAtUtc.HasValue &&
@@ -328,7 +328,7 @@ public sealed class PublicJobRepository(
             source = source.Where(job =>
                 job.Title.Contains(keyword) ||
                 job.Company.Name.Contains(keyword) ||
-                job.Category.Name.Contains(keyword) ||
+                (job.Category == null ? "Not specified" : job.Category.Name).Contains(keyword) ||
                 job.Description.Contains(keyword) ||
                 job.JobSkills.Any(jobSkill => jobSkill.Skill.Name.Contains(keyword)));
         }
@@ -340,7 +340,7 @@ public sealed class PublicJobRepository(
         {
             var normalizedCategoryName = categoryName.ToLower();
             source = source.Where(job =>
-                job.Category.Name.ToLower().Contains(normalizedCategoryName));
+                (job.Category == null ? "Not specified" : job.Category.Name).ToLower().Contains(normalizedCategoryName));
         }
         if (query.ExperienceLevel.HasValue)
             source = source.Where(job => job.ExperienceLevel == query.ExperienceLevel.Value);

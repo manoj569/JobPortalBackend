@@ -48,7 +48,7 @@ public sealed record PublicJobQuery(
 public sealed record PublicJobSummary(
     Guid Id, string ReferenceNumber, string Title, string Slug,
     Guid CompanyId, string CompanyName, string CompanySlug, string? CompanyLogoUrl,
-    Guid CategoryId, string CategoryName, string? Location,
+    Guid? CategoryId, string CategoryName, string? Location,
     decimal? MinimumSalary, decimal? MaximumSalary, string CurrencyCode,
     EmploymentType EmploymentType, WorkplaceType WorkplaceType,
     ExperienceLevel ExperienceLevel, bool IsFeatured,
@@ -66,7 +66,7 @@ public sealed record PublicJobDetails(
     string? Responsibilities, string? Requirements, string? Benefits,
     Guid CompanyId, string CompanyName, string CompanySlug, string? CompanyLogoUrl,
     string? CompanyDescription, string? CompanyWebsiteUrl,
-    Guid CategoryId, string CategoryName, string? Location,
+    Guid? CategoryId, string CategoryName, string? Location,
     decimal? MinimumSalary, decimal? MaximumSalary, string CurrencyCode,
     EmploymentType EmploymentType, WorkplaceType WorkplaceType,
     ExperienceLevel ExperienceLevel, bool IsFeatured,

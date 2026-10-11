@@ -64,6 +64,9 @@ public sealed partial class JobSourceRunner(
             "Job source run {JobSourceId} failed at provider/infrastructure level; no raw exception text is persisted.");
 
     // Optional so existing constructor callers (including tests) remain valid.
+    private readonly JobPortal.Application.Features.JobAggregation.IJobSourcePublicationPolicy selectionPolicy = publicationPolicy ??
+        new JobPortal.Application.Features.JobAggregation.JobSourcePublicationPolicy(
+            Microsoft.Extensions.Options.Options.Create(new JobPortal.Application.Features.JobAggregation.JobAggregationOptions()), timeProvider);
     private readonly ILogger<JobSourceRunner>? _logger = logger;
     private readonly IJobRepository? _jobRepository = jobRepository;
 
@@ -155,6 +158,7 @@ public sealed partial class JobSourceRunner(
         {
             publicationPolicy?.ApplyLicensedLogo(source);
             ExternalJobSourceSnapshot? snapshot = null;
+            var providerSnapshotComplete = false;
             var rawJobs = new List<RawExternalJob>();
             var observedJobs = new List<RawExternalJob>();
             var processingTimer = System.Diagnostics.Stopwatch.StartNew();
@@ -184,10 +188,14 @@ public sealed partial class JobSourceRunner(
             {
                 partialResult = new JobSourceRunResult
                 {
-                    JobSourceId = source.Id, TotalReceived = rawJobs.Count + (snapshot?.Skipped ?? 0),
+                    JobSourceId = source.Id, TotalReceived = observedJobs.Count + (snapshot?.Skipped ?? 0),
+                    Parsed = observedJobs.Count,
+                    EligibilityReasonCounts = snapshot?.EligibilityReasonCounts,
+                    ScanComplete = providerSnapshotComplete,
                     Created = created, Updated = updated, Unchanged = unchanged, Matched = matched,
                     Skipped = skipped, Failed = failed, Published = published, NeedsReview = needsReview,
                     QualityRejected = qualityRejected, PublishFailed = publishFailed, AutoPublishDisabled = disabled,
+                    QualityReasonCounts = new Dictionary<JobQualityReasonCode, int>(qualityReasons),
                     ReasonCounts = new Dictionary<JobIngestionReasonCode, int>(reasonCounts),
                     ValidationReasonCounts = new Dictionary<string, int>(validationReasons),
                     SelectionReasonCounts = snapshot?.SelectionReasonCounts
@@ -200,18 +208,19 @@ public sealed partial class JobSourceRunner(
             {
                 observedJobs.AddRange(batch.Jobs);
                 var providerSkipped = (snapshot?.Skipped ?? 0) + batch.Skipped;
-                snapshot = provider is ICompleteExternalJobProvider ? new(observedJobs, providerSkipped, batch.IsComplete) : null;
+                providerSnapshotComplete = provider is ICompleteExternalJobProvider && batch.IsComplete;
+                snapshot = new(observedJobs, providerSkipped, providerSnapshotComplete);
                 // Apply the policy cumulatively: a configured 20-job cap must not
                 // become 20 jobs PER batch, and ambiguous geography stays incomplete.
-                var selected = snapshot is not null && publicationPolicy is not null
-                    ? publicationPolicy.Select(source, snapshot) : snapshot;
+                var selected = selectionPolicy.Select(source, snapshot);
                 if (selected is not null) snapshot = selected;
                 var accepted = selected?.Jobs ?? observedJobs;
-                var newJobs = accepted.Skip(rawJobs.Count).Select(x => provider is ICompleteExternalJobProvider ? x with
+                var newJobs = accepted.Skip(rawJobs.Count).Select(x => x with
                 {
                     CompanyId = source.CompanyId,
-                    JobSourceId = string.IsNullOrWhiteSpace(x.ExternalId) ? null : source.Id
-                } : x).ToArray();
+                    JobSourceId = source.Id,
+                    CompanyName = source.Company?.Name ?? x.CompanyName
+                }).ToArray();
                 rawJobs.AddRange(newJobs);
                 if (_logger is not null) Progress(_logger, source.Id, "Eligible batch received", newJobs.Length, runTimer.Elapsed.TotalMilliseconds, null);
                 skipped += batch.Skipped;
@@ -324,32 +333,6 @@ public sealed partial class JobSourceRunner(
                         {
                             case JobIngestionOutcome.Created:
                                 created++;
-
-                                // Only newly created aggregated jobs are considered.
-                                // Existing duplicates must never be republished here.
-                                if (result.JobId.HasValue &&
-                                    autoPublishService is not null && !cancellationToken.IsCancellationRequested)
-                                {
-                                    publicationAttempt = true;
-                                    var publication = batchReview is not null && batchReview.TryGetValue(result.JobId.Value, out var reviewed)
-                                        ? reviewed : await autoPublishService.TryPublishAsync(result.JobId.Value, cancellationToken);
-                                    switch (publication.Outcome)
-                                    {
-                                        case JobAutoPublishOutcome.Published: published++; break;
-                                        case JobAutoPublishOutcome.NeedsReview: needsReview++; break;
-                                        case JobAutoPublishOutcome.Rejected: qualityRejected++; break;
-                                        case JobAutoPublishOutcome.Disabled: disabled++; break;
-                                        case JobAutoPublishOutcome.JobNotFound:
-                                            publishFailed++;
-                                            failed++;
-                                            reasonCounts[JobIngestionReasonCode.AutoPublishFailed] =
-                                                reasonCounts.GetValueOrDefault(JobIngestionReasonCode.AutoPublishFailed) + 1;
-                                            break;
-                                    }
-                                    foreach (var reason in publication.Reasons.Distinct())
-                                        qualityReasons[reason] = qualityReasons.GetValueOrDefault(reason) + 1;
-                                }
-
                                 break;
 
                             case JobIngestionOutcome.Updated:
@@ -379,6 +362,31 @@ public sealed partial class JobSourceRunner(
                             default:
                                 failed++;
                                 break;
+                        }
+
+                        // Count publication transitions, including eligible source-owned drafts from earlier runs.
+                        if (result.Outcome is (JobIngestionOutcome.Created or JobIngestionOutcome.Updated or JobIngestionOutcome.Unchanged or
+                            JobIngestionOutcome.MatchedByUrl or JobIngestionOutcome.MatchedByFingerprint or JobIngestionOutcome.MatchedByFuzzy) &&
+                            result.JobId.HasValue && autoPublishService is not null && !cancellationToken.IsCancellationRequested)
+                        {
+                            publicationAttempt = true;
+                            var publication = batchReview is not null && batchReview.TryGetValue(result.JobId.Value, out var reviewed)
+                                ? reviewed : await autoPublishService.TryPublishAsync(result.JobId.Value, cancellationToken);
+                            switch (publication.Outcome)
+                            {
+                                case JobAutoPublishOutcome.Published: published++; break;
+                                case JobAutoPublishOutcome.NeedsReview: needsReview++; break;
+                                case JobAutoPublishOutcome.Rejected: qualityRejected++; break;
+                                case JobAutoPublishOutcome.Disabled: disabled++; break;
+                                case JobAutoPublishOutcome.JobNotFound:
+                                    publishFailed++;
+                                    failed++;
+                                    reasonCounts[JobIngestionReasonCode.AutoPublishFailed] =
+                                        reasonCounts.GetValueOrDefault(JobIngestionReasonCode.AutoPublishFailed) + 1;
+                                    break;
+                            }
+                            foreach (var reason in publication.Reasons.Distinct())
+                                qualityReasons[reason] = qualityReasons.GetValueOrDefault(reason) + 1;
                         }
 
                         // Tally the machine-readable reason for every item result.
@@ -436,7 +444,7 @@ public sealed partial class JobSourceRunner(
             if (_logger is not null) Progress(_logger, source.Id, canReconcile ? "Reconciliation allowed" : "Reconciliation blocked: incomplete or unsafe snapshot",
                 observedJobs.Count, runTimer.Elapsed.TotalMilliseconds, null);
             var reconciliationTimer = System.Diagnostics.Stopwatch.StartNew();
-            if (canReconcile && _jobRepository is not null)
+            if (provider is ICompleteExternalJobProvider && canReconcile && _jobRepository is not null)
             {
                 closed = await _jobRepository.CloseSourceJobsMissingFromSnapshotAsync(
                     source.Id, externalIdsForReconciliation, timeProvider.GetUtcNow().UtcDateTime, cancellationToken);
@@ -458,7 +466,8 @@ public sealed partial class JobSourceRunner(
 
             // A complete-source provider's partial scan must never claim a successful
             // full run. Already committed items remain resumable on the next attempt.
-            var successful = snapshot is null ? skipped == 0 && failed == 0 : canReconcile;
+            var successful = provider is ICompleteExternalJobProvider ? canReconcile : skipped == 0 && failed == 0 &&
+                !(snapshot?.EligibilityReasonCounts?.Keys.Any(x => x is "AmbiguousLocation" or "ContradictoryLocation" or "UnknownCountry") ?? false);
             source.LastSuccessfulRunAtUtc = successful ? now : previousSuccessfulRun;
             source.LastError = successful ? null : "External job source scan was incomplete or had failed/skipped items.";
             source.ConsecutiveFailures = successful ? 0 : previousFailures + 1;
@@ -479,7 +488,10 @@ public sealed partial class JobSourceRunner(
             var runResult = new JobSourceRunResult
             {
                 JobSourceId = source.Id,
-                TotalReceived = rawJobs.Count + (snapshot?.Skipped ?? 0),
+                TotalReceived = observedJobs.Count + (snapshot?.Skipped ?? 0),
+                    Parsed = observedJobs.Count,
+                    EligibilityReasonCounts = snapshot?.EligibilityReasonCounts,
+                    ScanComplete = providerSnapshotComplete,
                 Created = created,
                 Updated = updated,
                 Unchanged = unchanged,
@@ -496,6 +508,7 @@ public sealed partial class JobSourceRunner(
                 ReasonCounts = reasonCounts.Count == 0 ? null : reasonCounts,
                 ValidationReasonCounts = validationReasons.Count == 0 ? null : validationReasons,
                 SelectionReasonCounts = snapshot?.SelectionReasonCounts,
+                ReconciliationSafe = canReconcile,
                 Succeeded = successful,
                 Error = source.LastError
             };

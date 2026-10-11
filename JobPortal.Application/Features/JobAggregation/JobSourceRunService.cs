@@ -1,3 +1,4 @@
+using System.Text.Json;
 using JobPortal.Application.Abstractions.Jobs;
 using JobPortal.Application.Abstractions.Persistence;
 using JobPortal.Application.Common.Exceptions;
@@ -42,16 +43,19 @@ public sealed record JobSourceRunResponse(
     int Published, int NeedsReview, int QualityRejected, int PublishFailed, int AutoPublishDisabled,
     bool Succeeded, string? Error)
 {
+    public JobSourceRunResult? Diagnostics { get; init; }
     public string StatusUrl => $"/api/admin/job-sources/{JobSourceId:D}/runs/{RunId:D}";
     public int ExistingDuplicate => Matched;
-    public int Rejected => Skipped;
+    public int Existing => Diagnostics?.Existing ?? Updated + Unchanged + Matched;
+    public int Rejected => Diagnostics?.Rejected ?? Skipped;
     public static JobSourceRunResponse From(JobSourceRun row) => new(row.Id, row.JobSourceId, row.Status.ToString(),
         row.AttemptCount, row.Status == JobSourceRunStatus.Interrupted && row.AttemptCount < JobSourceRun.MaximumAttempts,
         row.QueuedAtUtc, row.StartedAtUtc, row.CompletedAtUtc, row.InterruptedAtUtc, row.NextAttemptAtUtc,
         row.HeartbeatAtUtc, row.Phase, row.Processed, row.TotalReceived, row.Created, row.Updated, row.Unchanged,
         row.Closed, row.Matched, row.Skipped, row.Failed, row.Published, row.NeedsReview, row.QualityRejected,
         row.PublishFailed, row.AutoPublishDisabled, row.Status == JobSourceRunStatus.Succeeded,
-        row.ErrorCode); // Fixed internal codes only; no provider messages/URLs.
+        row.ErrorCode)
+        { Diagnostics = row.DiagnosticsJson is null ? null : JsonSerializer.Deserialize<JobSourceRunResult>(row.DiagnosticsJson) };
 }
 
 public sealed class JobSourceRunService(IJobSourceRepository sources, IJobSourceRunStore store, TimeProvider clock)

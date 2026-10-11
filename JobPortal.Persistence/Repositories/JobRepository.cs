@@ -9,6 +9,12 @@ namespace JobPortal.Persistence.Repositories;
 
 public sealed class JobRepository(JobPortalDbContext context) : IJobRepository
 {
+    public async Task<Job?> GetFreshByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var tracked = context.ChangeTracker.Entries<Job>().FirstOrDefault(x => x.Entity.Id == id);
+        if (tracked is not null) tracked.State = EntityState.Detached;
+        return await GetByIdAsync(id, false, cancellationToken);
+    }
     public bool SupportsAggregationBatchPreload => true;
     public Task<Job?> GetByIdAsync(Guid id, bool includeDeleted = false, CancellationToken cancellationToken = default)
     {
@@ -33,7 +39,7 @@ public sealed class JobRepository(JobPortalDbContext context) : IJobRepository
             var term = query.Search.Trim();
             source = source.Where(x => x.Title.Contains(term) || x.ReferenceNumber.Contains(term) ||
                 x.Description.Contains(term) || (x.Location != null && x.Location.Contains(term)) ||
-                x.Company.Name.Contains(term) || x.Category.Name.Contains(term));
+                x.Company.Name.Contains(term) || (x.Category == null ? "Not specified" : x.Category.Name).Contains(term));
         }
         if (query.CompanyId.HasValue) source = source.Where(x => x.CompanyId == query.CompanyId);
         if (query.JobSourceId.HasValue) source = source.Where(x => x.JobSourceId == query.JobSourceId);

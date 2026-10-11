@@ -19,28 +19,16 @@ public sealed class JobQualityGate : IJobQualityGate
         // These jobs must never become eligible for auto-publish.
         // ---------------------------------------------------------
 
-        if (string.IsNullOrWhiteSpace(job.Title))
+        if (!ImportedJobIntegrity.HasMeaningfulTitle(job.Title))
         {
             rejected.Add(
                 JobQualityReasonCode.MissingTitle);
-        }
-
-        if (string.IsNullOrWhiteSpace(job.Description))
-        {
-            rejected.Add(
-                JobQualityReasonCode.MissingDescription);
         }
 
         if (job.CompanyId == Guid.Empty)
         {
             rejected.Add(
                 JobQualityReasonCode.MissingCompany);
-        }
-
-        if (job.CategoryId == Guid.Empty)
-        {
-            rejected.Add(
-                JobQualityReasonCode.MissingCategory);
         }
 
         if (string.IsNullOrWhiteSpace(job.ApplicationUrl))
@@ -52,7 +40,7 @@ public sealed class JobQualityGate : IJobQualityGate
                      job.ApplicationUrl,
                      UriKind.Absolute,
                      out var applicationUri) ||
-                 applicationUri.Scheme is not ("http" or "https"))
+                 applicationUri.Scheme is not ("http" or "https") || !ImportedJobIntegrity.IsSafeApplicationUrl(job.ApplicationUrl))
         {
             rejected.Add(
                 JobQualityReasonCode.InvalidApplicationUrl);
@@ -113,43 +101,9 @@ public sealed class JobQualityGate : IJobQualityGate
         // instead of being eligible for unattended publishing.
         // ---------------------------------------------------------
 
-        // JobService.PublishAsync requires a future expiry date.
-        // Missing expiry therefore requires admin review.
-        if (!job.ExpiresAtUtc.HasValue)
-        {
-            review.Add(
-                JobQualityReasonCode.MissingExpiry);
-        }
-
-        if (string.IsNullOrWhiteSpace(job.Location))
-        {
-            review.Add(
-                JobQualityReasonCode.MissingLocation);
-        }
-
-        // Enum default value 0 represents missing/unreliable
-        // structured source information.
-        if ((int)job.WorkplaceType == 0)
-        {
-            review.Add(
-                JobQualityReasonCode.MissingWorkplaceType);
-        }
-
-        if ((int)job.EmploymentType == 0)
-        {
-            review.Add(
-                JobQualityReasonCode.MissingEmploymentType);
-        }
-
-        // Existing JobService.PublishAsync validates the stored job
-        // through UpdateJobValidator, where ExperienceLevel must be
-        // a valid enum value. Do not fabricate a level for external
-        // jobs; keep the job in Draft for admin review instead.
-        if ((int)job.ExperienceLevel == 0)
-        {
-            review.Add(
-                JobQualityReasonCode.MissingExperienceLevel);
-        }
+        var eligibility = ImportedJobIntegrity.Eligibility(job);
+        if (eligibility.Decision != IndiaJobEligibilityDecision.Accepted)
+            review.Add(JobQualityReasonCode.MissingLocation);
 
         if (review.Count > 0)
         {

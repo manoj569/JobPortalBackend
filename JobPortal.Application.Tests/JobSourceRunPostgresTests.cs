@@ -37,6 +37,11 @@ public sealed class JobSourceRunPostgresTests
             // Exercise the ACTUAL new migration, not a separately maintained approximation.
             foreach (var command in setup.GetService<IMigrationsSqlGenerator>().Generate(new AddDurableJobSourceRuns().UpOperations, setup.Model))
                 await setup.Database.ExecuteSqlRawAsync(command.CommandText);
+            var diagnostics = new AllowOptionalJobCategoryAndIngestionDiagnostics().UpOperations
+                .OfType<Microsoft.EntityFrameworkCore.Migrations.Operations.AddColumnOperation>()
+                .Where(x => x.Table == "JobSourceRuns").ToArray();
+            foreach (var command in setup.GetService<IMigrationsSqlGenerator>().Generate(diagnostics, setup.Model))
+                await setup.Database.ExecuteSqlRawAsync(command.CommandText);
             var source = Guid.NewGuid(); var now = DateTime.UtcNow;
             await setup.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"JobSources\" (\"Id\") VALUES ({source})");
             var requests = await Task.WhenAll(Enumerable.Range(0, 10).Select(async _ =>

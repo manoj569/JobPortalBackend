@@ -83,7 +83,7 @@ public class JobIngestionServiceTests
     [Theory]
     [InlineData(-1, JobQualityDecision.Rejected)]
     [InlineData(1, JobQualityDecision.Eligible)]
-    [InlineData(null, JobQualityDecision.NeedsReview)]
+    [InlineData(null, JobQualityDecision.Eligible)]
     public async Task IngestAsync_SourceExpiryRemainsDraftAndControlsQuality(int? days, JobQualityDecision expected)
     {
         var now = new DateTime(2026, 10, 1, 12, 0, 0, DateTimeKind.Utc);
@@ -281,7 +281,7 @@ public class JobIngestionServiceTests
     }
 
     [Fact]
-    public async Task IngestAsync_MissingCategory_DoesNotCreateNewJob()
+    public async Task IngestAsync_MissingCategory_CreatesUncategorisedJob()
     {
         var raw = CreateRawJob() with
         {
@@ -291,12 +291,12 @@ public class JobIngestionServiceTests
         var result = await _service.IngestAsync(raw);
 
         Assert.Equal(
-            JobIngestionOutcome.Invalid,
+            JobIngestionOutcome.Created,
             result.Outcome);
 
-        Assert.Null(result.JobId);
-        Assert.Empty(_jobs.AddedJobs);
-        Assert.Equal(0, _unitOfWork.SaveCalls);
+        Assert.NotNull(result.JobId);
+        Assert.Null(Assert.Single(_jobs.AddedJobs).CategoryId);
+        Assert.Equal(1, _unitOfWork.SaveCalls);
     }
 
     [Fact]
@@ -409,13 +409,13 @@ public class JobIngestionServiceTests
     }
 
     [Fact]
-    public async Task IngestAsync_EmptyCategory_DoesNotCreateNewJob()
+    public async Task IngestAsync_EmptyCategory_CreatesUncategorisedJob()
     {
         var result = await _service.IngestAsync(CreateRawJob() with { CategoryId = Guid.Empty });
 
-        Assert.Equal(JobIngestionOutcome.Invalid, result.Outcome);
-        Assert.Empty(_jobs.AddedJobs);
-        Assert.Equal(0, _unitOfWork.SaveCalls);
+        Assert.Equal(JobIngestionOutcome.Created, result.Outcome);
+        Assert.Null(Assert.Single(_jobs.AddedJobs).CategoryId);
+        Assert.Equal(1, _unitOfWork.SaveCalls);
     }
 
     [Fact]

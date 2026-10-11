@@ -37,8 +37,9 @@ public sealed class Job : BaseEntity
     public DateTime? ExpiresAtUtc { get; set; }
     public Guid CompanyId { get; set; }
     public Company Company { get; set; } = null!;
-    public Guid CategoryId { get; set; }
-    public Category Category { get; set; } = null!;
+    public Guid? CategoryId { get; set; }
+    public Category? Category { get; set; }
+    public string? SourceMetadataJson { get; set; }
     public ICollection<JobSkill> JobSkills { get; set; } = new List<JobSkill>();
     public ICollection<SavedJob> SavedByUsers { get; set; } = new List<SavedJob>();
     public ICollection<UserJobHistory> UserHistory { get; set; } = new List<UserJobHistory>();

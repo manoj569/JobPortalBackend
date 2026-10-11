@@ -42,7 +42,7 @@ public sealed class PwcCategoryIngestionTests
     public void PwcRulesAreScopedAndUseVerifiedBoardIdentityForCompanyNameVariants()
     {
         var classifier = new ExternalJobCategoryClassifier();
-        Assert.Null(classifier.Classify(new() { CompanyName = "Other company", Title = "SAP Consultant" }));
+        Assert.Equal("general", classifier.Classify(new() { CompanyName = "Other company", Title = "SAP Consultant" }));
         Assert.Equal("general", classifier.Classify(new() { CompanyName = "PwC India", Title = "SAP Consultant",
             ApplicationUrl = "https://pwc.wd3.myworkdayjobs.com/en-US/Global_Experienced_Careers/job/Pune/REQ1" }));
     }
@@ -59,7 +59,7 @@ public sealed class PwcCategoryIngestionTests
         var job = WorkdayJobSourceProvider.ParseDetail(Detail("<p><b>Specialism</b></p>Assurance<p><b>Management Level</b></p>Associate"), target, source, listing);
         Assert.Equal("Assurance", job!.ExternalCategory);
         Assert.Null(WorkdayJobSourceProvider.ParseDetail(Detail("<p>Our teams work in Assurance and Software Engineering.</p>"), target, source, listing)!.ExternalCategory);
-        Assert.Null(WorkdayJobSourceProvider.ParseDetail(Detail("<p><b>Specialism</b></p>Assurance<p>Details</p>"),
+        Assert.Equal("Assurance", WorkdayJobSourceProvider.ParseDetail(Detail("<p><b>Specialism</b></p>Assurance<p>Details</p>"),
             target with { Tenant = "other" }, source, listing)!.ExternalCategory);
     }
 
@@ -103,17 +103,18 @@ public sealed class PwcCategoryIngestionTests
         Assert.Equal(ids, await f.Context.Jobs.AsNoTracking().OrderBy(x => x.ExternalJobId).Select(x => x.Id).ToArrayAsync());
         var expected = new[] { slugs[0], slugs[1], slugs[2], slugs[3], slugs[3], slugs[4], slugs[5] };
         var saved = await f.Context.Jobs.AsNoTracking().Include(x => x.Category).OrderBy(x => x.ExternalJobId).ToArrayAsync();
-        Assert.Equal(expected, saved.Select(x => x.Category.Slug).ToArray());
-        provider.Jobs = [provider.Jobs[0] with { ExternalId = "UNKNOWN", Title = "Unclassified Associate",
-            ApplicationUrl = "https://pwc.wd3.myworkdayjobs.com/en-US/Global_Experienced_Careers/job/Pune/UNKNOWN" }];
+        Assert.Equal(expected, saved.Select(x => x.Category!.Slug).ToArray());
+        provider.Jobs = provider.Jobs.Append(provider.Jobs[0] with { ExternalId = "UNKNOWN", Title = "Unclassified Associate",
+            ApplicationUrl = "https://pwc.wd3.myworkdayjobs.com/en-US/Global_Experienced_Careers/job/Pune/UNKNOWN" }).ToArray();
         var unsafeRun = await runner.RunAsync(f.Source.Id);
-        Assert.False(unsafeRun.Succeeded);
-        Assert.Equal(0, unsafeRun.Created);
-        Assert.Equal(1, unsafeRun.ValidationRejected);
-        Assert.Equal(1, unsafeRun.ValidationReasonCounts!["MissingCategory"]);
+        Assert.True(unsafeRun.Succeeded);
+        Assert.Equal(1, unsafeRun.Created);
+        Assert.Equal(7, unsafeRun.Existing);
+        Assert.Equal(0, unsafeRun.ValidationRejected);
+        Assert.Null((await f.Context.Jobs.SingleAsync(x => x.ExternalJobId == "UNKNOWN")).CategoryId);
         Assert.Equal(0, unsafeRun.ProviderSkipped);
         Assert.Equal(0, unsafeRun.Closed);
-        Assert.Equal(7, await f.Context.Jobs.CountAsync());
+        Assert.Equal(8, await f.Context.Jobs.CountAsync());
     }
 
     private sealed class Monitor : IOptionsMonitor<JobAggregationOptions>

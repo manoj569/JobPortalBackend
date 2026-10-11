@@ -23,12 +23,13 @@ public sealed class AdminJobLifecycleTests
         new(2026, 7, 29, 12, 0, 0, DateTimeKind.Utc);
 
     [Fact]
-    public async Task PublishRequiresActiveReferencesAndFutureExpiry()
+    public async Task PublishRequiresActiveReferencesAndAllowsAbsentExpiry()
     {
         var fixture = CreateFixture();
         fixture.Job.ExpiresAtUtc = null;
-        await Assert.ThrowsAsync<BadRequestException>(() =>
-            fixture.Service.PublishAsync(fixture.Job.Id));
+        var withoutExpiry = await fixture.Service.PublishAsync(fixture.Job.Id);
+        Assert.Equal(JobStatus.Published, withoutExpiry.Status);
+        fixture.Job.Status = JobStatus.Draft;
 
         fixture.Job.ExpiresAtUtc = Now.AddDays(1);
         fixture.Repository.CompanyExists = false;
@@ -114,11 +115,11 @@ public sealed class AdminJobLifecycleTests
     }
 
     [Fact]
-    public async Task PublishedUpdateCannotRemoveFutureExpiryAndArchiveCannotBeEdited()
+    public async Task PublishedUpdateAllowsAbsentExpiryButRejectsExpiredAndArchived()
     {
         var fixture = CreateFixture(JobStatus.Published);
-        await Assert.ThrowsAsync<BadRequestException>(() =>
-            fixture.Service.UpdateAsync(fixture.Job.Id, Request(fixture.Job, null)));
+        var updated = await fixture.Service.UpdateAsync(fixture.Job.Id, Request(fixture.Job, null));
+        Assert.Null(updated.ExpiresAtUtc);
         await Assert.ThrowsAsync<BadRequestException>(() =>
             fixture.Service.UpdateAsync(
                 fixture.Job.Id, Request(fixture.Job, Now.AddSeconds(-1))));
@@ -206,6 +207,7 @@ public sealed class AdminJobLifecycleTests
             Company = company,
             CategoryId = category.Id,
             Category = category,
+            Location = "Pune",
             CurrencyCode = "INR",
             EmploymentType = EmploymentType.FullTime,
             WorkplaceType = WorkplaceType.Remote,
@@ -556,6 +558,7 @@ public sealed class JobLifecycleVisibilityTests
             Company = company,
             CategoryId = category.Id,
             Category = category,
+            Location = "Pune",
             CurrencyCode = "INR",
             EmploymentType = EmploymentType.FullTime,
             WorkplaceType = WorkplaceType.Remote,

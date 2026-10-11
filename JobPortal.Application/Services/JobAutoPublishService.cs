@@ -2,6 +2,7 @@ using JobPortal.Application.Abstractions.Jobs;
 using JobPortal.Application.Abstractions.Persistence;
 using JobPortal.Application.Features.JobAggregation;
 using Microsoft.Extensions.Options;
+using JobPortal.Domain.Enums;
 
 namespace JobPortal.Application.Services;
 
@@ -10,18 +11,15 @@ public sealed class JobAutoPublishService(
     IJobQualityGate qualityGate,
     IJobService jobService,
     IOptions<JobAggregationOptions> options,
-    TimeProvider timeProvider) : IJobAutoPublishService, IJobAutoPublishBatchReview
+    TimeProvider timeProvider,
+    IExternalJobCreationLock? publicationLock = null) : IJobAutoPublishService, IJobAutoPublishBatchReview
 {
     public async Task<IReadOnlyDictionary<Guid, JobAutoPublishResult>> ReviewBatchAsync(IReadOnlyCollection<Guid> jobIds,
         CancellationToken cancellationToken = default)
     {
+        _ = options; // Legacy flag no longer gates eligible imported jobs.
         cancellationToken.ThrowIfCancellationRequested();
         var results = new Dictionary<Guid, JobAutoPublishResult>();
-        if (!options.Value.AutoPublishEnabled)
-        {
-            foreach (var id in jobIds) results[id] = new() { Outcome = JobAutoPublishOutcome.Disabled };
-            return results;
-        }
         var snapshots = await jobs.FindAggregationReviewJobsAsync(jobIds, cancellationToken);
         if (snapshots is null) return results;
         foreach (var job in snapshots)
@@ -41,16 +39,8 @@ public sealed class JobAutoPublishService(
         Guid jobId,
         CancellationToken cancellationToken = default)
     {
+        _ = options; // Legacy flag no longer gates eligible imported jobs.
         cancellationToken.ThrowIfCancellationRequested();
-
-        // Fail closed. Automatic publishing must be explicitly enabled.
-        if (!options.Value.AutoPublishEnabled)
-        {
-            return new JobAutoPublishResult
-            {
-                Outcome = JobAutoPublishOutcome.Disabled
-            };
-        }
 
         var job = await jobs.GetByIdAsync(
             jobId,
@@ -64,6 +54,15 @@ public sealed class JobAutoPublishService(
                 Outcome = JobAutoPublishOutcome.JobNotFound
             };
         }
+
+        if (job.JobSourceId is null) return new() { Outcome = JobAutoPublishOutcome.NotImported };
+        await using var publicationLease = publicationLock is null ? null : await publicationLock.AcquireAsync(
+            new UrlCanonicalizer().Canonicalize(job.ApplicationUrl), new JobFingerprintService().GenerateFingerprint(job.Title, job.Company?.Name ?? job.CompanyId.ToString(), job.Location), cancellationToken);
+        job = await jobs.GetFreshByIdAsync(jobId, cancellationToken);
+        if (job is null) return new() { Outcome = JobAutoPublishOutcome.JobNotFound };
+        if (job.Status == JobStatus.Published) return new() { Outcome = JobAutoPublishOutcome.AlreadyPublished };
+        if (job.JobSourceId is null || job.IsHidden || job.Status == JobStatus.Archived)
+            return new() { Outcome = JobAutoPublishOutcome.NotImported };
 
         var quality = qualityGate.Evaluate(
             job,

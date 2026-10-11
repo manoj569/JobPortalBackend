@@ -56,7 +56,7 @@ public sealed class JobReferralRepository(JobPortalDbContext context, TimeProvid
             .Where(x => x.ApprovalStatus == JobReferralApprovalStatus.Approved &&
                 !x.ReferrerUser.IsDeleted && x.ReferrerUser.Status == UserStatus.Active &&
                 x.Job.Status == JobStatus.Published &&
-                !x.Job.Company.IsDeleted && !x.Job.Category.IsDeleted &&
+                !x.Job.Company.IsDeleted && (x.Job.CategoryId == null || (x.Job.Category != null && !x.Job.Category.IsDeleted)) &&
                 x.Job.PublishedAtUtc.HasValue &&
                 !x.Job.IsHidden && !x.Job.IsDeleted &&
                 (!x.Job.ExpiresAtUtc.HasValue || x.Job.ExpiresAtUtc > utcNow))

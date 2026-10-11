@@ -10,6 +10,7 @@ public sealed record ExternalJobSourceSnapshot(
 {
     // Selection diagnostics only: these items never reached ingestion validation.
     public IReadOnlyDictionary<string, int>? SelectionReasonCounts { get; init; }
+    public IReadOnlyDictionary<string, int>? EligibilityReasonCounts { get; init; }
 }
 
 /// <summary>

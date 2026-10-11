@@ -225,7 +225,7 @@ public sealed class AdminApplicationManagementTests
                 fixture.Application.User.Email, fixture.Application.JobId,
                 fixture.Application.Job.Title, fixture.Application.Job.Slug,
                 fixture.Application.Job.CompanyId, fixture.Application.Job.Company.Name,
-                fixture.Application.Job.CategoryId, fixture.Application.Job.Category.Name,
+                fixture.Application.Job.CategoryId, fixture.Application.Job.Category!.Name,
                 false)
         ];
         fixture.Repository.TotalCount = 14;

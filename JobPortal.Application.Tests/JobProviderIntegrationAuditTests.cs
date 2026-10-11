@@ -179,7 +179,7 @@ public sealed class JobProviderIntegrationAuditTests
     {
         Company = f.Company, CompanyId = f.Company.Id, Category = f.Category, CategoryId = f.Category.Id,
         JobSourceId = f.Source.Id, ExternalJobId = slug, Title = slug, Slug = slug, ReferenceNumber = slug,
-        Description = "Build reliable software.", ApplicationUrl = "https://example.test/apply", CurrencyCode = "INR",
+        Location = "Pune", Description = "Build reliable software.", ApplicationUrl = "https://example.test/apply", CurrencyCode = "INR",
         EmploymentType = EmploymentType.FullTime, WorkplaceType = WorkplaceType.Remote, ExperienceLevel = ExperienceLevel.Mid,
         ExpiresAtUtc = JobSourceFixture.Now.AddDays(10)
     };

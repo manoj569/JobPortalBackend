@@ -165,7 +165,7 @@ public sealed class WorkdayPersistencePerformanceTests(ITestOutputHelper output)
     {
         using var f = new JobSourceFixture();
         var (service, _, probe) = Service(f);
-        var saved = await service.IngestBatchAsync(Jobs(f, 50));
+        var saved = await service.IngestBatchAsync(Jobs(f, 50).Select(x => x with { Location = "Remote" }).ToArray());
         var repository = DispatchProxy.Create<IJobRepository, LargeSourceIngestionTests.Probe<IJobRepository>>();
         var reviewsProbe = (LargeSourceIngestionTests.Probe<IJobRepository>)(object)repository;
         reviewsProbe.Inner = new JobRepository(f.Context);
@@ -178,6 +178,7 @@ public sealed class WorkdayPersistencePerformanceTests(ITestOutputHelper output)
         Assert.False(reviewsProbe.Calls.ContainsKey(nameof(IJobRepository.GetByIdAsync)));
         Assert.Equal(50, probe.Calls[nameof(IJobRepository.AddAsync)]);
         var eligible = await f.Context.Jobs.FirstAsync();
+        eligible.Location = "Pune";
         eligible.ExpiresAtUtc = DateTime.UtcNow.AddDays(10);
         eligible.EmploymentType = (EmploymentType)1;
         eligible.WorkplaceType = (WorkplaceType)1;

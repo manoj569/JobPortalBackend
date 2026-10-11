@@ -56,7 +56,7 @@ public sealed class AdminApplicationRepository(JobPortalDbContext context) :
                 x.Job.CompanyId,
                 x.Job.Company.Name,
                 x.Job.CategoryId,
-                x.Job.Category.Name,
+                (x.Job.Category == null ? "Not specified" : x.Job.Category.Name),
                 x.ResumeStorageKey != null))
             .ToArrayAsync(cancellationToken);
         return (items, totalCount);

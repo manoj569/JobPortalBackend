@@ -8,7 +8,7 @@ internal static class JobValidationRules
 {
     public static void Apply<T>(AbstractValidator<T> validator,
         Expression<Func<T, string>> title, Expression<Func<T, string>> description,
-        Expression<Func<T, Guid>> companyId, Expression<Func<T, Guid>> categoryId,
+        Expression<Func<T, Guid>> companyId, Expression<Func<T, Guid?>> categoryId,
         Expression<Func<T, string?>> responsibilities, Expression<Func<T, string?>> requirements,
         Expression<Func<T, string?>> benefits, Expression<Func<T, string?>> location,
         Expression<Func<T, decimal?>> minimumSalary, Expression<Func<T, decimal?>> maximumSalary,
@@ -25,10 +25,10 @@ internal static class JobValidationRules
         Expression<Func<T, string?>> educationRequirement,
         Expression<Func<T, PostedByType?>> postedByType)
     {
-        validator.RuleFor(title).NotEmpty().MaximumLength(250);
-        validator.RuleFor(description).NotEmpty().MaximumLength(16000);
+        validator.RuleFor(title).NotEmpty().Must(JobPortal.Application.Services.ImportedJobIntegrity.HasMeaningfulTitle).MaximumLength(250);
+        validator.RuleFor(description).MaximumLength(16000);
         validator.RuleFor(companyId).NotEmpty();
-        validator.RuleFor(categoryId).NotEmpty();
+
         validator.RuleFor(responsibilities).MaximumLength(8000);
         validator.RuleFor(requirements).MaximumLength(8000);
         validator.RuleFor(benefits).MaximumLength(4000);
@@ -36,9 +36,9 @@ internal static class JobValidationRules
         validator.RuleFor(minimumSalary).GreaterThanOrEqualTo(0);
         validator.RuleFor(maximumSalary).GreaterThanOrEqualTo(0);
         validator.RuleFor(currencyCode).NotEmpty().Length(3).Matches("^[A-Za-z]{3}$");
-        validator.RuleFor(employmentType).IsInEnum();
-        validator.RuleFor(workplaceType).IsInEnum();
-        validator.RuleFor(experienceLevel).IsInEnum();
+        validator.RuleFor(employmentType).Must(value => (int)value == 0 || Enum.IsDefined(value));
+        validator.RuleFor(workplaceType).Must(value => (int)value == 0 || Enum.IsDefined(value));
+        validator.RuleFor(experienceLevel).Must(value => (int)value == 0 || Enum.IsDefined(value));
         validator.RuleFor(minimumExperienceYears).InclusiveBetween(0, 60);
         validator.RuleFor(maximumExperienceYears).InclusiveBetween(0, 60);
         validator.RuleFor(department).MaximumLength(150);

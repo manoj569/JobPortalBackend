@@ -131,7 +131,7 @@ public sealed record ResumeStatusResponse(bool HasResume, ResumeExtractionStatus
     DateTime? ExtractedAtUtc, string Message, Guid? ResumeId = null);
 public sealed record RecommendedJobResponse(Guid Id, string ReferenceNumber, string Title, string Slug,
     Guid CompanyId, string CompanyName, string CompanySlug, string? CompanyLogoUrl,
-    Guid CategoryId, string CategoryName, string? Location, EmploymentType EmploymentType,
+    Guid? CategoryId, string CategoryName, string? Location, EmploymentType EmploymentType,
     WorkplaceType WorkplaceType, ExperienceLevel ExperienceLevel, bool IsFeatured,
     DateTime PublishedAtUtc, DateTime? ExpiresAtUtc, int MatchScore,
     IReadOnlyCollection<string> MatchReasons);
@@ -142,7 +142,7 @@ public sealed record RecommendedJobsResponse(ResumeExtractionStatus ExtractionSt
 }
 public sealed record CandidateBrowseJobResponse(Guid Id, string ReferenceNumber, string Title, string Slug,
     Guid CompanyId, string CompanyName, string CompanySlug, string? CompanyLogoUrl,
-    Guid CategoryId, string CategoryName, string? Location, EmploymentType EmploymentType,
+    Guid? CategoryId, string CategoryName, string? Location, EmploymentType EmploymentType,
     WorkplaceType WorkMode, ExperienceLevel ExperienceLevel, bool IsFeatured,
     DateTime PublishedAtUtc, DateTime? ClosingDate);
 public sealed record CandidateBrowseJobsResponse(IReadOnlyCollection<CandidateBrowseJobResponse> Items,

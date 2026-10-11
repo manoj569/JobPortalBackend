@@ -72,7 +72,7 @@ public sealed class CandidateRepository(
             .OrderByDescending(x => x.PublishedAtUtc).Take(2000)
             .Select(x => new RecommendationJobCandidate(x.Id, x.ReferenceNumber, x.Title, x.Slug,
                 x.Description, x.Requirements, x.Responsibilities, x.CompanyId, x.Company.Name,
-                x.Company.Slug, x.Company.LogoUrl, x.Company.Industry, x.CategoryId, x.Category.Name,
+                x.Company.Slug, x.Company.LogoUrl, x.Company.Industry, x.CategoryId, (x.Category == null ? "Not specified" : x.Category.Name),
                 x.Location, x.EmploymentType, x.WorkplaceType, x.ExperienceLevel, x.IsFeatured,
                 x.PublishedAtUtc!.Value, x.ExpiresAtUtc)).ToArrayAsync(cancellationToken);
     }
@@ -90,7 +90,7 @@ public sealed class CandidateRepository(
             .Skip((query.PageNumber - 1) * query.PageSize).Take(query.PageSize)
             .Select(x => new RecommendationJobCandidate(x.Id, x.ReferenceNumber, x.Title, x.Slug,
                 x.Description, x.Requirements, x.Responsibilities, x.CompanyId, x.Company.Name,
-                x.Company.Slug, x.Company.LogoUrl, x.Company.Industry, x.CategoryId, x.Category.Name,
+                x.Company.Slug, x.Company.LogoUrl, x.Company.Industry, x.CategoryId, (x.Category == null ? "Not specified" : x.Category.Name),
                 x.Location, x.EmploymentType, x.WorkplaceType, x.ExperienceLevel, x.IsFeatured,
                 x.PublishedAtUtc!.Value, x.ExpiresAtUtc)).ToArrayAsync(cancellationToken);
         return (items, count);
@@ -197,7 +197,7 @@ public sealed class CandidateRepository(
             .Select(x => new JobApplicationResponse(
                 x.Id, x.JobId, x.Job.Title, x.Job.Slug, x.Job.Company.Name, x.Status,
                 x.CoverLetter, x.ResumeFileName, x.SubmittedAtUtc, x.WithdrawnAtUtc,
-                x.ApplicationMethod, x.Job.Category.Name, x.Job.Location, x.Job.EmploymentType,
+                x.ApplicationMethod, (x.Job.Category == null ? "Not specified" : x.Job.Category.Name), x.Job.Location, x.Job.EmploymentType,
                 x.Job.WorkplaceType, x.Job.ExperienceLevel, x.Job.ApplicationUrl, x.Job.ExpiresAtUtc))
             .ToArrayAsync(cancellationToken);
         return (items, count);

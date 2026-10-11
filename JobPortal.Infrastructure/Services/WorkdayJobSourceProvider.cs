@@ -38,13 +38,6 @@ public sealed partial class WorkdayJobSourceProvider(
     private const int SuspectedSearchCap = 2_000;
     private const int MaxJsonBytes = 4 * 1024 * 1024;
 
-    // Accenture currently exposes India jobs through this Workday country facet.
-    // Keep this provider-specific mapping fail-closed: other Workday tenants are
-    // left unfiltered until their country facet is explicitly verified.
-    private const string AccentureTenant = "accenture";
-    private const string AccentureSite = "AccentureCareers";
-    private const string IndiaCountryFacetId = "c4f78be1a8f14da0ab49ce1162348a5e";
-
     private static readonly TimeSpan RequestSpacing = TimeSpan.FromMilliseconds(250);
 
     private static readonly Action<ILogger, Guid, Exception?> Started =
@@ -553,7 +546,7 @@ public sealed partial class WorkdayJobSourceProvider(
             }
 
             var title = GetString(info, "title")?.Trim();
-            var description = GetString(info, "jobDescription");
+            var description = GetString(info, "jobDescription") ?? string.Empty;
             var externalId =
                 GetString(info, "jobReqId")?.Trim() ??
                 GetString(info, "jobPostingId")?.Trim() ??
@@ -561,11 +554,10 @@ public sealed partial class WorkdayJobSourceProvider(
                 listing.ExternalPath;
 
             if (string.IsNullOrWhiteSpace(title) ||
-                string.IsNullOrWhiteSpace(description) ||
                 string.IsNullOrWhiteSpace(externalId))
             {
                 reason = string.IsNullOrWhiteSpace(title) ? "DetailTitleMissing" :
-                    string.IsNullOrWhiteSpace(description) ? "DetailDescriptionMissing" : "DetailIdentityMissing";
+                    "DetailIdentityMissing";
                 return null;
             }
 
@@ -590,13 +582,8 @@ public sealed partial class WorkdayJobSourceProvider(
                     countryCodes.Add(alpha2);
 
                 var descriptor = GetString(country, "descriptor")?.Trim();
-                if (string.Equals(
-                        descriptor,
-                        "India",
-                        StringComparison.OrdinalIgnoreCase))
-                {
-                    countryCodes.Add("IN");
-                }
+                if (string.IsNullOrWhiteSpace(alpha2) && !string.IsNullOrWhiteSpace(descriptor))
+                    countryCodes.Add(descriptor);
             }
 
             if (info.TryGetProperty("country", out var directCountry) &&
@@ -607,25 +594,8 @@ public sealed partial class WorkdayJobSourceProvider(
                     countryCodes.Add(alpha2);
 
                 var descriptor = GetString(directCountry, "descriptor")?.Trim();
-                if (string.Equals(
-                        descriptor,
-                        "India",
-                        StringComparison.OrdinalIgnoreCase))
-                {
-                    countryCodes.Add("IN");
-                }
-            }
-
-            if (IsAccentureIndiaSource(target))
-            {
-                // The verified listing facet proves India eligibility when detail
-                // geography is absent. Explicit contradictory geography must fail closed.
-                if (countryCodes.Any(code => code.Trim().ToUpperInvariant() is not ("IN" or "IND" or "INDIA")))
-                {
-                    reason = "DetailGeographyContradictsIndiaFacet";
-                    return null;
-                }
-                countryCodes.Add("IN");
+                if (string.IsNullOrWhiteSpace(alpha2) && !string.IsNullOrWhiteSpace(descriptor))
+                    countryCodes.Add(descriptor);
             }
 
             var timeType = GetString(info, "timeType")?.Trim();
@@ -645,8 +615,7 @@ public sealed partial class WorkdayJobSourceProvider(
                 CountryCodes = countryCodes.ToArray(),
                 Description = description,
                 DescriptionIsHtml = true,
-                ExternalCategory = string.Equals(target.Tenant, "pwc", StringComparison.OrdinalIgnoreCase)
-                    ? ReadPwcSpecialism(description) : null,
+                ExternalCategory = ReadSpecialism(description),
                 ApplicationUrl = publicJobUri.AbsoluteUri,
                 SourcePostedAtUtc = ParseIsoDate(
                     GetString(info, "startDate")),
@@ -666,39 +635,22 @@ public sealed partial class WorkdayJobSourceProvider(
     private static Dictionary<string, string[]> GetAppliedFacets(
         WorkdayTarget target)
     {
-        if (IsAccentureIndiaSource(target))
-        {
-            return new Dictionary<string, string[]>
-            {
-                ["locationCountry"] = [IndiaCountryFacetId]
-            };
-        }
-
         return [];
     }
 
-    private static string? ReadPwcSpecialism(string description)
+    private static string? ReadSpecialism(string description)
     {
         try
         {
-            var match = PwcSpecialism().Match(description);
+            var match = Specialism().Match(description);
             return match.Success ? WebUtility.HtmlDecode(match.Groups[1].Value).Trim() : null;
         }
         catch (RegexMatchTimeoutException) { return null; }
     }
 
     [GeneratedRegex(@"<b>\s*Specialism\s*</b>\s*</p>\s*([^<]{1,200})", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, 100)]
-    private static partial Regex PwcSpecialism();
+    private static partial Regex Specialism();
 
-    private static bool IsAccentureIndiaSource(WorkdayTarget target) =>
-        string.Equals(
-            target.Tenant,
-            AccentureTenant,
-            StringComparison.OrdinalIgnoreCase) &&
-        string.Equals(
-            target.Site,
-            AccentureSite,
-            StringComparison.OrdinalIgnoreCase);
 
     private async Task<ListingPageWithStatus> FetchListingPageAsync(
         HttpClient client,

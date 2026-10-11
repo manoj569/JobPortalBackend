@@ -5,6 +5,20 @@ public sealed record JobSourceRunResult
     public Guid JobSourceId { get; init; }
 
     public int TotalReceived { get; init; }
+    public int Fetched => TotalReceived;
+    public int Parsed { get; init; }
+    public bool ScanComplete { get; init; }
+    public bool ReconciliationSafe { get; init; }
+    public IReadOnlyDictionary<string, int>? EligibilityReasonCounts { get; init; }
+    public int IndiaEligible => (EligibilityReasonCounts?.GetValueOrDefault("IndiaLocationConfirmed") ?? 0) +
+        (EligibilityReasonCounts?.GetValueOrDefault("ExplicitIndiaRemote") ?? 0);
+    public int MissingLocationAccepted => EligibilityReasonCounts?.GetValueOrDefault("MissingLocationAccepted") ?? 0;
+    public int NonIndiaRejected => (EligibilityReasonCounts?.GetValueOrDefault("NonIndiaLocation") ?? 0) +
+        (EligibilityReasonCounts?.GetValueOrDefault("IndiaRemoteExcluded") ?? 0);
+    public int AmbiguousLocationHeld => (EligibilityReasonCounts?.GetValueOrDefault("AmbiguousLocation") ?? 0) +
+        (EligibilityReasonCounts?.GetValueOrDefault("ContradictoryLocation") ?? 0) + (EligibilityReasonCounts?.GetValueOrDefault("UnknownCountry") ?? 0);
+    public int DuplicatesPrevented => Existing;
+    public int InvalidRequiredDataRejected => ValidationRejected;
 
     public int Created { get; init; }
 
@@ -46,7 +60,7 @@ public sealed record JobSourceRunResult
     /// Run-level counter grouping: rejected items are the ones skipped by
     /// validation/company resolution (Invalid + CompanyNotFound outcomes).
     /// </summary>
-    public int Rejected => Skipped;
+    public int Rejected => NonIndiaRejected + IngestionRejected;
 
     /// <summary>
     /// Machine-readable reason-code tallies collected across all processed

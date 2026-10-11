@@ -5,6 +5,7 @@ namespace JobPortal.Application.Abstractions.Persistence;
 
 public interface IJobRepository
 {
+    Task<Job?> GetFreshByIdAsync(Guid id, CancellationToken cancellationToken = default) => GetByIdAsync(id, false, cancellationToken);
     Task<Job?> GetByIdAsync(Guid id, bool includeDeleted = false, CancellationToken cancellationToken = default);
     Task<(IReadOnlyCollection<Job> Items, int TotalCount)> SearchAsync(JobSearchQuery query, CancellationToken cancellationToken = default);
     Task<bool> CompanyExistsAsync(Guid companyId, CancellationToken cancellationToken = default);

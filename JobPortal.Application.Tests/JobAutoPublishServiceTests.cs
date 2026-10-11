@@ -17,7 +17,7 @@ public class JobAutoPublishServiceTests
         new(2026, 9, 30, 12, 0, 0, DateTimeKind.Utc);
 
     [Fact]
-    public async Task TryPublishAsync_Disabled_DoesNotLoadOrPublish()
+    public async Task TryPublishAsync_LegacyFlagDisabled_StillPublishesImportedJob()
     {
         var repository = new JobRepositoryFake
         {
@@ -35,11 +35,11 @@ public class JobAutoPublishServiceTests
             repository.Job!.Id);
 
         Assert.Equal(
-            JobAutoPublishOutcome.Disabled,
+            JobAutoPublishOutcome.Published,
             result.Outcome);
 
-        Assert.Equal(0, repository.GetByIdCalls);
-        Assert.Equal(0, jobService.PublishCalls);
+        Assert.Equal(2, repository.GetByIdCalls);
+        Assert.Equal(1, jobService.PublishCalls);
     }
 
     [Fact]
@@ -66,13 +66,13 @@ public class JobAutoPublishServiceTests
             result.Outcome);
 
         Assert.True(result.Published);
-        Assert.Equal(1, repository.GetByIdCalls);
+        Assert.Equal(2, repository.GetByIdCalls);
         Assert.Equal(1, jobService.PublishCalls);
         Assert.Equal(job.Id, jobService.LastPublishedJobId);
     }
 
     [Fact]
-    public async Task TryPublishAsync_MissingLocation_NeedsReviewAndDoesNotPublish()
+    public async Task TryPublishAsync_MissingLocation_Publishes()
     {
         var job = CreateValidJob();
         job.Location = string.Empty;
@@ -92,18 +92,16 @@ public class JobAutoPublishServiceTests
         var result = await service.TryPublishAsync(job.Id);
 
         Assert.Equal(
-            JobAutoPublishOutcome.NeedsReview,
+            JobAutoPublishOutcome.Published,
             result.Outcome);
 
-        Assert.Contains(
-            JobQualityReasonCode.MissingLocation,
-            result.Reasons);
+        Assert.Empty(result.Reasons);
 
-        Assert.Equal(0, jobService.PublishCalls);
+        Assert.Equal(1, jobService.PublishCalls);
     }
 
     [Fact]
-    public async Task TryPublishAsync_MissingExpiry_NeedsReviewAndDoesNotPublish()
+    public async Task TryPublishAsync_MissingExpiry_Publishes()
     {
         var job = CreateValidJob();
         job.ExpiresAtUtc = null;
@@ -123,14 +121,12 @@ public class JobAutoPublishServiceTests
         var result = await service.TryPublishAsync(job.Id);
 
         Assert.Equal(
-            JobAutoPublishOutcome.NeedsReview,
+            JobAutoPublishOutcome.Published,
             result.Outcome);
 
-        Assert.Contains(
-            JobQualityReasonCode.MissingExpiry,
-            result.Reasons);
+        Assert.Empty(result.Reasons);
 
-        Assert.Equal(0, jobService.PublishCalls);
+        Assert.Equal(1, jobService.PublishCalls);
     }
 
     [Fact]
@@ -256,6 +252,7 @@ public class JobAutoPublishServiceTests
             MinimumExperienceYears = 2,
             MaximumExperienceYears = 4,
             ExpiresAtUtc = Now.AddDays(30),
+            JobSourceId = Guid.NewGuid(),
             Status = JobStatus.Draft
         };
     }

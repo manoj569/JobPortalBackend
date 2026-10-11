@@ -48,7 +48,7 @@ public sealed record CandidateEmploymentPeriod(DateOnly StartDate, DateOnly? End
 public sealed record RecommendationJobCandidate(Guid Id, string ReferenceNumber, string Title, string Slug,
     string Description, string? Requirements, string? Responsibilities, Guid CompanyId,
     string CompanyName, string CompanySlug, string? CompanyLogoUrl, string? CompanyIndustry,
-    Guid CategoryId, string CategoryName, string? Location, EmploymentType EmploymentType,
+    Guid? CategoryId, string CategoryName, string? Location, EmploymentType EmploymentType,
     WorkplaceType WorkplaceType, ExperienceLevel ExperienceLevel, bool IsFeatured,
     DateTime PublishedAtUtc, DateTime? ExpiresAtUtc);
 public sealed record CandidateRecruiterContact(

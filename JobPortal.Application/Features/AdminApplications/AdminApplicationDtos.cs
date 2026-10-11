@@ -25,7 +25,7 @@ public sealed record AdminApplicationListItem(
     string JobSlug,
     Guid CompanyId,
     string CompanyName,
-    Guid CategoryId,
+    Guid? CategoryId,
     string CategoryName,
     bool HasResume);
 
@@ -53,7 +53,7 @@ public sealed record AdminApplicationJobSummary(
     WorkplaceType WorkplaceType,
     Guid CompanyId,
     string CompanyName,
-    Guid CategoryId,
+    Guid? CategoryId,
     string CategoryName);
 
 public sealed record AdminApplicationStatusHistoryResponse(

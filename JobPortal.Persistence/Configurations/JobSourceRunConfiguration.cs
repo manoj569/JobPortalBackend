@@ -17,6 +17,7 @@ public sealed class JobSourceRunConfiguration : IEntityTypeConfiguration<JobSour
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Id).ValueGeneratedNever();
         builder.Property(x => x.Phase).HasMaxLength(64).IsRequired();
+        builder.Property(x => x.DiagnosticsJson).HasColumnType("jsonb");
         builder.Property(x => x.ErrorCode).HasMaxLength(64);
         builder.HasOne<JobSource>().WithMany().HasForeignKey(x => x.JobSourceId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne<User>().WithMany().HasForeignKey(x => x.RequestedByUserId).OnDelete(DeleteBehavior.Restrict);

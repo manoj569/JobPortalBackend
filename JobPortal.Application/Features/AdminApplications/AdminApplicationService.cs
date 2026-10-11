@@ -173,7 +173,7 @@ public sealed class AdminApplicationService(
             application.Job.CompanyId,
             application.Job.Company.Name,
             application.Job.CategoryId,
-            application.Job.Category.Name),
+            (application.Job.Category == null ? "Not specified" : application.Job.Category.Name)),
         application.StatusHistory
             .OrderBy(x => x.ChangedAtUtc)
             .ThenBy(x => x.Id)

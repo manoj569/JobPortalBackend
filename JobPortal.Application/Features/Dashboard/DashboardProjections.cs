@@ -11,7 +11,7 @@ public static class DashboardProjections
             new PublicJobSummary(
                 saved.Job.Id, saved.Job.ReferenceNumber, saved.Job.Title, saved.Job.Slug,
                 saved.Job.CompanyId, saved.Job.Company.Name, saved.Job.Company.Slug, saved.Job.Company.LogoUrl,
-                saved.Job.CategoryId, saved.Job.Category.Name, saved.Job.Location,
+                saved.Job.CategoryId, (saved.Job.Category == null ? "Not specified" : saved.Job.Category.Name), saved.Job.Location,
                 saved.Job.MinimumSalary, saved.Job.MaximumSalary, saved.Job.CurrencyCode,
                 saved.Job.EmploymentType, saved.Job.WorkplaceType, saved.Job.ExperienceLevel,
                 saved.Job.IsFeatured, saved.Job.PublishedAtUtc!.Value, saved.Job.ExpiresAtUtc,

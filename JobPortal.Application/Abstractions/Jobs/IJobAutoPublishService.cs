@@ -6,7 +6,9 @@ public enum JobAutoPublishOutcome
     Published = 1,
     NeedsReview = 2,
     Rejected = 3,
-    JobNotFound = 4
+    JobNotFound = 4,
+    AlreadyPublished = 5,
+    NotImported = 6
 }
 
 public sealed record JobAutoPublishResult

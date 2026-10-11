@@ -412,10 +412,10 @@ public sealed class MultiCompanyProviderTests
     [InlineData("Pune, India", "", true, true)]
     [InlineData("Remote", "IN", true, true)]
     [InlineData("Remote", "US", false, true)]
-    [InlineData("Bangalore", "US", false, true)]
+    [InlineData("Bangalore", "US", false, false)]
     [InlineData("Remote", "", false, false)]
     [InlineData("Indiana", "", false, false)]
-    [InlineData("Hyderabad", "", false, false)]
+    [InlineData("Hyderabad", "", true, true)]
     [InlineData("Hyderabad, Pakistan", "", false, false)]
     [InlineData("Remote", "XX", false, false)]
     [InlineData("Worldwide", "", false, false)]
@@ -440,14 +440,14 @@ public sealed class MultiCompanyProviderTests
     }
 
     [Fact]
-    public void BlankReviewedLocationCannotGrantIndiaEligibility()
+    public void BlankLocationIsAcceptedWithoutClaimingIndiaVerification()
     {
         var source = Source(AtsType.Greenhouse);
         var approval = Approval(source);
         approval.VerifiedIndiaLocations = [""];
         var selected = Policy(source, approval).Select(source, new([new RawExternalJob { Location = "  " }], 0, true));
-        Assert.Empty(selected.Jobs);
-        Assert.False(selected.IsComplete);
+        Assert.Equal("Location not specified", Assert.Single(selected.Jobs).Location);
+        Assert.True(selected.IsComplete);
     }
 
     [Fact]

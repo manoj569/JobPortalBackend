@@ -27,7 +27,7 @@ public sealed class WorkdayBatchIngestionTests(ITestOutputHelper output)
         var snapshot = await Provider(http).FetchSnapshotAsync(Source());
         Assert.False(snapshot.IsComplete);
         Assert.Equal(2, snapshot.Jobs.Count);
-        Assert.All(snapshot.Jobs, x => Assert.Contains("IN", x.CountryCodes));
+        Assert.All(snapshot.Jobs, x => Assert.Empty(x.CountryCodes));
     }
 
     [Fact]
@@ -205,7 +205,7 @@ public sealed class WorkdayBatchIngestionTests(ITestOutputHelper output)
     [Theory]
     [InlineData("not json")]
     [InlineData("[]")]
-    [InlineData("{\"jobPostingInfo\":{\"title\":\"Engineer\"}}")]
+
     public async Task InvalidDetailCannotFabricateADescription(string invalid)
     {
         using var http = new HttpClient(new Handler((request, _) => Task.FromResult(request.Method == HttpMethod.Post
@@ -291,9 +291,9 @@ public sealed class WorkdayBatchIngestionTests(ITestOutputHelper output)
         var result = await runner.RunAsync(f.Source.Id);
         Assert.True(result.Succeeded);
         Assert.Equal(3, result.Created);
-        Assert.Equal(0, result.Published);
-        Assert.Equal(3, result.NeedsReview);
-        Assert.Equal(3, await f.Context.Jobs.CountAsync(x => x.Status == JobStatus.Draft));
+        Assert.Equal(3, result.Published);
+        Assert.Equal(0, result.NeedsReview);
+        Assert.Equal(3, await f.Context.Jobs.CountAsync(x => x.Status == JobStatus.Published));
         var again = await runner.RunAsync(f.Source.Id);
         Assert.Equal(0, again.Created);
         Assert.Equal(0, again.Published);
@@ -336,15 +336,14 @@ public sealed class WorkdayBatchIngestionTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public async Task ListingRequestsKeepExactAccentureIndiaFacetAndStableOfficialUrls()
+    public async Task ListingRequestsUseNoCompanySpecificCountryFacetAndKeepStableOfficialUrls()
     {
         using var http = new HttpClient(new Handler(async (request, ct) =>
         {
             if (request.Method == HttpMethod.Post)
             {
                 using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
-                Assert.Equal("c4f78be1a8f14da0ab49ce1162348a5e",
-                    body.RootElement.GetProperty("appliedFacets").GetProperty("locationCountry")[0].GetString());
+                Assert.Empty(body.RootElement.GetProperty("appliedFacets").EnumerateObject());
                 return Json(Listing(1, 0, 1));
             }
             return Json(Detail(request));
@@ -383,9 +382,22 @@ public sealed class WorkdayBatchIngestionTests(ITestOutputHelper output)
             ? Json(Listing(1, 0, 1))
             : Json("""{"jobPostingInfo":{"title":"Engineer","jobReqId":"1","jobDescription":"Build software","country":{"alpha2Code":"US"},"location":"Remote"}}"""))));
         var result = await Provider(http).FetchSnapshotAsync(Source());
-        Assert.Empty(result.Jobs);
-        Assert.Equal(1, result.Skipped);
-        Assert.False(result.IsComplete);
+        Assert.Equal("US", Assert.Single(Assert.Single(result.Jobs).CountryCodes));
+        Assert.Equal(0, result.Skipped);
+        Assert.True(result.IsComplete);
+        Assert.Equal(IndiaJobEligibilityDecision.Rejected, IndiaJobEligibilityPolicy.Evaluate(Assert.Single(result.Jobs)).Decision);
+    }
+
+    [Fact]
+    public async Task ForeignCountryDescriptorWithoutAnIsoCodeIsPreservedAndRejected()
+    {
+        using var http = new HttpClient(new Handler((request, _) => Task.FromResult(request.Method == HttpMethod.Post
+            ? Json(Listing(1, 0, 1))
+            : Json("""{"jobPostingInfo":{"title":"Engineer","jobReqId":"1","country":{"descriptor":"United Kingdom"},"location":"Remote"}}"""))));
+        var result = await Provider(http).FetchSnapshotAsync(Source());
+        var job = Assert.Single(result.Jobs);
+        Assert.Equal("United Kingdom", Assert.Single(job.CountryCodes));
+        Assert.Equal(IndiaJobEligibilityDecision.Rejected, IndiaJobEligibilityPolicy.Evaluate(job).Decision);
     }
 
     [Fact]
@@ -583,8 +595,8 @@ public sealed class WorkdayBatchIngestionTests(ITestOutputHelper output)
             $"created={result.Created} updated={result.Updated} failed={result.Failed} needsReview={result.NeedsReview} published={result.Published}");
         Assert.True(result.Succeeded);
         Assert.Equal(count, result.Created);
-        Assert.Equal(count, result.NeedsReview);
-        Assert.Equal(0, result.Published);
+        Assert.Equal(0, result.NeedsReview);
+        Assert.Equal(count, result.Published);
         Assert.Equal(count, await f.Context.Jobs.CountAsync());
         Assert.Equal(f.Locks.CreationAcquisitions, f.Locks.CreationReleases);
     }
