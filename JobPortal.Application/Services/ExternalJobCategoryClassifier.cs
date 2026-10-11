@@ -26,6 +26,28 @@ public sealed class ExternalJobCategoryClassifier : IExternalJobCategoryClassifi
         Rule("legal-compliance", @"legal counsel|compliance (?:officer|analyst|manager)|general counsel", "Legal & Compliance", "Legal", "Compliance")
     ];
 
+    // PwC uses business-specialism labels and underscore-delimited role titles.
+    // General is only an explicit taxonomy match for known disciplines without
+    // a dedicated CareerHarbor category; it is never an unknown-job fallback.
+    private static readonly (string Slug, Regex Title, string[] Departments)[] PwcRoles =
+    [
+        Rule("software-engineering", @"(?:java|python|dotnet|net|application|SAP ABAP) developer"),
+        Rule("data-science-analytics", @"data engineer"),
+        Rule("general", @"(?:civil|mechanical|electrical|chemical|industrial|structural) engineer")
+    ];
+    private static readonly (string Slug, Regex Title, string[] Departments)[] PwcRules =
+    [
+        Rule("data-science-analytics", @"data engineer|data analytics|data and analytics", "Data and Analytics", "Data Analytics", "Data Engineering"),
+        Rule("finance-accounting", @"external audit|internal audit|financial reporting|finance|accounting|tax(?:ation)?", "Assurance", "External Audit", "Internal Audit", "Accounting", "Tax", "Corporate and Business Strategy - Tax"),
+        Rule("human-resources-recruitment", @"human resources|HR|talent acquisition|recruitment|people and organisation|people and organization", "Human Resources", "People and Organisation", "People and Organization"),
+        Rule("cybersecurity", @"cybersecurity|cyber security|SOC|SIEM|SAP GRC|threat hunting|incident response", "Cybersecurity", "Cybersecurity & Privacy", "Cybersecurity and Privacy"),
+        Rule("quality-assurance-testing", @"test automation|automation testing|manual testing|software testing|quality assurance", "Quality Assurance", "Testing"),
+        Rule("legal-compliance", @"legal|regulatory compliance", "Legal", "Regulatory Compliance")
+    ];
+    private static readonly (string Slug, Regex Title, string[] Departments) PwcGeneral =
+        Rule("general", @"consultant|consulting|advisory|(?:civil|mechanical|electrical|chemical|industrial|structural) engineer",
+            "SAP", "Management Consulting", "Business Consulting", "Civil Engineering", "Mechanical Engineering", "Electrical Engineering");
+
     private static (string, Regex, string[]) Rule(string slug, string title, params string[] departments) =>
         (slug, new Regex(@"\b(?:" + title + @")\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant |
             RegexOptions.NonBacktracking, TimeSpan.FromSeconds(1)), departments);
@@ -36,18 +58,38 @@ public sealed class ExternalJobCategoryClassifier : IExternalJobCategoryClassifi
         if (normalizedJob.Title.Length > 250) return null;
         try
         {
-            var titles = Rules.Where(r => r.Title.IsMatch(normalizedJob.Title) ||
-                r.Departments.Contains(normalizedJob.Title, StringComparer.OrdinalIgnoreCase)).Select(r => r.Slug).Distinct().ToArray();
+            var isPwc = normalizedJob.CompanyName.Equals("PwC", StringComparison.OrdinalIgnoreCase) ||
+                normalizedJob.CompanyName.Equals("PricewaterhouseCoopers", StringComparison.OrdinalIgnoreCase) ||
+                Uri.TryCreate(normalizedJob.ApplicationUrl, UriKind.Absolute, out var application) &&
+                application.Scheme == Uri.UriSchemeHttps &&
+                application.IdnHost.Equals("pwc.wd3.myworkdayjobs.com", StringComparison.OrdinalIgnoreCase);
+            var title = isPwc ? normalizedJob.Title.Replace('_', ' ') : normalizedJob.Title;
+            var titles = Rules.Where(r => r.Title.IsMatch(title) ||
+                r.Departments.Contains(title, StringComparer.OrdinalIgnoreCase)).Select(r => r.Slug).Distinct().ToArray();
+            if (isPwc)
+                titles = titles.Concat(PwcRoles.Where(r => r.Title.IsMatch(title)).Select(r => r.Slug)).Distinct().ToArray();
             if (titles.Length != 0) return titles.Length == 1 ? titles[0] : null;
+            if (isPwc)
+            {
+                var pwcTitles = PwcRules.Where(r => r.Title.IsMatch(title)).Select(r => r.Slug).Distinct().ToArray();
+                if (pwcTitles.Length != 0) return pwcTitles.Length == 1 ? pwcTitles[0] : null;
+                var specialisms = PwcRules.Where(r =>
+                    r.Departments.Contains(normalizedJob.ExternalCategory, StringComparer.OrdinalIgnoreCase))
+                    .Select(r => r.Slug).Distinct().ToArray();
+                if (specialisms.Length != 0) return specialisms.Length == 1 ? specialisms[0] : null;
+            }
             // Whole department labels only. Description keywords never classify a job.
             var departments = Rules.Where(r => r.Departments.Contains(normalizedJob.ExternalCategory, StringComparer.OrdinalIgnoreCase))
                 .Select(r => r.Slug).Distinct().ToArray();
-            return departments.Length == 1 ? departments[0] : null;
+            if (departments.Length != 0) return departments.Length == 1 ? departments[0] : null;
+            return isPwc && (PwcGeneral.Title.IsMatch(title) ||
+                PwcGeneral.Departments.Contains(normalizedJob.ExternalCategory, StringComparer.OrdinalIgnoreCase)) ? "general" : null;
         }
         catch (RegexMatchTimeoutException) { return null; }
     }
 
     public static bool MatchesCategory(string slug, string? categorySlug, string categoryName) =>
         string.Equals(slug, categorySlug, StringComparison.OrdinalIgnoreCase) ||
-        Rules.Any(r => r.Slug == slug && r.Departments.Contains(categoryName, StringComparer.OrdinalIgnoreCase));
+        Rules.Any(r => r.Slug == slug && r.Departments.Contains(categoryName, StringComparer.OrdinalIgnoreCase)) ||
+        slug == "general" && string.Equals(categoryName, "General", StringComparison.OrdinalIgnoreCase);
 }

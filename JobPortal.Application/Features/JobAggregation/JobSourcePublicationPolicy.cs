@@ -28,12 +28,13 @@ public sealed partial class JobSourcePublicationPolicy(IOptions<JobAggregationOp
     public ExternalJobSourceSnapshot Select(JobSource source, ExternalJobSourceSnapshot snapshot)
     {
         var approval = Settings(source);
+        var allLocations = PwcWorkdayImportPolicy.AppliesTo(source) || !approval.IndiaOnly;
         var jobs = new List<RawExternalJob>();
         var selectionReasons = new Dictionary<string, int>(StringComparer.Ordinal);
         var unknownEligibility = false;
         foreach (var job in snapshot.Jobs)
         {
-            if (!approval.IndiaOnly) { jobs.Add(job); continue; }
+            if (allLocations) { jobs.Add(job); continue; }
             var locations = job.AdditionalLocations.Prepend(job.Location ?? string.Empty).ToArray();
             if (job.CountryCodes.Any(IsIndia) || job.CountryCodes.Count == 0 && locations.Any(x => !string.IsNullOrWhiteSpace(x) && (IndiaLocation().IsMatch(x) ||
                     approval.VerifiedIndiaLocations.Contains(x.Trim(), StringComparer.OrdinalIgnoreCase))) ||

@@ -645,6 +645,8 @@ public sealed partial class WorkdayJobSourceProvider(
                 CountryCodes = countryCodes.ToArray(),
                 Description = description,
                 DescriptionIsHtml = true,
+                ExternalCategory = string.Equals(target.Tenant, "pwc", StringComparison.OrdinalIgnoreCase)
+                    ? ReadPwcSpecialism(description) : null,
                 ApplicationUrl = publicJobUri.AbsoluteUri,
                 SourcePostedAtUtc = ParseIsoDate(
                     GetString(info, "startDate")),
@@ -674,6 +676,19 @@ public sealed partial class WorkdayJobSourceProvider(
 
         return [];
     }
+
+    private static string? ReadPwcSpecialism(string description)
+    {
+        try
+        {
+            var match = PwcSpecialism().Match(description);
+            return match.Success ? WebUtility.HtmlDecode(match.Groups[1].Value).Trim() : null;
+        }
+        catch (RegexMatchTimeoutException) { return null; }
+    }
+
+    [GeneratedRegex(@"<b>\s*Specialism\s*</b>\s*</p>\s*([^<]{1,200})", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, 100)]
+    private static partial Regex PwcSpecialism();
 
     private static bool IsAccentureIndiaSource(WorkdayTarget target) =>
         string.Equals(

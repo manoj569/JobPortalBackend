@@ -55,12 +55,28 @@ public sealed class JobSourceCategoryResolver(
             // Prefer the canonical slug; otherwise reuse a unique existing equivalent category.
             var exact = matches.Where(c => string.Equals(c.Slug, classified, StringComparison.OrdinalIgnoreCase)).ToArray();
             if (exact.Length == 1) return exact[0].Id;
-            // Strong evidence without an unambiguous taxonomy entry must not become an unrelated fallback.
+            // Reuse an unambiguous taxonomy match; only the explicit PwC policy permits a neutral fallback.
             if (matches.Length == 1) return matches[0].Id;
             MissingCategory(source, matches.Length == 0 ? "ClassifiedCategoryMissing" : "ClassifiedCategoryAmbiguous");
+            if (PwcWorkdayImportPolicy.AppliesTo(source)) return await ResolvePwcFallbackAsync(source, cancellationToken);
             return null;
         }
+        if (PwcWorkdayImportPolicy.AppliesTo(source)) return await ResolvePwcFallbackAsync(source, cancellationToken);
         return await ResolveCategoryIdAsync(source, cancellationToken);
+    }
+
+    private async Task<Guid?> ResolvePwcFallbackAsync(JobSource source, CancellationToken cancellationToken)
+    {
+        _categoryOptions ??= await categories.GetOptionsAsync(cancellationToken);
+        foreach (var name in new[] { "Other", "General" })
+        {
+            var matches = _categoryOptions.Where(c => string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase)).ToArray();
+            var exact = matches.Where(c => string.Equals(c.Slug, name, StringComparison.OrdinalIgnoreCase)).ToArray();
+            var match = exact.Length == 1 ? exact[0] : matches.Length == 1 ? matches[0] : null;
+            if (match is not null && await ExistsAsync(match.Id, cancellationToken)) return match.Id;
+        }
+        MissingCategory(source, "PwcFallbackCategoryMissingOrAmbiguous");
+        return null;
     }
 
     public async Task<Guid?> ResolveCategoryIdAsync(JobSource source, CancellationToken cancellationToken = default)

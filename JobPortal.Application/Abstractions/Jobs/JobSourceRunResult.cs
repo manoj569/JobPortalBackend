@@ -35,6 +35,12 @@ public sealed record JobSourceRunResult
     /// existing callers.
     /// </summary>
     public int ExistingDuplicate => Matched;
+    public int Existing => Updated + Unchanged + Matched;
+    public int ValidationRejected => ValidationReasonCounts?.Values.Sum() ?? 0;
+    public int IngestionRejected => ValidationRejected +
+        (ReasonCounts?.GetValueOrDefault(JobIngestionReasonCode.CompanyNotFound) ?? 0);
+    public int ProviderSkipped => ReasonCounts?.GetValueOrDefault(JobIngestionReasonCode.ProviderError) ?? 0;
+    public int SelectionSkipped => SelectionReasonCounts?.Values.Sum() ?? 0;
 
     /// <summary>
     /// Run-level counter grouping: rejected items are the ones skipped by

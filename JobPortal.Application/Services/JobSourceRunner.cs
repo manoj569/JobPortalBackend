@@ -40,6 +40,11 @@ public sealed partial class JobSourceRunner(
             new EventId(4386, nameof(IngestionReason)),
             "JobSourceIngestionReason Source={JobSourceId} Stage={Stage} ReasonCode={ReasonCode} Count={Count}.");
 
+    [LoggerMessage(EventId = 4387, Level = LogLevel.Information,
+        Message = "JobSourcePersistenceSummary Source={SourceId} New={Created} Existing={Existing} Rejected={Rejected} ProviderSkipped={ProviderSkipped} SelectionSkipped={SelectionSkipped} Failed={Failed}.")]
+    private static partial void LogPersistenceSummary(ILogger logger, Guid sourceId, int created, int existing,
+        int rejected, int providerSkipped, int selectionSkipped, int failed);
+
     private static readonly Action<ILogger, Guid, int, int, int, int, int, Exception?> PublicationCompleted =
         LoggerMessage.Define<Guid, int, int, int, int, int>(LogLevel.Information,
             new EventId(4324, nameof(PublicationCompleted)),
@@ -560,6 +565,8 @@ public sealed partial class JobSourceRunner(
             // prevents the normal completion block from running.
             if (_logger is not null)
             {
+                LogPersistenceSummary(_logger, source.Id, partialResult.Created, partialResult.Existing,
+                    partialResult.IngestionRejected, partialResult.ProviderSkipped, partialResult.SelectionSkipped, partialResult.Failed);
                 foreach (var (reason, count) in partialResult.ReasonCounts ?? new Dictionary<JobIngestionReasonCode, int>())
                     IngestionReason(_logger, source.Id, "Ingestion", reason.ToString(), count, null);
                 foreach (var (reason, count) in partialResult.ValidationReasonCounts ?? new Dictionary<string, int>())
