@@ -43,7 +43,7 @@ public sealed class PublicJobRepository(
                 job.InternshipDurationMonths, job.IsFlexibleDuration,
                 job.Department, job.RoleCategory, job.EducationRequirement,
                 job.PostedByType, job.Company.CompanyType, job.Company.Industry,
-                job.ApplicationUrl))
+                job.ApplicationUrl, job.SalaryPeriod))
             .SingleOrDefaultAsync(cancellationToken);
 
     public async Task<IReadOnlyCollection<PublicJobSummary>> GetRelatedAsync(
@@ -181,8 +181,9 @@ public sealed class PublicJobRepository(
             .ThenBy(option => option.Months)
             .ToArrayAsync(cancellationToken);
 
-        var salary = await ApplyFilters(AvailableJobs(), query, FacetDimension.Salary)
-            .Where(job => job.MinimumSalary.HasValue || job.MaximumSalary.HasValue)
+        var salaryQuery = SalaryQueryPolicy.Normalize(query, salaryFacet: true);
+        var salary = await ApplyFilters(AvailableJobs(), salaryQuery, FacetDimension.Salary)
+            .Where(job => salaryQuery.CurrencyCode != null && salaryQuery.SalaryPeriod.HasValue && (job.MinimumSalary.HasValue || job.MaximumSalary.HasValue))
             .GroupBy(_ => 1)
             .Select(group => new
             {
@@ -317,6 +318,9 @@ public sealed class PublicJobRepository(
         PublicJobQuery query,
         FacetDimension excluded = FacetDimension.None)
     {
+        query = SalaryQueryPolicy.Normalize(query);
+        if (SalaryQueryPolicy.UsesSalary(query) && (query.CurrencyCode is null || query.SalaryPeriod is null))
+            return source.Where(_ => false); // Invalid direct repository callers must not compare unscoped amounts.
         if (query.ReferralOnly)
             source = source.Where(job => job.Referral != null &&
                 job.Referral.ApprovalStatus == JobReferralApprovalStatus.Approved &&
@@ -447,14 +451,16 @@ public sealed class PublicJobRepository(
         {
             if (query.MinExperienceYears.HasValue)
                 source = source.Where(job =>
-                    (job.MaximumExperienceYears ?? job.MinimumExperienceYears) >=
-                    query.MinExperienceYears.Value);
+                    (job.MinimumExperienceYears.HasValue || job.MaximumExperienceYears.HasValue) && (job.MaximumExperienceYears == null || job.MaximumExperienceYears >=
+                    query.MinExperienceYears.Value));
             if (query.MaxExperienceYears.HasValue)
                 source = source.Where(job =>
                     (job.MinimumExperienceYears ?? job.MaximumExperienceYears) <=
                     query.MaxExperienceYears.Value);
         }
 
+        if (query.CurrencyCode is not null) source = source.Where(job => job.CurrencyCode == query.CurrencyCode.ToUpper());
+        if (query.SalaryPeriod.HasValue) source = source.Where(job => job.SalaryPeriod == query.SalaryPeriod);
         if (excluded != FacetDimension.Salary)
         {
             var minimum = query.MinAmount ?? query.MinimumSalary;

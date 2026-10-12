@@ -18,7 +18,10 @@ public sealed class Job : BaseEntity
     public string? Location { get; set; }
     public decimal? MinimumSalary { get; set; }
     public decimal? MaximumSalary { get; set; }
-    public string CurrencyCode { get; set; } = "USD";
+    public string? CurrencyCode { get; set; }
+    public SalaryPeriod? SalaryPeriod { get; set; }
+    public string? ClassificationJson { get; set; }
+    public string? ManualClassificationOverrides { get; set; }
     public EmploymentType EmploymentType { get; set; }
     public WorkplaceType WorkplaceType { get; set; }
     public ExperienceLevel ExperienceLevel { get; set; }

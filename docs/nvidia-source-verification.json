@@ -1,0 +1,21 @@
+[
+  {
+    "url": "https://www.nvidia.com/en-us/about-nvidia/careers/",
+    "error": "The request was canceled due to the configured HttpClient.Timeout of 20 seconds elapsing."
+  },
+  {
+    "url": "https://jobs.nvidia.com/careers/job/893397462894",
+    "status": 200,
+    "links": [
+      "https://jobs.nvidia.com/careers/job/893397462894",
+      "https://jobs.nvidia.com/careers&#34;,",
+      "https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite/login&#34;,"
+    ],
+    "eightfold": true,
+    "requisitionPresent": false,
+    "applyContext": [
+      " &#34;id&#34;: &#34;candidate_home&#34;, &#34;url&#34;: &#34;https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite/login&#34;, &#34;target&#34;: &#34;_blank&#34;, &#34;external_link&#34;: true}]}, &#34;mobile&#34;: {&#34;nav_left_items&#34;: [{&#34;type&#34;: &#34;HAMBURGER_MENU&#34;, &#34;id&#34;: &#34;hamburger_menu&#34;, &#34;icon",
+      " &#34;id&#34;: &#34;candidate_home&#34;, &#34;url&#34;: &#34;https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite/login&#34;, &#34;target&#34;: &#34;_blank&#34;, &#34;external_link&#34;: true}]}, &#34;customHtmlNavbarData&#34;: {&#34;enable&#34;: false, &#34;html&#34;: &#34;&#34;, &#34;css&#34;: &#34;&#34;, &#34;stylesheets&#34;: []"
+    ]
+  }
+]

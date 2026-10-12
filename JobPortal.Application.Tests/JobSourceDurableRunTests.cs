@@ -223,13 +223,16 @@ public sealed class JobSourceDurableRunTests
     }
 
     [Fact]
-    public async Task SchedulerExecutesEligibleSourceWithoutApprovalConfiguration()
+    public async Task SchedulerQueuesEligibleSourceWithoutApprovalConfiguration()
     {
         using var f = new Fixture();
         var scheduler = new JobAggregationScheduler(f.Services.GetRequiredService<IServiceScopeFactory>(),
             Options.Create(new JobAggregationOptions { Scheduler = new() { Enabled = true } }), new(), f.Clock,
             NullLogger<JobAggregationScheduler>.Instance);
         await scheduler.RunOnceAsync();
+        Assert.Equal(0, f.Calls);
+        Assert.Single(f.Store.Rows);
+        await f.Worker().RunOnceAsync(default);
         Assert.Equal(1, f.Calls);
     }
 

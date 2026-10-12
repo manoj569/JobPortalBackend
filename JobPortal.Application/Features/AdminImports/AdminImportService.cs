@@ -808,7 +808,17 @@ public sealed class AdminImportService(
             request.Department,
             request.RoleCategory,
             request.EducationRequirement,
-            request.PostedByType));
+            request.PostedByType,
+            request.SalaryPeriod,
+            request.ManualOverrideFields ?? JobPortal.Application.Services.JobClassificationPolicy.Fields.Where(field => field switch
+            {
+                "EmploymentType" => request.EmploymentType != EmploymentType.Unknown,
+                "WorkplaceType" => request.WorkplaceType != WorkplaceType.Unknown,
+                "Experience" => request.MinimumExperienceYears.HasValue || request.MaximumExperienceYears.HasValue,
+                "Salary" => request.MinimumSalary.HasValue || request.MaximumSalary.HasValue,
+                "Location" => request.Location is not null,
+                _ => false
+            }).ToArray()));
         if (action.CompanyCreated)
             job.Company = action.Company;
         if (action.CategoryCreated)

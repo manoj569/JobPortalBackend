@@ -1,0 +1,226 @@
+[
+  {
+    "company": "Philips",
+    "verifiedAtUtc": "2026-10-11T17:20:11.6173684Z",
+    "verificationDate": "2026-10-11",
+    "listing": "https://philips.wd3.myworkdayjobs.com/wday/cxs/philips/jobs-and-careers/jobs",
+    "searchText": "Bangalore",
+    "total": 21,
+    "sample": [
+      {
+        "title": "Modality Sales Specialist- Bangalore",
+        "externalPath": "/job/Bangalore/Modality-Sales-Specialist--Bangalore_583824",
+        "locationsText": "Bangalore",
+        "postedOn": "Posted 26 Days Ago",
+        "bulletFields": [
+          "583824"
+        ]
+      },
+      {
+        "title": "Software Technologist I - C# .NET Full Stack",
+        "externalPath": "/job/Bangalore/Software-Technologist---C--NET-Full-Stack_568045",
+        "locationsText": "Bangalore",
+        "postedOn": "Posted 12 Days Ago",
+        "bulletFields": [
+          "568045"
+        ]
+      },
+      {
+        "title": "Lead - E Commerce- Flipkart & Myntra",
+        "externalPath": "/job/Bangalore/Lead---E-Commerce_570606",
+        "locationsText": "Bangalore",
+        "postedOn": "Posted 30+ Days Ago",
+        "bulletFields": [
+          "570606"
+        ]
+      },
+      {
+        "title": "MR Clinical Application Specialist",
+        "externalPath": "/job/Bangalore/MR-Clinical-Application-Specialist_573855",
+        "locationsText": "Bangalore",
+        "postedOn": "Posted 13 Days Ago",
+        "bulletFields": [
+          "573855"
+        ]
+      },
+      {
+        "title": "Data and Software Application Engineer",
+        "externalPath": "/job/Bangalore/Data-and-Software-Application-Engineer_575373",
+        "locationsText": "Bangalore",
+        "postedOn": "Posted 30+ Days Ago",
+        "bulletFields": [
+          "575373"
+        ]
+      }
+    ],
+    "detailUrl": "https://philips.wd3.myworkdayjobs.com/wday/cxs/philips/jobs-and-careers/job/Bangalore/Modality-Sales-Specialist--Bangalore_583824",
+    "detail": {
+      "jobReqId": "583824",
+      "title": "Modality Sales Specialist- Bangalore",
+      "location": "Bangalore",
+      "country": {
+        "descriptor": "India",
+        "id": "c4f78be1a8f14da0ab49ce1162348a5e"
+      },
+      "externalUrl": "https://philips.wd3.myworkdayjobs.com/jobs-and-careers/job/Bangalore/Modality-Sales-Specialist--Bangalore_583824",
+      "startDate": "2026-09-15",
+      "endDate": null,
+      "canApply": true,
+      "additionalLocations": null,
+      "postedOn": "Posted 26 Days Ago"
+    },
+    "status": "ok",
+    "fullPaginationVerified": false
+  },
+  {
+    "company": "Johnson Controls",
+    "verifiedAtUtc": "2026-10-11T17:20:14.0831667Z",
+    "verificationDate": "2026-10-11",
+    "listing": "https://jci.wd5.myworkdayjobs.com/wday/cxs/jci/JCI/jobs",
+    "searchText": "Bangalore",
+    "total": 32,
+    "sample": [
+      {
+        "title": "Product Manager - Selection Navigator",
+        "externalPath": "/job/Bangalore-Karnataka-India/Product-Manager---Selection-Navigator_WD30281742",
+        "timeType": "Full time",
+        "locationsText": "Bangalore-Karnataka-India",
+        "postedOn": "Posted 3 Days Ago",
+        "bulletFields": [
+          "WD30281742"
+        ]
+      },
+      {
+        "title": "Product Manager - Selection Navigator",
+        "externalPath": "/job/Bangalore-Karnataka-India/Product-Manager---Selection-Navigator_WD30281743",
+        "timeType": "Full time",
+        "locationsText": "Bangalore-Karnataka-India",
+        "postedOn": "Posted 3 Days Ago",
+        "bulletFields": [
+          "WD30281743"
+        ]
+      },
+      {
+        "title": "Baan Functional Consultant",
+        "externalPath": "/job/Bangalore-Karnataka-India/Baan-Functional-Consultant_WD30281842",
+        "timeType": "Full time",
+        "locationsText": "Bangalore-Karnataka-India",
+        "postedOn": "Posted 3 Days Ago",
+        "bulletFields": [
+          "WD30281842"
+        ]
+      },
+      {
+        "title": "Baan Functional Consultant",
+        "externalPath": "/job/Bangalore-Karnataka-India/Baan-Functional-Consultant_WD30281841",
+        "timeType": "Full time",
+        "locationsText": "Bangalore-Karnataka-India",
+        "postedOn": "Posted 3 Days Ago",
+        "bulletFields": [
+          "WD30281841"
+        ]
+      },
+      {
+        "title": "Baan Functional Consultant",
+        "externalPath": "/job/Bangalore-Karnataka-India/Baan-Functional-Consultant_WD30281839-1",
+        "timeType": "Full time",
+        "locationsText": "Bangalore-Karnataka-India",
+        "postedOn": "Posted 3 Days Ago",
+        "bulletFields": [
+          "WD30281839"
+        ]
+      }
+    ],
+    "detailUrl": "https://jci.wd5.myworkdayjobs.com/wday/cxs/jci/JCI/job/Bangalore-Karnataka-India/Product-Manager---Selection-Navigator_WD30281742",
+    "detail": {
+      "jobReqId": "WD30281742",
+      "title": "Product Manager - Selection Navigator",
+      "location": "Bangalore-Karnataka-India",
+      "country": {
+        "descriptor": "India",
+        "id": "c4f78be1a8f14da0ab49ce1162348a5e"
+      },
+      "externalUrl": "https://jci.wd5.myworkdayjobs.com/JCI/job/Bangalore-Karnataka-India/Product-Manager---Selection-Navigator_WD30281742",
+      "startDate": "2026-10-08",
+      "endDate": "2026-10-15",
+      "canApply": true,
+      "additionalLocations": null,
+      "postedOn": "Posted 3 Days Ago"
+    },
+    "status": "ok",
+    "fullPaginationVerified": false
+  },
+  {
+    "company": "Salesforce",
+    "verifiedAtUtc": "2026-10-11T17:20:16.4885641Z",
+    "verificationDate": "2026-10-11",
+    "listing": "https://salesforce.wd12.myworkdayjobs.com/wday/cxs/salesforce/External_Career_Site/jobs",
+    "searchText": "Bangalore",
+    "total": 84,
+    "sample": [
+      {
+        "title": "Senior Manager, Business Value Services",
+        "externalPath": "/job/India---Bangalore/Senior-Manager--Business-Value-Services_JR363302",
+        "locationsText": "India - Bangalore",
+        "postedOn": "Posted 2 Days Ago",
+        "bulletFields": [
+          "JR363302"
+        ]
+      },
+      {
+        "title": "Lead Developer Advocate",
+        "externalPath": "/job/India---Hyderabad/Lead-Developer-Advocate_JR363220",
+        "locationsText": "7 Locations",
+        "postedOn": "Posted 2 Days Ago",
+        "bulletFields": [
+          "JR363220"
+        ]
+      },
+      {
+        "title": "Developer Advocate",
+        "externalPath": "/job/India---Hyderabad/Developer-Advocate_JR363217",
+        "locationsText": "6 Locations",
+        "postedOn": "Posted 2 Days Ago",
+        "bulletFields": [
+          "JR363217"
+        ]
+      },
+      {
+        "title": "Director, Technical Consulting (Salesforce Field Service/Data Cloud)",
+        "externalPath": "/job/India---Bangalore/Director--Technical-Consulting--Salesforce-Field-Service-Data-Cloud-_JR356454",
+        "locationsText": "5 Locations",
+        "postedOn": "Posted 2 Days Ago",
+        "bulletFields": [
+          "JR356454"
+        ]
+      },
+      {
+        "title": "Salesforce Success Architect",
+        "externalPath": "/job/India---Hyderabad/Salesforce-Success-Architect--Agentforce-_JR330045-1",
+        "locationsText": "2 Locations",
+        "postedOn": "Posted 2 Days Ago",
+        "bulletFields": [
+          "JR330045"
+        ]
+      }
+    ],
+    "detailUrl": "https://salesforce.wd12.myworkdayjobs.com/wday/cxs/salesforce/External_Career_Site/job/India---Bangalore/Senior-Manager--Business-Value-Services_JR363302",
+    "detail": {
+      "jobReqId": "JR363302",
+      "title": "Senior Manager, Business Value Services",
+      "location": "India - Bangalore",
+      "country": {
+        "descriptor": "India",
+        "id": "c4f78be1a8f14da0ab49ce1162348a5e"
+      },
+      "externalUrl": "https://salesforce.wd12.myworkdayjobs.com/External_Career_Site/job/India---Bangalore/Senior-Manager--Business-Value-Services_JR363302",
+      "startDate": "2026-10-09",
+      "endDate": null,
+      "canApply": true,
+      "additionalLocations": null,
+      "postedOn": "Posted 2 Days Ago"
+    },
+    "status": "ok",
+    "fullPaginationVerified": false
+  }
+]

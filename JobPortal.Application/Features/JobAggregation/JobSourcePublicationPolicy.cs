@@ -32,14 +32,12 @@ public sealed class JobSourcePublicationPolicy(IOptions<JobAggregationOptions> o
         var jobs = new List<RawExternalJob>();
         var rejected = new Dictionary<string, int>(StringComparer.Ordinal);
         var reasons = new Dictionary<string, int>(StringComparer.Ordinal);
-        var held = false;
         foreach (var job in snapshot.Jobs)
         {
             var result = IndiaJobEligibilityPolicy.Evaluate(job);
             reasons[result.ReasonCode] = reasons.GetValueOrDefault(result.ReasonCode) + 1;
             if (result.Decision != IndiaJobEligibilityDecision.Accepted)
             {
-                held |= result.Decision == IndiaJobEligibilityDecision.Review;
                 rejected[result.ReasonCode] = rejected.GetValueOrDefault(result.ReasonCode) + 1;
                 continue;
             }
@@ -52,8 +50,10 @@ public sealed class JobSourcePublicationPolicy(IOptions<JobAggregationOptions> o
         }
         var limited = approval.TestImportLimit > 0;
         if (limited && jobs.Count > approval.TestImportLimit) rejected["TestImportLimit"] = jobs.Count - approval.TestImportLimit;
+        // Geography selects jobs to ingest; the full observed identities still protect
+        // held/foreign vacancies during absence reconciliation. A test cap remains unsafe.
         return new(limited ? jobs.Take(approval.TestImportLimit).ToArray() : jobs,
-            snapshot.Skipped, snapshot.IsComplete && !held && !limited)
+            snapshot.Skipped, snapshot.IsComplete && !limited)
         { SelectionReasonCounts = rejected.Count == 0 ? null : rejected, EligibilityReasonCounts = reasons };
     }
 

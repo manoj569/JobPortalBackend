@@ -412,19 +412,20 @@ public sealed class MultiCompanyProviderTests
     [InlineData("Pune, India", "", true, true)]
     [InlineData("Remote", "IN", true, true)]
     [InlineData("Remote", "US", false, true)]
-    [InlineData("Bangalore", "US", false, false)]
-    [InlineData("Remote", "", false, false)]
-    [InlineData("Indiana", "", false, false)]
+    [InlineData("Bangalore", "US", false, true)]
+    [InlineData("Remote", "", false, true)]
+    [InlineData("Indiana", "", false, true)]
     [InlineData("Hyderabad", "", true, true)]
-    [InlineData("Hyderabad, Pakistan", "", false, false)]
-    [InlineData("Remote", "XX", false, false)]
-    [InlineData("Worldwide", "", false, false)]
+    [InlineData("Hyderabad, Pakistan", "", false, true)]
+    [InlineData("Remote", "XX", false, true)]
+    [InlineData("Worldwide", "", false, true)]
     public void IndiaEligibilityRequiresEvidenceNotRemoteLabel(string location, string country, bool included, bool complete)
     {
         var source = Source(AtsType.Greenhouse);
         var selected = Policy(source).Select(source, new([new RawExternalJob
         { Location = location, CountryCodes = country.Length == 0 ? [] : [country], WorkplaceTypeText = "remote" }], 0, true));
         Assert.Equal(included ? 1 : 0, selected.Jobs.Count);
+        // Holding geography changes eligibility, not the completeness of the observed census.
         Assert.Equal(complete, selected.IsComplete);
     }
 

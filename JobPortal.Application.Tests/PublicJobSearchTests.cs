@@ -471,6 +471,10 @@ public sealed class PublicJobSearchTests
         Assert.Contains(options.Departments, option =>
             option.Value == "Operations" && option.Count == 1);
         Assert.Equal(new DecimalRangeFacet(300, 500, 1), options.SalaryRange);
+        fixture.Featured.CurrencyCode = "INR"; fixture.Featured.SalaryPeriod = SalaryPeriod.Yearly;
+        await fixture.Context.SaveChangesAsync();
+        var scopedSalary = await fixture.Repository.GetFilterOptionsAsync(new PublicJobQuery(Departments: ["Engineering"], CurrencyCode: "INR", SalaryPeriod: SalaryPeriod.Yearly));
+        Assert.Equal(new DecimalRangeFacet(300, 500, 1), scopedSalary.SalaryRange);
         Assert.Equal(new IntegerRangeFacet(0, 2, 1), options.ExperienceRange);
 
         var nameFilteredOptions = await fixture.Repository.GetFilterOptionsAsync(
@@ -727,6 +731,7 @@ public sealed class PublicJobSearchTests
                 MinimumSalary = minimumSalary,
                 MaximumSalary = maximumSalary,
                 CurrencyCode = "INR",
+                SalaryPeriod = SalaryPeriod.Yearly,
                 InternshipDurationMonths = internshipDurationMonths,
                 IsFlexibleDuration = isFlexible,
                 IsFeatured = isFeatured,

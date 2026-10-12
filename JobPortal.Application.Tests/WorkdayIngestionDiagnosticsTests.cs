@@ -25,7 +25,7 @@ public sealed class WorkdayIngestionDiagnosticsTests
         Assert.Equal("india", Assert.Single(selected.Jobs).ExternalId);
         Assert.Equal(1, selected.SelectionReasonCounts!["NonIndiaLocation"]);
         Assert.Equal(2, selected.SelectionReasonCounts["AmbiguousLocation"]);
-        Assert.False(selected.IsComplete);
+        Assert.True(selected.IsComplete);
         Assert.Equal(0, selected.Skipped);
     }
 
@@ -36,7 +36,8 @@ public sealed class WorkdayIngestionDiagnosticsTests
         f.Source.AtsType = AtsType.Workday;
         f.Map(f.Category.Id.ToString());
         var provider = new Batches([
-            new([Job("india", "IN"), Job("foreign", "US")], 0, false),
+            new([Job("india", "IN"), Job("foreign", "US"),
+                Job("unknown", "IN") with { Location = "Unknown", CountryCodes = [] }], 0, false),
             new([Job("india2", "IN")], 0, false),
             new([], 0, true)
         ]);
@@ -53,11 +54,17 @@ public sealed class WorkdayIngestionDiagnosticsTests
             publicationPolicy: new JobSourcePublicationPolicy(Options.Create(new JobAggregationOptions()), TimeProvider.System));
         var first = await runner.RunAsync(f.Source.Id);
         Assert.True(first.Succeeded);
+        Assert.True(first.ScanComplete);
+        Assert.True(first.ReconciliationSafe);
+        Assert.Equal(2, first.SelectionSkipped);
+        Assert.Equal(1, first.AmbiguousLocationHeld);
         Assert.Equal(2, first.Created);
         Assert.Equal(1, first.Rejected);
         Assert.Equal(1, first.SelectionReasonCounts!["NonIndiaLocation"]);
         var repeated = await runner.RunAsync(f.Source.Id);
         Assert.True(repeated.Succeeded);
+        Assert.True(repeated.ReconciliationSafe);
+        Assert.Equal(2, repeated.SelectionSkipped);
         Assert.Equal(0, repeated.Created);
         Assert.Equal(2, repeated.Unchanged);
         Assert.Equal(1, repeated.SelectionReasonCounts!["NonIndiaLocation"]);

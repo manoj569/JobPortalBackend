@@ -8,6 +8,8 @@ public sealed record ExternalJobSourceSnapshot(
     int Skipped,
     bool IsComplete)
 {
+    public int? CheckpointCursor { get; init; }
+    public bool ContinuationPending { get; init; }
     // Selection diagnostics only: these items never reached ingestion validation.
     public IReadOnlyDictionary<string, int>? SelectionReasonCounts { get; init; }
     public IReadOnlyDictionary<string, int>? EligibilityReasonCounts { get; init; }

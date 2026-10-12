@@ -1,6 +1,6 @@
 namespace JobPortal.Domain.Entities;
 
-public enum JobSourceRunStatus { Queued = 0, Running = 1, Succeeded = 2, Failed = 3, Interrupted = 4 }
+public enum JobSourceRunStatus { Queued = 0, Running = 1, Succeeded = 2, Failed = 3, Interrupted = 4, Paused = 5, Unsafe = 6, Cancelled = 7 }
 
 // Operational record, not a soft-deletable business entity. Lease mutations use atomic SQL.
 public sealed class JobSourceRun
@@ -19,6 +19,8 @@ public sealed class JobSourceRun
     public Guid? LeaseOwner { get; set; }
     public DateTime? LeaseExpiresAtUtc { get; set; }
     public int AttemptCount { get; set; }
+    public int ExecutionCount { get; set; }
+    public string? CheckpointJson { get; set; }
     public string Phase { get; set; } = "Queued";
     public string? DiagnosticsJson { get; set; }
     public string? ErrorCode { get; set; }

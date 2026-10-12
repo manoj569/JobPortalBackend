@@ -1,0 +1,319 @@
+[
+  {
+    "company": "Kyndryl",
+    "verifiedAtUtc": null,
+    "verificationDate": "2026-10-11",
+    "listing": "https://kyndryl.wd5.myworkdayjobs.com/wday/cxs/kyndryl/KyndrylProfessionalCareers/jobs",
+    "searchText": "India",
+    "total": 298,
+    "sample": [
+      {
+        "title": "Banking Application Consultant",
+        "externalPath": "/job/RMZ-TITANIUM/Banking-Application-Consultant_R-69122",
+        "locationsText": "RMZ TITANIUM",
+        "postedOn": "Posted 9 Days Ago",
+        "remoteType": "In Person",
+        "bulletFields": [
+          "R-69122"
+        ]
+      },
+      {
+        "title": "Banking Mobile App developer",
+        "externalPath": "/job/Bangalore-Karnataka-India/Banking-Mobile-App-developer_R-60603",
+        "locationsText": "Bangalore, Karnataka, India",
+        "postedOn": "Posted 30+ Days Ago",
+        "remoteType": "In Person",
+        "bulletFields": [
+          "R-60603"
+        ]
+      },
+      {
+        "title": "SugarCRM Banking Techno-functional Consultant",
+        "externalPath": "/job/Bangalore-Karnataka-India/SugarCRM-Banking-Techno-functional-Consultant_R-60593",
+        "locationsText": "Bangalore, Karnataka, India",
+        "postedOn": "Posted 30+ Days Ago",
+        "remoteType": "In Person",
+        "bulletFields": [
+          "R-60593"
+        ]
+      },
+      {
+        "title": "Chief Information Officer - Business Relationship Manager",
+        "externalPath": "/job/Bangalore-Karnataka-India/Chief-Information-Officer---Business-Relationship-Manager_R-67581-1",
+        "locationsText": "Bangalore, Karnataka, India",
+        "postedOn": "Posted 26 Days Ago",
+        "remoteType": "Partially Remote",
+        "bulletFields": [
+          "R-67581"
+        ]
+      },
+      {
+        "title": "Associate Director - Transition Manager",
+        "externalPath": "/job/Tokyo-Japan/Transition-Manager--Shift-to-India-_R-54685",
+        "locationsText": "Tokyo, Japan",
+        "postedOn": "Posted 30+ Days Ago",
+        "remoteType": "In Person",
+        "bulletFields": [
+          "R-54685"
+        ]
+      }
+    ],
+    "detailUrl": "https://kyndryl.wd5.myworkdayjobs.com/wday/cxs/kyndryl/KyndrylProfessionalCareers/job/RMZ-TITANIUM/Banking-Application-Consultant_R-69122",
+    "detail": {
+      "jobReqId": "R-69122",
+      "title": "Banking Application Consultant",
+      "location": "RMZ TITANIUM",
+      "country": {
+        "descriptor": "India",
+        "id": "c4f78be1a8f14da0ab49ce1162348a5e"
+      },
+      "externalUrl": "https://kyndryl.wd5.myworkdayjobs.com/KyndrylProfessionalCareers/job/RMZ-TITANIUM/Banking-Application-Consultant_R-69122",
+      "startDate": "2026-10-02",
+      "endDate": null,
+      "canApply": true,
+      "additionalLocations": null,
+      "postedOn": "Posted 9 Days Ago"
+    },
+    "status": "ok",
+    "fullPaginationVerified": false
+  },
+  {
+    "company": "Qualcomm",
+    "verifiedAtUtc": null,
+    "verificationDate": "2026-10-11",
+    "listing": "https://qualcomm.wd12.myworkdayjobs.com/wday/cxs/qualcomm/External/jobs",
+    "searchText": "India",
+    "total": 0,
+    "sample": [],
+    "detailUrl": null,
+    "detail": null,
+    "status": "ok",
+    "fullPaginationVerified": false
+  },
+  {
+    "company": "Johnson Controls",
+    "verifiedAtUtc": null,
+    "verificationDate": "2026-10-11",
+    "listing": "https://jci.wd5.myworkdayjobs.com/wday/cxs/jci/JCI/jobs",
+    "searchText": "India",
+    "total": 169,
+    "sample": [
+      {
+        "title": "Principal Product Engineer",
+        "externalPath": "/job/New-Freedom-Pennsylvania-United-States-of-America/Principal-Product-Engineer_WD30280435",
+        "timeType": "Full time",
+        "locationsText": "New Freedom-Pennsylvania-United States of America",
+        "postedOn": "Posted 2 Days Ago",
+        "bulletFields": [
+          "WD30280435"
+        ]
+      },
+      {
+        "title": "Mobility Specialist",
+        "externalPath": "/job/Pune-Maharashtra-India/Mobility-Specialist_WD30279606-1",
+        "timeType": "Full time",
+        "locationsText": "Pune-Maharashtra-India",
+        "postedOn": "Posted 2 Days Ago",
+        "bulletFields": [
+          "WD30279606"
+        ]
+      },
+      {
+        "title": "Retail Security Systems Technician",
+        "externalPath": "/job/Evansville-Indiana-United-States-of-America/Retail-Security-Systems-Technician_WD30280103",
+        "timeType": "Full time",
+        "locationsText": "3 Locations",
+        "postedOn": "Posted 3 Days Ago",
+        "bulletFields": [
+          "WD30280103"
+        ]
+      },
+      {
+        "title": "Sr. Application Engineer II",
+        "externalPath": "/job/Pune-Maharashtra-India/Sr-Application-Engineer-II_WD30282053-1",
+        "timeType": "Full time",
+        "locationsText": "Pune-Maharashtra-India",
+        "postedOn": "Posted 2 Days Ago",
+        "bulletFields": [
+          "WD30282053"
+        ]
+      },
+      {
+        "title": "HVAC Equipment Service Technician 1",
+        "externalPath": "/job/Hyderabad-Andhra-Pradesh-India/HVAC-Equipment-Service-Technician-1_WD30281562",
+        "timeType": "Full time",
+        "locationsText": "Hyderabad-Andhra Pradesh-India",
+        "postedOn": "Posted 2 Days Ago",
+        "bulletFields": [
+          "WD30281562"
+        ]
+      }
+    ],
+    "detailUrl": "https://jci.wd5.myworkdayjobs.com/wday/cxs/jci/JCI/job/New-Freedom-Pennsylvania-United-States-of-America/Principal-Product-Engineer_WD30280435",
+    "detail": {
+      "jobReqId": "WD30280435",
+      "title": "Principal Product Engineer",
+      "location": "New Freedom-Pennsylvania-United States of America",
+      "country": {
+        "descriptor": "United States of America",
+        "id": "bc33aa3152ec42d4995f4791a106ed09"
+      },
+      "externalUrl": "https://jci.wd5.myworkdayjobs.com/JCI/job/New-Freedom-Pennsylvania-United-States-of-America/Principal-Product-Engineer_WD30280435",
+      "startDate": "2026-10-09",
+      "endDate": null,
+      "canApply": true,
+      "additionalLocations": null,
+      "postedOn": "Posted 2 Days Ago"
+    },
+    "status": "ok",
+    "fullPaginationVerified": false
+  },
+  {
+    "company": "NVIDIA",
+    "verifiedAtUtc": null,
+    "verificationDate": "2026-10-11",
+    "listing": "https://nvidia.wd5.myworkdayjobs.com/wday/cxs/nvidia/NVIDIAExternalCareerSite/jobs",
+    "searchText": "India",
+    "total": 273,
+    "sample": [
+      {
+        "title": "Head of Startups - India and South Asia",
+        "externalPath": "/job/India-Bengaluru/Senior-Manager--Inception---South-Asia-Region_JR2024311",
+        "locationsText": "India, Bengaluru",
+        "postedOn": "Posted 30+ Days Ago",
+        "bulletFields": [
+          "JR2024311"
+        ]
+      },
+      {
+        "title": "Manager, AI/HPC Infrastructure Technical Delivery — India",
+        "externalPath": "/job/India-Pune/Manager--AI-HPC-Infrastructure-Technical-Delivery---India_JR2024696",
+        "locationsText": "India, Pune",
+        "postedOn": "Posted 30+ Days Ago",
+        "bulletFields": [
+          "JR2024696"
+        ]
+      },
+      {
+        "title": "Senior Technical Support Engineer, Networking",
+        "externalPath": "/job/India-Bengaluru/Senior-Technical-Support-Engineer--Networking_JR2027104",
+        "locationsText": "6 Locations",
+        "postedOn": "Posted 6 Days Ago",
+        "bulletFields": [
+          "JR2027104"
+        ]
+      },
+      {
+        "title": "Senior Network Infrastructure Engineer",
+        "externalPath": "/job/India-Remote/Senior-Network-Infrastructure-Engineer_JR2015526",
+        "locationsText": "5 Locations",
+        "postedOn": "Posted 30+ Days Ago",
+        "bulletFields": [
+          "JR2015526"
+        ]
+      },
+      {
+        "title": "Architect – AI-Powered Performance Verification Automation",
+        "externalPath": "/job/India-Bengaluru/Architect---AI-Powered-Performance-Verification-Automation_JR2024489",
+        "locationsText": "5 Locations",
+        "postedOn": "Posted 30+ Days Ago",
+        "bulletFields": [
+          "JR2024489"
+        ]
+      }
+    ],
+    "detailUrl": "https://nvidia.wd5.myworkdayjobs.com/wday/cxs/nvidia/NVIDIAExternalCareerSite/job/India-Bengaluru/Senior-Manager--Inception---South-Asia-Region_JR2024311",
+    "detail": {
+      "jobReqId": "JR2024311",
+      "title": "Head of Startups - India and South Asia",
+      "location": "India, Bengaluru",
+      "country": {
+        "descriptor": "India",
+        "id": "c4f78be1a8f14da0ab49ce1162348a5e"
+      },
+      "externalUrl": "https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite/job/India-Bengaluru/Senior-Manager--Inception---South-Asia-Region_JR2024311",
+      "startDate": "2026-09-03",
+      "endDate": null,
+      "canApply": true,
+      "additionalLocations": null,
+      "postedOn": "Posted 30+ Days Ago"
+    },
+    "status": "ok",
+    "fullPaginationVerified": false
+  },
+  {
+    "company": "Adobe",
+    "verifiedAtUtc": null,
+    "verificationDate": "2026-10-11",
+    "listing": "https://adobe.wd5.myworkdayjobs.com/wday/cxs/adobe/external_experienced/jobs",
+    "searchText": "India",
+    "total": 73,
+    "sample": [
+      {
+        "title": "People Analytics, India Leader",
+        "externalPath": "/job/Bangalore/Senior-Manager--Advanced-People-Analytics---Reporting_R169338",
+        "locationsText": "2 Locations",
+        "postedOn": "Posted 23 Days Ago",
+        "bulletFields": [
+          "R169338"
+        ]
+      },
+      {
+        "title": "Manager - Sales Development, India",
+        "externalPath": "/job/Bangalore/BDR-Manager---India_R170508",
+        "locationsText": "4 Locations",
+        "postedOn": "Posted 23 Days Ago",
+        "bulletFields": [
+          "R170508"
+        ]
+      },
+      {
+        "title": "Solutions Consultant",
+        "externalPath": "/job/Remote-India/Solutions-Consultant_R169899",
+        "locationsText": "Remote India",
+        "postedOn": "Posted 23 Days Ago",
+        "bulletFields": [
+          "R169899"
+        ]
+      },
+      {
+        "title": "Manager Inside Sales",
+        "externalPath": "/job/Remote-India/Manager-Inside-Sales_R171720",
+        "locationsText": "Remote India",
+        "postedOn": "Posted 23 Days Ago",
+        "bulletFields": [
+          "R171720"
+        ]
+      },
+      {
+        "title": "Customer Success Account Manager",
+        "externalPath": "/job/Remote-India/Customer-Success-Account-Manager_R144410",
+        "locationsText": "Remote India",
+        "postedOn": "Posted 23 Days Ago",
+        "bulletFields": [
+          "R144410"
+        ]
+      }
+    ],
+    "detailUrl": "https://adobe.wd5.myworkdayjobs.com/wday/cxs/adobe/external_experienced/job/Bangalore/Senior-Manager--Advanced-People-Analytics---Reporting_R169338",
+    "detail": {
+      "jobReqId": "R169338",
+      "title": "People Analytics, India Leader",
+      "location": "Bangalore",
+      "country": {
+        "descriptor": "India",
+        "id": "c4f78be1a8f14da0ab49ce1162348a5e"
+      },
+      "externalUrl": "https://adobe.wd5.myworkdayjobs.com/external_experienced/job/Bangalore/Senior-Manager--Advanced-People-Analytics---Reporting_R169338",
+      "startDate": "2026-09-18",
+      "endDate": null,
+      "canApply": true,
+      "additionalLocations": [
+        "Noida"
+      ],
+      "postedOn": "Posted 23 Days Ago"
+    },
+    "status": "ok",
+    "fullPaginationVerified": false
+  }
+]

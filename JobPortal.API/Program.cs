@@ -137,8 +137,10 @@ builder.Services.AddOutputCache(options =>
         .Tag("public-jobs"));
 });
 builder.Services.AddHostedService<JobExpiryHostedService>();
-builder.Services.Configure<JobAggregationOptions>(
-    builder.Configuration.GetSection(JobAggregationOptions.SectionName));
+builder.Services.AddOptions<JobAggregationOptions>()
+    .Bind(builder.Configuration.GetSection(JobAggregationOptions.SectionName))
+    .Validate(o => o.Workday.IsValid() && o.Scheduler.MaxConcurrentSources is >= 1 and <= 8,
+        "Job aggregation execution limits are invalid.").ValidateOnStart();
 
 builder.Services.AddSingleton<JobAggregationScheduler>();
 builder.Services.AddHostedService<JobAggregationSchedulerHostedService>();

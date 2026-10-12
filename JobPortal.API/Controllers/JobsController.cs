@@ -16,6 +16,13 @@ public sealed class JobsController(
     IJobService jobService,
     IOutputCacheStore outputCache) : ControllerBase
 {
+    [HttpPost("analyze-description")]
+    [ProducesResponseType(typeof(ApiResponse<JobPortal.Application.Services.JobClassificationResult>), StatusCodes.Status200OK)]
+    public ActionResult<ApiResponse<JobPortal.Application.Services.JobClassificationResult>> AnalyzeDescription(
+        [FromBody] JobPortal.Application.Services.JobClassificationInput request,
+        [FromServices] JobPortal.Application.Services.IJobClassificationService classifier) =>
+        Ok(new ApiResponse<JobPortal.Application.Services.JobClassificationResult>(classifier.Analyze(request)));
+
     [HttpGet]
     [ProducesResponseType(typeof(ApiResponse<PagedResponse<JobResponse>>), StatusCodes.Status200OK)]
     public async Task<ActionResult<ApiResponse<PagedResponse<JobResponse>>>> Search(

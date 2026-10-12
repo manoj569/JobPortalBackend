@@ -1,0 +1,83 @@
+{
+  "note": "Review templates only; not loaded by application. Resolve existing CompanyId, full inventory duplicates and publication/licensing gates before POST. No startup seeding or activation.",
+  "sources": [
+    {
+      "companyName": "NVIDIA",
+      "verificationDate": "2026-10-11",
+      "registrationStatus": "PendingRegistryAndRightsReview",
+      "requestTemplate": {
+        "companyId": null,
+        "careerPageUrl": "https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite",
+        "atsType": 5,
+        "atsIdentifier": "nvidia/NVIDIAExternalCareerSite",
+        "isActive": false,
+        "scanIntervalMinutes": 720
+      }
+    },
+    {
+      "companyName": "Mastercard",
+      "verificationDate": "2026-10-11",
+      "registrationStatus": "PendingRegistryAndRightsReview",
+      "requestTemplate": {
+        "companyId": null,
+        "careerPageUrl": "https://mastercard.wd1.myworkdayjobs.com/CorporateCareers",
+        "atsType": 5,
+        "atsIdentifier": "mastercard/CorporateCareers",
+        "isActive": false,
+        "scanIntervalMinutes": 720
+      }
+    },
+    {
+      "companyName": "Kyndryl",
+      "verificationDate": "2026-10-11",
+      "registrationStatus": "PendingRegistryAndRightsReview",
+      "requestTemplate": {
+        "companyId": null,
+        "careerPageUrl": "https://kyndryl.wd5.myworkdayjobs.com/KyndrylProfessionalCareers",
+        "atsType": 5,
+        "atsIdentifier": "kyndryl/KyndrylProfessionalCareers",
+        "isActive": false,
+        "scanIntervalMinutes": 720
+      }
+    },
+    {
+      "companyName": "Johnson Controls",
+      "verificationDate": "2026-10-11",
+      "registrationStatus": "PendingRegistryAndRightsReview",
+      "requestTemplate": {
+        "companyId": null,
+        "careerPageUrl": "https://jci.wd5.myworkdayjobs.com/JCI",
+        "atsType": 5,
+        "atsIdentifier": "jci/JCI",
+        "isActive": false,
+        "scanIntervalMinutes": 720
+      }
+    },
+    {
+      "companyName": "Intel",
+      "verificationDate": "2026-10-11",
+      "registrationStatus": "PendingRegistryAndRightsReview",
+      "requestTemplate": {
+        "companyId": null,
+        "careerPageUrl": "https://intel.wd1.myworkdayjobs.com/External",
+        "atsType": 5,
+        "atsIdentifier": "intel/External",
+        "isActive": false,
+        "scanIntervalMinutes": 720
+      }
+    },
+    {
+      "companyName": "Philips",
+      "verificationDate": "2026-10-11",
+      "registrationStatus": "PendingRegistryAndRightsReview",
+      "requestTemplate": {
+        "companyId": null,
+        "careerPageUrl": "https://philips.wd3.myworkdayjobs.com/jobs-and-careers",
+        "atsType": 5,
+        "atsIdentifier": "philips/jobs-and-careers",
+        "isActive": false,
+        "scanIntervalMinutes": 720
+      }
+    }
+  ]
+}

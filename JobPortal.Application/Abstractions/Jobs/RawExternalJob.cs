@@ -20,6 +20,7 @@ public sealed record RawExternalJob
     public string? Benefits { get; init; }
     public string? ApplicationUrl { get; init; }
     public string? ExternalId { get; init; }
+    public int? SourceOrdinal { get; init; }
     // Set by JobSourceRunner only for providers that return a complete snapshot.
     public Guid? JobSourceId { get; init; }
     public DateTime? SourcePostedAtUtc { get; init; }
@@ -36,6 +37,8 @@ public sealed record RawExternalJob
     public string? EducationRequirement { get; init; }
     public string? ExternalCategory { get; init; }
     public bool DescriptionIsHtml { get; init; }
+    public string? CurrencyCode { get; init; }
+    public SalaryPeriod? SalaryPeriod { get; init; }
     public decimal? SalaryMin { get; init; }
     public decimal? SalaryMax { get; init; }
 

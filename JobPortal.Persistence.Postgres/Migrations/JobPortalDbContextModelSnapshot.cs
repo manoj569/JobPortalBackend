@@ -3884,6 +3884,9 @@ namespace JobPortal.Persistence.Postgres.Migrations
                     b.Property<Guid?>("CategoryId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("ClassificationJson")
+                        .HasColumnType("text");
+
                     b.Property<Guid>("CompanyId")
                         .HasColumnType("uuid");
 
@@ -3891,7 +3894,6 @@ namespace JobPortal.Persistence.Postgres.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("CurrencyCode")
-                        .IsRequired()
                         .HasMaxLength(3)
                         .HasColumnType("character(3)")
                         .IsFixedLength();
@@ -3957,6 +3959,10 @@ namespace JobPortal.Persistence.Postgres.Migrations
                         .HasMaxLength(250)
                         .HasColumnType("character varying(250)");
 
+                    b.Property<string>("ManualClassificationOverrides")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
                     b.Property<int?>("MaximumExperienceYears")
                         .HasColumnType("integer");
 
@@ -3993,6 +3999,9 @@ namespace JobPortal.Persistence.Postgres.Migrations
                     b.Property<string>("RoleCategory")
                         .HasMaxLength(150)
                         .HasColumnType("character varying(150)");
+
+                    b.Property<int?>("SalaryPeriod")
+                        .HasColumnType("integer");
 
                     b.Property<string>("Slug")
                         .IsRequired()
@@ -4589,6 +4598,9 @@ namespace JobPortal.Persistence.Postgres.Migrations
                     b.Property<int>("AutoPublishDisabled")
                         .HasColumnType("integer");
 
+                    b.Property<string>("CheckpointJson")
+                        .HasColumnType("jsonb");
+
                     b.Property<int>("Closed")
                         .HasColumnType("integer");
 
@@ -4604,6 +4616,11 @@ namespace JobPortal.Persistence.Postgres.Migrations
                     b.Property<string>("ErrorCode")
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
+
+                    b.Property<int>("ExecutionCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
 
                     b.Property<int>("Failed")
                         .HasColumnType("integer");
@@ -4678,7 +4695,7 @@ namespace JobPortal.Persistence.Postgres.Migrations
                     b.HasIndex("JobSourceId")
                         .IsUnique()
                         .HasDatabaseName("UX_JobSourceRuns_ActiveSource")
-                        .HasFilter("\"Status\" IN (0, 1) OR (\"Status\" = 4 AND \"AttemptCount\" < 3)");
+                        .HasFilter("\"Status\" IN (0, 1) OR \"Status\" = 5 OR (\"Status\" = 4 AND \"AttemptCount\" < 3)");
 
                     b.HasIndex("RequestedByUserId");
 
@@ -4692,9 +4709,57 @@ namespace JobPortal.Persistence.Postgres.Migrations
                         {
                             t.HasCheckConstraint("CK_JobSourceRuns_Attempts", "\"AttemptCount\" BETWEEN 0 AND 3");
 
+                            t.HasCheckConstraint("CK_JobSourceRuns_Executions", "\"ExecutionCount\" BETWEEN 0 AND 1000");
+
                             t.HasCheckConstraint("CK_JobSourceRuns_Lease", "(\"Status\" = 1 AND \"LeaseOwner\" IS NOT NULL AND \"LeaseExpiresAtUtc\" IS NOT NULL) OR (\"Status\" <> 1 AND \"LeaseOwner\" IS NULL AND \"LeaseExpiresAtUtc\" IS NULL)");
 
-                            t.HasCheckConstraint("CK_JobSourceRuns_Status", "\"Status\" BETWEEN 0 AND 4");
+                            t.HasCheckConstraint("CK_JobSourceRuns_Status", "\"Status\" BETWEEN 0 AND 7");
+                        });
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.JobSourceRunItem", b =>
+                {
+                    b.Property<Guid>("RunId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Ordinal")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CommittedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ExternalId")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<int>("IngestionOutcome")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("JobId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("PublicationAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("PublicationOutcome")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("PublicationReasonsJson")
+                        .HasColumnType("jsonb");
+
+                    b.Property<int>("ReasonCode")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ValidationReason")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.HasKey("RunId", "Ordinal");
+
+                    b.ToTable("JobSourceRunItems", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_JobSourceRunItems_Ordinal", "\"Ordinal\" BETWEEN 0 AND 9999");
                         });
                 });
 
@@ -7622,6 +7687,15 @@ namespace JobPortal.Persistence.Postgres.Migrations
                         .WithMany()
                         .HasForeignKey("RequestedByUserId")
                         .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.JobSourceRunItem", b =>
+                {
+                    b.HasOne("JobPortal.Domain.Entities.JobSourceRun", null)
+                        .WithMany()
+                        .HasForeignKey("RunId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("JobPortal.Domain.Entities.Membership", b =>

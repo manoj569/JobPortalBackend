@@ -236,7 +236,8 @@ public sealed class JobConfiguration : IEntityTypeConfiguration<Job>
         builder.Property(x => x.Location).HasMaxLength(250);
         builder.Property(x => x.MinimumSalary).HasPrecision(18, 2);
         builder.Property(x => x.MaximumSalary).HasPrecision(18, 2);
-        builder.Property(x => x.CurrencyCode).HasMaxLength(3).IsFixedLength().IsRequired();
+        builder.Property(x => x.CurrencyCode).HasMaxLength(3).IsFixedLength().IsRequired(false);
+        builder.Property(x => x.ManualClassificationOverrides).HasMaxLength(200);
         builder.Property(x => x.Department).HasMaxLength(150);
         builder.Property(x => x.RoleCategory).HasMaxLength(150);
         builder.Property(x => x.EducationRequirement).HasMaxLength(200);

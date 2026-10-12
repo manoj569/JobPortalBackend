@@ -3,12 +3,28 @@ namespace JobPortal.Application.Abstractions.Jobs;
 public sealed record JobSourceRunResult
 {
     public Guid JobSourceId { get; init; }
+    public Guid? RunId { get; init; }
+    public bool ContinuationPending { get; init; }
+    public string? StopReason { get; init; }
+    public int ListingTotal { get; init; }
+    public int ListingPages { get; init; }
+    public int ObservedIdentities { get; init; }
+    public int DetailAttempted { get; init; }
+    public int DetailSucceeded { get; init; }
+    public int DetailFailed { get; init; }
+    public int DetailInFlight => Math.Max(0, DetailAttempted - DetailSucceeded - DetailFailed);
+    public JobSourceRunResult WithDetailProgress(WorkdayDetailProgress details) => details.ApplyTo(this);
+    public int CheckpointCursor { get; init; }
+    public int? RemainingWork { get; init; }
+    public DateTime? LastCheckpointAtUtc { get; init; }
+    public double DurationMilliseconds { get; init; }
 
     public int TotalReceived { get; init; }
     public int Fetched => TotalReceived;
     public int Parsed { get; init; }
     public bool ScanComplete { get; init; }
     public bool ReconciliationSafe { get; init; }
+    public IReadOnlyList<string> ReconciliationBlockReasons { get; init; } = [];
     public IReadOnlyDictionary<string, int>? EligibilityReasonCounts { get; init; }
     public int IndiaEligible => (EligibilityReasonCounts?.GetValueOrDefault("IndiaLocationConfirmed") ?? 0) +
         (EligibilityReasonCounts?.GetValueOrDefault("ExplicitIndiaRemote") ?? 0);

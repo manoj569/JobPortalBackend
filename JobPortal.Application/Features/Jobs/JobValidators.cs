@@ -12,7 +12,7 @@ internal static class JobValidationRules
         Expression<Func<T, string?>> responsibilities, Expression<Func<T, string?>> requirements,
         Expression<Func<T, string?>> benefits, Expression<Func<T, string?>> location,
         Expression<Func<T, decimal?>> minimumSalary, Expression<Func<T, decimal?>> maximumSalary,
-        Expression<Func<T, string>> currencyCode,
+        Expression<Func<T, string?>> currencyCode,
         Expression<Func<T, EmploymentType>> employmentType,
         Expression<Func<T, WorkplaceType>> workplaceType,
         Expression<Func<T, ExperienceLevel>> experienceLevel,
@@ -35,7 +35,7 @@ internal static class JobValidationRules
         validator.RuleFor(location).MaximumLength(250);
         validator.RuleFor(minimumSalary).GreaterThanOrEqualTo(0);
         validator.RuleFor(maximumSalary).GreaterThanOrEqualTo(0);
-        validator.RuleFor(currencyCode).NotEmpty().Length(3).Matches("^[A-Za-z]{3}$");
+        validator.RuleFor(currencyCode).Must(value => value is null || System.Text.RegularExpressions.Regex.IsMatch(value, "^[A-Za-z]{3}$"));
         validator.RuleFor(employmentType).Must(value => (int)value == 0 || Enum.IsDefined(value));
         validator.RuleFor(workplaceType).Must(value => (int)value == 0 || Enum.IsDefined(value));
         validator.RuleFor(experienceLevel).Must(value => (int)value == 0 || Enum.IsDefined(value));
@@ -82,6 +82,8 @@ public sealed class CreateJobRequestValidator : AbstractValidator<CreateJobReque
 {
     public CreateJobRequestValidator()
     {
+        RuleFor(x => x.SalaryPeriod).IsInEnum();
+        RuleFor(x => x.ManualOverrideFields).Must(values => values is null || values.All(JobPortal.Application.Services.JobClassificationPolicy.Fields.Contains));
         JobValidationRules.Apply(this, x => x.Title, x => x.Description, x => x.CompanyId, x => x.CategoryId,
             x => x.Responsibilities, x => x.Requirements, x => x.Benefits, x => x.Location,
             x => x.MinimumSalary, x => x.MaximumSalary, x => x.CurrencyCode,
@@ -100,6 +102,8 @@ public sealed class UpdateJobRequestValidator : AbstractValidator<UpdateJobReque
 {
     public UpdateJobRequestValidator()
     {
+        RuleFor(x => x.SalaryPeriod).IsInEnum();
+        RuleFor(x => x.ManualOverrideFields).Must(values => values is null || values.All(JobPortal.Application.Services.JobClassificationPolicy.Fields.Contains));
         JobValidationRules.Apply(this, x => x.Title, x => x.Description, x => x.CompanyId, x => x.CategoryId,
             x => x.Responsibilities, x => x.Requirements, x => x.Benefits, x => x.Location,
             x => x.MinimumSalary, x => x.MaximumSalary, x => x.CurrencyCode,

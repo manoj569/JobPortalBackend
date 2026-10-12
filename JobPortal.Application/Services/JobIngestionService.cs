@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using JobPortal.Application.Abstractions.Jobs;
 using JobPortal.Application.Abstractions.Persistence;
 using JobPortal.Application.Common.Text;
@@ -15,8 +16,11 @@ public sealed class JobIngestionService(
     IUnitOfWork unitOfWork,
     TimeProvider timeProvider,
     IExternalJobCreationLock creationLock,
-    IUrlCanonicalizer canonicalizer) : IJobIngestionService, IBulkJobIngestionService, IBatchedJobIngestionService
+    IUrlCanonicalizer canonicalizer,
+    IJobSourceRunCheckpoint? checkpoint = null, ILogger<JobIngestionService>? classificationLogger = null,
+    IJobClassificationService? classifier = null) : IJobIngestionService, IBulkJobIngestionService, IBatchedJobIngestionService
 {
+    private static readonly Action<ILogger, Guid?, string?, Guid, Exception?> ClassificationFailed = LoggerMessage.Define<Guid?, string?, Guid>(LogLevel.Error, new EventId(7410, "ClassificationFailed"), "Classification failed for source {SourceId}, external job {ExternalId}, job {JobId}");
     // JobSourceRunner processes a source sequentially inside one DI scope.
     // Cache successful company resolutions so a source containing many jobs
     // from the same company does not repeat the same remote database lookup.
@@ -48,7 +52,7 @@ public sealed class JobIngestionService(
         if (_batchMode) return;
         var start = System.Diagnostics.Stopwatch.GetTimestamp();
         _saveCalls++;
-        try { await unitOfWork.SaveChangesAsync(token); }
+        try { await unitOfWork.SaveChangesAsync(token); checkpoint?.ConfirmSaved(); }
         finally { _saveMilliseconds += System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds; }
     }
 
@@ -294,6 +298,12 @@ public sealed class JobIngestionService(
                 owned.LastSeenAtUtc = now;
                 owned.FirstSeenAtUtc ??= now;
                 if (changed) owned.UpdatedAtUtc = now;
+                var ownedResult = new JobIngestionResult
+                {
+                    Outcome = changed ? JobIngestionOutcome.Updated : JobIngestionOutcome.Unchanged,
+                    JobId = owned.Id, ExplicitReasonCode = JobIngestionReasonCode.None
+                };
+                checkpoint?.StageIngestion(rawJob, ownedResult);
                 await PersistAsync(cancellationToken);
                 if (_runPrepared)
                 {
@@ -333,6 +343,9 @@ public sealed class JobIngestionService(
                 var changed = ApplySourceFields(concurrentOwned, rawJob, title, company, location, applicationUrl);
                 concurrentOwned.LastSeenAtUtc = timeProvider.GetUtcNow().UtcDateTime;
                 concurrentOwned.FirstSeenAtUtc ??= concurrentOwned.LastSeenAtUtc;
+                checkpoint?.StageIngestion(rawJob, new JobIngestionResult
+                { Outcome = changed ? JobIngestionOutcome.Updated : JobIngestionOutcome.Unchanged,
+                    JobId = concurrentOwned.Id, ExplicitReasonCode = JobIngestionReasonCode.None });
                 await PersistAsync(cancellationToken);
                 if (_runPrepared) RememberSavedOwned(concurrentOwned, oldUrl);
                 if (_runPrepared && !_batchMode) jobs.ReleaseSavedAggregationTracking();
@@ -357,13 +370,13 @@ public sealed class JobIngestionService(
                     !_stagedMetadataRepairs.Contains(matchedSnapshot.Id))))
             {
                 if (_bulkTouchedJobIds.Contains(matchedSnapshot.Id))
-                    return DuplicateResult(duplicate, matchedSnapshot.Id);
+                    return await CommitDuplicateAsync(rawJob, duplicate, matchedSnapshot.Id, cancellationToken);
 
                 var touched = await jobs.TouchAggregationMetadataAsync(
                     matchedSnapshot.Id, now, cancellationToken);
 
                 if (touched > 0)
-                    return DuplicateResult(duplicate, matchedSnapshot.Id);
+                    return await CommitDuplicateAsync(rawJob, duplicate, matchedSnapshot.Id, cancellationToken);
 
                 if (touched == 0)
                     return Invalid("Matched job is no longer available.");
@@ -393,6 +406,7 @@ public sealed class JobIngestionService(
                 if (_batchMode) _stagedMetadataRepairs.Add(matchedJob.Id);
             }
 
+            checkpoint?.StageIngestion(rawJob, DuplicateResult(duplicate, matchedJob.Id));
             await PersistAsync(cancellationToken);
             if (_batchMode && matchedJob.FingerprintHash is not null)
                 _fingerprintMatches.TryAdd(matchedJob.FingerprintHash, matchedJob);
@@ -443,6 +457,9 @@ public sealed class JobIngestionService(
             SourcePostedAtUtc = rawJob.SourcePostedAtUtc is { Kind: DateTimeKind.Utc } posted ? posted : null
         };
 
+        ApplyClassification(job, rawJob);
+        checkpoint?.StageIngestion(rawJob, new JobIngestionResult
+        { Outcome = JobIngestionOutcome.Created, JobId = job.Id, ExplicitReasonCode = JobIngestionReasonCode.None });
         await jobs.AddAsync(job, cancellationToken);
         if (_batchMode) _fingerprintMatches.TryAdd(job.FingerprintHash!, job);
         await PersistAsync(cancellationToken);
@@ -462,6 +479,7 @@ public sealed class JobIngestionService(
     private bool ApplySourceFields(Job job, RawExternalJob raw, string title, Company company,
         string? location, string? applicationUrl)
     {
+        if (JobClassificationPolicy.Overrides(job).Contains("Location", StringComparer.Ordinal)) location = job.Location;
         var description = TextNormalizer.TrimOrNull(raw.Description) ?? string.Empty;
         var responsibilities = TextNormalizer.TrimOrNull(raw.Responsibilities);
         var requirements = TextNormalizer.TrimOrNull(raw.Requirements);
@@ -478,10 +496,7 @@ public sealed class JobIngestionService(
         var changed = metadataChanged || job.Title != title || job.Description != description || job.Responsibilities != responsibilities ||
             job.Requirements != requirements || job.Benefits != benefits || job.ApplicationUrl != (applicationUrl ?? string.Empty) ||
             job.CanonicalApplicationUrlHash != canonicalUrlHash || job.FingerprintHash != fingerprint || job.Slug != slug ||
-            job.Location != location || job.ExpiresAtUtc != expiry || job.MinimumSalary != raw.SalaryMin ||
-            job.MaximumSalary != raw.SalaryMax || job.EmploymentType != (raw.EmploymentType ?? default) ||
-            job.WorkplaceType != (raw.WorkplaceType ?? default) || job.ExperienceLevel != (raw.ExperienceLevel ?? default) ||
-            job.MinimumExperienceYears != raw.MinimumExperienceYears || job.MaximumExperienceYears != raw.MaximumExperienceYears ||
+            job.Location != location || job.ExpiresAtUtc != expiry ||
             job.EducationRequirement != education || (raw.CategoryId.HasValue && raw.CategoryId.Value != Guid.Empty && job.CategoryId != raw.CategoryId.Value) ||
             job.SourcePostedAtUtc != sourcePosted || job.CompanyId != company.Id;
 
@@ -497,19 +512,35 @@ public sealed class JobIngestionService(
         job.Location = location;
         if (metadataChanged) job.SourceMetadataJson = raw.SourceMetadataJson;
         job.ExpiresAtUtc = expiry;
-        job.MinimumSalary = raw.SalaryMin;
-        job.MaximumSalary = raw.SalaryMax;
-        job.EmploymentType = raw.EmploymentType ?? default;
-        job.WorkplaceType = raw.WorkplaceType ?? default;
-        job.ExperienceLevel = raw.ExperienceLevel ?? default;
-        job.MinimumExperienceYears = raw.MinimumExperienceYears;
-        job.MaximumExperienceYears = raw.MaximumExperienceYears;
+        var classificationBefore = ClassificationState(job);
+        ApplyClassification(job, raw);
+        changed |= classificationBefore != ClassificationState(job);
         job.EducationRequirement = education;
         job.SourcePostedAtUtc = sourcePosted;
         if (raw.CategoryId.HasValue && raw.CategoryId.Value != Guid.Empty)
             job.CategoryId = raw.CategoryId.Value;
         job.CompanyId = company.Id;
         return changed;
+    }
+
+    private static string ClassificationState(Job job) => System.Text.Json.JsonSerializer.Serialize(new
+    { job.EmploymentType, job.WorkplaceType, job.MinimumExperienceYears, job.MaximumExperienceYears,
+        job.MinimumSalary, job.MaximumSalary, job.CurrencyCode, job.SalaryPeriod, job.ClassificationJson });
+
+    private void ApplyClassification(Job job, RawExternalJob raw)
+    {
+        try
+        {
+            var result = (classifier ?? new JobClassificationService()).Analyze(new(raw.Title,
+            raw.Description + "\n" + raw.Requirements + "\n" + raw.Responsibilities, raw.Location,
+            raw.EmploymentType, raw.WorkplaceType, raw.MinimumExperienceYears, raw.MaximumExperienceYears,
+            raw.SalaryMin, raw.SalaryMax, raw.CurrencyCode, raw.SalaryPeriod));
+            JobClassificationPolicy.Apply(job, result, historical: job.ClassificationJson is null && job.CreatedAtUtc != default);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            if (classificationLogger is not null) ClassificationFailed(classificationLogger, raw.JobSourceId, raw.ExternalId, job.Id, ex);
+        }
     }
 
     private void RememberSavedOwned(Job job, string? oldUrl)
@@ -616,6 +647,18 @@ public sealed class JobIngestionService(
             _companyCache[cacheKey] = company;
 
         return company;
+    }
+
+    private async Task<JobIngestionResult> CommitDuplicateAsync(RawExternalJob raw, DeduplicationResult duplicate,
+        Guid jobId, CancellationToken ct)
+    {
+        var result = DuplicateResult(duplicate, jobId);
+        if (checkpoint is { Enabled: true })
+        {
+            checkpoint.StageIngestion(raw, result);
+            await PersistAsync(ct);
+        }
+        return result;
     }
 
     private static JobIngestionResult DuplicateResult(DeduplicationResult duplicate, Guid jobId) =>

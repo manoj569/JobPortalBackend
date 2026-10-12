@@ -16,10 +16,19 @@ public sealed class JobSourceCategoryResolver(
     private static readonly Action<ILogger, Guid, string, Exception?> CategoryMissing =
         LoggerMessage.Define<Guid, string>(LogLevel.Information, new EventId(4385, nameof(CategoryMissing)),
             "JobSourceCategoryResolution Source={JobSourceId} ReasonCode={ReasonCode}");
+    private static readonly Action<ILogger, Guid, string, int, Exception?> CategorySummary =
+        LoggerMessage.Define<Guid, string, int>(LogLevel.Information, new EventId(4388, nameof(CategorySummary)),
+            "JobSourceCategorySummary Source={JobSourceId} ReasonCode={ReasonCode} Count={Count}");
+    private readonly Dictionary<(Guid Source, string Reason), int> _missing = [];
     private bool _running;
     private readonly HashSet<Guid> _validCategories = [];
-    public void BeginRun() { _running = true; _validCategories.Clear(); _categoryOptions = null; }
-    public void EndRun() { _running = false; _validCategories.Clear(); _categoryOptions = null; }
+    public void BeginRun() { _missing.Clear(); _running = true; _validCategories.Clear(); _categoryOptions = null; }
+    public void EndRun()
+    {
+        if (logger is not null)
+            foreach (var (key, count) in _missing) CategorySummary(logger, key.Source, key.Reason, count, null);
+        _missing.Clear(); _running = false; _validCategories.Clear(); _categoryOptions = null;
+    }
     private async Task<bool> ExistsAsync(Guid id, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
@@ -85,6 +94,7 @@ public sealed class JobSourceCategoryResolver(
 
     private void MissingCategory(JobSource source, string reason)
     {
-        if (logger is not null) CategoryMissing(logger, source.Id, reason, null);
+        if (_running) _missing[(source.Id, reason)] = _missing.GetValueOrDefault((source.Id, reason)) + 1;
+        else if (logger is not null) CategoryMissing(logger, source.Id, reason, null);
     }
 }

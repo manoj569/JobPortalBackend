@@ -1,0 +1,67 @@
+[
+  {
+    "company": "Kyndryl",
+    "detailUrl": "https://kyndryl.wd5.myworkdayjobs.com/wday/cxs/kyndryl/KyndrylProfessionalCareers/job/RMZ-TITANIUM/Banking-Application-Consultant_R-69122",
+    "stableId": true,
+    "externalId": "R-69122",
+    "india": true,
+    "location": "RMZ TITANIUM",
+    "applicationEntryUrl": "https://kyndryl.wd5.myworkdayjobs.com/KyndrylProfessionalCareers/job/RMZ-TITANIUM/Banking-Application-Consultant_R-69122",
+    "samePublicHost": true,
+    "canApply": true,
+    "endDate": null,
+    "verifiedAtUtc": "2026-10-11T17:28:11.8266691Z"
+  },
+  {
+    "company": "Mastercard",
+    "detailUrl": "https://mastercard.wd1.myworkdayjobs.com/wday/cxs/mastercard/CorporateCareers/job/Pune-India/Lead-Software-Engineer_R-287556-1",
+    "stableId": true,
+    "externalId": "R-287556",
+    "india": true,
+    "location": "Pune, India",
+    "applicationEntryUrl": "https://mastercard.wd1.myworkdayjobs.com/CorporateCareers/job/Pune-India/Lead-Software-Engineer_R-287556-1",
+    "samePublicHost": true,
+    "canApply": true,
+    "endDate": null,
+    "verifiedAtUtc": "2026-10-11T17:28:17.2403799Z"
+  },
+  {
+    "company": "Intel",
+    "detailUrl": "https://intel.wd1.myworkdayjobs.com/wday/cxs/intel/External/job/India-Bangalore/Accountant_JR0283198",
+    "stableId": true,
+    "externalId": "JR0283198",
+    "india": true,
+    "location": "India, Bangalore",
+    "applicationEntryUrl": "https://intel.wd1.myworkdayjobs.com/External/job/India-Bangalore/Accountant_JR0283198",
+    "samePublicHost": true,
+    "canApply": true,
+    "endDate": null,
+    "verifiedAtUtc": "2026-10-11T17:28:18.8098296Z"
+  },
+  {
+    "company": "Philips",
+    "detailUrl": "https://philips.wd3.myworkdayjobs.com/wday/cxs/philips/jobs-and-careers/job/Bangalore/Modality-Sales-Specialist--Bangalore_583824",
+    "stableId": true,
+    "externalId": "583824",
+    "india": true,
+    "location": "Bangalore",
+    "applicationEntryUrl": "https://philips.wd3.myworkdayjobs.com/jobs-and-careers/job/Bangalore/Modality-Sales-Specialist--Bangalore_583824",
+    "samePublicHost": true,
+    "canApply": true,
+    "endDate": null,
+    "verifiedAtUtc": "2026-10-11T17:28:21.3704757Z"
+  },
+  {
+    "company": "Johnson Controls",
+    "detailUrl": "https://jci.wd5.myworkdayjobs.com/wday/cxs/jci/JCI/job/Bangalore-Karnataka-India/Product-Manager---Selection-Navigator_WD30281742",
+    "stableId": true,
+    "externalId": "WD30281742",
+    "india": true,
+    "location": "Bangalore-Karnataka-India",
+    "applicationEntryUrl": "https://jci.wd5.myworkdayjobs.com/JCI/job/Bangalore-Karnataka-India/Product-Manager---Selection-Navigator_WD30281742",
+    "samePublicHost": true,
+    "canApply": true,
+    "endDate": "2026-10-15",
+    "verifiedAtUtc": "2026-10-11T17:28:24.1422733Z"
+  }
+]

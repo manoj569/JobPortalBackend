@@ -1,3 +1,4 @@
+using JobPortal.Domain.Enums;
 using FluentValidation;
 
 namespace JobPortal.Application.Features.PublicJobs;
@@ -14,6 +15,10 @@ public sealed class PublicJobQueryValidator : AbstractValidator<PublicJobQuery>
         RuleFor(x => x.EffectivePageNumber)
             .Must((query, page) => ((long)page - 1) * query.PageSize <= int.MaxValue)
             .WithMessage("Requested page exceeds the supported offset.");
+        RuleFor(x => x.CurrencyCode).Matches("^[A-Z]{3}$");
+        RuleFor(x => x.SalaryPeriod).IsInEnum();
+        RuleFor(x => x.CurrencyCode).NotEmpty().When(x => x.SalaryPeriod.HasValue);
+        RuleFor(x => x.SalaryPeriod).NotNull().When(x => x.CurrencyCode is not null);
         RuleFor(x => x.Search).MaximumLength(250);
         RuleFor(x => x.Keyword).MaximumLength(250);
         RuleFor(x => x.Location).MaximumLength(250);

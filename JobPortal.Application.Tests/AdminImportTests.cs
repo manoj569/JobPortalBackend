@@ -179,7 +179,7 @@ public sealed class AdminImportTests
         var fixture = CreateFixture();
         var expired = Now.AddMinutes(-1).ToString("O");
         var row =
-            $"Example Role,Missing Company,Missing Category,Description,not-a-url,Unknown,Somewhere,None,Pune,200,100,INR,{expired},Responsibilities,Requirements,Benefits,false";
+            $"Example Role,Missing Company,Missing Category,Description,not-a-url,NotAnEmploymentType,Somewhere,None,Pune,200,100,INR,{expired},Responsibilities,Requirements,Benefits,false";
 
         var result = await fixture.Service.PreviewJobsAsync(JobFile(row));
 
@@ -233,6 +233,21 @@ public sealed class AdminImportTests
         Assert.Null(job.PublishedAtUtc);
         Assert.Null(job.RecruiterContact);
         Assert.Equal(1, fixture.UnitOfWork.SaveCount);
+    }
+
+    [Fact]
+    public async Task CsvClassificationFillsMissingFieldsAndKeepsExplicitSelections()
+    {
+        var fixture = CreateFixtureWithReferences();
+        var row = "Imported Role,Example Company,Technology,Minimum 3 years experience. Fully remote. Full-time opportunity,https://jobs.example.invalid/classified,PartTime,,Mid,Pune,,,,,,,,true";
+        var result = await fixture.Service.CommitJobsAsync(JobFile(row));
+        Assert.Equal(1, result.ImportedRows);
+        var job = Assert.Single(fixture.Repository.AddedJobs);
+        Assert.Equal(3, job.MinimumExperienceYears);
+        Assert.Equal(WorkplaceType.Remote, job.WorkplaceType);
+        Assert.Equal(EmploymentType.PartTime, job.EmploymentType);
+        Assert.Null(job.CurrencyCode);
+        Assert.NotNull(job.ClassificationJson);
     }
 
     [Fact]

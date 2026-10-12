@@ -29,13 +29,18 @@ public sealed class JobAggregationOptions
 
 public sealed class WorkdayFetchOptions
 {
+    public int JobsPerExecution { get; set; } = 500;
+    public int ExecutionSeconds { get; set; } = 600;
+    public int ContinuationDelaySeconds { get; set; } = 60;
+    public int MaximumExecutions { get; set; } = 200;
     public int BatchSize { get; set; } = 100;
     public int DetailConcurrency { get; set; } = 8;
     public int RequestTimeoutSeconds { get; set; } = 15;
     public int RunBudgetSeconds { get; set; } = 1800;
     public int MaximumAttempts { get; set; } = 3;
     public int RequestSpacingMilliseconds { get; set; } = 250;
-    public bool IsValid() => BatchSize is >= 1 and <= 200 && DetailConcurrency is >= 1 and <= 16 &&
+    public bool IsValid() => JobsPerExecution is >= 1 and <= 10000 && ExecutionSeconds is >= 30 and <= 1800 &&
+        ContinuationDelaySeconds is >= 5 and <= 3600 && MaximumExecutions is >= 1 and <= 1000 && BatchSize is >= 1 and <= 200 && DetailConcurrency is >= 1 and <= 16 &&
         RequestTimeoutSeconds is >= 1 and <= 60 && RunBudgetSeconds is >= 1 and <= 7200 &&
         MaximumAttempts is >= 1 and <= 5 && RequestSpacingMilliseconds is >= 250 and <= 5000;
 }

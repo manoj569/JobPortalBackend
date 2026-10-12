@@ -1,0 +1,40 @@
+[
+  {
+    "officialUrl": "https://careers.mastercard.com/us/en",
+    "status": 200,
+    "workdayLinks": [
+      "https://mastercard.wd1.myworkdayjobs.com/CorporateCareers"
+    ]
+  },
+  {
+    "officialUrl": "https://www.salesforce.com/company/careers/jobs/",
+    "status": 200,
+    "workdayLinks": []
+  },
+  {
+    "officialUrl": "https://jobs.hp.com/",
+    "status": 200,
+    "workdayLinks": []
+  },
+  {
+    "officialUrl": "https://www.intel.com/content/www/us/en/support/articles/000089205/programs/jobs-at-intel.html",
+    "error": "Response status code does not indicate success: 403 (Forbidden)."
+  },
+  {
+    "officialUrl": "https://www.nvidia.com/en-us/about-nvidia/careers/",
+    "status": 200,
+    "workdayLinks": []
+  },
+  {
+    "officialUrl": "https://careers.adobe.com/",
+    "status": 200,
+    "workdayLinks": []
+  },
+  {
+    "officialUrl": "https://www.careers.philips.com/emea/en/philips-recruitment-fraud-alert",
+    "status": 200,
+    "workdayLinks": [
+      "https://philips.wd3.myworkdayjobs.com/jobs-and-careers"
+    ]
+  }
+]

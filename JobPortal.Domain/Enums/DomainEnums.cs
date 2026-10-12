@@ -19,9 +19,9 @@ public enum PaymentStatus
 public enum PaymentProvider { Unknown = 0, Stripe, Razorpay, PayPal, BankTransfer, PhonePe }
 public enum JobStatus { Draft = 1, Published, Paused, Closed, Expired, Archived }
 public enum ResumeExtractionStatus { NotStarted = 0, Processing, Ready, Failed }
-public enum EmploymentType { FullTime = 1, PartTime, Contract, Internship, Freelance, Temporary }
-public enum WorkplaceType { OnSite = 1, Remote, Hybrid }
-public enum ExperienceLevel { Entry = 1, Junior, Mid, Senior, Lead, Executive }
+public enum EmploymentType { Unknown = 0, FullTime = 1, PartTime, Contract, Internship, Freelance, Temporary }
+public enum WorkplaceType { Unknown = 0, OnSite = 1, Remote, Hybrid }
+public enum ExperienceLevel { Unknown = 0, Entry = 1, Junior, Mid, Senior, Lead, Executive }
 public enum CompanyType { Startup = 1, Corporate, IndianMnc, ForeignMnc, Consultant }
 public enum CompanySubmissionSource { Administrative = 0, CandidateSubmitted = 1 }
 public enum PostedByType { Company = 1, Consultant }
@@ -113,3 +113,5 @@ public enum AtsType
     SuccessFactors = 4,
     Workday = 5
 }
+
+public enum SalaryPeriod { Yearly = 1, Monthly, Hourly }

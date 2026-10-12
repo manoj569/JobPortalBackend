@@ -17,7 +17,8 @@ public sealed partial class JobSourceRunner(
     IExternalJobMetadataEnricher? enricher = null,
     IJobRepository? jobRepository = null,
     JobPortal.Application.Features.JobAggregation.IJobSourceRunProgress? runProgress = null,
-    JobPortal.Application.Features.JobAggregation.IJobSourcePublicationPolicy? publicationPolicy = null) : IJobSourceRunner
+    JobPortal.Application.Features.JobAggregation.IJobSourcePublicationPolicy? publicationPolicy = null,
+    IJobSourceRunCheckpoint? checkpoint = null) : IJobSourceRunner
 {
     private static readonly Action<ILogger, Guid, string, int, double, Exception?> Progress =
         LoggerMessage.Define<Guid, string, int, double>(LogLevel.Information, new EventId(4325, nameof(Progress)),
@@ -118,6 +119,10 @@ public sealed partial class JobSourceRunner(
             };
         }
 
+        checkpoint?.Enable(source);
+        if (checkpoint is { Enabled: true, State.CompletedResult: { Succeeded: true } completed })
+            return completed; // Final source bookkeeping/closures were already durably committed.
+
         // Admin and scheduler callers already hold the SAME local/distributed
         // execution guards. Save the attempt before any provider/network work.
         var attemptAt = timeProvider.GetUtcNow().UtcDateTime;
@@ -147,6 +152,8 @@ public sealed partial class JobSourceRunner(
             };
         }
 
+        checkpoint?.Enable(source);
+        var durable = checkpoint is { Enabled: true };
         var previousSuccessfulRun = source.LastSuccessfulRunAtUtc;
         var previousFailures = source.ConsecutiveFailures;
         var previousError = source.LastError;
@@ -159,8 +166,16 @@ public sealed partial class JobSourceRunner(
             publicationPolicy?.ApplyLicensedLogo(source);
             ExternalJobSourceSnapshot? snapshot = null;
             var providerSnapshotComplete = false;
+            var reconciliationSafe = false;
+            IReadOnlyList<string> reconciliationBlockReasons = [];
             var rawJobs = new List<RawExternalJob>();
-            var observedJobs = new List<RawExternalJob>();
+            var observedJobs = new List<RawExternalJob>(durable ? checkpoint!.State?.ObservedJobs ?? [] : []);
+            if (durable && checkpoint!.State is { } restored)
+            {
+                snapshot = selectionPolicy.Select(source, new(observedJobs, restored.ProviderSkipped, false));
+                rawJobs.AddRange(snapshot.Jobs); // Earlier eligible items are already durably acknowledged.
+            }
+            var continuationPending = false;
             var processingTimer = System.Diagnostics.Stopwatch.StartNew();
             var enrichmentMilliseconds = 0d;
             var ingestionMilliseconds = 0d;
@@ -186,12 +201,37 @@ public sealed partial class JobSourceRunner(
 
             void ReportProgress(string phase)
             {
+                if (durable)
+                {
+                    var committed = checkpoint!.CommittedCounters;
+                    created = committed.Created; updated = committed.Updated; unchanged = committed.Unchanged;
+                    matched = committed.Matched; skipped = (snapshot?.Skipped ?? 0) + committed.Skipped;
+                    failed = committed.Failed; published = committed.Published; needsReview = committed.NeedsReview;
+                    qualityRejected = committed.QualityRejected; publishFailed = committed.PublishFailed;
+                    disabled = committed.AutoPublishDisabled; processed = committed.TotalReceived;
+                    reasonCounts.Clear(); validationReasons.Clear(); qualityReasons.Clear();
+                    foreach (var (key, count) in committed.ReasonCounts ?? new Dictionary<JobIngestionReasonCode, int>()) reasonCounts[key] = count;
+                    foreach (var (key, count) in committed.ValidationReasonCounts ?? new Dictionary<string, int>()) validationReasons[key] = count;
+                    foreach (var (key, count) in committed.QualityReasonCounts ?? new Dictionary<JobQualityReasonCode, int>()) qualityReasons[key] = count;
+                    if (snapshot?.Skipped > 0) reasonCounts[JobIngestionReasonCode.ProviderError] = snapshot.Skipped;
+                }
                 partialResult = new JobSourceRunResult
                 {
-                    JobSourceId = source.Id, TotalReceived = observedJobs.Count + (snapshot?.Skipped ?? 0),
+                    JobSourceId = source.Id, RunId = durable ? checkpoint!.RunId : null,
+                    ListingTotal = durable ? checkpoint!.State?.ListingTotal ?? 0 : 0,
+                    ListingPages = durable ? checkpoint!.State?.ListingPages ?? 0 : 0,
+                    CheckpointCursor = durable ? checkpoint!.State?.Cursor ?? 0 : 0,
+                    LastCheckpointAtUtc = durable ? checkpoint!.State?.CommittedAtUtc : null,
+                    RemainingWork = durable && checkpoint!.State is { } state ? state.ListingTotal - state.Cursor : null,
+                    ObservedIdentities = observedJobs.Select(x => x.ExternalId).Distinct(StringComparer.Ordinal).Count(),
+                    DetailAttempted = observedJobs.Count + (snapshot?.Skipped ?? 0), DetailSucceeded = observedJobs.Count,
+                    DetailFailed = snapshot?.Skipped ?? 0, DurationMilliseconds = runTimer.Elapsed.TotalMilliseconds,
+                    TotalReceived = observedJobs.Count + (snapshot?.Skipped ?? 0),
                     Parsed = observedJobs.Count,
                     EligibilityReasonCounts = snapshot?.EligibilityReasonCounts,
                     ScanComplete = providerSnapshotComplete,
+                    ReconciliationSafe = reconciliationSafe,
+                    ReconciliationBlockReasons = reconciliationBlockReasons,
                     Created = created, Updated = updated, Unchanged = unchanged, Matched = matched,
                     Skipped = skipped, Failed = failed, Published = published, NeedsReview = needsReview,
                     QualityRejected = qualityRejected, PublishFailed = publishFailed, AutoPublishDisabled = disabled,
@@ -200,6 +240,7 @@ public sealed partial class JobSourceRunner(
                     ValidationReasonCounts = new Dictionary<string, int>(validationReasons),
                     SelectionReasonCounts = snapshot?.SelectionReasonCounts
                 };
+                if (durable) partialResult = partialResult.WithDetailProgress(checkpoint!.Details);
                 runProgress?.Report(new(phase, processed, partialResult));
             }
             ReportProgress("Ingestion");
@@ -207,11 +248,12 @@ public sealed partial class JobSourceRunner(
             await foreach (var batch in FetchBatchesAsync(provider, source, cancellationToken))
             {
                 observedJobs.AddRange(batch.Jobs);
+                continuationPending = batch.ContinuationPending;
                 var providerSkipped = (snapshot?.Skipped ?? 0) + batch.Skipped;
                 providerSnapshotComplete = provider is ICompleteExternalJobProvider && batch.IsComplete;
                 snapshot = new(observedJobs, providerSkipped, providerSnapshotComplete);
                 // Apply the policy cumulatively: a configured 20-job cap must not
-                // become 20 jobs PER batch, and ambiguous geography stays incomplete.
+                // become 20 jobs PER batch. Geography selection preserves census completeness.
                 var selected = selectionPolicy.Select(source, snapshot);
                 if (selected is not null) snapshot = selected;
                 var accepted = selected?.Jobs ?? observedJobs;
@@ -247,7 +289,8 @@ public sealed partial class JobSourceRunner(
                 IReadOnlyList<JobIngestionResult>? committedBatch = null;
                 RawExternalJob[]? preparedBatch = null;
                 if (newJobs.Length > 0 && source.AtsType == JobPortal.Domain.Enums.AtsType.Workday &&
-                    newJobs.All(x => !x.ExpiresAtUtc.HasValue) && ingestionService is IBatchedJobIngestionService batchedIngestion)
+                    newJobs.All(x => !x.ExpiresAtUtc.HasValue) && ingestionService is IBatchedJobIngestionService batchedIngestion &&
+                    (!durable || !newJobs.Any(x => checkpoint!.Replay(x) is not null)))
                 {
                     try
                     {
@@ -283,6 +326,7 @@ public sealed partial class JobSourceRunner(
                         // per-item path. Ambiguous commits are rechecked under locks.
                         unitOfWork.ResetAfterFailure();
                         (ingestionService as IBulkJobIngestionService)?.ResetRunAfterFailure();
+                        if (durable) await checkpoint!.RefreshAsync(cancellationToken);
                         preparedBatch = null;
                         if (_logger is not null) ItemFailed(_logger, source.Id, null);
                     }
@@ -307,6 +351,9 @@ public sealed partial class JobSourceRunner(
                     if (committedBatch is null) cancellationToken.ThrowIfCancellationRequested();
 
                     var publicationAttempt = false;
+                    JobIngestionResult? durableResult = null;
+                    JobAutoPublishResult? durablePublication = null;
+                    checkpoint?.SetCurrentItem(rawJob);
                     try
                     {
                         var enrichmentStart = System.Diagnostics.Stopwatch.GetTimestamp();
@@ -326,9 +373,12 @@ public sealed partial class JobSourceRunner(
 
                         var ingestionStart = System.Diagnostics.Stopwatch.GetTimestamp();
                         JobIngestionResult result;
-                        try { result = committedBatch is not null ? committedBatch[batchIndex] : await ingestionService.IngestAsync(preparedJob, cancellationToken); }
+                        try { result = durable ? checkpoint!.Replay(rawJob) ??
+                            (committedBatch is not null ? committedBatch[batchIndex] : await ingestionService.IngestAsync(preparedJob, cancellationToken)) :
+                            committedBatch is not null ? committedBatch[batchIndex] : await ingestionService.IngestAsync(preparedJob, cancellationToken); }
                         finally { ingestionMilliseconds += System.Diagnostics.Stopwatch.GetElapsedTime(ingestionStart).TotalMilliseconds; }
 
+                        durableResult = result;
                         switch (result.Outcome)
                         {
                             case JobIngestionOutcome.Created:
@@ -370,8 +420,10 @@ public sealed partial class JobSourceRunner(
                             result.JobId.HasValue && autoPublishService is not null && !cancellationToken.IsCancellationRequested)
                         {
                             publicationAttempt = true;
-                            var publication = batchReview is not null && batchReview.TryGetValue(result.JobId.Value, out var reviewed)
+                            var publication = durable ? checkpoint!.ReplayedPublication(rawJob) : null;
+                            publication ??= batchReview is not null && batchReview.TryGetValue(result.JobId.Value, out var reviewed)
                                 ? reviewed : await autoPublishService.TryPublishAsync(result.JobId.Value, cancellationToken);
+                            durablePublication = publication;
                             switch (publication.Outcome)
                             {
                                 case JobAutoPublishOutcome.Published: published++; break;
@@ -389,6 +441,8 @@ public sealed partial class JobSourceRunner(
                                 qualityReasons[reason] = qualityReasons.GetValueOrDefault(reason) + 1;
                         }
 
+                        if (durable) await checkpoint!.CompleteItemAsync(rawJob, result, durablePublication, cancellationToken);
+
                         // Tally the machine-readable reason for every item result.
                         if (result.ReasonCode != JobIngestionReasonCode.None)
                         {
@@ -401,6 +455,7 @@ public sealed partial class JobSourceRunner(
                     {
                         if (committedBatch is null) throw;
                     }
+                    catch (JobSourceSnapshotUnsafeException) { throw; }
                     catch
                     {
                         // A malformed/problematic individual record must not
@@ -410,6 +465,17 @@ public sealed partial class JobSourceRunner(
                         // records the failure classification.
                         unitOfWork.ResetAfterFailure();
                         (ingestionService as IBulkJobIngestionService)?.ResetRunAfterFailure();
+                        if (durable)
+                        {
+                            await checkpoint!.RefreshAsync(cancellationToken);
+                            var recovered = checkpoint.Replay(rawJob);
+                            if (!publicationAttempt && recovered is not null)
+                                throw new JobSourceContinuationException("CommittedBatchRecoveryRequired");
+                            await checkpoint.CompleteItemAsync(rawJob, recovered ?? durableResult ?? new JobIngestionResult
+                            { Outcome = JobIngestionOutcome.Failed, ExplicitReasonCode = JobIngestionReasonCode.PersistenceError },
+                                publicationAttempt ? new JobAutoPublishResult { Outcome = JobAutoPublishOutcome.JobNotFound } : null,
+                                cancellationToken);
+                        }
                         failed++;
                         if (publicationAttempt) publishFailed++;
                         var failureReason = publicationAttempt
@@ -429,18 +495,40 @@ public sealed partial class JobSourceRunner(
                             Progress(_logger, source.Id, "Enrichment and ingestion progress", processed, processingTimer.Elapsed.TotalMilliseconds, null);
                     }
                 }
+                if (durable && batch.CheckpointCursor is { } cursor)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (autoPublishService is not null && newJobs.Any(x => checkpoint!.Replay(x)?.JobId is not null &&
+                        checkpoint.ReplayedPublication(x) is null))
+                        throw new JobSourceContinuationException("PublicationRecoveryRequired");
+                    await checkpoint!.CommitAsync(cursor, snapshot?.Skipped ?? 0, observedJobs, cancellationToken);
+                    ReportProgress("CheckpointCommitted");
+                }
 
             }
             cancellationToken.ThrowIfCancellationRequested();
             var closed = 0;
-            ReportProgress("Reconciliation");
             var externalIdsForReconciliation = observedJobs.Select(x => x.ExternalId)
                 .Where(x => !string.IsNullOrWhiteSpace(x))
                 .Select(x => x!.Trim())
                 .ToArray();
             var hasCompleteIdentities = externalIdsForReconciliation.Length == observedJobs.Count &&
                 externalIdsForReconciliation.Distinct(StringComparer.Ordinal).Count() == observedJobs.Count;
-            var canReconcile = snapshot is { IsComplete: true, Skipped: 0 } && hasCompleteIdentities && skipped == 0 && failed == 0;
+            var blockers = new List<string>();
+            if (!providerSnapshotComplete) blockers.Add("ProviderSnapshotIncomplete");
+            if (snapshot is not { IsComplete: true } && providerSnapshotComplete)
+                blockers.Add("SelectionSnapshotIncomplete"); // Includes configured test caps.
+            if (snapshot is null || snapshot.Skipped != 0) blockers.Add("ProviderSkippedItems");
+            if (!hasCompleteIdentities) blockers.Add("IncompleteOrDuplicateSourceIdentities");
+            if (skipped != 0) blockers.Add("SkippedItems");
+            if (failed != 0) blockers.Add("FailedItems");
+            reconciliationBlockReasons = blockers.ToArray();
+            var canReconcile = blockers.Count == 0;
+            reconciliationSafe = canReconcile;
+            ReportProgress("Reconciliation");
+            if (_logger is not null)
+                foreach (var reason in reconciliationBlockReasons)
+                    IngestionReason(_logger, source.Id, "Reconciliation", reason, 1, null);
             if (_logger is not null) Progress(_logger, source.Id, canReconcile ? "Reconciliation allowed" : "Reconciliation blocked: incomplete or unsafe snapshot",
                 observedJobs.Count, runTimer.Elapsed.TotalMilliseconds, null);
             var reconciliationTimer = System.Diagnostics.Stopwatch.StartNew();
@@ -469,11 +557,10 @@ public sealed partial class JobSourceRunner(
             var successful = provider is ICompleteExternalJobProvider ? canReconcile : skipped == 0 && failed == 0 &&
                 !(snapshot?.EligibilityReasonCounts?.Keys.Any(x => x is "AmbiguousLocation" or "ContradictoryLocation" or "UnknownCountry") ?? false);
             source.LastSuccessfulRunAtUtc = successful ? now : previousSuccessfulRun;
-            source.LastError = successful ? null : "External job source scan was incomplete or had failed/skipped items.";
-            source.ConsecutiveFailures = successful ? 0 : previousFailures + 1;
+            source.LastError = continuationPending ? previousError : successful ? null : "External job source scan was incomplete or had failed/skipped items.";
+            source.ConsecutiveFailures = continuationPending ? previousFailures : successful ? 0 : previousFailures + 1;
 
             sources.Update(source);
-            await unitOfWork.SaveChangesAsync(cancellationToken);
 
             // Provider-wide fetch failures never reach this per-item tally, but
             // any explicitly failed ingestion results are counted too.
@@ -488,6 +575,13 @@ public sealed partial class JobSourceRunner(
             var runResult = new JobSourceRunResult
             {
                 JobSourceId = source.Id,
+                RunId = partialResult.RunId, ListingTotal = partialResult.ListingTotal, ListingPages = partialResult.ListingPages,
+                ObservedIdentities = partialResult.ObservedIdentities, DetailAttempted = partialResult.DetailAttempted,
+                DetailSucceeded = partialResult.DetailSucceeded, DetailFailed = partialResult.DetailFailed,
+                CheckpointCursor = partialResult.CheckpointCursor, LastCheckpointAtUtc = partialResult.LastCheckpointAtUtc,
+                RemainingWork = partialResult.RemainingWork, DurationMilliseconds = runTimer.Elapsed.TotalMilliseconds,
+                ContinuationPending = continuationPending,
+                StopReason = successful ? "Complete" : continuationPending ? "ExecutionSliceComplete" : "IncompleteOrUnsafeScan",
                 TotalReceived = observedJobs.Count + (snapshot?.Skipped ?? 0),
                     Parsed = observedJobs.Count,
                     EligibilityReasonCounts = snapshot?.EligibilityReasonCounts,
@@ -509,14 +603,18 @@ public sealed partial class JobSourceRunner(
                 ValidationReasonCounts = validationReasons.Count == 0 ? null : validationReasons,
                 SelectionReasonCounts = snapshot?.SelectionReasonCounts,
                 ReconciliationSafe = canReconcile,
+                ReconciliationBlockReasons = reconciliationBlockReasons,
                 Succeeded = successful,
                 Error = source.LastError
             };
 
+            checkpoint?.StageCompletedResult(runResult);
+            await unitOfWork.SaveChangesAsync(cancellationToken);
+
             if (_logger is not null)
             {
                 if (successful) LogSucceeded(_logger, source.Id, processed, runTimer.Elapsed.TotalMilliseconds);
-                else LogFailed(_logger, source.Id, "IncompleteOrUnsafeScan");
+                else if (!continuationPending) LogFailed(_logger, source.Id, "IncompleteOrUnsafeScan");
                 Progress(_logger, source.Id, "Enrichment and ingestion completed", processed, processingTimer.Elapsed.TotalMilliseconds, null);
                 Progress(_logger, source.Id, "Run completed", processed, runTimer.Elapsed.TotalMilliseconds, null);
                 PublicationCompleted(_logger, source.Id, published, needsReview, qualityRejected, publishFailed, disabled, null);
@@ -538,6 +636,15 @@ public sealed partial class JobSourceRunner(
             }
 
             return runResult;
+        }
+        catch (JobSourceContinuationException exception)
+        {
+            unitOfWork.ResetAfterFailure();
+            source.LastSuccessfulRunAtUtc = previousSuccessfulRun;
+            source.LastError = previousError; source.ConsecutiveFailures = previousFailures;
+            if (durable) partialResult = partialResult.WithDetailProgress(checkpoint!.Details);
+            return partialResult with { Succeeded = false, ContinuationPending = true, StopReason = exception.ReasonCode, DurationMilliseconds = runTimer.Elapsed.TotalMilliseconds,
+                ReconciliationSafe = false, ReconciliationBlockReasons = ["ExecutionInterrupted"] };
         }
         catch (OperationCanceledException)
             when (cancellationToken.IsCancellationRequested)
@@ -570,7 +677,10 @@ public sealed partial class JobSourceRunner(
             sources.Update(source);
             await unitOfWork.SaveChangesAsync(cancellationToken);
 
-            return partialResult with { Succeeded = false, Error = source.LastError };
+            return partialResult with { Succeeded = false, Error = source.LastError,
+                StopReason = exception is JobSourceSnapshotUnsafeException unsafeSnapshot ? unsafeSnapshot.ReasonCode : "InfrastructureFailure",
+                ReconciliationSafe = false, ReconciliationBlockReasons = exception is JobSourceSnapshotUnsafeException
+                    ? ["SnapshotUnsafe"] : ["ExecutionFailed"] };
         }
         finally
         {

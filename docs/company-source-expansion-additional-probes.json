@@ -1,0 +1,312 @@
+[
+  {
+    "company": "Mastercard",
+    "verifiedAtUtc": "2026-10-11T17:19:19.1584548Z",
+    "verificationDate": "2026-10-11",
+    "listing": "https://mastercard.wd1.myworkdayjobs.com/wday/cxs/mastercard/CorporateCareers/jobs",
+    "searchText": "India",
+    "total": 252,
+    "sample": [
+      {
+        "title": "Lead Software Engineer",
+        "externalPath": "/job/Pune-India/Lead-Software-Engineer_R-287556-1",
+        "locationsText": "Pune, India",
+        "postedOn": "Posted 2 Days Ago",
+        "bulletFields": [
+          "R-287556"
+        ]
+      },
+      {
+        "title": "Director, Sales Operations & Business Transformation",
+        "externalPath": "/job/Gurgaon-India/Director--Sales-Operations---Business-Transformation_R-291604",
+        "locationsText": "Gurgaon, India",
+        "postedOn": "Posted 2 Days Ago",
+        "bulletFields": [
+          "R-291604"
+        ]
+      },
+      {
+        "title": "Specialist, Implementation",
+        "externalPath": "/job/Pune-India/Specialist--Implementation_R-291830-1",
+        "locationsText": "Pune, India",
+        "postedOn": "Posted 2 Days Ago",
+        "bulletFields": [
+          "R-291830"
+        ]
+      },
+      {
+        "title": "Software Integration Engineer-II",
+        "externalPath": "/job/Pune-India/Software-Integration-Engineer-II_R-280012-1",
+        "locationsText": "Pune, India",
+        "postedOn": "Posted 2 Days Ago",
+        "bulletFields": [
+          "R-280012"
+        ]
+      },
+      {
+        "title": "Data Scientist I",
+        "externalPath": "/job/Pune-India/Data-Scientist-I_R-278159",
+        "locationsText": "Pune, India",
+        "postedOn": "Posted 2 Days Ago",
+        "bulletFields": [
+          "R-278159"
+        ]
+      }
+    ],
+    "detailUrl": "https://mastercard.wd1.myworkdayjobs.com/wday/cxs/mastercard/CorporateCareers/job/Pune-India/Lead-Software-Engineer_R-287556-1",
+    "detail": {
+      "jobReqId": "R-287556",
+      "title": "Lead Software Engineer",
+      "location": "Pune, India",
+      "country": {
+        "descriptor": "India",
+        "id": "c4f78be1a8f14da0ab49ce1162348a5e"
+      },
+      "externalUrl": "https://mastercard.wd1.myworkdayjobs.com/CorporateCareers/job/Pune-India/Lead-Software-Engineer_R-287556-1",
+      "startDate": "2026-10-09",
+      "endDate": null,
+      "canApply": true,
+      "additionalLocations": null,
+      "postedOn": "Posted 2 Days Ago"
+    },
+    "status": "ok",
+    "fullPaginationVerified": false
+  },
+  {
+    "company": "Salesforce",
+    "verifiedAtUtc": "2026-10-11T17:19:25.7559101Z",
+    "verificationDate": "2026-10-11",
+    "listing": "https://salesforce.wd12.myworkdayjobs.com/wday/cxs/salesforce/External_Career_Site/jobs",
+    "searchText": "India",
+    "total": 243,
+    "sample": [
+      {
+        "title": "Executive Operations & Leadership Engagement DirectorDirector",
+        "externalPath": "/job/Georgia---Atlanta/Executive-Operations---Leadership-Engagement-DirectorDirector_JR363410",
+        "locationsText": "5 Locations",
+        "postedOn": "Posted Yesterday",
+        "bulletFields": [
+          "JR363410"
+        ]
+      },
+      {
+        "title": "Internal Audit Senior Analyst, Data Analytics",
+        "externalPath": "/job/Indiana---Indianapolis/Internal-Audit-Senior-Analyst--Data-Analytics_JR359944",
+        "locationsText": "4 Locations",
+        "postedOn": "Posted 2 Days Ago",
+        "bulletFields": [
+          "JR359944"
+        ]
+      },
+      {
+        "title": "Customer Success Manager - State East & Local",
+        "externalPath": "/job/District-of-Columbia---Washington/Customer-Success-Manager---State-East---Local_JR362631",
+        "locationsText": "11 Locations",
+        "postedOn": "Posted 2 Days Ago",
+        "bulletFields": [
+          "JR362631"
+        ]
+      },
+      {
+        "title": "Signature Success, Sales Executive - Telco, Media, Technology Vertical",
+        "externalPath": "/job/California---San-Francisco/Signature-Success--Sales-Executive---Telco--Media--Technology-Vertical_JR361301",
+        "locationsText": "6 Locations",
+        "postedOn": "Posted 2 Days Ago",
+        "bulletFields": [
+          "JR361301"
+        ]
+      },
+      {
+        "title": "VP, Global Compensation",
+        "externalPath": "/job/Texas---Austin/VP--Global-Compensation_JR360300",
+        "locationsText": "5 Locations",
+        "postedOn": "Posted 2 Days Ago",
+        "bulletFields": [
+          "JR360300"
+        ]
+      }
+    ],
+    "detailUrl": "https://salesforce.wd12.myworkdayjobs.com/wday/cxs/salesforce/External_Career_Site/job/Georgia---Atlanta/Executive-Operations---Leadership-Engagement-DirectorDirector_JR363410",
+    "detail": {
+      "jobReqId": "JR363410",
+      "title": "Executive Operations & Leadership Engagement DirectorDirector",
+      "location": "Georgia - Atlanta",
+      "country": {
+        "descriptor": "United States of America",
+        "id": "bc33aa3152ec42d4995f4791a106ed09"
+      },
+      "externalUrl": "https://salesforce.wd12.myworkdayjobs.com/External_Career_Site/job/Georgia---Atlanta/Executive-Operations---Leadership-Engagement-DirectorDirector_JR363410",
+      "startDate": "2026-10-10",
+      "endDate": null,
+      "canApply": true,
+      "additionalLocations": [
+        "Illinois - Chicago",
+        "Washington - Seattle",
+        "Indiana - Indianapolis",
+        "Texas - Austin"
+      ],
+      "postedOn": "Posted Yesterday"
+    },
+    "status": "ok",
+    "fullPaginationVerified": false
+  },
+  {
+    "company": "Intel",
+    "verifiedAtUtc": "2026-10-11T17:19:29.9047431Z",
+    "verificationDate": "2026-10-11",
+    "listing": "https://intel.wd1.myworkdayjobs.com/wday/cxs/intel/External/jobs",
+    "searchText": "India",
+    "total": 66,
+    "sample": [
+      {
+        "title": "Accountant",
+        "externalPath": "/job/India-Bangalore/Accountant_JR0283198",
+        "locationsText": "India, Bangalore",
+        "postedOn": "Posted 23 Days Ago",
+        "bulletFields": [
+          "JR0283198"
+        ]
+      },
+      {
+        "title": "AI/ML Technologist",
+        "externalPath": "/job/India-Bangalore/AI-ML-Technologist_JR0285263",
+        "locationsText": "India, Bangalore",
+        "postedOn": "Posted 4 Days Ago",
+        "bulletFields": [
+          "JR0285263"
+        ]
+      },
+      {
+        "title": "CPU DFT Manager",
+        "externalPath": "/job/India-Bangalore/CPU-DFT-Manager_JR0285257",
+        "locationsText": "India, Bangalore",
+        "postedOn": "Posted 30+ Days Ago",
+        "bulletFields": [
+          "JR0285257"
+        ]
+      },
+      {
+        "title": "CPU Circuit Design Lead",
+        "externalPath": "/job/India-Bangalore/CPU-Circuit-Design-Lead_JR0285850-1",
+        "locationsText": "India, Bangalore",
+        "postedOn": "Posted 30+ Days Ago",
+        "bulletFields": [
+          "JR0285850"
+        ]
+      },
+      {
+        "title": "IP RTL Senior Design Engineer",
+        "externalPath": "/job/India-Bangalore/IP-RTL-Senior-Design-Engineer_JR0284056-1",
+        "locationsText": "India, Bangalore",
+        "postedOn": "Posted 30+ Days Ago",
+        "bulletFields": [
+          "JR0284056"
+        ]
+      }
+    ],
+    "detailUrl": "https://intel.wd1.myworkdayjobs.com/wday/cxs/intel/External/job/India-Bangalore/Accountant_JR0283198",
+    "detail": {
+      "jobReqId": "JR0283198",
+      "title": "Accountant",
+      "location": "India, Bangalore",
+      "country": {
+        "descriptor": "India",
+        "id": "c4f78be1a8f14da0ab49ce1162348a5e"
+      },
+      "externalUrl": "https://intel.wd1.myworkdayjobs.com/External/job/India-Bangalore/Accountant_JR0283198",
+      "startDate": "2026-09-18",
+      "endDate": null,
+      "canApply": true,
+      "additionalLocations": null,
+      "postedOn": "Posted 23 Days Ago"
+    },
+    "status": "ok",
+    "fullPaginationVerified": false
+  },
+  {
+    "company": "HP",
+    "verifiedAtUtc": "2026-10-11T17:19:37.3586746Z",
+    "verificationDate": "2026-10-11",
+    "listing": "https://hp.wd5.myworkdayjobs.com/wday/cxs/hp/ExternalCareerSite/jobs",
+    "searchText": "India",
+    "total": 84,
+    "sample": [
+      {
+        "title": "Financial Analyst 4",
+        "externalPath": "/job/Bengaluru-Karnataka-India/Financial-Analyst-4_3167734-2",
+        "locationsText": "2 Locations",
+        "postedOn": "Posted 3 Days Ago",
+        "bulletFields": [
+          "3167734"
+        ]
+      },
+      {
+        "title": "Financial Analyst",
+        "externalPath": "/job/Bengaluru-Karnataka-India/Financial-Analyst_3168704-1",
+        "locationsText": "2 Locations",
+        "postedOn": "Posted 3 Days Ago",
+        "bulletFields": [
+          "3168704"
+        ]
+      },
+      {
+        "title": "Partner Sales - Distribution",
+        "externalPath": "/job/Gurugram-Haryana-India/Partner-Sales---Distribution_3167839-1",
+        "locationsText": "2 Locations",
+        "postedOn": "Posted 5 Days Ago",
+        "bulletFields": [
+          "3167839"
+        ]
+      },
+      {
+        "title": "Financial Analyst-Lease Enablement",
+        "externalPath": "/job/Bengaluru-Karnataka-India/Financial-Analyst-Lease-Enablement_3168932-1",
+        "locationsText": "Bengaluru, Karnataka, India",
+        "postedOn": "Posted 5 Days Ago",
+        "bulletFields": [
+          "3168932"
+        ]
+      },
+      {
+        "title": "Supply Chain Financial Analyst",
+        "externalPath": "/job/Bengaluru-Karnataka-India/Supply-Chain-Finance-Specialist_3166198-1",
+        "locationsText": "Bengaluru, Karnataka, India",
+        "postedOn": "Posted 5 Days Ago",
+        "bulletFields": [
+          "3166198"
+        ]
+      }
+    ],
+    "detailUrl": "https://hp.wd5.myworkdayjobs.com/wday/cxs/hp/ExternalCareerSite/job/Bengaluru-Karnataka-India/Financial-Analyst-Lease-Enablement_3168932-1",
+    "detail": {
+      "jobReqId": "3168932",
+      "title": "Financial Analyst-Lease Enablement",
+      "location": "Bengaluru, Karnataka, India",
+      "country": {
+        "descriptor": "India",
+        "id": "c4f78be1a8f14da0ab49ce1162348a5e"
+      },
+      "externalUrl": "https://hp.wd5.myworkdayjobs.com/ExternalCareerSite/job/Bengaluru-Karnataka-India/Financial-Analyst-Lease-Enablement_3168932-1",
+      "startDate": "2026-10-06",
+      "endDate": null,
+      "canApply": true,
+      "additionalLocations": null,
+      "postedOn": "Posted 5 Days Ago"
+    },
+    "status": "ok",
+    "fullPaginationVerified": false
+  },
+  {
+    "company": "Walmart Global Tech",
+    "verifiedAtUtc": "2026-10-11T17:19:38.9266965Z",
+    "verificationDate": "2026-10-11",
+    "listing": "https://walmart.wd5.myworkdayjobs.com/wday/cxs/walmart/WalmartExternal/jobs",
+    "searchText": "India",
+    "total": null,
+    "sample": null,
+    "detailUrl": null,
+    "detail": null,
+    "status": "Response status code does not indicate success: 422 (Unprocessable Entity).",
+    "fullPaginationVerified": false
+  }
+]

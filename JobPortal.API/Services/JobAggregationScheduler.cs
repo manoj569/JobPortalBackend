@@ -96,6 +96,11 @@ public sealed class JobAggregationScheduler(
                 }
 
                 SourceStarted(logger, sourceId, null);
+                if (queue is not null)
+                {
+                    await queue.EnqueueAsync(sourceId, null, now, cancellationToken);
+                    return;
+                }
                 var result = await scope.ServiceProvider.GetRequiredService<IJobSourceRunner>()
                     .RunAsync(sourceId, cancellationToken);
                 SourceCompleted(logger, sourceId, result.Created, result.Matched, result.Skipped, result.Failed, result.Succeeded, null);

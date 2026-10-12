@@ -40,7 +40,7 @@ public sealed record PublicJobQuery(
     int? Page = null,
     string? CompanyName = null,
     string? CategoryName = null,
-    bool ReferralOnly = false)
+    bool ReferralOnly = false, string? CurrencyCode = null, SalaryPeriod? SalaryPeriod = null)
 {
     public int EffectivePageNumber => Page ?? PageNumber;
 }
@@ -49,7 +49,7 @@ public sealed record PublicJobSummary(
     Guid Id, string ReferenceNumber, string Title, string Slug,
     Guid CompanyId, string CompanyName, string CompanySlug, string? CompanyLogoUrl,
     Guid? CategoryId, string CategoryName, string? Location,
-    decimal? MinimumSalary, decimal? MaximumSalary, string CurrencyCode,
+    decimal? MinimumSalary, decimal? MaximumSalary, string? CurrencyCode,
     EmploymentType EmploymentType, WorkplaceType WorkplaceType,
     ExperienceLevel ExperienceLevel, bool IsFeatured,
     DateTime PublishedAtUtc, DateTime? ExpiresAtUtc,
@@ -59,7 +59,7 @@ public sealed record PublicJobSummary(
     PostedByType? PostedByType, CompanyType? CompanyType, string? Industry,
     bool IsReferralJob = false, Guid? ReferralId = null, string? ReferrerName = null,
     DateTime? ReferralApprovedAtUtc = null, decimal? MatchScore = null,
-    IReadOnlyCollection<string>? MatchReasons = null, bool? IsResumeMatch = null);
+    IReadOnlyCollection<string>? MatchReasons = null, bool? IsResumeMatch = null, SalaryPeriod? SalaryPeriod = null);
 
 public sealed record PublicJobDetails(
     Guid Id, string ReferenceNumber, string Title, string Slug, string Description,
@@ -67,7 +67,7 @@ public sealed record PublicJobDetails(
     Guid CompanyId, string CompanyName, string CompanySlug, string? CompanyLogoUrl,
     string? CompanyDescription, string? CompanyWebsiteUrl,
     Guid? CategoryId, string CategoryName, string? Location,
-    decimal? MinimumSalary, decimal? MaximumSalary, string CurrencyCode,
+    decimal? MinimumSalary, decimal? MaximumSalary, string? CurrencyCode,
     EmploymentType EmploymentType, WorkplaceType WorkplaceType,
     ExperienceLevel ExperienceLevel, bool IsFeatured,
     DateTime PublishedAtUtc, DateTime? ExpiresAtUtc,
@@ -75,7 +75,7 @@ public sealed record PublicJobDetails(
     int? InternshipDurationMonths, bool IsFlexibleDuration,
     string? Department, string? RoleCategory, string? EducationRequirement,
     PostedByType? PostedByType, CompanyType? CompanyType, string? Industry,
-    string? ApplicationUrl = null);
+    string? ApplicationUrl = null, SalaryPeriod? SalaryPeriod = null);
 
 public sealed record PopularCompanyResponse(
     Guid Id, string Name, string Slug, string? LogoUrl, string? Industry,

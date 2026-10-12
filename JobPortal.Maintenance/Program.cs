@@ -1,6 +1,8 @@
 using JobPortal.Maintenance;
 using Npgsql;
 
+if (args.FirstOrDefault() == "job-classification-backfill") return await ClassificationBackfillCommand.RunAsync(args);
+
 if (args is ["--help"] or ["job-url-hash-backfill", "--help"])
 {
     Console.WriteLine("job-aggregation-lock-test (isolated advisory-lock verification; no business writes)");

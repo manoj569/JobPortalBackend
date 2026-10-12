@@ -11,7 +11,7 @@ namespace JobPortal.Persistence.Repositories;
 public sealed class JobSourceRunStore(JobPortalDbContext db) : IJobSourceRunStore
 {
     public static Expression<Func<JobSourceRun, bool>> ActivePredicate => x =>
-        x.Status == JobSourceRunStatus.Queued || x.Status == JobSourceRunStatus.Running ||
+        x.Status == JobSourceRunStatus.Queued || x.Status == JobSourceRunStatus.Running || x.Status == JobSourceRunStatus.Paused ||
         x.Status == JobSourceRunStatus.Interrupted && x.AttemptCount < JobSourceRun.MaximumAttempts;
 
     public async Task<JobSourceRun> EnqueueAsync(Guid sourceId, Guid? requestedBy, DateTime now, CancellationToken ct)
@@ -49,24 +49,35 @@ public sealed class JobSourceRunStore(JobPortalDbContext db) : IJobSourceRunStor
         await CandidatesQuery(now).ToArrayAsync(ct);
 
     internal IQueryable<JobSourceRun> CandidatesQuery(DateTime now) => db.JobSourceRuns.AsNoTracking()
-        .Where(x => (x.Status == JobSourceRunStatus.Queued || x.Status == JobSourceRunStatus.Interrupted && x.AttemptCount < JobSourceRun.MaximumAttempts)
+        .Where(x => (x.Status == JobSourceRunStatus.Queued || x.Status == JobSourceRunStatus.Paused || x.Status == JobSourceRunStatus.Interrupted && x.AttemptCount < JobSourceRun.MaximumAttempts)
             && x.NextAttemptAtUtc <= now || x.Status == JobSourceRunStatus.Running && x.LeaseExpiresAtUtc <= now)
         .OrderBy(x => x.NextAttemptAtUtc).ThenBy(x => x.QueuedAtUtc).ThenBy(x => x.Id).Take(25);
 
     public async Task<JobSourceRun?> TryClaimAsync(Guid runId, Guid owner, DateTime now, DateTime expiry, CancellationToken ct)
     {
         await db.JobSourceRuns.Where(x => x.Id == runId && x.NextAttemptAtUtc <= now && x.AttemptCount < JobSourceRun.MaximumAttempts &&
-            (x.Status == JobSourceRunStatus.Queued || x.Status == JobSourceRunStatus.Interrupted))
+            x.ExecutionCount < 1000 && (x.Status == JobSourceRunStatus.Queued || x.Status == JobSourceRunStatus.Paused || x.Status == JobSourceRunStatus.Interrupted))
             .ExecuteUpdateAsync(s => s.SetProperty(x => x.Status, JobSourceRunStatus.Running)
                 .SetProperty(x => x.LeaseOwner, owner).SetProperty(x => x.LeaseExpiresAtUtc, expiry)
-                .SetProperty(x => x.HeartbeatAtUtc, now).SetProperty(x => x.StartedAtUtc, now)
+                .SetProperty(x => x.HeartbeatAtUtc, now).SetProperty(x => x.StartedAtUtc, x => x.StartedAtUtc ?? now)
                 .SetProperty(x => x.CompletedAtUtc, (DateTime?)null).SetProperty(x => x.ErrorCode, (string?)null)
-                .SetProperty(x => x.DiagnosticsJson, (string?)null).SetProperty(x => x.Phase, "ProviderFetch").SetProperty(x => x.AttemptCount, x => x.AttemptCount + 1)
-                .SetProperty(x => x.Processed, 0).SetProperty(x => x.TotalReceived, 0).SetProperty(x => x.Created, 0)
-                .SetProperty(x => x.Updated, 0).SetProperty(x => x.Unchanged, 0).SetProperty(x => x.Closed, 0)
-                .SetProperty(x => x.Matched, 0).SetProperty(x => x.Skipped, 0).SetProperty(x => x.Failed, 0)
-                .SetProperty(x => x.Published, 0).SetProperty(x => x.NeedsReview, 0).SetProperty(x => x.QualityRejected, 0)
-                .SetProperty(x => x.PublishFailed, 0).SetProperty(x => x.AutoPublishDisabled, 0), ct);
+                .SetProperty(x => x.DiagnosticsJson, x => x.CheckpointJson == null ? null : x.DiagnosticsJson)
+                .SetProperty(x => x.Phase, "ProviderFetch").SetProperty(x => x.AttemptCount, x => x.AttemptCount + 1)
+                .SetProperty(x => x.ExecutionCount, x => x.ExecutionCount + 1)
+                .SetProperty(x => x.Processed, x => x.CheckpointJson == null ? 0 : x.Processed)
+                .SetProperty(x => x.TotalReceived, x => x.CheckpointJson == null ? 0 : x.TotalReceived)
+                .SetProperty(x => x.Created, x => x.CheckpointJson == null ? 0 : x.Created)
+                .SetProperty(x => x.Updated, x => x.CheckpointJson == null ? 0 : x.Updated)
+                .SetProperty(x => x.Unchanged, x => x.CheckpointJson == null ? 0 : x.Unchanged)
+                .SetProperty(x => x.Closed, x => x.CheckpointJson == null ? 0 : x.Closed)
+                .SetProperty(x => x.Matched, x => x.CheckpointJson == null ? 0 : x.Matched)
+                .SetProperty(x => x.Skipped, x => x.CheckpointJson == null ? 0 : x.Skipped)
+                .SetProperty(x => x.Failed, x => x.CheckpointJson == null ? 0 : x.Failed)
+                .SetProperty(x => x.Published, x => x.CheckpointJson == null ? 0 : x.Published)
+                .SetProperty(x => x.NeedsReview, x => x.CheckpointJson == null ? 0 : x.NeedsReview)
+                .SetProperty(x => x.QualityRejected, x => x.CheckpointJson == null ? 0 : x.QualityRejected)
+                .SetProperty(x => x.PublishFailed, x => x.CheckpointJson == null ? 0 : x.PublishFailed)
+                .SetProperty(x => x.AutoPublishDisabled, x => x.CheckpointJson == null ? 0 : x.AutoPublishDisabled), ct);
         // Also confirms a claim after an ambiguous/transient SQL response.
         return await db.JobSourceRuns.AsNoTracking().SingleOrDefaultAsync(x => x.Id == runId &&
             x.Status == JobSourceRunStatus.Running && x.LeaseOwner == owner && x.LeaseExpiresAtUtc > now, ct);
@@ -89,23 +100,36 @@ public sealed class JobSourceRunStore(JobPortalDbContext db) : IJobSourceRunStor
 
     public async Task RecoverAsync(Guid runId, DateTime now, DateTime retryAt, CancellationToken ct) =>
         await db.JobSourceRuns.Where(x => x.Id == runId && x.Status == JobSourceRunStatus.Running && x.LeaseExpiresAtUtc <= now)
-            .ExecuteUpdateAsync(s => s.SetProperty(x => x.Status, JobSourceRunStatus.Interrupted)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.Status, x => x.ExecutionCount >= 1000 ? JobSourceRunStatus.Failed : x.CheckpointJson != null && x.AttemptCount < JobSourceRun.MaximumAttempts
+                    ? JobSourceRunStatus.Paused : JobSourceRunStatus.Interrupted)
                 .SetProperty(x => x.InterruptedAtUtc, now).SetProperty(x => x.NextAttemptAtUtc, retryAt)
-                .SetProperty(x => x.CompletedAtUtc, x => x.AttemptCount >= JobSourceRun.MaximumAttempts ? now : (DateTime?)null)
+                .SetProperty(x => x.CompletedAtUtc, x => x.AttemptCount >= JobSourceRun.MaximumAttempts || x.ExecutionCount >= 1000 ? now : (DateTime?)null)
                 .SetProperty(x => x.ErrorCode, "worker_lease_expired").SetProperty(x => x.Phase, "Interrupted")
                 .SetProperty(x => x.LeaseOwner, (Guid?)null).SetProperty(x => x.LeaseExpiresAtUtc, (DateTime?)null), ct);
 
     public async Task<bool> FinishAsync(JobSourceRun run, JobSourceRunStatus status, DateTime now, DateTime retryAt,
         JobSourceRunProgressSnapshot p, CancellationToken ct)
     {
-        if (status is not (JobSourceRunStatus.Succeeded or JobSourceRunStatus.Failed or JobSourceRunStatus.Interrupted))
+        if (status is not (JobSourceRunStatus.Succeeded or JobSourceRunStatus.Failed or JobSourceRunStatus.Interrupted or
+            JobSourceRunStatus.Paused or JobSourceRunStatus.Unsafe or JobSourceRunStatus.Cancelled))
             throw new ArgumentOutOfRangeException(nameof(status));
+        var previousCursor = run.CheckpointJson is null ? 0 : JsonSerializer.Deserialize<JobPortal.Application.Abstractions.Jobs.WorkdayRunCheckpoint>(run.CheckpointJson)?.Cursor ?? 0;
+        var progressed = p.Counters.CheckpointCursor > previousCursor;
+        var attempts = progressed ? 0 : run.AttemptCount;
+        if (status == JobSourceRunStatus.Paused && (attempts >= JobSourceRun.MaximumAttempts || run.ExecutionCount >= 1000))
+        {
+            status = JobSourceRunStatus.Failed;
+            p = p with { Counters = p.Counters with { ContinuationPending = false,
+                StopReason = run.ExecutionCount >= 1000 ? "MaximumExecutionsExceeded" : "NoProgressAttemptsExhausted" } };
+        }
         return await Owned(run, now).ExecuteUpdateAsync(s => s.SetProperty(x => x.Status, status)
-            .SetProperty(x => x.CompletedAtUtc, status == JobSourceRunStatus.Interrupted && run.AttemptCount < JobSourceRun.MaximumAttempts ? (DateTime?)null : now)
-            .SetProperty(x => x.InterruptedAtUtc, status == JobSourceRunStatus.Interrupted ? now : run.InterruptedAtUtc)
+            .SetProperty(x => x.AttemptCount, attempts)
+            .SetProperty(x => x.CompletedAtUtc, status == JobSourceRunStatus.Paused || status == JobSourceRunStatus.Interrupted && attempts < JobSourceRun.MaximumAttempts ? (DateTime?)null : now)
+            .SetProperty(x => x.InterruptedAtUtc, status == JobSourceRunStatus.Interrupted || status == JobSourceRunStatus.Paused ? now : run.InterruptedAtUtc)
             .SetProperty(x => x.NextAttemptAtUtc, retryAt).SetProperty(x => x.Phase, status.ToString())
             .SetProperty(x => x.ErrorCode, status == JobSourceRunStatus.Succeeded ? null :
-                status == JobSourceRunStatus.Interrupted ? "worker_interrupted" : "source_run_failed")
+                status == JobSourceRunStatus.Paused ? "continuation_pending" : status == JobSourceRunStatus.Unsafe ? "unsafe_snapshot" :
+                status == JobSourceRunStatus.Cancelled ? "source_unavailable" : status == JobSourceRunStatus.Interrupted ? "worker_interrupted" : "source_run_failed")
             .SetProperty(x => x.LeaseOwner, (Guid?)null).SetProperty(x => x.LeaseExpiresAtUtc, (DateTime?)null)
             .SetProperty(x => x.Processed, p.Processed).SetProperty(x => x.TotalReceived, p.Counters.TotalReceived)
             .SetProperty(x => x.Created, p.Counters.Created).SetProperty(x => x.Updated, p.Counters.Updated)

@@ -15,6 +15,10 @@ namespace JobPortal.API.Controllers;
 [OutputCache(PolicyName = "PublicJobs")]
 public sealed class PublicJobsController(IPublicJobService jobService) : ControllerBase
 {
+    [HttpGet("experience-ranges")]
+    public ActionResult<ApiResponse<IReadOnlyList<ExperienceFilterRange>>> ExperienceRanges() =>
+        Ok(new ApiResponse<IReadOnlyList<ExperienceFilterRange>>(ExperienceFilterPolicy.Ranges));
+
     [HttpGet]
     [HttpGet("search")]
     [HttpGet("filter")]

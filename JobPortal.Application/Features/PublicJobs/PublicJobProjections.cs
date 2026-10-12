@@ -26,5 +26,5 @@ public static class PublicJobProjections
                 !job.Referral.ReferrerUser.IsDeleted && job.Referral.ReferrerUser.Status == UserStatus.Active ? "Employee Referrer" : null,
             job.Referral != null && job.Referral.ApprovalStatus == JobReferralApprovalStatus.Approved &&
                 !job.Referral.ReferrerUser.IsDeleted && job.Referral.ReferrerUser.Status == UserStatus.Active ? job.Referral.ReviewedAtUtc : null,
-            null, null, null);
+            null, null, null, job.SalaryPeriod);
 }

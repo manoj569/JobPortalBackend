@@ -20,5 +20,5 @@ public static class DashboardProjections
                 saved.Job.Department, saved.Job.RoleCategory,
                 saved.Job.EducationRequirement, saved.Job.PostedByType,
                 saved.Job.Company.CompanyType, saved.Job.Company.Industry,
-                false, null, null, null, null, null, null));
+                false, null, null, null, null, null, null, saved.Job.SalaryPeriod));
 }

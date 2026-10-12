@@ -74,7 +74,8 @@ public sealed class JobService(
             MaximumExperienceYears = request.Job.MaximumExperienceYears,
             Location = TextNormalizer.TrimOrNull(request.Job.Location),
             MinimumSalary = request.Job.MinimumSalary,
-            CurrencyCode = TextNormalizer.TrimOrNull(request.Job.CurrencyCode)?.ToUpperInvariant() ?? "USD",
+            MaximumSalary = request.Job.MaximumSalary,
+            CurrencyCode = request.Job.MinimumSalary.HasValue || request.Job.MaximumSalary.HasValue ? TextNormalizer.TrimOrNull(request.Job.CurrencyCode)?.ToUpperInvariant() : null,
             ExpiresAtUtc = request.Job.ExpiresAtUtc,
             Responsibilities = TextNormalizer.TrimOrNull(request.Job.Responsibilities),
             Requirements = TextNormalizer.TrimOrNull(request.Job.Requirements),
@@ -153,6 +154,17 @@ public sealed class JobService(
 
         NormalizeManualJob(job);
         await using var creationLease = await ProtectManualCreationAsync(job, cancellationToken);
+        if (job.ClassificationJson is null)
+        {
+            job.SalaryPeriod = request.Job.SalaryPeriod;
+            job.ManualClassificationOverrides = string.Join(",", request.Job.ManualOverrideFields ??
+                JobClassificationPolicy.Fields.Where(field => field switch
+                { "EmploymentType" => request.Job.EmploymentType.HasValue, "WorkplaceType" => request.Job.WorkplaceType.HasValue,
+                  "Experience" => request.Job.MinimumExperienceYears.HasValue || request.Job.MaximumExperienceYears.HasValue,
+                  "Salary" => request.Job.MinimumSalary.HasValue || request.Job.MaximumSalary.HasValue,
+                  "Location" => request.Job.Location is not null, _ => false }));
+            JobClassificationPolicy.Apply(job, JobClassificationPolicy.Analyze(job));
+        }
         await jobs.AddAsync(job, cancellationToken);
         if (companyCreated) await auditWriter.AppendAsync(new(AuditAction.Create, "Company", company!.Id.ToString()), cancellationToken);
         if (categoryCreated) await auditWriter.AppendAsync(new(AuditAction.Create, "Category", category!.Id.ToString()), cancellationToken);
@@ -249,7 +261,12 @@ public sealed class JobService(
             request.WorkplaceType, request.ExperienceLevel, request.ExpiresAtUtc,
             request.MinimumExperienceYears, request.MaximumExperienceYears,
             request.InternshipDurationMonths, request.IsFlexibleDuration, request.Department,
-            request.RoleCategory, request.EducationRequirement, request.PostedByType));
+            request.RoleCategory, request.EducationRequirement, request.PostedByType, request.SalaryPeriod, request.ManualOverrideFields ??
+                JobClassificationPolicy.Fields.Where(field => field switch
+                { "EmploymentType" => request.EmploymentType != EmploymentType.Unknown, "WorkplaceType" => request.WorkplaceType != WorkplaceType.Unknown,
+                  "Experience" => request.MinimumExperienceYears.HasValue || request.MaximumExperienceYears.HasValue,
+                  "Salary" => request.MinimumSalary.HasValue || request.MaximumSalary.HasValue,
+                  "Location" => request.Location is not null, _ => false }).ToArray()));
 
         NormalizeManualJob(job);
         await using var creationLease = await ProtectManualCreationAsync(job, cancellationToken);
@@ -536,7 +553,7 @@ public sealed class JobService(
         job.WorkplaceType, job.ExperienceLevel, job.ExpiresAtUtc,
         job.MinimumExperienceYears, job.MaximumExperienceYears,
         job.InternshipDurationMonths, job.IsFlexibleDuration, job.Department,
-        job.RoleCategory, job.EducationRequirement, job.PostedByType);
+        job.RoleCategory, job.EducationRequirement, job.PostedByType, job.SalaryPeriod, JobClassificationPolicy.Overrides(job));
 
     private static void NormalizeManualJob(Job job)
     {

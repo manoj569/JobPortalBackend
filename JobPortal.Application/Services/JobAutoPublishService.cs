@@ -12,7 +12,8 @@ public sealed class JobAutoPublishService(
     IJobService jobService,
     IOptions<JobAggregationOptions> options,
     TimeProvider timeProvider,
-    IExternalJobCreationLock? publicationLock = null) : IJobAutoPublishService, IJobAutoPublishBatchReview
+    IExternalJobCreationLock? publicationLock = null,
+    IJobSourceRunCheckpoint? checkpoint = null) : IJobAutoPublishService, IJobAutoPublishBatchReview
 {
     public async Task<IReadOnlyDictionary<Guid, JobAutoPublishResult>> ReviewBatchAsync(IReadOnlyCollection<Guid> jobIds,
         CancellationToken cancellationToken = default)
@@ -88,10 +89,13 @@ public sealed class JobAutoPublishService(
 
         // Never set Job.Status directly.
         // Existing JobService remains the final publication authority.
+        // The receipt joins the existing publication/audit SaveChanges transaction.
+        checkpoint?.StagePublication(jobId, new JobAutoPublishResult { Outcome = JobAutoPublishOutcome.Published });
         await jobService.PublishAsync(
             jobId,
             cancellationToken);
 
+        checkpoint?.ConfirmSaved();
         return new JobAutoPublishResult
         {
             Outcome = JobAutoPublishOutcome.Published
