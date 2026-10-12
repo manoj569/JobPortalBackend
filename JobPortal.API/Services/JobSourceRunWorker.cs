@@ -184,18 +184,25 @@ public sealed partial class JobSourceRunWorker(IServiceScopeFactory scopes, JobS
                         {
                             var counters = journal.CommittedCounters;
                             var captured = progress.Snapshot;
+                            var recoveredProviderSkipped = journal.State?.RebaseCount > captured.Counters.RebaseCount
+                                ? journal.State.ProviderSkipped : captured.Counters.ProviderSkipped;
                             var reasons = new Dictionary<JobIngestionReasonCode, int>(counters.ReasonCounts ?? new Dictionary<JobIngestionReasonCode, int>());
-                            if (captured.Counters.ProviderSkipped > 0) reasons[JobIngestionReasonCode.ProviderError] = captured.Counters.ProviderSkipped;
+                            if (recoveredProviderSkipped > 0) reasons[JobIngestionReasonCode.ProviderError] = recoveredProviderSkipped;
                             progress.Report(captured with { Processed = counters.TotalReceived,
                                 Counters = (captured.Counters with
                                 {
                                     RunId = run.Id, ListingTotal = journal.State?.ListingTotal ?? captured.Counters.ListingTotal,
+                                    RebaseCount = journal.State?.RebaseCount ?? captured.Counters.RebaseCount,
+                                    ListingDiagnostics = journal.State?.RebaseCount > captured.Counters.RebaseCount
+                                        ? journal.State.ListingDiagnostics : captured.Counters.ListingDiagnostics,
                                     ListingPages = journal.State?.ListingPages ?? captured.Counters.ListingPages,
-                                    TotalReceived = Math.Max(captured.Counters.TotalReceived, journal.State?.Cursor ?? 0),
-                                    Parsed = Math.Max(captured.Counters.Parsed, journal.State?.ObservedJobs.Count ?? 0),
+                                    TotalReceived = journal.State?.RebaseCount > captured.Counters.RebaseCount
+                                        ? journal.State.Cursor : Math.Max(captured.Counters.TotalReceived, journal.State?.Cursor ?? 0),
+                                    Parsed = journal.State?.RebaseCount > captured.Counters.RebaseCount
+                                        ? journal.State.ObservedJobs.Count : Math.Max(captured.Counters.Parsed, journal.State?.ObservedJobs.Count ?? 0),
                                     Created = counters.Created, Updated = counters.Updated, Unchanged = counters.Unchanged,
                                     Matched = counters.Matched, Failed = counters.Failed, Published = counters.Published,
-                                    Skipped = counters.Skipped + captured.Counters.ProviderSkipped, ReasonCounts = reasons,
+                                    Skipped = counters.Skipped + recoveredProviderSkipped, ReasonCounts = reasons,
                                     NeedsReview = counters.NeedsReview, QualityRejected = counters.QualityRejected,
                                     PublishFailed = counters.PublishFailed, AutoPublishDisabled = counters.AutoPublishDisabled,
                                     ValidationReasonCounts = counters.ValidationReasonCounts, QualityReasonCounts = counters.QualityReasonCounts,

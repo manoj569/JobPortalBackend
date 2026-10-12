@@ -198,6 +198,198 @@ public sealed class WorkdayResilienceTests
             new JobSourceRun { CheckpointJson = """{"Version":2,"ListingTotal":0,"Cursor":0,"ObservedJobs":[]}""" }, default));
         Assert.Equal("InvalidCheckpoint", invalid.ReasonCode);
     }
+    [Theory]
+    [InlineData(21, false, false)]
+    [InlineData(22, false, false)]
+    [InlineData(20, false, false)]
+    [InlineData(21, true, false)]
+    [InlineData(21, false, true)]
+    public async Task DurableRunnerRebasesChangedCensusAndKeepsPositiveJobs(int replacementTotal, bool reverse, bool drift)
+    {
+        using var f = new JobSourceFixture();
+        f.Source.AtsType = AtsType.Workday; f.Source.AtsIdentifier = "fixture/Careers";
+        f.Source.CareerPageUrl = "https://fixture.wd1.myworkdayjobs.com/Careers";
+        f.Map(f.Category.Id.ToString()); await f.Context.SaveChangesAsync();
+        var journal = new MemoryCheckpoint(); journal.Enable(f.Source);
+        using var board = new Board(21, 21, drift ? 22 : 21) { OmitContinuationTotal = drift };
+        using var http = new HttpClient(board);
+        using var provider = new WorkdayJobSourceProvider(new Factory(http), checkpoint: journal, timeProvider: new FastClock(),
+            options: Options.Create(new JobAggregationOptions { Workday = new() { JobsPerExecution = 5, BatchSize = 5, MaximumAttempts = 1 } }));
+        var jobs = new JobRepository(f.Context); var unit = new UnitOfWork(f.Context);
+        var fingerprints = new JobFingerprintService(); var canonical = new UrlCanonicalizer();
+        var ingestion = new JobIngestionService(jobs, new CompanyManagementRepository(f.Context), new CategoryManagementRepository(f.Context),
+            new JobDeduplicationService(jobs, fingerprints, canonical), fingerprints, unit, TimeProvider.System, f.Locks, canonical, journal);
+        var runner = new JobSourceRunner(f.Repository, [provider], ingestion, unit, TimeProvider.System, f.Resolver,
+            new ExternalJobNormalizer(), jobRepository: jobs, checkpoint: journal);
+        var first = await runner.RunAsync(f.Source.Id);
+        Assert.True(first.ContinuationPending); Assert.Equal(5, first.Created); Assert.False(first.ReconciliationSafe);
+        board.Reset(replacementTotal, replacementTotal, replacementTotal); board.ReverseOrder = reverse;
+        var changed = replacementTotal != 21 || reverse || drift;
+        JobSourceRunResult result;
+        var executions = 0;
+        do { result = await runner.RunAsync(f.Source.Id); Assert.Equal(0, result.Failed); executions++; }
+        while (result.ContinuationPending && executions < 12);
+        Assert.False(result.ContinuationPending);
+        Assert.True(result.Succeeded); Assert.True(result.ReconciliationSafe);
+        Assert.Equal(replacementTotal, result.ObservedIdentities); Assert.Equal(replacementTotal, result.CheckpointCursor);
+        Assert.Equal(replacementTotal, result.Created); Assert.Equal(changed ? 5 : 0, result.Existing);
+        Assert.Equal(changed ? 1 : 0, journal.State!.RebaseCount);
+        Assert.Equal(replacementTotal, await f.Context.Jobs.CountAsync());
+        Assert.Equal(replacementTotal + (changed ? 5 : 0), board.DetailRequests);
+    }
+
+    [Fact]
+    public async Task Production1094To1095DriftFetchesReplacementInsteadOfStoppingBeforeDetails()
+    {
+        var source = Source(); var journal = new MemoryCheckpoint(); journal.Enable(source);
+        using var board = new Board(1094, 1094, 1095) { OmitContinuationTotal = true, Mutation = "membership" };
+        using var http = new HttpClient(board);
+        using var provider = new WorkdayJobSourceProvider(new Factory(http), checkpoint: journal, timeProvider: new FastClock(),
+            options: Options.Create(new JobAggregationOptions { Workday = new() { JobsPerExecution = 200, BatchSize = 100,
+                MaximumAttempts = 1, DetailConcurrency = 4, RunBudgetSeconds = 300 } }));
+        var committedIds = new Dictionary<string, Guid>(StringComparer.Ordinal);
+        async Task<ExternalJobSourceSnapshot> Execute()
+        {
+            var observed = journal.State?.ObservedJobs.ToList() ?? [];
+            var rebases = journal.State?.RebaseCount ?? 0;
+            ExternalJobSourceSnapshot? last = null;
+            await foreach (var batch in provider.FetchBatchesAsync(source, default))
+            {
+                if (journal.State!.RebaseCount != rebases) { observed.Clear(); rebases = journal.State.RebaseCount; }
+                observed.AddRange(batch.Jobs);
+                foreach (var raw in batch.Jobs)
+                {
+                    var externalId = Assert.IsType<string>(raw.ExternalId);
+                    var id = int.Parse(externalId.AsSpan(2), CultureInfo.InvariantCulture);
+                    if (id >= 94) continue; // Production fixture's 94 accepted positive ingestions.
+                    var existed = committedIds.TryGetValue(externalId, out var jobId);
+                    if (!existed) { jobId = Guid.NewGuid(); committedIds.Add(externalId, jobId); }
+                    await journal.CompleteItemAsync(raw, new() { JobId = jobId,
+                        Outcome = existed ? JobIngestionOutcome.Unchanged : JobIngestionOutcome.Created },
+                        new() { Outcome = !existed && id < 80 ? JobAutoPublishOutcome.Published : JobAutoPublishOutcome.AlreadyPublished }, default);
+                }
+                await journal.CommitAsync(batch.CheckpointCursor!.Value, batch.Skipped, observed, default);
+                last = batch;
+            }
+            return last!;
+        }
+        var first = await Execute();
+        Assert.True(first.ContinuationPending); Assert.False(first.IsComplete);
+        Assert.True(first.ListingDiagnostics!.FirstPageChanged);
+        Assert.Equal(200, journal.State!.Cursor); Assert.Equal(1094, journal.State.ListingTotal);
+        Assert.Equal(94, journal.CommittedCounters.Created); Assert.Equal(80, journal.CommittedCounters.Published);
+        board.Reset(1095, 1095, 1095); board.Mutation = null;
+        var second = await Execute();
+        Assert.True(second.ContinuationPending); Assert.Equal(400, board.DetailRequests);
+        Assert.Equal(1095, journal.State.ListingTotal); Assert.Equal(200, journal.State.Cursor);
+        Assert.Equal(1, journal.State.RebaseCount); Assert.False(second.IsComplete);
+        Assert.Equal(94, journal.CommittedCounters.Created); Assert.Equal(94, journal.CommittedCounters.Existing);
+        ExternalJobSourceSnapshot completed = second;
+        var executions = 0;
+        while (completed.ContinuationPending && executions++ < 8) completed = await Execute();
+        Assert.False(completed.ContinuationPending);
+        Assert.True(completed.IsComplete); Assert.True(completed.ListingDiagnostics!.ReconciliationSafe);
+        Assert.Equal(1095, journal.State.Cursor); Assert.Equal(94, committedIds.Count);
+        Assert.Equal(94, journal.CommittedCounters.Created); Assert.Equal(80, journal.CommittedCounters.Published);
+        Assert.Equal(1295, board.DetailRequests);
+    }
+
+    [Fact]
+    public async Task ProductionDriftReplacementArchives94CreationsAnd80PublicationsAndRestartsAtZero()
+    {
+        var evidence = new WorkdayListingDiagnostics { IngestionSafe = true, SnapshotStable = true, ReconciliationSafe = true,
+            InitialReportedTotal = 1095, FinalReportedTotal = 1095, UniquePaths = 1095, RawSlots = 1095, ReasonCode = "Complete" };
+        var old = new WorkdayRunCheckpoint { Version = 2, SourceIdentity = "source", ListingIdentity = "old", ListingTotal = 1094,
+            Cursor = 200, ObservedJobs = Enumerable.Range(0, 200).Select(i => new RawExternalJob { ExternalId = $"R-{i}" }).ToArray(),
+            ListingDiagnostics = evidence with { SnapshotStable = false, ReconciliationSafe = false, InitialReportedTotal = 1094,
+                UniquePaths = 1094, RawSlots = 1094, FirstPageChanged = true, ReasonCode = "ListingTotalDrift" } };
+        Assert.True(WorkdayCheckpointRebasePolicy.RequiresRebase(old, "source", "new", 1095, evidence));
+        var reset = WorkdayCheckpointRebasePolicy.Restart(old, "new", 1095, 55, evidence,
+            new JobSourceRunResult { Created = 94, Published = 80, TotalReceived = 94 }, DateTime.UtcNow);
+        var restored = JsonSerializer.Deserialize<WorkdayRunCheckpoint>(JsonSerializer.Serialize(reset))!;
+        Assert.Equal(0, restored.Cursor); Assert.Empty(restored.ObservedJobs); Assert.Equal(1095, restored.ListingTotal);
+        Assert.Equal(3, restored.Version); Assert.Equal(1, restored.RebaseCount); Assert.Null(restored.CompletedResult);
+        var counters = WorkdayCheckpointRebasePolicy.AddCounters(new() { Unchanged = 94 }, restored.ArchivedCounters);
+        Assert.Equal(94, counters.Created); Assert.Equal(94, counters.Existing); Assert.Equal(80, counters.Published);
+        Assert.False(counters.ReconciliationSafe); Assert.True(restored.ListingDiagnostics!.SnapshotStable);
+        using var fixture = new JobSourceFixture();
+        var journal = new JobSourceRunCheckpoint(fixture.Context, TimeProvider.System);
+        await journal.BindAsync(new JobSourceRun { CheckpointJson = JsonSerializer.Serialize(restored) }, default);
+        Assert.Equal(94, journal.CommittedCounters.Created); Assert.Equal(80, journal.CommittedCounters.Published);
+        Assert.False(WorkdayCheckpointRebasePolicy.RequiresRebase(restored, "source", "new", 1095, evidence));
+        var twice = WorkdayCheckpointRebasePolicy.Restart(restored, "newer", 1096, 55,
+            evidence with { UniquePaths = 1096, RawSlots = 1096 }, counters, DateTime.UtcNow);
+        Assert.Equal(2, twice.RebaseCount); Assert.Equal(94, twice.ArchivedCounters!.Created);
+        Assert.Equal(94, twice.ArchivedCounters.Existing); Assert.Equal(80, twice.ArchivedCounters.Published);
+    }
+
+    [Theory]
+    [InlineData("DuplicateListingPaths")]
+    [InlineData("ListingEndedEarly")]
+    [InlineData("ListingTotalDrift")]
+    [InlineData("FailedDetails")]
+    public void UnsafeReplacementCannotRebaseOrUpgradeAuthority(string reason)
+    {
+        var state = new WorkdayRunCheckpoint { SourceIdentity = "source", ListingIdentity = "old", ListingTotal = 21, Cursor = 5 };
+        var evidence = new WorkdayListingDiagnostics { IngestionSafe = true, ReconciliationSafe = false, ReasonCode = reason };
+        Assert.Throws<JobSourceSnapshotUnsafeException>(() => WorkdayCheckpointRebasePolicy.RequiresRebase(state, "source", "new", 22, evidence));
+        Assert.Throws<JobSourceSnapshotUnsafeException>(() => WorkdayCheckpointRebasePolicy.RequiresRebase(state, "different-source", "old", 21, evidence));
+        Assert.Equal(5, state.Cursor);
+    }
+
+    // Tests provider + real ingestion/runner; PostgreSQL tests cover atomic persistence and lease fencing.
+    private sealed class MemoryCheckpoint : IJobSourceRunCheckpoint
+    {
+        private readonly Dictionary<int, (string? Id, JobIngestionResult Result)> receipts = [];
+        private readonly Dictionary<int, JobAutoPublishResult> publications = [];
+        public WorkdayDetailProgress Details { get; } = new();
+        public Guid? RunId { get; } = Guid.NewGuid();
+        public bool Enabled { get; private set; }
+        public WorkdayRunCheckpoint? State { get; private set; }
+        public JobSourceRunResult CommittedCounters => WorkdayCheckpointRebasePolicy.AddCounters(new() {
+            TotalReceived = receipts.Count, Created = receipts.Values.Count(x => x.Result.Outcome == JobIngestionOutcome.Created),
+            Published = publications.Values.Count(x => x.Outcome == JobAutoPublishOutcome.Published),
+            Updated = receipts.Values.Count(x => x.Result.Outcome == JobIngestionOutcome.Updated),
+            Unchanged = receipts.Values.Count(x => x.Result.Outcome == JobIngestionOutcome.Unchanged),
+            Matched = receipts.Values.Count(x => x.Result.Outcome is JobIngestionOutcome.MatchedByUrl or JobIngestionOutcome.MatchedByFingerprint or JobIngestionOutcome.MatchedByFuzzy),
+            Failed = receipts.Values.Count(x => x.Result.Outcome == JobIngestionOutcome.Failed) }, State?.ArchivedCounters);
+        public void Enable(JobSource source) => Enabled = source.AtsType == AtsType.Workday;
+        public Task BindAsync(JobSourceRun run, CancellationToken ct) => Task.CompletedTask;
+        public Task RefreshAsync(CancellationToken ct) => Task.CompletedTask;
+        public Task PrepareAsync(string sourceIdentity, string listingIdentity, int total, int pages, CancellationToken ct,
+            WorkdayListingDiagnostics? listingDiagnostics = null)
+        {
+            if (State is not null && WorkdayCheckpointRebasePolicy.RequiresRebase(State, sourceIdentity, listingIdentity, total, listingDiagnostics))
+            {
+                State = WorkdayCheckpointRebasePolicy.Restart(State, listingIdentity, total, pages, listingDiagnostics!, CommittedCounters, DateTime.UtcNow);
+                receipts.Clear(); publications.Clear();
+            }
+            State ??= new() { SourceIdentity = sourceIdentity, ListingIdentity = listingIdentity, ListingTotal = total,
+                ListingPages = pages, ListingDiagnostics = listingDiagnostics };
+            return Task.CompletedTask;
+        }
+        public Task CommitAsync(int cursor, int providerSkipped, IReadOnlyCollection<RawExternalJob> observed, CancellationToken ct)
+        {
+            Assert.Equal(cursor, observed.Count + providerSkipped);
+            State = State! with { Cursor = cursor, ProviderSkipped = providerSkipped, ObservedJobs = observed.ToArray() };
+            return Task.CompletedTask;
+        }
+        public JobIngestionResult? Replay(RawExternalJob raw)
+        {
+            if (raw.SourceOrdinal is not { } ordinal || !receipts.TryGetValue(ordinal, out var receipt)) return null;
+            Assert.Equal(receipt.Id, raw.ExternalId); return receipt.Result;
+        }
+        public JobAutoPublishResult? ReplayedPublication(RawExternalJob raw) => raw.SourceOrdinal is { } ordinal ? publications.GetValueOrDefault(ordinal) : null;
+        public void SetCurrentItem(RawExternalJob raw) { }
+        public void StageIngestion(RawExternalJob raw, JobIngestionResult result)
+        { if (raw.SourceOrdinal is { } ordinal) receipts.TryAdd(ordinal, (raw.ExternalId, result)); }
+        public void ConfirmSaved() { }
+        public void StageCompletedResult(JobSourceRunResult result) { }
+        public void StagePublication(Guid jobId, JobAutoPublishResult result) { }
+        public Task CompleteItemAsync(RawExternalJob raw, JobIngestionResult result, JobAutoPublishResult? publication, CancellationToken ct)
+        { StageIngestion(raw, result); if (publication is not null && raw.SourceOrdinal is { } ordinal) publications.TryAdd(ordinal, publication); return Task.CompletedTask; }
+    }
+
     private static JobSource Source() => new() { AtsType = AtsType.Workday, AtsIdentifier = "fixture/Careers",
         CareerPageUrl = "https://fixture.wd1.myworkdayjobs.com/Careers", Company = new Company { Name = "Fixture" } };
     private sealed class Factory(HttpClient http) : IHttpClientFactory { public HttpClient CreateClient(string name) => http; }
@@ -208,6 +400,7 @@ public sealed class WorkdayResilienceTests
 
     private sealed class Board(int initial, int observed, int final) : HttpMessageHandler
     {
+        public bool ReverseOrder { get; set; }
         public bool OmitContinuationTotal { get; init; }
         public bool MissingContinuationTotal { get; init; }
         public bool MissingInitialTotal { get; init; }
@@ -233,7 +426,7 @@ public sealed class WorkdayResilienceTests
                 var start = Mutation == "repeated" && offset == 200 ? 0 : offset;
                 var count = Math.Min(20, Math.Max(0, observed - offset));
                 if (Mutation == "empty" && offset == 20) count = 0;
-                var entries = Enumerable.Range(start, count).Select(i => new
+                var entries = Enumerable.Range(start, count).Select(i => ReverseOrder ? observed - 1 - i : i).Select(i => new
                 {
                     title = $"Software Engineer {i}", externalPath = Mutation == "invalidPath" ? "/../invalid" :
                         $"/job/Pune/Engineer_{(Mutation == "duplicate" && i == 20 ? 19 : i)}",

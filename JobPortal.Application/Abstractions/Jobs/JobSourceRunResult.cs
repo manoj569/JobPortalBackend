@@ -8,6 +8,7 @@ public sealed record JobSourceRunResult
     public string? StopReason { get; init; }
     public WorkdayListingDiagnostics? ListingDiagnostics { get; init; }
     public int ListingTotal { get; init; }
+    public int RebaseCount { get; init; }
     public int ListingPages { get; init; }
     public int ObservedIdentities { get; init; }
     public int DetailAttempted { get; init; }

@@ -16,6 +16,9 @@ public sealed record WorkdayRunCheckpoint
     public IReadOnlyCollection<RawExternalJob> ObservedJobs { get; init; } = [];
     public JobSourceRunResult? CompletedResult { get; init; }
     public WorkdayListingDiagnostics? ListingDiagnostics { get; init; }
+    // Version 3 fences old binaries from ordinal receipts retired by a rebase.
+    public int RebaseCount { get; init; }
+    public JobSourceRunResult? ArchivedCounters { get; init; }
 }
 
 public interface IJobSourceRunCheckpoint

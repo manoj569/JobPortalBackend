@@ -177,6 +177,7 @@ public sealed partial class JobSourceRunner(
                 rawJobs.AddRange(snapshot.Jobs); // Earlier eligible items are already durably acknowledged.
             }
             var continuationPending = false;
+            var traversalRebaseCount = durable ? checkpoint!.State?.RebaseCount ?? 0 : 0;
             var processingTimer = System.Diagnostics.Stopwatch.StartNew();
             var enrichmentMilliseconds = 0d;
             var ingestionMilliseconds = 0d;
@@ -221,6 +222,7 @@ public sealed partial class JobSourceRunner(
                     JobSourceId = source.Id, RunId = durable ? checkpoint!.RunId : null,
                     ListingDiagnostics = listingDiagnostics,
                     ListingTotal = durable ? checkpoint!.State?.ListingTotal ?? 0 : listingDiagnostics?.UniquePaths ?? 0,
+                    RebaseCount = durable ? checkpoint!.State?.RebaseCount ?? 0 : 0,
                     ListingPages = durable ? checkpoint!.State?.ListingPages ?? 0 : listingDiagnostics?.PageCount ?? 0,
                     CheckpointCursor = durable ? checkpoint!.State?.Cursor ?? 0 : 0,
                     LastCheckpointAtUtc = durable ? checkpoint!.State?.CommittedAtUtc : null,
@@ -249,6 +251,14 @@ public sealed partial class JobSourceRunner(
 
             await foreach (var batch in FetchBatchesAsync(provider, source, cancellationToken))
             {
+                // Provider prepares the replacement before its first yield. Old observed
+                // identities and selection skips cannot join the new census.
+                if (durable && checkpoint!.State?.RebaseCount != traversalRebaseCount)
+                {
+                    traversalRebaseCount = checkpoint.State?.RebaseCount ?? 0;
+                    observedJobs.Clear(); rawJobs.Clear(); snapshot = null;
+                    providerSnapshotComplete = false; reconciliationSafe = false;
+                }
                 listingDiagnostics = batch.ListingDiagnostics ?? listingDiagnostics;
                 if (batch.ListingDiagnostics is { IngestionSafe: false } unsafeListing)
                     throw new JobSourceSnapshotUnsafeException(unsafeListing.ReasonCode, unsafeListing);
@@ -581,6 +591,7 @@ public sealed partial class JobSourceRunner(
             {
                 JobSourceId = source.Id,
                 RunId = partialResult.RunId, ListingTotal = partialResult.ListingTotal, ListingPages = partialResult.ListingPages,
+                RebaseCount = partialResult.RebaseCount,
                 ObservedIdentities = partialResult.ObservedIdentities, DetailAttempted = partialResult.DetailAttempted,
                 DetailSucceeded = partialResult.DetailSucceeded, DetailFailed = partialResult.DetailFailed,
                 CheckpointCursor = partialResult.CheckpointCursor, LastCheckpointAtUtc = partialResult.LastCheckpointAtUtc,

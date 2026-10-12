@@ -170,7 +170,7 @@ public sealed class WorkdayCheckpointPostgresTests(WorkdayCheckpointDatabase dat
     }
 
     [WorkdayLocalPostgresFact]
-    public async Task ProviderBudgetPauseIsBoundedAndSnapshotChangesFailClosedOnResume()
+    public async Task ProviderBudgetPauseIsBoundedAndStableSnapshotChangesRestartOnResume()
     {
         var f = await Harness.CreateAsync(database, 3);
         var run = await f.EnqueueAsync();
@@ -190,12 +190,13 @@ public sealed class WorkdayCheckpointPostgresTests(WorkdayCheckpointDatabase dat
         f.Total = 4;
         var changed = await f.ExecuteAsync(run.Id, 1);
         Assert.False(changed.Succeeded);
-        Assert.False(changed.ContinuationPending);
+        Assert.True(changed.ContinuationPending);
         Assert.False(changed.ReconciliationSafe);
-        Assert.Equal("ListingSnapshotIncompatible", changed.StopReason);
+        Assert.Equal("ExecutionSliceComplete", changed.StopReason);
+        Assert.Equal(1, changed.RebaseCount);
         Assert.Equal(0, changed.Closed);
         await using var db = database.Open();
-        Assert.Equal(JobSourceRunStatus.Unsafe, (await db.JobSourceRuns.SingleAsync(x => x.Id == run.Id)).Status);
+        Assert.Equal(JobSourceRunStatus.Paused, (await db.JobSourceRuns.SingleAsync(x => x.Id == run.Id)).Status);
         Assert.Equal(1, await db.Jobs.CountAsync(x => x.CompanyId == f.Source.CompanyId));
     }
 
@@ -291,7 +292,7 @@ public sealed class WorkdayCheckpointPostgresTests(WorkdayCheckpointDatabase dat
     }
 
     [WorkdayLocalPostgresFact]
-    public async Task DriftedMembershipResumesPositiveReceiptsButNeverUpgradesReconciliationAuthority()
+    public async Task StableReplacementRestartsDriftedMembershipBeforeGrantingReconciliationAuthority()
     {
         var f = await Harness.CreateAsync(database, 43);
         f.IndiaCount = 43;
@@ -312,34 +313,38 @@ public sealed class WorkdayCheckpointPostgresTests(WorkdayCheckpointDatabase dat
         {
             result = await f.ExecuteAsync(run.Id, 10);
             executions++;
-            Assert.False(result.Succeeded);
-            Assert.False(result.ReconciliationSafe);
-            Assert.Equal(0, result.Closed);
-            // Later slices see a stable board with exactly the frozen membership.
-            // That cannot erase the first execution's non-authoritative evidence.
+            if (result.ContinuationPending)
+            {
+                Assert.False(result.Succeeded);
+                Assert.False(result.ReconciliationSafe);
+                Assert.Equal(0, result.Closed);
+            }
+            // Stable replacement is a NEW traversal, including the already committed prefix.
             if (executions == 1) f.AdvertisedTotal = 42;
         } while (result.ContinuationPending && executions < 10);
-        Assert.Equal(5, executions);
+        Assert.Equal(6, executions);
         Assert.False(result.ContinuationPending);
-        Assert.Equal("ListingTotalDrift", result.StopReason);
+        Assert.Equal("Complete", result.StopReason);
+        Assert.True(result.ReconciliationSafe);
+        Assert.Equal(1, result.Closed);
         Assert.Equal(42, result.CheckpointCursor);
-        Assert.Equal(42, result.Existing);
+        Assert.Equal(52, result.Existing);
         Assert.Equal(0, result.Created);
         await using (var db = database.Open())
         {
             var stored = await db.JobSourceRuns.SingleAsync(x => x.Id == run.Id);
-            Assert.Equal(JobSourceRunStatus.Unsafe, stored.Status);
+            Assert.Equal(JobSourceRunStatus.Succeeded, stored.Status);
             var state = JsonSerializer.Deserialize<WorkdayRunCheckpoint>(stored.CheckpointJson!)!;
-            Assert.Equal(2, state.Version);
-            Assert.False(state.ListingDiagnostics!.ReconciliationSafe);
-            Assert.Equal(43, state.ListingDiagnostics.InitialReportedTotal);
+            Assert.Equal(3, state.Version);
+            Assert.True(state.ListingDiagnostics!.ReconciliationSafe);
+            Assert.Equal(42, state.ListingDiagnostics.InitialReportedTotal);
             Assert.Equal(42, state.ListingDiagnostics.FinalReportedTotal);
-            Assert.Null(state.CompletedResult);
+            Assert.NotNull(state.CompletedResult);
             Assert.Equal(42, await db.Set<JobSourceRunItem>().CountAsync(x => x.RunId == run.Id));
-            Assert.Equal(43, await db.Jobs.CountAsync(x => x.JobSourceId == f.Source.Id && x.Status == JobStatus.Published));
-            Assert.Equal(previousSuccess, await db.JobSources.Where(x => x.Id == f.Source.Id).Select(x => x.LastSuccessfulRunAtUtc).SingleAsync());
+            Assert.Equal(42, await db.Jobs.CountAsync(x => x.JobSourceId == f.Source.Id && x.Status == JobStatus.Published));
+            Assert.NotEqual(previousSuccess, await db.JobSources.Where(x => x.Id == f.Source.Id).Select(x => x.LastSuccessfulRunAtUtc).SingleAsync());
         }
-        // A separately captured authoritative census can reconcile. Resume of the drifted one cannot.
+        // A later independent stable run is also idempotent.
         f.AdvertisedTotal = null;
         f.FinalAnchorTotal = null;
         f.OmitContinuationTotal = false;
@@ -349,7 +354,61 @@ public sealed class WorkdayCheckpointPostgresTests(WorkdayCheckpointDatabase dat
         Assert.True(complete.Succeeded);
         Assert.True(complete.ReconciliationSafe);
         Assert.Equal(0, complete.Created);
-        Assert.Equal(1, complete.Closed);
+        Assert.Equal(0, complete.Closed);
+    }
+
+    [WorkdayLocalPostgresTheory]
+    [InlineData(8, false)]
+    [InlineData(6, false)]
+    [InlineData(7, true)]
+    public async Task ReplacementTraversalKeepsReceiptsCountersAndDefersClosure(int replacement, bool reverse)
+    {
+        var f = await Harness.CreateAsync(database, 7);
+        var baseline = await f.EnqueueAsync();
+        Assert.True((await f.ExecuteAsync(baseline.Id, 7)).Succeeded);
+        var run = await f.EnqueueAsync();
+        var first = await f.ExecuteAsync(run.Id, 2);
+        Assert.Equal(2, first.Existing);
+        f.Total = replacement; f.ReverseOrder = reverse;
+        var resumed = await f.ExecuteAsync(run.Id, 2);
+        Assert.True(resumed.ContinuationPending); Assert.False(resumed.ReconciliationSafe);
+        Assert.Equal(0, resumed.Closed); Assert.Equal(1, resumed.RebaseCount); Assert.Equal(2, resumed.CheckpointCursor);
+        Assert.Equal(4, resumed.Existing + resumed.Created);
+        JobSourceRunResult result = resumed;
+        while (result.ContinuationPending) result = await f.ExecuteAsync(run.Id, 2);
+        Assert.True(result.Succeeded); Assert.True(result.ReconciliationSafe);
+        Assert.Equal(replacement, result.ObservedIdentities); Assert.Equal(replacement + 2, result.Created + result.Existing);
+        Assert.Equal(Math.Max(0, replacement - 7), result.Created);
+        Assert.Equal(Math.Max(0, 7 - replacement), result.Closed);
+        await using var db = database.Open();
+        Assert.Equal(Math.Max(7, replacement), await db.Jobs.CountAsync(x => x.JobSourceId == f.Source.Id));
+        Assert.Equal(replacement, await db.Set<JobSourceRunItem>().CountAsync(x => x.RunId == run.Id));
+        var restored = new JobSourceRunCheckpoint(db, TimeProvider.System);
+        await restored.BindAsync((await db.JobSourceRuns.SingleAsync(x => x.Id == run.Id)), default);
+        Assert.Equal(result.Created, restored.CommittedCounters.Created);
+        Assert.Equal(result.Existing, restored.CommittedCounters.Existing);
+        Assert.Equal(result.Published, restored.CommittedCounters.Published);
+    }
+
+    [WorkdayLocalPostgresFact]
+    public async Task RebaseWithLostLeaseCannotArchiveOrRetireReceipts()
+    {
+        var f = await Harness.CreateAsync(database, 3);
+        var run = await f.EnqueueAsync(); await f.ExecuteAsync(run.Id, 2);
+        await using var db = database.Open();
+        var stored = await db.JobSourceRuns.SingleAsync(x => x.Id == run.Id);
+        var before = stored.CheckpointJson;
+        var journal = new JobSourceRunCheckpoint(db, TimeProvider.System);
+        await journal.BindAsync(stored, default); journal.Enable(f.Source);
+        var evidence = new WorkdayListingDiagnostics { IngestionSafe = true, ReconciliationSafe = true,
+            SnapshotStable = true, UniquePaths = 4, RawSlots = 4, InitialReportedTotal = 4, ReasonCode = "Complete" };
+        var failure = await Assert.ThrowsAsync<JobSourceSnapshotUnsafeException>(() => journal.PrepareAsync(
+            journal.State!.SourceIdentity, "replacement", 4, 1, default, evidence));
+        Assert.Equal("CheckpointLeaseLost", failure.ReasonCode); // Paused run cannot own the mutation.
+        await using var check = database.Open();
+        Assert.Equal(before, (await check.JobSourceRuns.SingleAsync(x => x.Id == run.Id)).CheckpointJson);
+        Assert.Equal(2, await check.Set<JobSourceRunItem>().CountAsync(x => x.RunId == run.Id));
+        Assert.Equal(0, journal.State!.RebaseCount); Assert.Equal(2, journal.CommittedCounters.Created);
     }
 
     private enum CrashPoint { None, BeforeSave, AfterSave, AfterFinalSave }
@@ -483,6 +542,7 @@ public sealed class WorkdayCheckpointPostgresTests(WorkdayCheckpointDatabase dat
         public int? FinalAnchorTotal;
         public int AnchorReads;
         public bool OmitContinuationTotal;
+        public bool ReverseOrder;
         public Func<int, CancellationToken, Task>? BeforeDetail;
 
         public static async Task<Harness> CreateAsync(WorkdayCheckpointDatabase database, int total)
@@ -568,6 +628,7 @@ public sealed class WorkdayCheckpointPostgresTests(WorkdayCheckpointDatabase dat
                 var reported = offset == 0 ? AnchorReads > 1 ? FinalAnchorTotal ?? AdvertisedTotal ?? Total : AdvertisedTotal ?? Total :
                     OmitContinuationTotal ? 0 : AdvertisedTotal ?? Total;
                 return Json(JsonSerializer.Serialize(new { total = reported, jobPostings = Enumerable.Range(offset, Math.Min(20, Total - offset))
+                    .Select(i => ReverseOrder ? Total - 1 - i : i)
                     .Select(i => new { title = $"{(ChangeListingAfterDetails && DetailRequests >= Total ? "Changed" : "Unmapped")} vacancy {Source.Id:N} {i}", externalPath = $"/job/Pune/Vacancy_{Source.Id:N}_{i}",
                         locationsText = UseGeographyMatrix && i == 3 ? null : "Multiple locations" }) }));
             }

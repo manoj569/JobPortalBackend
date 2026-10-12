@@ -28,7 +28,8 @@ public sealed class JobSourceRunCheckpoint(JobPortalDbContext db, TimeProvider c
     {
         this.run = run;
         State = run.CheckpointJson is null ? null : JsonSerializer.Deserialize<WorkdayRunCheckpoint>(run.CheckpointJson);
-        if (State is { Version: not (1 or 2) } ||
+        if (State is { Version: not (1 or 2 or 3) } ||
+            State is { Version: 3 } && (State.ListingDiagnostics is not { IngestionSafe: true } || State.RebaseCount < 1 || State.ArchivedCounters is null) ||
             State is { Version: 2 } && State.ListingDiagnostics is not { IngestionSafe: true, ReconciliationSafe: false } ||
             State is { Version: 1, ListingDiagnostics.ReconciliationSafe: false } ||
             State is { Cursor: < 0 } || State is { ListingTotal: > 10000 } ||
@@ -54,10 +55,30 @@ public sealed class JobSourceRunCheckpoint(JobPortalDbContext db, TimeProvider c
         if (!Enabled) return;
         if (State is not null)
         {
-            if (State.SourceIdentity != sourceIdentity || State.ListingIdentity != listingIdentity || State.ListingTotal != total)
-                throw new JobSourceSnapshotUnsafeException("ListingSnapshotIncompatible");
-            if (listingDiagnostics is { ReconciliationSafe: false } && State.Version == 1)
-                await SaveAsync(State with { Version = 2, ListingDiagnostics = listingDiagnostics }, ct);
+            if (WorkdayCheckpointRebasePolicy.RequiresRebase(State, sourceIdentity, listingIdentity, total, listingDiagnostics))
+            {
+                var previous = State;
+                var nextState = WorkdayCheckpointRebasePolicy.Restart(previous, listingIdentity, total, pages,
+                    listingDiagnostics!, CommittedCounters, clock.GetUtcNow().UtcDateTime);
+                // Both archive and receipt retirement commit under the same lease fence.
+                await db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+                {
+                    await using var transaction = await db.Database.BeginTransactionAsync(ct);
+                    try
+                    {
+                        await SaveAsync(nextState, ct);
+                        await db.Set<JobSourceRunItem>().Where(x => x.RunId == run!.Id).ExecuteDeleteAsync(ct);
+                        await transaction.CommitAsync(ct);
+                    }
+                    catch { State = previous; throw; }
+                });
+                foreach (var row in db.Set<JobSourceRunItem>().Local.Where(x => x.RunId == run!.Id).ToArray())
+                    db.Entry(row).State = EntityState.Detached;
+                await RefreshAsync(ct);
+                return;
+            }
+            if (listingDiagnostics is { ReconciliationSafe: false } && State.ListingDiagnostics is not { ReconciliationSafe: false })
+                await SaveAsync(State with { Version = State.Version == 3 ? 3 : 2, ListingDiagnostics = listingDiagnostics }, ct);
             return;
         }
         var next = new WorkdayRunCheckpoint
@@ -194,7 +215,7 @@ public sealed class JobSourceRunCheckpoint(JobPortalDbContext db, TimeProvider c
         {
             int Ingestion(JobIngestionOutcome outcome) => ingestionCounts.GetValueOrDefault(outcome);
             int Publication(JobAutoPublishOutcome outcome) => publicationCounts.GetValueOrDefault(outcome);
-            return new()
+            return WorkdayCheckpointRebasePolicy.AddCounters(new()
             {
                 TotalReceived = committed.Count,
                 Created = Ingestion(JobIngestionOutcome.Created), Updated = Ingestion(JobIngestionOutcome.Updated),
@@ -207,7 +228,7 @@ public sealed class JobSourceRunCheckpoint(JobPortalDbContext db, TimeProvider c
                 PublishFailed = Publication(JobAutoPublishOutcome.JobNotFound), ReasonCounts = new Dictionary<JobIngestionReasonCode, int>(reasons),
                 ValidationReasonCounts = new Dictionary<string, int>(validation, StringComparer.Ordinal),
                 QualityReasonCounts = new Dictionary<JobQualityReasonCode, int>(quality)
-            };
+            }, State?.ArchivedCounters);
         }
     }
 

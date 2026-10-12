@@ -236,9 +236,12 @@ public sealed partial class WorkdayJobSourceProvider(
                     WorldwideRemote = selection?.AllowExplicitWorldwideRemote ?? false, Limit = selection?.TestImportLimit ?? 0 });
                 var sourceIdentity = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
                     $"v1|{source.Id:D}|{source.CompanyId:D}|{target.Origin}|{target.Tenant}|{target.Site}|{policyIdentity}")));
-                // Freeze positively observed membership, not an unfulfilled advertised count.
-                // The reconciliation restriction joins the existing JSON checkpoint, without a schema change.
+                // Resume only identical ordered membership. Prepare may atomically restart
+                // against a freshly authoritative replacement; never reuse its old offset.
+                var priorRebases = checkpoint!.State?.RebaseCount ?? 0;
                 await checkpoint!.PrepareAsync(sourceIdentity, ListingIdentity(inventory), postings.Count, inventory.Pages, token, inventory.Diagnostics);
+                if (logger is not null && checkpoint.State?.RebaseCount > priorRebases)
+                    LogStage(logger, source.Id, "CheckpointRebased", postings.Count, listingTimer.Elapsed.TotalMilliseconds, 1);
             }
             var initial = durable ? checkpoint!.State : null;
             var listingDiagnostics = initial?.ListingDiagnostics is { ReconciliationSafe: false } captured
