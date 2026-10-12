@@ -514,6 +514,115 @@ public sealed class PublicJobSearchTests
         result.ShouldHaveValidationErrorFor(x => x.CategoryName);
     }
 
+    [Theory]
+    [InlineData(".NET", "Description")]
+    [InlineData(".net", "Description")]
+    [InlineData("   .NET   ", "Description")]
+    [InlineData("NET", "Description")]
+    [InlineData("ASP.NET", "Description")]
+    [InlineData(".NET", "Title")]
+    [InlineData("Azure", "Requirements")]
+    [InlineData("Azure", "Responsibilities")]
+    [InlineData("Azure", "Department")]
+    [InlineData("Azure", "RoleCategory")]
+    [InlineData("Azure", "Benefits")]
+    [InlineData("Azure", "EducationRequirement")]
+    [InlineData("C#", "Description")]
+    [InlineData("C++", "Description")]
+    [InlineData("Node.js", "Description")]
+    [InlineData("%", "Description")]
+    [InlineData("_", "Description")]
+    [InlineData("\\", "Description")]
+    [InlineData("SQL Server", "Description")]
+    public async Task LiteralCaseInsensitiveContentSearch(string keyword, string field)
+    {
+        await using var fixture = await SearchFixture.CreateAsync();
+        fixture.Featured.Title = "Support Engineer";
+        var content = field == "Description" ? "Experience with .NET ASP.NET C# C++ Node.js SQL Server 50% foo_bar \\ tools" : keyword;
+        typeof(Job).GetProperty(field)!.SetValue(fixture.Featured, content);
+        await fixture.Context.SaveChangesAsync();
+        var result = await fixture.Repository.SearchAsync(new(Keyword: keyword));
+        Assert.Equal(1, result.TotalCount);
+        Assert.Equal(fixture.Featured.Id, Assert.Single(result.Items).Id);
+    }
+
+    [Fact]
+    public async Task CrossFieldTokensFiltersCountsFacetsAndPaginationShareOneQuery()
+    {
+        await using var fixture = await SearchFixture.CreateAsync();
+        fixture.Flexible.Title = "Senior Support Engineer";
+        fixture.Flexible.Description = "Azure and .NET";
+        fixture.Flexible.Location = "Pune";
+        fixture.Flexible.WorkplaceType = WorkplaceType.Remote;
+        fixture.Flexible.MinimumExperienceYears = 3;
+        fixture.Flexible.MaximumExperienceYears = null;
+        var hidden = fixture.Copy("hidden-search", JobStatus.Published, isHidden: true);
+        var deleted = fixture.Copy("deleted-search", JobStatus.Published, isDeleted: true);
+        var draft = fixture.Copy("draft-search", JobStatus.Draft);
+        var expired = fixture.Copy("expired-search", JobStatus.Published, expiresAtUtc: Now);
+        foreach (var job in new[] { hidden, deleted, draft, expired }) job.Description = "Senior Azure .NET";
+        fixture.Context.AddRange(hidden, deleted, draft, expired);
+        await fixture.Context.SaveChangesAsync();
+        var query = new PublicJobQuery(Keyword: "  SENIOR\t azure .net ", Location: " pUnE ",
+            Locations: ["PUNE"], WorkModes: [WorkplaceType.Remote], MinExperienceYears: 2,
+            MaxExperienceYears: 4, ExperienceLevel: ExperienceLevel.Senior, PageSize: 1);
+        var service = new PublicJobService(fixture.Repository, new PublicJobQueryValidator());
+        var page = await service.SearchAsync(query);
+        Assert.Equal(fixture.Flexible.Id, Assert.Single(page.Items).Id);
+        Assert.Equal(1, page.TotalCount);
+        Assert.Equal(1, page.TotalPages);
+        Assert.Equal(1, page.PageNumber);
+        Assert.Equal(1, page.PageSize);
+        Assert.Equal(page.Items.Select(x => x.Id), (await service.SearchAsync(query)).Items.Select(x => x.Id));
+        var facets = await service.GetFilterOptionsAsync(query);
+        Assert.Equal(1, Assert.Single(facets.Locations).Count);
+        Assert.Equal(1, Assert.Single(facets.Departments).Count);
+        Assert.Empty((await service.SearchAsync(query with { Keyword = "senior azure missing" })).Items);
+        Assert.Equal(3, (await service.SearchAsync(new(Keyword: "   "))).TotalCount);
+        Assert.Equal(1, (await service.SearchAsync(query with { Keyword = null, Search = "senior azure" })).TotalCount);
+    }
+
+    [Fact]
+    public async Task FilteredCountAndCeilingPagesRemainStableAcrossTiedSortValues()
+    {
+        await using var fixture = await SearchFixture.CreateAsync();
+        for (var index = 0; index < 3; index++)
+        {
+            var job = fixture.Copy($"match-{index}", JobStatus.Published);
+            job.Description = ".NET";
+            fixture.Context.Jobs.Add(job);
+        }
+        await fixture.Context.SaveChangesAsync();
+        var service = new PublicJobService(fixture.Repository, new PublicJobQueryValidator());
+        var query = new PublicJobQuery(Keyword: ".net", PageSize: 2, SortBy: PublicJobSort.LatestPublished);
+        var first = await service.SearchAsync(query);
+        var second = await service.SearchAsync(query with { Page = 2 });
+        Assert.Equal(3, first.TotalCount);
+        Assert.Equal(2, first.TotalPages);
+        Assert.Equal(2, first.Items.Count);
+        Assert.Single(second.Items);
+        Assert.Equal(3, first.Items.Concat(second.Items).Select(x => x.Id).Distinct().Count());
+        Assert.Equal(first.Items.Select(x => x.Id), (await service.SearchAsync(query)).Items.Select(x => x.Id));
+    }
+
+    [Theory]
+    [InlineData("%")]
+    [InlineData("_")]
+    [InlineData("C++")]
+    [InlineData("senior azure")]
+    public void LiteralSearchTranslatesToParameterizedPostgresSql(string keyword)
+    {
+        using var db = new JobPortalDbContext(new DbContextOptionsBuilder<JobPortalDbContext>()
+            .UseNpgsql("Host=localhost;Database=TranslationOnly;Username=postgres").Options);
+        var sql = new PublicJobRepository(db, new FixedTimeProvider(Now))
+            .FilteredJobsQuery(new(Keyword: keyword)).ToQueryString();
+        Assert.Contains("lower(", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("@__", sql, StringComparison.Ordinal);
+        Assert.Contains("Requirements", sql, StringComparison.Ordinal);
+        Assert.Contains("Responsibilities", sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("ILIKE", sql, StringComparison.OrdinalIgnoreCase);
+    }
+
     private sealed class SearchFixture : IAsyncDisposable
     {
         private SearchFixture(JobPortalDbContext context)

@@ -197,12 +197,16 @@ public sealed class WorkdayBatchIngestionTests(ITestOutputHelper output)
         var firstReads = 0;
         using var http = new HttpClient(new Handler(async (request, ct) =>
         {
+            if (request.Method != HttpMethod.Post) return Json(Detail(request));
             using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
             var offset = body.RootElement.GetProperty("offset").GetInt32();
             if (offset == 0 && ++firstReads > 1) return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
             return Json(Listing(offset == 0 ? 40 : 0, offset, 20));
         }));
-        await Assert.ThrowsAsync<HttpRequestException>(() => Provider(http, attempts: 2).FetchSnapshotAsync(Source()));
+        var snapshot = await Provider(http, attempts: 2).FetchSnapshotAsync(Source());
+        Assert.False(snapshot.IsComplete);
+        Assert.Equal(40, snapshot.Jobs.Count);
+        Assert.Equal("AnchorRevalidationFailed", snapshot.ListingDiagnostics!.ReasonCode);
         Assert.Equal(3, firstReads); // Initial anchor plus exactly two failed validation attempts.
     }
 
@@ -255,8 +259,12 @@ public sealed class WorkdayBatchIngestionTests(ITestOutputHelper output)
     [Fact]
     public async Task ShortListingBeforeAdvertisedTotalFailsClosed()
     {
-        using var http = new HttpClient(new Handler((_, _) => Task.FromResult(Json(Listing(40, 0, 10)))));
-        await Assert.ThrowsAsync<InvalidDataException>(() => Provider(http).FetchSnapshotAsync(Source()));
+        using var http = new HttpClient(new Handler((request, _) => Task.FromResult(Json(request.Method == HttpMethod.Post
+            ? Listing(40, 0, 10) : Detail(request)))));
+        var snapshot = await Provider(http).FetchSnapshotAsync(Source());
+        Assert.False(snapshot.IsComplete);
+        Assert.False(snapshot.ListingDiagnostics!.ReconciliationSafe);
+        Assert.Equal(10, snapshot.Jobs.Count);
     }
 
     [Fact]

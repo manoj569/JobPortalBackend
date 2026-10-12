@@ -1,0 +1,35 @@
+{
+  "jobPostingInfo": {
+    "id": "d477653d4d3110015173499a09dd0000",
+    "title": "Senior Data Engineer-1",
+    "jobDescription": "<p><span><b>Our Purpose</b></span></p><p></p><p><i>Mastercard powers economies and empowers people in 200&#43; countries and territories worldwide. Together with our customers, we’re helping build a sustainable economy where everyone can prosper. We support a wide range of digital payments choices, making transactions secure, simple, smart and accessible. Our technology and innovation, partnerships and networks combine to deliver a unique set of products and services that help people, businesses and governments realize their greatest potential.</i></p><p></p><p><b>Title and Summary</b></p><h3></h3><p></p>Senior Data Engineer-1<h3></h3><p style=\"text-align:inherit\"></p>Who is Mastercard?<br>Mastercard is a global technology company in the payments industry. Our mission is to connect and power an inclusive, digital economy that benefits everyone, everywhere by making transactions safe, simple, smart, and accessible. Using secure data and networks, partnerships and passion, our innovations and solutions help individuals, financial institutions, governments, and businesses realize their greatest potential.<br>Our decency quotient, or DQ, drives our culture and everything we do inside and outside of our company. With connections across more than 210 countries and territories, we are building a sustainable world that unlocks priceless possibilities for all.<br><br>Overview<br>Mastercard is seeking a Senior Data Engineer to join our team in Hyderabad, India. This is an experienced individual-contributor role that owns end-to-end pipeline delivery and mentors peers. It will appeal to you if you combine deep technical expertise with the ability to independently deliver complex data solutions and raise the bar for the engineers around you.<br><br>You will bring cutting edge software and full stack development skills with advanced knowledge of cloud and data lake experience while working with massive data volumes. Our teams are small, agile, and focused on the needs of the high growth fintech marketplace, and you will work across functional teams within Mastercard to deliver on our cloud strategy while keeping our systems resilient, responsive, and maintainable on cloud.<br><br>Key Responsibilities<br>Own the end-to-end design, development, and delivery of complex batch and real-time data pipelines using Databricks, Spark, Python, and PySpark.<br><br>Drive dbt-based transformation architecture with rigorous Test-Driven Development (TDD) and modular design.<br><br>Design and own CI/CD pipelines using GitLab and Jenkins, and champion DataOps practices across the team.<br><br>Administer and optimize Databricks objects and the platform using Databricks Asset Bundles, managing performance, access, and cost.<br><br>Establish data observability frameworks covering quality, freshness, lineage, and anomaly detection.<br><br>Lead the design of real-time data streaming pipelines (e.g., using Kafka, Spark Structured Streaming).<br><br>Mentor junior and mid-level engineers, and lead code and design reviews.<br><br>Partner with stakeholders on requirements, delivery planning, and technical trade-offs.<br><br>Plan and execute deployments, migrations, and upgrades with minimal disruption to operations.<br><br>Required Qualifications<br>Bachelor's degree in computer science or a related technical field (Master's a plus).<br><br>5+ years of data engineering experience.<br><br>Deep hands-on experience with Databricks (including administration), Spark, and Python.<br><br>Strong background in PySpark and distributed data processing.<br><br>Proven track record using dbt for robust, testable transformation workflows following TDD.<br><br>Familiarity with Databricks Asset Bundles for object deployment and version control.<br><br>Strong CI/CD (GitLab, Jenkins) and DataOps expertise.<br><br>Experience with real-time data processing and streaming pipelines.<br><br>Expert SQL development and strong cloud infrastructure experience (AWS, Azure, or GCP).<br><br>Demonstrated experience mentoring engineers and leading technical delivery.<br><br>Ideally you have experience in banking, e-commerce, credit cards or payment processing and exposure to both SaaS and premises-based architectures. In addition, you have a post-secondary degree in computer science, mathematics, or quantitative science.<h3></h3><p style=\"text-align:inherit\"></p><h3></h3><p style=\"text-align:inherit\"></p><p style=\"text-align:left\"><b>Corporate Security Responsibility</b></p><p style=\"text-align:left\"><br />All activities involving access to Mastercard assets, information, and networks comes with an inherent risk to the organization and, therefore, it is expected that every person working for, or on behalf of, Mastercard is responsible for information security and must:</p><ul><li><p style=\"text-align:left\">Abide by Mastercard’s security policies and practices;</p></li><li><p style=\"text-align:left\">Ensure the confidentiality and integrity of the information being accessed;</p></li><li><p style=\"text-align:left\">Report any suspected information security violation or breach, and</p></li><li><p style=\"text-align:left\">Complete all periodic mandatory security trainings in accordance with Mastercard’s guidelines.</p></li></ul><p style=\"text-align:inherit\"></p><br /><p style=\"text-align:inherit\"></p><br /><p style=\"text-align:inherit\"></p><br /><p style=\"text-align:inherit\"></p>",
+    "location": "Hyderabad, India",
+    "postedOn": "Posted Today",
+    "startDate": "2026-10-12",
+    "timeType": "Full time",
+    "jobReqId": "R-292031",
+    "jobPostingId": "Senior-Data-Engineer-1_R-292031",
+    "jobPostingSiteId": "CorporateCareers",
+    "country": {
+      "descriptor": "India",
+      "id": "c4f78be1a8f14da0ab49ce1162348a5e"
+    },
+    "canApply": true,
+    "posted": true,
+    "includeResumeParsing": true,
+    "jobRequisitionLocation": {
+      "descriptor": "Hyderabad, India",
+      "country": {
+        "descriptor": "India",
+        "id": "c4f78be1a8f14da0ab49ce1162348a5e",
+        "alpha2Code": "IN"
+      }
+    },
+    "externalUrl": "https://mastercard.wd1.myworkdayjobs.com/CorporateCareers/job/Hyderabad-India/Senior-Data-Engineer-1_R-292031",
+    "questionnaireId": "7c7d38bf3bce10014d0e1d9bc9b10000",
+    "secondaryQuestionnaireId": "8131e020187d1000ba7c298c7afe0000",
+    "timeLeftToApply": "30+ days left to apply",
+    "endDate": "2026-11-15",
+    "jobPostingEndDateAsText": "End Date: November 15, 2026"
+  }
+}

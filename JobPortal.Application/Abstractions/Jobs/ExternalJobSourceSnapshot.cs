@@ -10,9 +10,30 @@ public sealed record ExternalJobSourceSnapshot(
 {
     public int? CheckpointCursor { get; init; }
     public bool ContinuationPending { get; init; }
+    public WorkdayListingDiagnostics? ListingDiagnostics { get; init; }
     // Selection diagnostics only: these items never reached ingestion validation.
     public IReadOnlyDictionary<string, int>? SelectionReasonCounts { get; init; }
     public IReadOnlyDictionary<string, int>? EligibilityReasonCounts { get; init; }
+}
+
+// Count equality is insufficient to authorize absence reconciliation after observed drift.
+public sealed record WorkdayListingDiagnostics
+{
+    public int InitialReportedTotal { get; init; }
+    public int? FinalReportedTotal { get; init; }
+    public int RawSlots { get; init; }
+    public int UniquePaths { get; init; }
+    public int DuplicatePaths { get; init; }
+    public int PlaceholderCount { get; init; }
+    public bool FirstPageChanged { get; init; }
+    public int LastOffset { get; init; }
+    public int LastPageSize { get; init; }
+    public int PageCount { get; init; }
+    public bool SnapshotStable { get; init; }
+    public bool IngestionSafe { get; init; }
+    public bool ReconciliationSafe { get; init; }
+    public string ReasonCode { get; init; } = "SnapshotIncomplete";
+    public bool RetryRecommended { get; init; }
 }
 
 /// <summary>

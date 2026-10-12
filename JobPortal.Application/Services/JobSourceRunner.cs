@@ -160,6 +160,7 @@ public sealed partial class JobSourceRunner(
         var runTimer = System.Diagnostics.Stopwatch.StartNew();
         var processed = 0;
         var partialResult = new JobSourceRunResult { JobSourceId = source.Id };
+        WorkdayListingDiagnostics? listingDiagnostics = checkpoint?.State?.ListingDiagnostics;
 
         try
         {
@@ -218,8 +219,9 @@ public sealed partial class JobSourceRunner(
                 partialResult = new JobSourceRunResult
                 {
                     JobSourceId = source.Id, RunId = durable ? checkpoint!.RunId : null,
-                    ListingTotal = durable ? checkpoint!.State?.ListingTotal ?? 0 : 0,
-                    ListingPages = durable ? checkpoint!.State?.ListingPages ?? 0 : 0,
+                    ListingDiagnostics = listingDiagnostics,
+                    ListingTotal = durable ? checkpoint!.State?.ListingTotal ?? 0 : listingDiagnostics?.UniquePaths ?? 0,
+                    ListingPages = durable ? checkpoint!.State?.ListingPages ?? 0 : listingDiagnostics?.PageCount ?? 0,
                     CheckpointCursor = durable ? checkpoint!.State?.Cursor ?? 0 : 0,
                     LastCheckpointAtUtc = durable ? checkpoint!.State?.CommittedAtUtc : null,
                     RemainingWork = durable && checkpoint!.State is { } state ? state.ListingTotal - state.Cursor : null,
@@ -247,6 +249,9 @@ public sealed partial class JobSourceRunner(
 
             await foreach (var batch in FetchBatchesAsync(provider, source, cancellationToken))
             {
+                listingDiagnostics = batch.ListingDiagnostics ?? listingDiagnostics;
+                if (batch.ListingDiagnostics is { IngestionSafe: false } unsafeListing)
+                    throw new JobSourceSnapshotUnsafeException(unsafeListing.ReasonCode, unsafeListing);
                 observedJobs.AddRange(batch.Jobs);
                 continuationPending = batch.ContinuationPending;
                 var providerSkipped = (snapshot?.Skipped ?? 0) + batch.Skipped;
@@ -581,7 +586,9 @@ public sealed partial class JobSourceRunner(
                 CheckpointCursor = partialResult.CheckpointCursor, LastCheckpointAtUtc = partialResult.LastCheckpointAtUtc,
                 RemainingWork = partialResult.RemainingWork, DurationMilliseconds = runTimer.Elapsed.TotalMilliseconds,
                 ContinuationPending = continuationPending,
-                StopReason = successful ? "Complete" : continuationPending ? "ExecutionSliceComplete" : "IncompleteOrUnsafeScan",
+                StopReason = successful ? "Complete" : continuationPending ? "ExecutionSliceComplete" :
+                    listingDiagnostics is { ReasonCode: not "Complete" } ? listingDiagnostics.ReasonCode : "IncompleteOrUnsafeScan",
+                ListingDiagnostics = listingDiagnostics,
                 TotalReceived = observedJobs.Count + (snapshot?.Skipped ?? 0),
                     Parsed = observedJobs.Count,
                     EligibilityReasonCounts = snapshot?.EligibilityReasonCounts,
@@ -677,9 +684,12 @@ public sealed partial class JobSourceRunner(
             sources.Update(source);
             await unitOfWork.SaveChangesAsync(cancellationToken);
 
+            var snapshotReason = exception is JobSourceSnapshotUnsafeException unsafeSnapshot ? unsafeSnapshot.ReasonCode :
+                exception is InvalidDataException && exception.Data["WorkdayFailureReason"] is { } providerReason ? providerReason.ToString() : null;
             return partialResult with { Succeeded = false, Error = source.LastError,
-                StopReason = exception is JobSourceSnapshotUnsafeException unsafeSnapshot ? unsafeSnapshot.ReasonCode : "InfrastructureFailure",
-                ReconciliationSafe = false, ReconciliationBlockReasons = exception is JobSourceSnapshotUnsafeException
+                ListingDiagnostics = (exception as JobSourceSnapshotUnsafeException)?.ListingDiagnostics ?? listingDiagnostics,
+                StopReason = snapshotReason ?? "InfrastructureFailure",
+                ReconciliationSafe = false, ReconciliationBlockReasons = snapshotReason is not null
                     ? ["SnapshotUnsafe"] : ["ExecutionFailed"] };
         }
         finally

@@ -28,7 +28,10 @@ public sealed class JobSourceRunCheckpoint(JobPortalDbContext db, TimeProvider c
     {
         this.run = run;
         State = run.CheckpointJson is null ? null : JsonSerializer.Deserialize<WorkdayRunCheckpoint>(run.CheckpointJson);
-        if (State is { Version: not 1 } || State is { Cursor: < 0 } || State is { ListingTotal: > 10000 } ||
+        if (State is { Version: not (1 or 2) } ||
+            State is { Version: 2 } && State.ListingDiagnostics is not { IngestionSafe: true, ReconciliationSafe: false } ||
+            State is { Version: 1, ListingDiagnostics.ReconciliationSafe: false } ||
+            State is { Cursor: < 0 } || State is { ListingTotal: > 10000 } ||
             State is not null && (State.Cursor > State.ListingTotal || State.ObservedJobs.Count + State.ProviderSkipped != State.Cursor))
             throw new JobSourceSnapshotUnsafeException("InvalidCheckpoint");
         await RefreshAsync(ct);
@@ -45,19 +48,25 @@ public sealed class JobSourceRunCheckpoint(JobPortalDbContext db, TimeProvider c
         foreach (var row in rows) { committed.Add(row.Ordinal, row); Tally(row, 1); }
     }
 
-    public async Task PrepareAsync(string sourceIdentity, string listingIdentity, int total, int pages, CancellationToken ct)
+    public async Task PrepareAsync(string sourceIdentity, string listingIdentity, int total, int pages, CancellationToken ct,
+        WorkdayListingDiagnostics? listingDiagnostics = null)
     {
         if (!Enabled) return;
         if (State is not null)
         {
             if (State.SourceIdentity != sourceIdentity || State.ListingIdentity != listingIdentity || State.ListingTotal != total)
                 throw new JobSourceSnapshotUnsafeException("ListingSnapshotIncompatible");
+            if (listingDiagnostics is { ReconciliationSafe: false } && State.Version == 1)
+                await SaveAsync(State with { Version = 2, ListingDiagnostics = listingDiagnostics }, ct);
             return;
         }
         var next = new WorkdayRunCheckpoint
         {
+            // Prior binaries reject version 2 instead of silently dropping the safety restriction on rollback.
+            Version = listingDiagnostics is { ReconciliationSafe: false } ? 2 : 1,
             SourceIdentity = sourceIdentity, ListingIdentity = listingIdentity, ListingTotal = total,
-            ListingPages = pages, CapturedAtUtc = clock.GetUtcNow().UtcDateTime, CommittedAtUtc = clock.GetUtcNow().UtcDateTime
+            ListingPages = pages, CapturedAtUtc = clock.GetUtcNow().UtcDateTime, CommittedAtUtc = clock.GetUtcNow().UtcDateTime,
+            ListingDiagnostics = listingDiagnostics
         };
         await SaveAsync(next, ct);
     }

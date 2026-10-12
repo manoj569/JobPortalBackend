@@ -151,7 +151,10 @@ public sealed partial class JobSourceRunWorker(IServiceScopeFactory scopes, JobS
         catch (JobSourceSnapshotUnsafeException exception)
         {
             status = JobSourceRunStatus.Unsafe;
-            progress.Report(new("Unsafe", run.Processed, new() { RunId = run.Id, StopReason = exception.ReasonCode }));
+            var captured = progress.Snapshot;
+            progress.Report(captured with { Phase = "Unsafe", Counters = captured.Counters with
+            { RunId = run.Id, StopReason = exception.ReasonCode, ReconciliationSafe = false,
+                ListingDiagnostics = exception.ListingDiagnostics ?? captured.Counters.ListingDiagnostics } });
         }
         catch (Exception)
         {

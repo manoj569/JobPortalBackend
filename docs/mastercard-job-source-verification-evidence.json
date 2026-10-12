@@ -1,0 +1,261 @@
+{
+  "verifiedAtUtc": "2026-10-12T10:09:42.1027861Z",
+  "backendHead": "e99692626ee68aedf04f7d05c791e4df57d76cd2",
+  "official": {
+    "workdayLinks": [
+      "https://mastercard.wd1.myworkdayjobs.com/CorporateCareers"
+    ],
+    "url": "https://careers.mastercard.com/us/en",
+    "verifiedAtUtc": "2026-10-12T10:08:28.6977688Z",
+    "status": 200
+  },
+  "host": "mastercard.wd1.myworkdayjobs.com",
+  "tenant": "mastercard",
+  "site": "CorporateCareers",
+  "payload": {
+    "limit": 20,
+    "offset": "0,20,40 and anchor 0",
+    "appliedFacets": {},
+    "searchText": ""
+  },
+  "listing": [
+    {
+      "offset": 0,
+      "httpStatus": 200,
+      "reportedTotal": 1084,
+      "rawSlots": 20,
+      "uniquePaths": 20,
+      "duplicates": 0,
+      "placeholders": 0,
+      "totalOmitted": false
+    },
+    {
+      "offset": 20,
+      "httpStatus": 200,
+      "reportedTotal": 0,
+      "rawSlots": 20,
+      "uniquePaths": 20,
+      "duplicates": 0,
+      "placeholders": 0,
+      "totalOmitted": true
+    },
+    {
+      "offset": 40,
+      "httpStatus": 200,
+      "reportedTotal": 0,
+      "rawSlots": 20,
+      "uniquePaths": 20,
+      "duplicates": 0,
+      "placeholders": 0,
+      "totalOmitted": true
+    }
+  ],
+  "summary": {
+    "duplicatePaths": 0,
+    "fullCensusVerified": false,
+    "placeholders": 0,
+    "indiaDetailSamples": 4,
+    "advertisedTotal": 1084,
+    "indiaListingSamples": 13,
+    "uniquePaths": 60,
+    "rawSlots": 60,
+    "uniqueListingRequisitions": 60
+  },
+  "anchor": {
+    "AnchorTotal": 1084,
+    "AnchorMatches": true,
+    "VerifiedAtUtc": "2026-10-12T10:09:42.1027861Z"
+  },
+  "details": [
+    {
+      "title": "Director, Sales Operations & Business Transformation",
+      "location": "Gurgaon, India",
+      "reference": "R-291604",
+      "externalPath": "/job/Gurgaon-India/Director--Sales-Operations---Business-Transformation_R-291604",
+      "detailUrl": "https://mastercard.wd1.myworkdayjobs.com/wday/cxs/mastercard/CorporateCareers/job/Gurgaon-India/Director--Sales-Operations---Business-Transformation_R-291604",
+      "httpStatus": 200,
+      "countryCode": "IN",
+      "country": "India",
+      "externalUrl": "https://mastercard.wd1.myworkdayjobs.com/CorporateCareers/job/Gurgaon-India/Director--Sales-Operations---Business-Transformation_R-291604",
+      "providerApplicationUrl": "https://mastercard.wd1.myworkdayjobs.com/en-US/CorporateCareers/job/Gurgaon-India/Director--Sales-Operations---Business-Transformation_R-291604",
+      "timeType": "Full time",
+      "remoteType": null,
+      "canApply": true,
+      "posted": true,
+      "status": null,
+      "endDate": "2026-11-14"
+    },
+    {
+      "title": "Senior Data Engineer-1",
+      "location": "Hyderabad, India",
+      "reference": "R-292031",
+      "externalPath": "/job/Hyderabad-India/Senior-Data-Engineer-1_R-292031",
+      "detailUrl": "https://mastercard.wd1.myworkdayjobs.com/wday/cxs/mastercard/CorporateCareers/job/Hyderabad-India/Senior-Data-Engineer-1_R-292031",
+      "httpStatus": 200,
+      "countryCode": "IN",
+      "country": "India",
+      "externalUrl": "https://mastercard.wd1.myworkdayjobs.com/CorporateCareers/job/Hyderabad-India/Senior-Data-Engineer-1_R-292031",
+      "providerApplicationUrl": "https://mastercard.wd1.myworkdayjobs.com/en-US/CorporateCareers/job/Hyderabad-India/Senior-Data-Engineer-1_R-292031",
+      "timeType": "Full time",
+      "remoteType": null,
+      "canApply": true,
+      "posted": true,
+      "status": null,
+      "endDate": "2026-11-15"
+    },
+    {
+      "title": "Senior Full‑Stack Engineer - React, Typescript, Node & Java",
+      "location": "Navi Mumbai, India (Finicity)",
+      "reference": "R-291599",
+      "externalPath": "/job/Navi-Mumbai-India-Finicity/Senior-Full-Stack-Engineer---React--Typescript--Node---Java_R-291599",
+      "detailUrl": "https://mastercard.wd1.myworkdayjobs.com/wday/cxs/mastercard/CorporateCareers/job/Navi-Mumbai-India-Finicity/Senior-Full-Stack-Engineer---React--Typescript--Node---Java_R-291599",
+      "httpStatus": 200,
+      "countryCode": "IN",
+      "country": "India",
+      "externalUrl": "https://mastercard.wd1.myworkdayjobs.com/CorporateCareers/job/Navi-Mumbai-India-Finicity/Senior-Full-Stack-Engineer---React--Typescript--Node---Java_R-291599",
+      "providerApplicationUrl": "https://mastercard.wd1.myworkdayjobs.com/en-US/CorporateCareers/job/Navi-Mumbai-India-Finicity/Senior-Full-Stack-Engineer---React--Typescript--Node---Java_R-291599",
+      "timeType": "Full time",
+      "remoteType": null,
+      "canApply": true,
+      "posted": true,
+      "status": null,
+      "endDate": "2026-10-31"
+    },
+    {
+      "title": "Senior Enterprise Operations Engineer-1",
+      "location": "Pune, India",
+      "reference": "R-278780",
+      "externalPath": "/job/Pune-India/Senior-Enterprise-Operations-Engineer-1_R-278780",
+      "detailUrl": "https://mastercard.wd1.myworkdayjobs.com/wday/cxs/mastercard/CorporateCareers/job/Pune-India/Senior-Enterprise-Operations-Engineer-1_R-278780",
+      "httpStatus": 200,
+      "countryCode": "IN",
+      "country": "India",
+      "externalUrl": "https://mastercard.wd1.myworkdayjobs.com/CorporateCareers/job/Pune-India/Senior-Enterprise-Operations-Engineer-1_R-278780",
+      "providerApplicationUrl": "https://mastercard.wd1.myworkdayjobs.com/en-US/CorporateCareers/job/Pune-India/Senior-Enterprise-Operations-Engineer-1_R-278780",
+      "timeType": "Full time",
+      "remoteType": null,
+      "canApply": true,
+      "posted": true,
+      "status": null,
+      "endDate": "2026-10-30"
+    },
+    {
+      "title": "Director, Finance Business Partner",
+      "location": "London, England (Angel Lane)",
+      "reference": "R-291339",
+      "externalPath": "/job/London-England-Angel-Lane/Director--Finance-Business-Partner_R-291339",
+      "detailUrl": "https://mastercard.wd1.myworkdayjobs.com/wday/cxs/mastercard/CorporateCareers/job/London-England-Angel-Lane/Director--Finance-Business-Partner_R-291339",
+      "httpStatus": 200,
+      "countryCode": "GB",
+      "country": "United Kingdom",
+      "externalUrl": "https://mastercard.wd1.myworkdayjobs.com/CorporateCareers/job/London-England-Angel-Lane/Director--Finance-Business-Partner_R-291339",
+      "providerApplicationUrl": "https://mastercard.wd1.myworkdayjobs.com/en-US/CorporateCareers/job/London-England-Angel-Lane/Director--Finance-Business-Partner_R-291339",
+      "timeType": "Full time",
+      "remoteType": null,
+      "canApply": true,
+      "posted": true,
+      "status": null,
+      "endDate": null
+    }
+  ],
+  "applicationEntry": {
+    "requestedUrl": "https://mastercard.wd1.myworkdayjobs.com/en-US/CorporateCareers/job/Pune-India/Senior-Enterprise-Operations-Engineer-1_R-278780",
+    "httpStatus": 200,
+    "verifiedAtUtc": "2026-10-12T10:17:31.9193915Z",
+    "finalUrl": "https://mastercard.wd1.myworkdayjobs.com/en-US/CorporateCareers/job/Pune-India/Senior-Enterprise-Operations-Engineer-1_R-278780"
+  },
+  "productionSourceInventory": "UNKNOWN - no authenticated registry or production database inspected",
+  "fixtureHashes": [
+    {
+      "file": "mastercard-detail-R-278780.json",
+      "sha256": "FA549E007CE1FEAB3ED747C0C917D806903CB5D3F61A00D83D5CC9C6338547A2"
+    },
+    {
+      "file": "mastercard-detail-R-291339.json",
+      "sha256": "25854754B43002DB3D2FA97A5327DBAA5F06FD1FAD3543A27AE42D907716D35A"
+    },
+    {
+      "file": "mastercard-detail-R-291599.json",
+      "sha256": "62126B7AAE14C2B0FBA2A3DED536116F7FF757CF19B4EA7C81866EB7ABFC96B7"
+    },
+    {
+      "file": "mastercard-detail-R-291604.json",
+      "sha256": "370FE9F119DE1C04B82441737F10B89AE3B6C47A99FEFC0386E06EDBF161A42A"
+    },
+    {
+      "file": "mastercard-detail-R-292031.json",
+      "sha256": "615492150863AE7C31CF62AAD5E956E7B9C3B47B5B1145B1E068DB82A82D3719"
+    },
+    {
+      "file": "mastercard-listing-0.json",
+      "sha256": "99FB7BACEE0DA07D7F9A745F1197114C94BDA9107649707A62705DA6369D4D7D"
+    },
+    {
+      "file": "mastercard-listing-20.json",
+      "sha256": "11E7D209BE5AE3F538FEA463086E06DEE45A08CC1CEC8E474D3B5D91E6B4FABD"
+    },
+    {
+      "file": "mastercard-listing-40.json",
+      "sha256": "D9CA8F9A96123F1686F244E35175FB6827F1E164E5148F777D1F54BCFD936DBC"
+    },
+    {
+      "file": "mastercard-listing-anchor.json",
+      "sha256": "99FB7BACEE0DA07D7F9A745F1197114C94BDA9107649707A62705DA6369D4D7D"
+    },
+    {
+      "file": "mastercard-sample-listing.json",
+      "sha256": "190D7AA40478E0B857F4FC05891FA352AA037DA1A89F5D330FAB997516D7C696"
+    }
+  ],
+  "tests": {
+    "newIssuesRemaining": 0,
+    "performance": "Excluded synthetic ingestion benchmark",
+    "analyzers": {
+      "added": [],
+      "baselineLocations": 184,
+      "removed": [],
+      "currentLocations": 184
+    },
+    "strictTestBuild": "FAIL - 184 baseline analyzer findings",
+    "postgres": "Not rerun in Mastercard-only verification; previous disposable verification remains documented",
+    "mastercard": {
+      "failed": 0,
+      "skipped": 0,
+      "passed": 11,
+      "trx": "mastercard-fixtures-final.trx"
+    },
+    "regressions": {
+      "failed": 0,
+      "skipped": 0,
+      "passed": 179,
+      "trx": "mastercard-regressions.trx"
+    }
+  },
+  "builds": {
+    "runtimeTests": {
+      "analyzersEnabled": true,
+      "result": "PASS",
+      "warnings": 184,
+      "errors": 0,
+      "warningsAsErrors": false
+    },
+    "maintenance": {
+      "errors": 0,
+      "result": "PASS",
+      "warnings": 0,
+      "configuration": "Release"
+    },
+    "api": {
+      "errors": 0,
+      "result": "PASS",
+      "warnings": 0,
+      "configuration": "Release"
+    },
+    "strictTests": {
+      "baseline": true,
+      "result": "FAIL",
+      "errors": 184
+    },
+    "restore": "PASS"
+  }
+}

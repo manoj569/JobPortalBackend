@@ -327,15 +327,7 @@ public sealed class PublicJobRepository(
                 !job.Referral.ReferrerUser.IsDeleted && job.Referral.ReferrerUser.Status == UserStatus.Active &&
                 job.Status == JobStatus.Published);
         var keyword = FirstValue(query.Keyword, query.Search);
-        if (keyword is not null)
-        {
-            source = source.Where(job =>
-                job.Title.Contains(keyword) ||
-                job.Company.Name.Contains(keyword) ||
-                (job.Category == null ? "Not specified" : job.Category.Name).Contains(keyword) ||
-                job.Description.Contains(keyword) ||
-                job.JobSkills.Any(jobSkill => jobSkill.Skill.Name.Contains(keyword)));
-        }
+        source = CandidateJobKeywordQuery.Apply(source, keyword);
 
         if (query.CategoryId.HasValue)
             source = source.Where(job => job.CategoryId == query.CategoryId.Value);
@@ -346,7 +338,7 @@ public sealed class PublicJobRepository(
             source = source.Where(job =>
                 (job.Category == null ? "Not specified" : job.Category.Name).ToLower().Contains(normalizedCategoryName));
         }
-        if (query.ExperienceLevel.HasValue)
+        if (query.ExperienceLevel.HasValue && !query.MinExperienceYears.HasValue && !query.MaxExperienceYears.HasValue)
             source = source.Where(job => job.ExperienceLevel == query.ExperienceLevel.Value);
 
         if (excluded != FacetDimension.Company)

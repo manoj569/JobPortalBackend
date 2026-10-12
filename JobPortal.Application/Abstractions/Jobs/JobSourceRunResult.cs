@@ -6,6 +6,7 @@ public sealed record JobSourceRunResult
     public Guid? RunId { get; init; }
     public bool ContinuationPending { get; init; }
     public string? StopReason { get; init; }
+    public WorkdayListingDiagnostics? ListingDiagnostics { get; init; }
     public int ListingTotal { get; init; }
     public int ListingPages { get; init; }
     public int ObservedIdentities { get; init; }

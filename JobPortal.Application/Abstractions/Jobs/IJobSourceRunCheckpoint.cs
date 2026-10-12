@@ -15,6 +15,7 @@ public sealed record WorkdayRunCheckpoint
     public DateTime CommittedAtUtc { get; init; }
     public IReadOnlyCollection<RawExternalJob> ObservedJobs { get; init; } = [];
     public JobSourceRunResult? CompletedResult { get; init; }
+    public WorkdayListingDiagnostics? ListingDiagnostics { get; init; }
 }
 
 public interface IJobSourceRunCheckpoint
@@ -25,7 +26,8 @@ public interface IJobSourceRunCheckpoint
     WorkdayRunCheckpoint? State { get; }
     Task BindAsync(JobSourceRun run, CancellationToken ct);
     void Enable(JobSource source);
-    Task PrepareAsync(string sourceIdentity, string listingIdentity, int total, int pages, CancellationToken ct);
+    Task PrepareAsync(string sourceIdentity, string listingIdentity, int total, int pages, CancellationToken ct,
+        WorkdayListingDiagnostics? listingDiagnostics = null);
     Task CommitAsync(int cursor, int providerSkipped, IReadOnlyCollection<RawExternalJob> observed, CancellationToken ct);
     Task RefreshAsync(CancellationToken ct);
     JobIngestionResult? Replay(RawExternalJob raw);
@@ -57,9 +59,10 @@ public sealed class WorkdayDetailProgress
     }
 }
 
-public sealed class JobSourceSnapshotUnsafeException(string reason) : Exception("Source snapshot is unsafe.")
+public sealed class JobSourceSnapshotUnsafeException(string reason, WorkdayListingDiagnostics? listingDiagnostics = null) : Exception("Source snapshot is unsafe.")
 {
     public string ReasonCode { get; } = reason;
+    public WorkdayListingDiagnostics? ListingDiagnostics { get; } = listingDiagnostics;
 }
 
 public sealed class JobSourceContinuationException(string reason) : Exception("Source execution requires continuation.")

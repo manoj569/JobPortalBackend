@@ -1,0 +1,45 @@
+{
+  "total": 5,
+  "jobPostings": [
+    {
+      "title": "Director, Sales Operations & Business Transformation",
+      "externalPath": "/job/Gurgaon-India/Director--Sales-Operations---Business-Transformation_R-291604",
+      "locationsText": "Gurgaon, India",
+      "bulletFields": [
+        "R-291604"
+      ]
+    },
+    {
+      "title": "Senior Data Engineer-1",
+      "externalPath": "/job/Hyderabad-India/Senior-Data-Engineer-1_R-292031",
+      "locationsText": "Hyderabad, India",
+      "bulletFields": [
+        "R-292031"
+      ]
+    },
+    {
+      "title": "Senior Full‑Stack Engineer - React, Typescript, Node & Java",
+      "externalPath": "/job/Navi-Mumbai-India-Finicity/Senior-Full-Stack-Engineer---React--Typescript--Node---Java_R-291599",
+      "locationsText": "Navi Mumbai, India (Finicity)",
+      "bulletFields": [
+        "R-291599"
+      ]
+    },
+    {
+      "title": "Senior Enterprise Operations Engineer-1",
+      "externalPath": "/job/Pune-India/Senior-Enterprise-Operations-Engineer-1_R-278780",
+      "locationsText": "Pune, India",
+      "bulletFields": [
+        "R-278780"
+      ]
+    },
+    {
+      "title": "Director, Finance Business Partner",
+      "externalPath": "/job/London-England-Angel-Lane/Director--Finance-Business-Partner_R-291339",
+      "locationsText": "London, England (Angel Lane)",
+      "bulletFields": [
+        "R-291339"
+      ]
+    }
+  ]
+}
