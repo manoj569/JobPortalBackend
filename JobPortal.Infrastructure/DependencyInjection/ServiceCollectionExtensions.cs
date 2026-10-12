@@ -28,6 +28,11 @@ public static class ServiceCollectionExtensions
         ValidateGoogleConfiguration(configuration);
 
         services.AddSingleton<IPasswordHasher, Pbkdf2PasswordHasher>();
+        services.AddHttpClient(CompanyLogoResolver.HttpClientName, client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(5);
+        }).ConfigurePrimaryHttpMessageHandler(CompanyLogoHttpTransport.CreateHandler).RemoveAllLoggers();
+        services.AddScoped<JobPortal.Application.Abstractions.AdminManagement.ICompanyLogoResolver, CompanyLogoResolver>();
         services.AddSingleton<IJwtTokenService, JwtTokenService>();
         services.Configure<GoogleAuthenticationOptions>(
             configuration.GetSection(GoogleAuthenticationOptions.SectionName));

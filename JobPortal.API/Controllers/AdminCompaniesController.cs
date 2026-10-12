@@ -37,6 +37,20 @@ public sealed class AdminCompaniesController(ICompanyManagementService companies
         Ok(new ApiResponse<CompanyResponse>(await companies.UpdateAsync(id, request, cancellationToken),
             "Company updated successfully."));
 
+    [HttpPost("{id:guid}/logo/resolve")]
+    public async Task<ActionResult<ApiResponse<CompanyLogoPreviewResponse>>> ResolveLogo(
+        Guid id, [FromBody] ResolveCompanyLogoRequest request,
+        [FromServices] ICompanyLogoResolver resolver, CancellationToken cancellationToken)
+    {
+        var company = await companies.GetByIdAsync(id, cancellationToken);
+        var website = request.WebsiteUrl ?? company.WebsiteUrl;
+        var result = !request.ReplaceExisting && !string.IsNullOrWhiteSpace(company.LogoUrl)
+            ? new CompanyLogoResolutionResult(company.LogoUrl, "ExistingCompanyLogo")
+            : await resolver.ResolveAsync(company.Name, website, request.CareerPageUrl, cancellationToken);
+        return Ok(new ApiResponse<CompanyLogoPreviewResponse>(new(company.Id, company.Name, website,
+            result.LogoUrl, result.Source, result.Resolved)));
+    }
+
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
     {
