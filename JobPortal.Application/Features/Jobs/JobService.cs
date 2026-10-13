@@ -367,6 +367,7 @@ public sealed class JobService(
             if (job.Status != JobStatus.Published)
                 throw new ConflictException("Only a published job can be unpublished.");
             job.Status = JobStatus.Draft;
+            job.SourceOwnsPublication = false;
             job.PublishedAtUtc = null;
             job.IsFeatured = false;
         }, cancellationToken);
@@ -378,6 +379,7 @@ public sealed class JobService(
             if (job.Status != JobStatus.Published)
                 throw new ConflictException("Only a published job can be closed.");
             job.Status = JobStatus.Closed;
+            job.SourceOwnsPublication = false;
             job.IsFeatured = false;
         }, cancellationToken);
 
@@ -387,6 +389,7 @@ public sealed class JobService(
             if (job.Status == JobStatus.Archived)
                 throw new ConflictException("The job is already archived.");
             job.Status = JobStatus.Archived;
+            job.SourceOwnsPublication = false;
             job.IsFeatured = false;
         }, cancellationToken);
 
@@ -407,6 +410,7 @@ public sealed class JobService(
         ChangeAsync(id, null, job =>
         {
             job.IsHidden = isHidden;
+            if (isHidden) job.SourceOwnsPublication = false;
             if (isHidden)
                 job.IsFeatured = false;
         }, cancellationToken);
@@ -490,6 +494,15 @@ public sealed class JobService(
         CancellationToken cancellationToken)
     {
         var job = await RequiredJobAsync(id, false, cancellationToken);
+        // Serialize editorial suppression with automatic publication, then re-read
+        // so an already-running import cannot overwrite the administrator's choice.
+        await using var lease = job.JobSourceId is not null && creationLock is not null
+            ? await creationLock.AcquireAsync(new UrlCanonicalizer().Canonicalize(job.ApplicationUrl),
+                new JobFingerprintService().GenerateFingerprint(job.Title, job.Company?.Name ?? job.CompanyId.ToString(), job.Location),
+                cancellationToken) : null;
+        if (lease is not null)
+            job = await jobs.GetFreshByIdAsync(id, cancellationToken)
+                ?? throw new NotFoundException($"Job '{id}' was not found.");
         change(job);
         return await SaveStateChangeAsync(job, auditAction, cancellationToken);
     }

@@ -31,6 +31,9 @@ public sealed class JobSource : BaseEntity
     /// </summary>
     public bool IsActive { get; set; } = true;
 
+    // Explicit operator opt-in; legacy and newly configured sources default to drafts.
+    public bool AutoPublishEnabled { get; set; }
+
     /// <summary>
     /// Interval in minutes between aggregation runs for this source.
     /// </summary>

@@ -32,6 +32,8 @@ public sealed class SaveJobSourceRequestValidator : AbstractValidator<SaveJobSou
                 context.AddFailure(nameof(request.CareerPageUrl), "Use the matching HTTPS Oracle career-site jobs URL without credentials, port, query or fragment.");
             if (request.IsActive)
                 context.AddFailure(nameof(request.IsActive), OracleRecruitingCloudConfiguration.BlockedMessage);
+            if (request.AutoPublishEnabled)
+                context.AddFailure(nameof(request.AutoPublishEnabled), OracleRecruitingCloudConfiguration.BlockedMessage);
             if (request.OracleRecruitingCloud is { } settings)
             {
                 if (config is null || !string.Equals(settings.OracleHost, config.OracleHost, StringComparison.OrdinalIgnoreCase) ||

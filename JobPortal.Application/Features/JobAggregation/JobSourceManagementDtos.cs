@@ -10,7 +10,8 @@ public sealed record JobSourceSearchQuery(
 public sealed record SaveJobSourceRequest(
     Guid CompanyId, string CareerPageUrl, AtsType AtsType, string? AtsIdentifier,
     bool IsActive = true, int ScanIntervalMinutes = 720,
-    OracleRecruitingCloudSourceRequest? OracleRecruitingCloud = null);
+    OracleRecruitingCloudSourceRequest? OracleRecruitingCloud = null,
+    bool AutoPublishEnabled = false);
 
 public sealed record JobSourceResponse(
     Guid Id, Guid CompanyId, string CompanyName, string CareerPageUrl,
@@ -19,6 +20,7 @@ public sealed record JobSourceResponse(
     int ConsecutiveFailures, Guid? CategoryId, string? CategoryName,
     DateTime CreatedAtUtc, DateTime? UpdatedAtUtc)
 {
+    public bool AutoPublishEnabled { get; init; }
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public OracleRecruitingCloudSourceStatus? OracleRecruitingCloud { get; init; }
 }

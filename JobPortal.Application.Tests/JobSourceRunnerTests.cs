@@ -445,7 +445,7 @@ public class JobSourceRunnerTests
     }
 
     [Fact]
-    public async Task RunAsync_DuplicateJob_RechecksPublication()
+    public async Task RunAsync_DuplicateJob_DoesNotPublishAnUnownedMatch()
     {
         _provider.Jobs =
         [
@@ -479,8 +479,8 @@ public class JobSourceRunnerTests
         Assert.Equal(1, result.Matched);
         Assert.Equal(0, result.Created);
 
-        Assert.Equal(1, autoPublish.CallCount);
-        Assert.NotNull(autoPublish.LastJobId);
+        Assert.Equal(0, autoPublish.CallCount);
+        Assert.Null(autoPublish.LastJobId);
     }
 
     [Fact]

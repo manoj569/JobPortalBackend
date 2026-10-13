@@ -425,7 +425,8 @@ public sealed class WorkdayCheckpointPostgresTests(WorkdayCheckpointDatabase dat
         Assert.True(result.ReconciliationSafe);
         Assert.Equal(6, result.ObservedIdentities);
         Assert.Equal(3, result.Created);
-        Assert.Equal(3, result.Published);
+        Assert.Equal(2, result.Published);
+        Assert.Equal(1, result.NeedsReview);
         Assert.Equal(2, result.IndiaEligible);
         Assert.Equal(1, result.MissingLocationAccepted);
         Assert.Equal(1, result.NonIndiaRejected);
@@ -554,7 +555,7 @@ public sealed class WorkdayCheckpointPostgresTests(WorkdayCheckpointDatabase dat
             var name = "Workday test " + Guid.NewGuid().ToString("N");
             var company = new Company { Name = name, NormalizedName = name.ToUpperInvariant(), Slug = name.Replace(' ', '-'), OwnerUserId = owner.Id };
             var source = new JobSource { CompanyId = company.Id, Company = company, AtsType = AtsType.Workday,
-                AtsIdentifier = "ptc/PTC", CareerPageUrl = "https://ptc.wd1.myworkdayjobs.com/PTC", IsActive = true };
+                AtsIdentifier = "ptc/PTC", CareerPageUrl = "https://ptc.wd1.myworkdayjobs.com/PTC", IsActive = true, AutoPublishEnabled = true };
             db.Add(owner); db.Add(source); await db.SaveChangesAsync();
             return new(database, source, total);
         }
@@ -592,7 +593,7 @@ public sealed class WorkdayCheckpointPostgresTests(WorkdayCheckpointDatabase dat
                 new UpdateRecruiterContactRequestValidator(), new JobSearchQueryValidator(), TimeProvider.System, companies, categories,
                 sources, locks, deduplication);
             var publisher = new JobAutoPublishService(jobs, new JobQualityGate(), service, Options.Create(new JobAggregationOptions()),
-                TimeProvider.System, locks, checkpoint);
+                TimeProvider.System, sources, locks, checkpoint);
             var resolver = new JobSourceCategoryResolver(new Monitor(), categories, new ExternalJobCategoryClassifier());
             var ingestion = new JobIngestionService(jobs, companies, categories, deduplication, fingerprints, unit,
                 TimeProvider.System, locks, canonical, checkpoint);

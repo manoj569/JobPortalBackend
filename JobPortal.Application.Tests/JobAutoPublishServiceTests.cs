@@ -72,7 +72,7 @@ public class JobAutoPublishServiceTests
     }
 
     [Fact]
-    public async Task TryPublishAsync_MissingLocation_Publishes()
+    public async Task TryPublishAsync_MissingLocation_IsHeldForEvidence()
     {
         var job = CreateValidJob();
         job.Location = string.Empty;
@@ -92,12 +92,12 @@ public class JobAutoPublishServiceTests
         var result = await service.TryPublishAsync(job.Id);
 
         Assert.Equal(
-            JobAutoPublishOutcome.Published,
+            JobAutoPublishOutcome.NeedsReview,
             result.Outcome);
 
-        Assert.Empty(result.Reasons);
+        Assert.Contains(JobQualityReasonCode.MissingLocation, result.Reasons);
 
-        Assert.Equal(1, jobService.PublishCalls);
+        Assert.Equal(0, jobService.PublishCalls);
     }
 
     [Fact]
@@ -230,7 +230,7 @@ public class JobAutoPublishServiceTests
             new JobQualityGate(),
             jobService,
             options,
-            new FixedTimeProvider(Now));
+            new FixedTimeProvider(Now), new SourceRepositoryFake(repository.Job));
     }
 
     private static Job CreateValidJob()
@@ -253,6 +253,7 @@ public class JobAutoPublishServiceTests
             MaximumExperienceYears = 4,
             ExpiresAtUtc = Now.AddDays(30),
             JobSourceId = Guid.NewGuid(),
+            SourceOwnsPublication = true,
             Status = JobStatus.Draft
         };
     }
@@ -262,6 +263,16 @@ public class JobAutoPublishServiceTests
     {
         public override DateTimeOffset GetUtcNow() =>
             new(utcNow);
+    }
+
+    private sealed class SourceRepositoryFake(Job? job) : IJobSourceRepository
+    {
+        public Task<JobSource?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+            Task.FromResult<JobSource?>(new() { Id = id, CompanyId = job?.CompanyId ?? Guid.Empty,
+                AtsType = AtsType.Greenhouse, AutoPublishEnabled = true });
+        public Task<IReadOnlyCollection<JobSource>> GetDueSourcesAsync(DateTime nowUtc, int maxResults,
+            CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public void Update(JobSource source) => throw new NotImplementedException();
     }
 
     private sealed class JobRepositoryFake : IJobRepository

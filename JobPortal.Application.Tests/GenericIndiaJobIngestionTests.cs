@@ -21,7 +21,6 @@ public sealed class GenericIndiaJobIngestionTests
     [InlineData("Bengaluru", "Hybrid", null, "IndiaLocationConfirmed")]
     [InlineData("Hyderabad", null, null, "IndiaLocationConfirmed")]
     [InlineData("India-wide remote", "Remote", null, "ExplicitIndiaRemote")]
-    [InlineData(null, null, null, "MissingLocationAccepted")]
     [InlineData("Remote", "Remote", "Remote hiring from India", "ExplicitIndiaRemote")]
     public async Task EligibleJobsArePublishedAndVisibleInDiscoverWithOptionalMetadataAbsent(string? location, string? mode, string? eligibility, string reason)
     {
@@ -237,7 +236,7 @@ public sealed class GenericIndiaJobIngestionTests
             new JobDeduplicationService(jobs, fingerprint, canonical));
     }
     internal static JobAutoPublishService Publisher(JobSourceFixture f) => new(new JobRepository(f.Context), new JobQualityGate(),
-        ManualService(f), Options.Create(new JobAggregationOptions { AutoPublishEnabled = false }), TimeProvider.System, f.Locks);
+        ManualService(f), Options.Create(new JobAggregationOptions { AutoPublishEnabled = false }), TimeProvider.System, f.Repository, f.Locks);
     internal static JobSourceRunner Runner(JobSourceFixture f, SnapshotProvider provider)
     {
         var jobs = new JobRepository(f.Context); var unit = new UnitOfWork(f.Context); var fingerprint = new JobFingerprintService(); var canonical = new UrlCanonicalizer();

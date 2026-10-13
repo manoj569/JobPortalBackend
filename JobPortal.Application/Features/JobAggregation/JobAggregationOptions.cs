@@ -4,7 +4,7 @@ public sealed class JobAggregationOptions
 {
     public const string SectionName = "JobAggregation";
 
-    // Safe default. Automatic publishing must be explicitly enabled.
+    // Legacy binding compatibility only. JobSource.AutoPublishEnabled controls publication.
     public bool AutoPublishEnabled { get; set; }
 
     public int GreenhouseDetailConcurrency { get; set; } = 2;

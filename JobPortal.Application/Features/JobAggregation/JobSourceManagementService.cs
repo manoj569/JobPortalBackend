@@ -155,6 +155,7 @@ public sealed class JobSourceManagementService(
         source.AtsType = request.AtsType;
         source.AtsIdentifier = identifier;
         source.IsActive = request.IsActive;
+        source.AutoPublishEnabled = request.AutoPublishEnabled;
         source.ScanIntervalMinutes = request.ScanIntervalMinutes;
     }
 
@@ -170,6 +171,7 @@ public sealed class JobSourceManagementService(
             source.LastError is null ? null : "External job source run failed.",
             source.ConsecutiveFailures, category?.Id, category?.Name, source.CreatedAtUtc, source.UpdatedAtUtc)
         {
+            AutoPublishEnabled = source.AutoPublishEnabled,
             OracleRecruitingCloud = oracle ? new(oracleConfig?.OracleHost, oracleConfig?.CareerSiteId, source.AtsIdentifier) : null
         };
     }

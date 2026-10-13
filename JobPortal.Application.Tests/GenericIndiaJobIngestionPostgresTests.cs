@@ -36,7 +36,7 @@ public sealed class GenericIndiaJobIngestionPostgresTests
         setup.Users.Add(owner);
         var company = new Company { Name = name, NormalizedName = name.ToUpperInvariant(), Slug = name.Replace(' ', '-').ToLowerInvariant(), OwnerUserId = owner.Id };
         var sources = Enumerable.Range(0, 8).Select(i => new JobSource { Company = company, CompanyId = company.Id,
-            AtsType = AtsType.Greenhouse, AtsIdentifier = company.Slug + i, CareerPageUrl = "https://example.test/careers" }).ToArray();
+            AtsType = AtsType.Greenhouse, AtsIdentifier = company.Slug + i, CareerPageUrl = "https://example.test/careers", AutoPublishEnabled = true }).ToArray();
         setup.AddRange(sources); await setup.SaveChangesAsync();
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
             { ["ConnectionStrings:DefaultConnection"] = connection }).Build();
@@ -53,8 +53,8 @@ public sealed class GenericIndiaJobIngestionPostgresTests
                 new UpdateJobRequestValidator(), new UpdateRecruiterContactRequestValidator(), new JobSearchQueryValidator(),
                 TimeProvider.System, companies, categories, sourceRepository, locks, deduplication);
             var publisher = new JobAutoPublishService(jobs, new JobQualityGate(), service,
-                Options.Create(new JobAggregationOptions { AutoPublishEnabled = false }), TimeProvider.System, locks);
-            var raw = GenericIndiaJobIngestionTests.Vacancy(1) with { Location = null, ApplicationUrl = url, CompanyName = company.Name };
+                Options.Create(new JobAggregationOptions { AutoPublishEnabled = false }), TimeProvider.System, sourceRepository, locks);
+            var raw = GenericIndiaJobIngestionTests.Vacancy(1) with { Location = null, CountryCodes = ["IN"], ApplicationUrl = url, CompanyName = company.Name };
             var provider = new GenericIndiaJobIngestionTests.SnapshotProvider(AtsType.Greenhouse, [raw]);
             var resolver = new JobSourceCategoryResolver(new Monitor(), categories, new ExternalJobCategoryClassifier());
             var ingestion = new JobIngestionService(jobs, companies, categories, deduplication, fingerprint, unit, TimeProvider.System, locks, canonical);
@@ -87,7 +87,8 @@ public sealed class GenericIndiaJobIngestionPostgresTests
         var progress = new JobSourceRunProgressSnapshot("Finalizing", 1, results[0]);
         Assert.True(await store.FinishAsync(claimed, JobSourceRunStatus.Succeeded, now, now, progress, default));
         var status = JobSourceRunResponse.From((await store.GetAsync(sources[0].Id, queued.Id, default))!);
-        Assert.Equal(1, status.Diagnostics!.MissingLocationAccepted);
+        Assert.Equal(0, status.Diagnostics!.MissingLocationAccepted);
+        Assert.Equal(1, status.Diagnostics.IndiaEligible);
         Assert.Equal(1, status.Diagnostics.Parsed);
     }
 

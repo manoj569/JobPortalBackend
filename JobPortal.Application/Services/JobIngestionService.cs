@@ -453,6 +453,7 @@ public sealed class JobIngestionService(
             FirstSeenAtUtc = now,
             LastSeenAtUtc = now,
             JobSourceId = rawJob.JobSourceId,
+            SourceOwnsPublication = rawJob.JobSourceId.HasValue,
             ExternalJobId = sourceExternalId,
             SourcePostedAtUtc = rawJob.SourcePostedAtUtc is { Kind: DateTimeKind.Utc } posted ? posted : null
         };

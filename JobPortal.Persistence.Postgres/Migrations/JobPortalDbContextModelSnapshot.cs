@@ -4011,6 +4011,9 @@ namespace JobPortal.Persistence.Postgres.Migrations
                     b.Property<string>("SourceMetadataJson")
                         .HasColumnType("jsonb");
 
+                    b.Property<bool>("SourceOwnsPublication")
+                        .HasColumnType("boolean");
+
                     b.Property<DateTime?>("SourcePostedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -4530,6 +4533,9 @@ namespace JobPortal.Persistence.Postgres.Migrations
 
                     b.Property<int>("AtsType")
                         .HasColumnType("integer");
+
+                    b.Property<bool>("AutoPublishEnabled")
+                        .HasColumnType("boolean");
 
                     b.Property<string>("CareerPageUrl")
                         .IsRequired()

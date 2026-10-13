@@ -505,7 +505,7 @@ internal sealed class JobSourceFixture : IDisposable
     public JobSourceFixture(TestAggregationLocks? locks = null)
     {
         Locks = locks ?? new();
-        Source = new() { Company = Company, CompanyId = Company.Id, CareerPageUrl = Request.CareerPageUrl, AtsType = AtsType.Greenhouse, AtsIdentifier = "acme" };
+        Source = new() { Company = Company, CompanyId = Company.Id, CareerPageUrl = Request.CareerPageUrl, AtsType = AtsType.Greenhouse, AtsIdentifier = "acme", AutoPublishEnabled = true };
         Context.AddRange(Company, Category, Source);
         Context.SaveChanges();
         Repository = new(Context);

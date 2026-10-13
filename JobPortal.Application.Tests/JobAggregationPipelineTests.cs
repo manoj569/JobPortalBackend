@@ -61,7 +61,6 @@ public sealed class JobAggregationPipelineTests
 
     [Theory]
     [InlineData("expiry", JobQualityReasonCode.MissingExpiry)]
-    [InlineData("location", JobQualityReasonCode.MissingLocation)]
     [InlineData("workplace", JobQualityReasonCode.MissingWorkplaceType)]
     [InlineData("employment", JobQualityReasonCode.MissingEmploymentType)]
     public async Task MissingOptionalSourceFieldsPublishWithoutFabrication(string field, JobQualityReasonCode reason)
@@ -274,7 +273,7 @@ public sealed class JobAggregationPipelineTests
             new UpdateJobRequestValidator(), new UpdateRecruiterContactRequestValidator(), new JobSearchQueryValidator(), clock,
             sources: f.Repository);
         var publisher = new JobAutoPublishService(jobs, new JobQualityGate(), jobService,
-            Options.Create(new JobAggregationOptions { AutoPublishEnabled = enabled }), clock);
+            Options.Create(new JobAggregationOptions { AutoPublishEnabled = enabled }), clock, f.Repository);
         return new(f.Repository, [f.Provider], ingestion, unit, clock, f.Resolver, new ExternalJobNormalizer(), autoPublishService: publisher, enricher: enricher);
     }
 

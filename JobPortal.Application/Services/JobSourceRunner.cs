@@ -443,8 +443,7 @@ public sealed partial class JobSourceRunner(
                         }
 
                         // Count publication transitions, including eligible source-owned drafts from earlier runs.
-                        if (result.Outcome is (JobIngestionOutcome.Created or JobIngestionOutcome.Updated or JobIngestionOutcome.Unchanged or
-                            JobIngestionOutcome.MatchedByUrl or JobIngestionOutcome.MatchedByFingerprint or JobIngestionOutcome.MatchedByFuzzy) &&
+                        if (result.Outcome is (JobIngestionOutcome.Created or JobIngestionOutcome.Updated or JobIngestionOutcome.Unchanged) &&
                             result.JobId.HasValue && autoPublishService is not null && !cancellationToken.IsCancellationRequested)
                         {
                             publicationAttempt = true;

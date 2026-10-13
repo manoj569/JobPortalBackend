@@ -28,7 +28,8 @@ public enum JobQualityReasonCode
     MissingLocation,
     MissingWorkplaceType,
     MissingEmploymentType,
-    MissingExperienceLevel
+    MissingExperienceLevel,
+    PublicationOwnershipUnverified
 }
 
 public sealed record JobQualityResult

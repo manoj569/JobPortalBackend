@@ -170,7 +170,7 @@ public sealed class WorkdayPersistencePerformanceTests(ITestOutputHelper output)
         var reviewsProbe = (LargeSourceIngestionTests.Probe<IJobRepository>)(object)repository;
         reviewsProbe.Inner = new JobRepository(f.Context);
         var publisher = new JobAutoPublishService(repository, new JobQualityGate(), null!,
-            Options.Create(new JobAggregationOptions { AutoPublishEnabled = true }), TimeProvider.System);
+            Options.Create(new JobAggregationOptions { AutoPublishEnabled = true }), TimeProvider.System, f.Repository);
         var decisions = await publisher.ReviewBatchAsync(saved.Select(x => x.JobId!.Value).ToArray());
         Assert.Equal(50, decisions.Count);
         Assert.All(decisions.Values, x => Assert.Equal(JobAutoPublishOutcome.NeedsReview, x.Outcome));

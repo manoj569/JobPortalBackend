@@ -57,6 +57,9 @@ public sealed class Job : BaseEntity
 
     // Nullable source identity is populated only for provider-owned imports.
     public Guid? JobSourceId { get; set; }
+    // Set only on new provider-owned imports. Editorial suppression revokes it.
+    // False for legacy rows whose publication ownership cannot be inferred safely.
+    public bool SourceOwnsPublication { get; set; }
     public string? ExternalJobId { get; set; }
     public DateTime? SourcePostedAtUtc { get; set; }
 }

@@ -141,7 +141,7 @@ public sealed class MastercardWorkdayVerificationTests
         var jobService = new JobService(jobs, unit, fixture.Audit, new CreateJobRequestValidator(), new UpdateJobRequestValidator(),
             new UpdateRecruiterContactRequestValidator(), new JobSearchQueryValidator(), TimeProvider.System, sources: fixture.Repository);
         var publisher = new JobAutoPublishService(jobs, new JobQualityGate(), jobService,
-            Options.Create(new JobAggregationOptions()), TimeProvider.System);
+            Options.Create(new JobAggregationOptions()), TimeProvider.System, fixture.Repository);
         var runner = new JobSourceRunner(fixture.Repository, [provider], ingestion, unit, TimeProvider.System,
             fixture.Resolver, new ExternalJobNormalizer(), autoPublishService: publisher, jobRepository: jobs);
         var first = await runner.RunAsync(fixture.Source.Id);

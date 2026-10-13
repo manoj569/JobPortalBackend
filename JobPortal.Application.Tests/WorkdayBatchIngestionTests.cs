@@ -611,7 +611,7 @@ public sealed class WorkdayBatchIngestionTests(ITestOutputHelper output)
         var jobService = new JobService(jobs, unit, f.Audit, new CreateJobRequestValidator(), new UpdateJobRequestValidator(),
             new UpdateRecruiterContactRequestValidator(), new JobSearchQueryValidator(), TimeProvider.System, sources: f.Repository);
         var publisher = new JobAutoPublishService(jobs, new JobQualityGate(), jobService,
-            Options.Create(new JobAggregationOptions { AutoPublishEnabled = publish }), TimeProvider.System);
+            Options.Create(new JobAggregationOptions { AutoPublishEnabled = publish }), TimeProvider.System, f.Repository);
         return new(f.Repository, [provider], ingestion, unit, TimeProvider.System, f.Resolver, new ExternalJobNormalizer(),
             autoPublishService: publisher, jobRepository: jobs, publicationPolicy: policy, enricher: enrichment);
     }
