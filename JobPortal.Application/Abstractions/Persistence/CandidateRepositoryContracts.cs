@@ -1,3 +1,4 @@
+using JobPortal.Application.Features.PublicJobs;
 using JobPortal.Application.Features.Candidates;
 using JobPortal.Domain.Entities;
 using JobPortal.Domain.Enums;
@@ -19,7 +20,7 @@ public interface ICandidateRepository
     Task<CandidateResumeProfile?> GetResumeProfileAsync(Guid userId, bool tracking, CancellationToken cancellationToken = default);
     Task AddResumeProfileAsync(CandidateResumeProfile profile, CancellationToken cancellationToken = default);
     Task<IReadOnlyCollection<RecommendationJobCandidate>> GetRecommendationCandidatesAsync(Guid userId, CancellationToken cancellationToken = default);
-    Task<(IReadOnlyCollection<RecommendationJobCandidate> Items, int TotalCount)> GetCandidateBrowseJobsAsync(Guid userId, CandidatePageQuery query, CancellationToken cancellationToken = default);
+    Task<(IReadOnlyCollection<RecommendationJobCandidate> Items, int TotalCount)> GetCandidateBrowseJobsAsync(Guid userId, PublicJobQuery query, CancellationToken cancellationToken = default);
     Task<CandidateJob?> GetAvailableJobAsync(Guid jobId, CancellationToken cancellationToken = default);
     Task<CandidateRecruiterContact?> GetApprovedRecruiterContactForAvailableJobAsync(
     Guid jobId,

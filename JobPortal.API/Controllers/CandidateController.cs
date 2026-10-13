@@ -1,3 +1,4 @@
+using JobPortal.Application.Features.PublicJobs;
 using JobPortal.API.Extensions;
 using JobPortal.Application.Abstractions.Candidates;
 using JobPortal.Application.Features.Candidates;
@@ -176,7 +177,7 @@ public sealed class CandidateController(ICandidateService candidates) : Controll
 
     [HttpGet("jobs")]
     public async Task<ActionResult<ApiResponse<CandidateBrowseJobsResponse>>> BrowseJobs(
-        [FromQuery] CandidatePageQuery query, CancellationToken cancellationToken) =>
+        [FromQuery] PublicJobQuery query, CancellationToken cancellationToken) =>
         Ok(new ApiResponse<CandidateBrowseJobsResponse>(await candidates.GetBrowseJobsAsync(
             User.GetRequiredUserId(), query, cancellationToken)));
 

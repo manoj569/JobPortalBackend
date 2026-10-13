@@ -1,3 +1,4 @@
+using JobPortal.Application.Features.PublicJobs;
 using JobPortal.Application.Abstractions.Persistence;
 using JobPortal.Application.Features.Candidates;
 using JobPortal.Domain.Common;
@@ -5,12 +6,15 @@ using JobPortal.Domain.Entities;
 using JobPortal.Domain.Enums;
 using JobPortal.Persistence.Context;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using System.Diagnostics;
 
 namespace JobPortal.Persistence.Repositories;
 
 public sealed class CandidateRepository(
     JobPortalDbContext context,
-    TimeProvider timeProvider) : ICandidateRepository
+    TimeProvider timeProvider,
+    ILogger<PublicJobRepository>? browseLogger = null) : ICandidateRepository
 {
     public Task<User?> GetCandidateAsync(Guid userId, CancellationToken cancellationToken = default) =>
         context.Users.SingleOrDefaultAsync(x => x.Id == userId &&
@@ -78,21 +82,23 @@ public sealed class CandidateRepository(
     }
 
     public async Task<(IReadOnlyCollection<RecommendationJobCandidate> Items, int TotalCount)> GetCandidateBrowseJobsAsync(
-        Guid userId, CandidatePageQuery query, CancellationToken cancellationToken = default)
+        Guid userId, PublicJobQuery query, CancellationToken cancellationToken = default)
     {
-        var now = timeProvider.GetUtcNow().UtcDateTime;
-        var source = context.Jobs.AsNoTracking().Where(x => x.Status == JobStatus.Published &&
-            !x.IsHidden && !x.IsDeleted && x.PublishedAtUtc.HasValue &&
-            (!x.ExpiresAtUtc.HasValue || x.ExpiresAtUtc > now) &&
-            !x.Applications.Any(a => a.UserId == userId && !a.IsDeleted));
+        query = JobBrowseQueryPolicy.Normalize(query);
+        var timer = Stopwatch.StartNew();
+        var browse = new PublicJobRepository(context, timeProvider, browseLogger);
+        var source = browse.FilteredJobsQuery(query)
+            .Where(x => !x.Applications.Any(a => a.UserId == userId && !a.IsDeleted));
         var count = await source.CountAsync(cancellationToken);
-        var items = await source.OrderByDescending(x => x.PublishedAtUtc).ThenBy(x => x.Id)
-            .Skip((query.PageNumber - 1) * query.PageSize).Take(query.PageSize)
+        var items = await PublicJobRepository.ApplySorting(source, query.SortBy, query.SortDirection,
+                JobBrowseQueryPolicy.SearchText(query))
+            .Skip((query.EffectivePageNumber - 1) * query.PageSize).Take(query.PageSize)
             .Select(x => new RecommendationJobCandidate(x.Id, x.ReferenceNumber, x.Title, x.Slug,
                 x.Description, x.Requirements, x.Responsibilities, x.CompanyId, x.Company.Name,
                 x.Company.Slug, x.Company.LogoUrl, x.Company.Industry, x.CategoryId, (x.Category == null ? "Not specified" : x.Category.Name),
                 x.Location, x.EmploymentType, x.WorkplaceType, x.ExperienceLevel, x.IsFeatured,
                 x.PublishedAtUtc!.Value, x.ExpiresAtUtc)).ToArrayAsync(cancellationToken);
+        browse.LogSearch(query, count, timer.ElapsedMilliseconds);
         return (items, count);
     }
 

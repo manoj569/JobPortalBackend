@@ -1,3 +1,4 @@
+using JobPortal.Application.Features.PublicJobs;
 using JobPortal.Application.Features.Candidates;
 using JobPortal.Shared.Models;
 
@@ -27,7 +28,7 @@ public interface ICandidateService
     Task DeleteResumeAsync(Guid userId, CancellationToken cancellationToken = default);
     Task<ResumeStatusResponse> GetResumeStatusAsync(Guid userId, CancellationToken cancellationToken = default);
     Task<RecommendedJobsResponse> GetRecommendedJobsAsync(Guid userId, CandidatePageQuery query, CancellationToken cancellationToken = default);
-    Task<CandidateBrowseJobsResponse> GetBrowseJobsAsync(Guid userId, CandidatePageQuery query, CancellationToken cancellationToken = default);
+    Task<CandidateBrowseJobsResponse> GetBrowseJobsAsync(Guid userId, PublicJobQuery query, CancellationToken cancellationToken = default);
     Task<RecruiterContactResponse> GetRecruiterContactAsync(
     Guid userId,
     Guid jobId,

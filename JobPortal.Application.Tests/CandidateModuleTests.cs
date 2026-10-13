@@ -1,3 +1,4 @@
+using JobPortal.Application.Features.PublicJobs;
 using System.Text.Json;
 using System.Reflection;
 using JobPortal.Application.Features.Memberships;
@@ -1332,7 +1333,7 @@ public sealed class CandidateModuleTests
         public Task<IReadOnlyCollection<RecommendationJobCandidate>> GetRecommendationCandidatesAsync(Guid userId, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyCollection<RecommendationJobCandidate>>(RecommendationJobs.Where(x => !AppliedJobIds.Contains(x.Id)).ToArray());
         public Task<(IReadOnlyCollection<RecommendationJobCandidate> Items, int TotalCount)> GetCandidateBrowseJobsAsync(
-            Guid userId, CandidatePageQuery query, CancellationToken cancellationToken = default) =>
+            Guid userId, PublicJobQuery query, CancellationToken cancellationToken = default) =>
             Task.FromResult(((IReadOnlyCollection<RecommendationJobCandidate>)RecommendationJobs.Where(x => !AppliedJobIds.Contains(x.Id)).ToArray(), RecommendationJobs.Count(x => !AppliedJobIds.Contains(x.Id))));
         public Task<CandidateRecruiterContact?> GetApprovedRecruiterContactForAvailableJobAsync(
     Guid jobId,

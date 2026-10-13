@@ -14,7 +14,7 @@ public sealed class PublicJobService(
         PublicJobQuery query, CancellationToken cancellationToken = default)
     {
         await validator.ValidateAndThrowAsync(query, cancellationToken);
-        query = SalaryQueryPolicy.Normalize(query);
+        query = SalaryQueryPolicy.Normalize(JobBrowseQueryPolicy.Normalize(query));
         var result = await repository.SearchAsync(query, cancellationToken);
         return new PublicJobSearchResponse(
             result.Items,
@@ -54,7 +54,7 @@ public sealed class PublicJobService(
         CancellationToken cancellationToken = default)
     {
         await validator.ValidateAndThrowAsync(query, cancellationToken);
-        query = SalaryQueryPolicy.Normalize(query);
+        query = SalaryQueryPolicy.Normalize(JobBrowseQueryPolicy.Normalize(query));
         return await repository.GetFilterOptionsAsync(query, cancellationToken);
     }
 }

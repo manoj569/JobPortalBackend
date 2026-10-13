@@ -40,7 +40,7 @@ public sealed record PublicJobQuery(
     int? Page = null,
     string? CompanyName = null,
     string? CategoryName = null,
-    bool ReferralOnly = false, string? CurrencyCode = null, SalaryPeriod? SalaryPeriod = null)
+    bool ReferralOnly = false, string? CurrencyCode = null, SalaryPeriod? SalaryPeriod = null, string? Q = null)
 {
     public int EffectivePageNumber => Page ?? PageNumber;
 }
