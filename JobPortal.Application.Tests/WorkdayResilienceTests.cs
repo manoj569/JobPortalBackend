@@ -98,6 +98,43 @@ public sealed class WorkdayResilienceTests
         if (mutation == "placeholder") Assert.Equal(1, snapshot.ListingDiagnostics.PlaceholderCount);
     }
 
+    [Fact]
+    public async Task TinyPlaceholderAnomalyAllowsIngestionButNeverReconciliation()
+    {
+        // 1 / 200 = 0.5%, exactly the conservative ingestion-only tolerance.
+        using var handler = new Board(200, 200, 200) { Mutation = "placeholder" };
+        using var http = new HttpClient(handler);
+        using var provider = Provider(http);
+        var snapshot = await provider.FetchSnapshotAsync(Source());
+
+        Assert.False(snapshot.IsComplete);
+        Assert.Equal(199, snapshot.Jobs.Count);
+        Assert.Equal(199, handler.DetailRequests);
+        Assert.True(snapshot.ListingDiagnostics!.IngestionSafe);
+        Assert.False(snapshot.ListingDiagnostics.ReconciliationSafe);
+        Assert.False(snapshot.ListingDiagnostics.SnapshotStable);
+        Assert.Equal(1, snapshot.ListingDiagnostics.PlaceholderCount);
+        Assert.Equal("ListingPlaceholders", snapshot.ListingDiagnostics.ReasonCode);
+        Assert.True(snapshot.ListingDiagnostics.RetryRecommended);
+    }
+
+    [Fact]
+    public async Task PlaceholderAnomalyAboveToleranceStillBlocksIngestion()
+    {
+        // 1 / 199 is slightly above 0.5%, so the existing fail-closed behavior remains.
+        using var handler = new Board(199, 199, 199) { Mutation = "placeholder" };
+        using var http = new HttpClient(handler);
+        using var provider = Provider(http);
+        var snapshot = await provider.FetchSnapshotAsync(Source());
+
+        Assert.False(snapshot.IsComplete);
+        Assert.False(snapshot.ListingDiagnostics!.IngestionSafe);
+        Assert.False(snapshot.ListingDiagnostics.ReconciliationSafe);
+        Assert.Equal(1, snapshot.ListingDiagnostics.PlaceholderCount);
+        Assert.Equal("ListingPlaceholders", snapshot.ListingDiagnostics.ReasonCode);
+        Assert.True(snapshot.ListingDiagnostics.RetryRecommended);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -245,8 +282,17 @@ public sealed class WorkdayResilienceTests
         using var board = new Board(1094, 1094, 1095) { OmitContinuationTotal = true, Mutation = "membership" };
         using var http = new HttpClient(board);
         using var provider = new WorkdayJobSourceProvider(new Factory(http), checkpoint: journal, timeProvider: new FastClock(),
-            options: Options.Create(new JobAggregationOptions { Workday = new() { JobsPerExecution = 200, BatchSize = 100,
-                MaximumAttempts = 1, DetailConcurrency = 4, RunBudgetSeconds = 300 } }));
+            options: Options.Create(new JobAggregationOptions
+            {
+                Workday = new()
+                {
+                    JobsPerExecution = 200,
+                    BatchSize = 100,
+                    MaximumAttempts = 1,
+                    DetailConcurrency = 4,
+                    RunBudgetSeconds = 300
+                }
+            }));
         var committedIds = new Dictionary<string, Guid>(StringComparer.Ordinal);
         async Task<ExternalJobSourceSnapshot> Execute()
         {
@@ -264,8 +310,11 @@ public sealed class WorkdayResilienceTests
                     if (id >= 94) continue; // Production fixture's 94 accepted positive ingestions.
                     var existed = committedIds.TryGetValue(externalId, out var jobId);
                     if (!existed) { jobId = Guid.NewGuid(); committedIds.Add(externalId, jobId); }
-                    await journal.CompleteItemAsync(raw, new() { JobId = jobId,
-                        Outcome = existed ? JobIngestionOutcome.Unchanged : JobIngestionOutcome.Created },
+                    await journal.CompleteItemAsync(raw, new()
+                    {
+                        JobId = jobId,
+                        Outcome = existed ? JobIngestionOutcome.Unchanged : JobIngestionOutcome.Created
+                    },
                         new() { Outcome = !existed && id < 80 ? JobAutoPublishOutcome.Published : JobAutoPublishOutcome.AlreadyPublished }, default);
                 }
                 await journal.CommitAsync(batch.CheckpointCursor!.Value, batch.Skipped, observed, default);
@@ -297,12 +346,36 @@ public sealed class WorkdayResilienceTests
     [Fact]
     public async Task ProductionDriftReplacementArchives94CreationsAnd80PublicationsAndRestartsAtZero()
     {
-        var evidence = new WorkdayListingDiagnostics { IngestionSafe = true, SnapshotStable = true, ReconciliationSafe = true,
-            InitialReportedTotal = 1095, FinalReportedTotal = 1095, UniquePaths = 1095, RawSlots = 1095, ReasonCode = "Complete" };
-        var old = new WorkdayRunCheckpoint { Version = 2, SourceIdentity = "source", ListingIdentity = "old", ListingTotal = 1094,
-            Cursor = 200, ObservedJobs = Enumerable.Range(0, 200).Select(i => new RawExternalJob { ExternalId = $"R-{i}" }).ToArray(),
-            ListingDiagnostics = evidence with { SnapshotStable = false, ReconciliationSafe = false, InitialReportedTotal = 1094,
-                UniquePaths = 1094, RawSlots = 1094, FirstPageChanged = true, ReasonCode = "ListingTotalDrift" } };
+        var evidence = new WorkdayListingDiagnostics
+        {
+            IngestionSafe = true,
+            SnapshotStable = true,
+            ReconciliationSafe = true,
+            InitialReportedTotal = 1095,
+            FinalReportedTotal = 1095,
+            UniquePaths = 1095,
+            RawSlots = 1095,
+            ReasonCode = "Complete"
+        };
+        var old = new WorkdayRunCheckpoint
+        {
+            Version = 2,
+            SourceIdentity = "source",
+            ListingIdentity = "old",
+            ListingTotal = 1094,
+            Cursor = 200,
+            ObservedJobs = Enumerable.Range(0, 200).Select(i => new RawExternalJob { ExternalId = $"R-{i}" }).ToArray(),
+            ListingDiagnostics = evidence with
+            {
+                SnapshotStable = false,
+                ReconciliationSafe = false,
+                InitialReportedTotal = 1094,
+                UniquePaths = 1094,
+                RawSlots = 1094,
+                FirstPageChanged = true,
+                ReasonCode = "ListingTotalDrift"
+            }
+        };
         Assert.True(WorkdayCheckpointRebasePolicy.RequiresRebase(old, "source", "new", 1095, evidence));
         var reset = WorkdayCheckpointRebasePolicy.Restart(old, "new", 1095, 55, evidence,
             new JobSourceRunResult { Created = 94, Published = 80, TotalReceived = 94 }, DateTime.UtcNow);
@@ -346,13 +419,16 @@ public sealed class WorkdayResilienceTests
         public Guid? RunId { get; } = Guid.NewGuid();
         public bool Enabled { get; private set; }
         public WorkdayRunCheckpoint? State { get; private set; }
-        public JobSourceRunResult CommittedCounters => WorkdayCheckpointRebasePolicy.AddCounters(new() {
-            TotalReceived = receipts.Count, Created = receipts.Values.Count(x => x.Result.Outcome == JobIngestionOutcome.Created),
+        public JobSourceRunResult CommittedCounters => WorkdayCheckpointRebasePolicy.AddCounters(new()
+        {
+            TotalReceived = receipts.Count,
+            Created = receipts.Values.Count(x => x.Result.Outcome == JobIngestionOutcome.Created),
             Published = publications.Values.Count(x => x.Outcome == JobAutoPublishOutcome.Published),
             Updated = receipts.Values.Count(x => x.Result.Outcome == JobIngestionOutcome.Updated),
             Unchanged = receipts.Values.Count(x => x.Result.Outcome == JobIngestionOutcome.Unchanged),
             Matched = receipts.Values.Count(x => x.Result.Outcome is JobIngestionOutcome.MatchedByUrl or JobIngestionOutcome.MatchedByFingerprint or JobIngestionOutcome.MatchedByFuzzy),
-            Failed = receipts.Values.Count(x => x.Result.Outcome == JobIngestionOutcome.Failed) }, State?.ArchivedCounters);
+            Failed = receipts.Values.Count(x => x.Result.Outcome == JobIngestionOutcome.Failed)
+        }, State?.ArchivedCounters);
         public void Enable(JobSource source) => Enabled = source.AtsType == AtsType.Workday;
         public Task BindAsync(JobSourceRun run, CancellationToken ct) => Task.CompletedTask;
         public Task RefreshAsync(CancellationToken ct) => Task.CompletedTask;
@@ -364,8 +440,14 @@ public sealed class WorkdayResilienceTests
                 State = WorkdayCheckpointRebasePolicy.Restart(State, listingIdentity, total, pages, listingDiagnostics!, CommittedCounters, DateTime.UtcNow);
                 receipts.Clear(); publications.Clear();
             }
-            State ??= new() { SourceIdentity = sourceIdentity, ListingIdentity = listingIdentity, ListingTotal = total,
-                ListingPages = pages, ListingDiagnostics = listingDiagnostics };
+            State ??= new()
+            {
+                SourceIdentity = sourceIdentity,
+                ListingIdentity = listingIdentity,
+                ListingTotal = total,
+                ListingPages = pages,
+                ListingDiagnostics = listingDiagnostics
+            };
             return Task.CompletedTask;
         }
         public Task CommitAsync(int cursor, int providerSkipped, IReadOnlyCollection<RawExternalJob> observed, CancellationToken ct)
@@ -390,8 +472,13 @@ public sealed class WorkdayResilienceTests
         { StageIngestion(raw, result); if (publication is not null && raw.SourceOrdinal is { } ordinal) publications.TryAdd(ordinal, publication); return Task.CompletedTask; }
     }
 
-    private static JobSource Source() => new() { AtsType = AtsType.Workday, AtsIdentifier = "fixture/Careers",
-        CareerPageUrl = "https://fixture.wd1.myworkdayjobs.com/Careers", Company = new Company { Name = "Fixture" } };
+    private static JobSource Source() => new()
+    {
+        AtsType = AtsType.Workday,
+        AtsIdentifier = "fixture/Careers",
+        CareerPageUrl = "https://fixture.wd1.myworkdayjobs.com/Careers",
+        Company = new Company { Name = "Fixture" }
+    };
     private sealed class Factory(HttpClient http) : IHttpClientFactory { public HttpClient CreateClient(string name) => http; }
     private sealed class FastClock : TimeProvider
     { private long seconds; public override DateTimeOffset GetUtcNow() => DateTimeOffset.UtcNow.AddSeconds(Interlocked.Increment(ref seconds)); }
@@ -428,9 +515,11 @@ public sealed class WorkdayResilienceTests
                 if (Mutation == "empty" && offset == 20) count = 0;
                 var entries = Enumerable.Range(start, count).Select(i => ReverseOrder ? observed - 1 - i : i).Select(i => new
                 {
-                    title = $"Software Engineer {i}", externalPath = Mutation == "invalidPath" ? "/../invalid" :
+                    title = $"Software Engineer {i}",
+                    externalPath = Mutation == "invalidPath" ? "/../invalid" :
                         $"/job/Pune/Engineer_{(Mutation == "duplicate" && i == 20 ? 19 : i)}",
-                    locationsText = "Pune, India", bulletFields = new[] { $"R-{i}" }
+                    locationsText = "Pune, India",
+                    bulletFields = new[] { $"R-{i}" }
                 }).Cast<object>().ToList();
                 if (offset == 0 && AnchorReads > 1 && Mutation == "membership")
                     entries[0] = new { title = "New Engineer", externalPath = "/job/Pune/Engineer_999", locationsText = "Pune, India" };
@@ -445,9 +534,18 @@ public sealed class WorkdayResilienceTests
             if (Cancel is not null && CancelDuringDetails) { Cancel.Cancel(); token.ThrowIfCancellationRequested(); }
             var id = int.Parse(request.RequestUri!.AbsolutePath.Split('_').Last(), CultureInfo.InvariantCulture);
             if (FailDetail && id == 0) return new(HttpStatusCode.ServiceUnavailable);
-            return Json(JsonSerializer.Serialize(new { jobPostingInfo = new { title = $"Software Engineer {id}", jobReqId = $"R-{id}",
-                location = "Pune, India", timeType = "Full time", country = new { alpha2Code = "IN" },
-                jobDescription = $"Build and maintain reliable software product {id}. Minimum 3 years experience required." } }));
+            return Json(JsonSerializer.Serialize(new
+            {
+                jobPostingInfo = new
+                {
+                    title = $"Software Engineer {id}",
+                    jobReqId = $"R-{id}",
+                    location = "Pune, India",
+                    timeType = "Full time",
+                    country = new { alpha2Code = "IN" },
+                    jobDescription = $"Build and maintain reliable software product {id}. Minimum 3 years experience required."
+                }
+            }));
         }
     }
 }

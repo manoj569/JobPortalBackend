@@ -40,6 +40,12 @@ public sealed partial class WorkdayJobSourceProvider(
     private const int SuspectedSearchCap = 2_000;
     private const int MaxJsonBytes = 4 * 1024 * 1024;
 
+    // Workday occasionally inserts non-job placeholder cards into otherwise healthy
+    // listing snapshots. Permit a tiny bounded anomaly for ingestion only. A snapshot
+    // containing any placeholder is still never safe for destructive reconciliation.
+    private const int MaxToleratedPlaceholderRows = 5;
+    private const double MaxToleratedPlaceholderFraction = 0.005d; // 0.5%
+
     private static readonly TimeSpan RequestSpacing = TimeSpan.FromMilliseconds(250);
 
     private static readonly Action<ILogger, Guid, Exception?> Started =
@@ -231,9 +237,13 @@ public sealed partial class WorkdayJobSourceProvider(
                 if (!inventory.Diagnostics.IngestionSafe)
                     throw new JobSourceSnapshotUnsafeException(inventory.Diagnostics.ReasonCode, inventory.Diagnostics);
                 var selection = options?.Value.SourceApprovals.GetValueOrDefault(source.Id.ToString("D"));
-                var policyIdentity = JsonSerializer.Serialize(new { IndiaOnly = selection?.IndiaOnly ?? true,
+                var policyIdentity = JsonSerializer.Serialize(new
+                {
+                    IndiaOnly = selection?.IndiaOnly ?? true,
                     Locations = selection?.VerifiedIndiaLocations.Order(StringComparer.OrdinalIgnoreCase).ToArray() ?? [],
-                    WorldwideRemote = selection?.AllowExplicitWorldwideRemote ?? false, Limit = selection?.TestImportLimit ?? 0 });
+                    WorldwideRemote = selection?.AllowExplicitWorldwideRemote ?? false,
+                    Limit = selection?.TestImportLimit ?? 0
+                });
                 var sourceIdentity = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
                     $"v1|{source.Id:D}|{source.CompanyId:D}|{target.Origin}|{target.Tenant}|{target.Site}|{policyIdentity}")));
                 // Resume only identical ordered membership. Prepare may atomically restart
@@ -332,14 +342,20 @@ public sealed partial class WorkdayJobSourceProvider(
             if (logger is not null)
                 LogListingSummary(logger, source.Id, rawEntriesRead, postings.Count, duplicatePaths, placeholderRows, expectedTotal, complete);
             continuation = durable && cursor < postings.Count;
-            var finalDiagnostics = listingDiagnostics with { ReconciliationSafe = complete,
+            var finalDiagnostics = listingDiagnostics with
+            {
+                ReconciliationSafe = complete,
                 ReasonCode = complete ? "Complete" : !listingDiagnostics.ReconciliationSafe ? listingDiagnostics.ReasonCode :
                     failed > 0 ? "FailedDetails" : duplicateIds ? "DuplicateExternalIds" : continuation ? "ExecutionSliceComplete" : "SnapshotIncomplete",
-                RetryRecommended = !complete };
+                RetryRecommended = !complete
+            };
             LogSnapshot(source.Id, finalDiagnostics);
             yield return new(Array.Empty<RawExternalJob>(), 0, complete)
-            { ContinuationPending = durable && cursor < postings.Count, CheckpointCursor = durable ? cursor : null,
-                ListingDiagnostics = finalDiagnostics };
+            {
+                ContinuationPending = durable && cursor < postings.Count,
+                CheckpointCursor = durable ? cursor : null,
+                ListingDiagnostics = finalDiagnostics
+            };
         }
         finally
         {
@@ -491,7 +507,8 @@ public sealed partial class WorkdayJobSourceProvider(
             return new ListingPage(
                 total,
                 rawEntryCount,
-                postings) { HasReportedTotal = hasTotal };
+                postings)
+            { HasReportedTotal = hasTotal };
         }
         catch (JsonException exception)
         {
@@ -634,180 +651,201 @@ public sealed partial class WorkdayJobSourceProvider(
     private async Task<ListingInventory> ReadListingAsync(HttpClient client, WorkdayTarget target,
         JobSource source, CancellationToken token)
     {
-            var postings = new List<ListingEntry>();
-            var seenPaths = new HashSet<string>(StringComparer.Ordinal);
-            var rawEntriesRead = 0;
-            var duplicatePaths = 0;
-            var placeholderRows = 0;
-            int? expectedTotal = null;
-            var listingChanged = false;
-            var continuationTotalOmitted = false;
-            var shortFinalPage = false;
-            var reportedTotalChanged = false;
-            var repeatedPage = false;
-            var anchorFailed = false;
-            var firstPageChanged = false;
-            int? finalTotal = null;
-            var lastOffset = 0;
-            var lastPageSize = 0;
-            ListingPageWithStatus? firstPage = null;
-            var pageSignatures = new HashSet<string>(StringComparer.Ordinal);
+        var postings = new List<ListingEntry>();
+        var seenPaths = new HashSet<string>(StringComparer.Ordinal);
+        var rawEntriesRead = 0;
+        var duplicatePaths = 0;
+        var placeholderRows = 0;
+        int? expectedTotal = null;
+        var listingChanged = false;
+        var continuationTotalOmitted = false;
+        var shortFinalPage = false;
+        var reportedTotalChanged = false;
+        var repeatedPage = false;
+        var anchorFailed = false;
+        var firstPageChanged = false;
+        int? finalTotal = null;
+        var lastOffset = 0;
+        var lastPageSize = 0;
+        ListingPageWithStatus? firstPage = null;
+        var pageSignatures = new HashSet<string>(StringComparer.Ordinal);
 
-            var pages = 0;
-            for (var offset = 0; ; offset += PageSize)
+        var pages = 0;
+        for (var offset = 0; ; offset += PageSize)
+        {
+            token.ThrowIfCancellationRequested();
+
+            var page = await FetchListingPageAsync(
+                client,
+                target,
+                source.Id,
+                offset,
+                token);
+
+            pages++;
+            lastOffset = offset;
+            lastPageSize = page.RawEntryCount;
+            // CXS may report total=0 on nonempty continuation pages while
+            // page zero alone reports the global total. Zero is not evidence
+            // of a changed census here; raw slots and a final anchor still validate it.
+            var totalOmitted = offset > 0 && expectedTotal > 0 && page.Total == 0 && page.RawEntryCount > 0;
+            continuationTotalOmitted |= totalOmitted;
+            if (expectedTotal.HasValue && !totalOmitted && page.Total != expectedTotal.Value)
             {
-                token.ThrowIfCancellationRequested();
+                listingChanged = true;
+                reportedTotalChanged = true;
+                if (logger is not null) LogSourceFailure(logger, source.Id, "listing_snapshot", offset, "ListingTotalChanged", page.StatusCode);
+            }
+            if (logger is not null) LogListingValidation(logger, source.Id, "page", offset,
+                expectedTotal ?? page.Total, page.Total, page.RawEntryCount, totalOmitted);
+            var signature = string.Join("|", page.Postings.Select(x => x.ExternalPath));
+            if (page.Postings.Count > 0 && !pageSignatures.Add(signature))
+            {
+                listingChanged = true;
+                repeatedPage = true;
+                if (logger is not null) LogSourceFailure(logger, source.Id, "listing_snapshot", offset, "RepeatedPage", page.StatusCode);
+                break;
+            }
+            rawEntriesRead += page.RawEntryCount;
+            placeholderRows += page.RawEntryCount - page.Postings.Count;
 
-                var page = await FetchListingPageAsync(
-                    client,
-                    target,
-                    source.Id,
-                    offset,
-                    token);
+            if (expectedTotal is null)
+            {
+                if (!page.HasReportedTotal)
+                    throw LoggedInvalidDocument(source.Id, "listing_parse", offset, page.StatusCode,
+                        FailureReason.ListingTotalInvalid, "The initial Workday page must report a total.");
+                expectedTotal = page.Total;
+                firstPage = page;
 
-                pages++;
-                lastOffset = offset;
-                lastPageSize = page.RawEntryCount;
-                // CXS may report total=0 on nonempty continuation pages while
-                // page zero alone reports the global total. Zero is not evidence
-                // of a changed census here; raw slots and a final anchor still validate it.
-                var totalOmitted = offset > 0 && expectedTotal > 0 && page.Total == 0 && page.RawEntryCount > 0;
-                continuationTotalOmitted |= totalOmitted;
-                if (expectedTotal.HasValue && !totalOmitted && page.Total != expectedTotal.Value)
-                {
-                    listingChanged = true;
-                    reportedTotalChanged = true;
-                    if (logger is not null) LogSourceFailure(logger, source.Id, "listing_snapshot", offset, "ListingTotalChanged", page.StatusCode);
-                }
-                if (logger is not null) LogListingValidation(logger, source.Id, "page", offset,
-                    expectedTotal ?? page.Total, page.Total, page.RawEntryCount, totalOmitted);
-                var signature = string.Join("|", page.Postings.Select(x => x.ExternalPath));
-                if (page.Postings.Count > 0 && !pageSignatures.Add(signature))
-                {
-                    listingChanged = true;
-                    repeatedPage = true;
-                    if (logger is not null) LogSourceFailure(logger, source.Id, "listing_snapshot", offset, "RepeatedPage", page.StatusCode);
-                    break;
-                }
-                rawEntriesRead += page.RawEntryCount;
-                placeholderRows += page.RawEntryCount - page.Postings.Count;
+                if (expectedTotal < 0 || expectedTotal > MaxJobs)
+                    throw LoggedInvalidDocument(
+                        source.Id,
+                        "listing_parse",
+                        offset,
+                        page.StatusCode,
+                        expectedTotal > MaxJobs
+                            ? FailureReason.ListingRecordLimitExceeded
+                            : FailureReason.ListingTotalInvalid,
+                        "The Workday listing total is invalid or exceeds the configured safe limit.");
+            }
 
-                if (expectedTotal is null)
-                {
-                    if (!page.HasReportedTotal)
-                        throw LoggedInvalidDocument(source.Id, "listing_parse", offset, page.StatusCode,
-                            FailureReason.ListingTotalInvalid, "The initial Workday page must report a total.");
-                    expectedTotal = page.Total;
-                    firstPage = page;
-
-                    if (expectedTotal < 0 || expectedTotal > MaxJobs)
-                        throw LoggedInvalidDocument(
-                            source.Id,
-                            "listing_parse",
-                            offset,
-                            page.StatusCode,
-                            expectedTotal > MaxJobs
-                                ? FailureReason.ListingRecordLimitExceeded
-                                : FailureReason.ListingTotalInvalid,
-                            "The Workday listing total is invalid or exceeds the configured safe limit.");
-                }
-
-                if (expectedTotal == 0)
-                {
-                    if (offset != 0 || page.RawEntryCount != 0 || page.Postings.Count != 0)
-                        throw LoggedInvalidDocument(
-                            source.Id,
-                            "listing_snapshot",
-                            offset,
-                            page.StatusCode,
-                            FailureReason.ListingSnapshotChanged,
-                            "The Workday listing changed while reading the snapshot.");
-
-                    break;
-                }
-
-                if (page.RawEntryCount == 0)
+            if (expectedTotal == 0)
+            {
+                if (offset != 0 || page.RawEntryCount != 0 || page.Postings.Count != 0)
                     throw LoggedInvalidDocument(
                         source.Id,
                         "listing_snapshot",
                         offset,
                         page.StatusCode,
-                        FailureReason.ListingEndedEarly,
-                        "The Workday listing ended before the first-page total was reached.");
+                        FailureReason.ListingSnapshotChanged,
+                        "The Workday listing changed while reading the snapshot.");
 
-                foreach (var posting in page.Postings)
-                {
-                    if (!seenPaths.Add(posting.ExternalPath))
-                    {
-                        // Workday can repeat a posting across pages. Count raw slots
-                        // for pagination but fetch each unique job only once.
-                        duplicatePaths++;
-                        continue;
-                    }
-
-                    postings.Add(posting);
-                }
-
-                if (rawEntriesRead >= expectedTotal)
-                    break;
-
-                if (page.RawEntryCount < PageSize)
-                {
-                    shortFinalPage = true;
-                    break;
-                }
-
-                await Task.Delay(RequestSpacing, token);
+                break;
             }
 
-            // Never probe beyond the advertised total: some tenants wrap to
-            // page zero there. When continuation totals were omitted, re-read
-            // the original anchor within the existing HTTP retry/run budgets.
-            // A changing anchor cannot authorize closure, even if counts match.
-            if ((continuationTotalOmitted || shortFinalPage || reportedTotalChanged) &&
-                !repeatedPage && duplicatePaths == 0 && placeholderRows == 0 && firstPage is not null)
+            if (page.RawEntryCount == 0)
+                throw LoggedInvalidDocument(
+                    source.Id,
+                    "listing_snapshot",
+                    offset,
+                    page.StatusCode,
+                    FailureReason.ListingEndedEarly,
+                    "The Workday listing ended before the first-page total was reached.");
+
+            foreach (var posting in page.Postings)
             {
-                try
+                if (!seenPaths.Add(posting.ExternalPath))
                 {
-                    var anchor = await FetchListingPageAsync(client, target, source.Id, 0, token);
-                    if (!anchor.HasReportedTotal || anchor.Total < 0 || anchor.Total > MaxJobs ||
-                        anchor.RawEntryCount != Math.Min(PageSize, anchor.Total) ||
-                        anchor.Postings.Count != anchor.RawEntryCount ||
-                        anchor.Postings.Select(x => x.ExternalPath).Distinct(StringComparer.Ordinal).Count() != anchor.Postings.Count)
-                        throw new JobSourceSnapshotUnsafeException("AnchorRevalidationFailed");
-                    finalTotal = anchor.Total;
-                    if (logger is not null) LogListingValidation(logger, source.Id, "anchor", 0,
-                        firstPage.Total, anchor.Total, anchor.RawEntryCount, false);
-                    firstPageChanged = anchor.RawEntryCount != firstPage.RawEntryCount ||
-                        !anchor.Postings.Select(x => (x.ExternalPath, x.BulletId)).SequenceEqual(firstPage.Postings.Select(x => (x.ExternalPath, x.BulletId)));
-                    reportedTotalChanged |= anchor.Total != firstPage.Total;
-                    listingChanged |= firstPageChanged || reportedTotalChanged;
+                    // Workday can repeat a posting across pages. Count raw slots
+                    // for pagination but fetch each unique job only once.
+                    duplicatePaths++;
+                    continue;
                 }
-                catch (Exception exception) when (exception is HttpRequestException or TimeoutException or InvalidDataException or JobSourceSnapshotUnsafeException)
-                {
-                    anchorFailed = true;
-                    listingChanged = true;
-                    if (logger is not null) LogSourceFailure(logger, source.Id, "listing_anchor", 0, "AnchorRevalidationFailed", null);
-                }
+
+                postings.Add(posting);
             }
-            var exactCounts = rawEntriesRead == expectedTotal && postings.Count == expectedTotal;
-            var structural = !repeatedPage && duplicatePaths == 0 && placeholderRows == 0;
-            var stable = structural && !listingChanged && exactCounts;
-            var reason = repeatedPage ? "RepeatedPage" : duplicatePaths > 0 ? "DuplicateListingPaths" :
-                placeholderRows > 0 ? "ListingPlaceholders" : anchorFailed ? "AnchorRevalidationFailed" :
-                reportedTotalChanged ? "ListingTotalDrift" : firstPageChanged ? "ListingMembershipChanged" :
-                !exactCounts ? "ListingEndedEarly" : expectedTotal == SuspectedSearchCap ? "SuspectedSearchCap" : "Complete";
-            var diagnostics = new WorkdayListingDiagnostics
+
+            if (rawEntriesRead >= expectedTotal)
+                break;
+
+            if (page.RawEntryCount < PageSize)
             {
-                InitialReportedTotal = expectedTotal ?? 0, FinalReportedTotal = finalTotal,
-                RawSlots = rawEntriesRead, UniquePaths = postings.Count, DuplicatePaths = duplicatePaths,
-                PlaceholderCount = placeholderRows, FirstPageChanged = firstPageChanged,
-                LastOffset = lastOffset, LastPageSize = lastPageSize, PageCount = pages, SnapshotStable = stable,
-                IngestionSafe = structural, ReconciliationSafe = stable && expectedTotal != SuspectedSearchCap,
-                ReasonCode = reason, RetryRecommended = reason != "Complete"
-            };
-            LogSnapshot(source.Id, diagnostics);
-            return new(postings, expectedTotal ?? 0, rawEntriesRead, duplicatePaths, placeholderRows, !stable, pages, diagnostics);
+                shortFinalPage = true;
+                break;
+            }
+
+            await Task.Delay(RequestSpacing, token);
+        }
+
+        // Never probe beyond the advertised total: some tenants wrap to
+        // page zero there. When continuation totals were omitted, re-read
+        // the original anchor within the existing HTTP retry/run budgets.
+        // A changing anchor cannot authorize closure, even if counts match.
+        if ((continuationTotalOmitted || shortFinalPage || reportedTotalChanged) &&
+            !repeatedPage && duplicatePaths == 0 && placeholderRows == 0 && firstPage is not null)
+        {
+            try
+            {
+                var anchor = await FetchListingPageAsync(client, target, source.Id, 0, token);
+                if (!anchor.HasReportedTotal || anchor.Total < 0 || anchor.Total > MaxJobs ||
+                    anchor.RawEntryCount != Math.Min(PageSize, anchor.Total) ||
+                    anchor.Postings.Count != anchor.RawEntryCount ||
+                    anchor.Postings.Select(x => x.ExternalPath).Distinct(StringComparer.Ordinal).Count() != anchor.Postings.Count)
+                    throw new JobSourceSnapshotUnsafeException("AnchorRevalidationFailed");
+                finalTotal = anchor.Total;
+                if (logger is not null) LogListingValidation(logger, source.Id, "anchor", 0,
+                    firstPage.Total, anchor.Total, anchor.RawEntryCount, false);
+                firstPageChanged = anchor.RawEntryCount != firstPage.RawEntryCount ||
+                    !anchor.Postings.Select(x => (x.ExternalPath, x.BulletId)).SequenceEqual(firstPage.Postings.Select(x => (x.ExternalPath, x.BulletId)));
+                reportedTotalChanged |= anchor.Total != firstPage.Total;
+                listingChanged |= firstPageChanged || reportedTotalChanged;
+            }
+            catch (Exception exception) when (exception is HttpRequestException or TimeoutException or InvalidDataException or JobSourceSnapshotUnsafeException)
+            {
+                anchorFailed = true;
+                listingChanged = true;
+                if (logger is not null) LogSourceFailure(logger, source.Id, "listing_anchor", 0, "AnchorRevalidationFailed", null);
+            }
+        }
+        var exactCounts = rawEntriesRead == expectedTotal && postings.Count == expectedTotal;
+        var placeholderFraction = rawEntriesRead == 0 ? 0d : (double)placeholderRows / rawEntriesRead;
+        var placeholdersTolerableForIngestion =
+            placeholderRows == 0 ||
+            (placeholderRows <= MaxToleratedPlaceholderRows &&
+             placeholderFraction <= MaxToleratedPlaceholderFraction);
+
+        // Repeated pages and duplicate identities are never safe to ingest. A tiny
+        // number of rows that contain neither title nor externalPath may be skipped
+        // for ingestion because ParseListingPage already classifies them as non-job
+        // placeholder cards. They still make the snapshot non-authoritative for
+        // reconciliation, so existing jobs can never be closed from such a run.
+        var ingestionStructural = !repeatedPage && duplicatePaths == 0 && placeholdersTolerableForIngestion;
+        var reconciliationStructural = !repeatedPage && duplicatePaths == 0 && placeholderRows == 0;
+        var stable = reconciliationStructural && !listingChanged && exactCounts;
+        var reason = repeatedPage ? "RepeatedPage" : duplicatePaths > 0 ? "DuplicateListingPaths" :
+            placeholderRows > 0 ? "ListingPlaceholders" : anchorFailed ? "AnchorRevalidationFailed" :
+            reportedTotalChanged ? "ListingTotalDrift" : firstPageChanged ? "ListingMembershipChanged" :
+            !exactCounts ? "ListingEndedEarly" : expectedTotal == SuspectedSearchCap ? "SuspectedSearchCap" : "Complete";
+        var diagnostics = new WorkdayListingDiagnostics
+        {
+            InitialReportedTotal = expectedTotal ?? 0,
+            FinalReportedTotal = finalTotal,
+            RawSlots = rawEntriesRead,
+            UniquePaths = postings.Count,
+            DuplicatePaths = duplicatePaths,
+            PlaceholderCount = placeholderRows,
+            FirstPageChanged = firstPageChanged,
+            LastOffset = lastOffset,
+            LastPageSize = lastPageSize,
+            PageCount = pages,
+            SnapshotStable = stable,
+            IngestionSafe = ingestionStructural,
+            ReconciliationSafe = stable && expectedTotal != SuspectedSearchCap,
+            ReasonCode = reason,
+            RetryRecommended = reason != "Complete"
+        };
+        LogSnapshot(source.Id, diagnostics);
+        return new(postings, expectedTotal ?? 0, rawEntriesRead, duplicatePaths, placeholderRows, !stable, pages, diagnostics);
     }
 
     private static string ListingIdentity(ListingInventory inventory) => Convert.ToHexString(SHA256.HashData(
@@ -875,7 +913,8 @@ public sealed partial class WorkdayJobSourceProvider(
             parsed.Total,
             parsed.RawEntryCount,
             parsed.Postings,
-            response.StatusCode) { HasReportedTotal = parsed.HasReportedTotal };
+            response.StatusCode)
+        { HasReportedTotal = parsed.HasReportedTotal };
     }
 
     private async Task<RawExternalJob?> FetchDetailAsync(
