@@ -1,6 +1,6 @@
 namespace JobPortal.Application.Abstractions.Jobs;
 
-/// <summary>A fresh authoritative census may replace traversal, never source identity.</summary>
+/// <summary>Live membership may restart progress, never change configured source identity.</summary>
 public static class WorkdayCheckpointRebasePolicy
 {
     public static bool RequiresRebase(WorkdayRunCheckpoint state, string sourceIdentity,
@@ -8,23 +8,16 @@ public static class WorkdayCheckpointRebasePolicy
     {
         ArgumentNullException.ThrowIfNull(state);
         if (state.SourceIdentity != sourceIdentity)
-            throw new JobSourceSnapshotUnsafeException("ListingSnapshotIncompatible", diagnostics);
-        var changed = state.ListingIdentity != listingIdentity || state.ListingTotal != total;
-        var replacesRestricted = state.ListingDiagnostics is { ReconciliationSafe: false } &&
-            diagnostics is { ReconciliationSafe: true };
-        if (!changed && !replacesRestricted) return false;
-        if (diagnostics is not { IngestionSafe: true, SnapshotStable: true, ReconciliationSafe: true } ||
-            diagnostics.UniquePaths != total || diagnostics.RawSlots != total ||
-            diagnostics.DuplicatePaths != 0 || diagnostics.PlaceholderCount != 0)
-            throw new JobSourceSnapshotUnsafeException("ListingSnapshotIncompatible", diagnostics);
-        return true;
+            throw new JobSourceSnapshotUnsafeException("SourceConfigurationChanged", diagnostics);
+        if (total is < 0 or > 10000) throw new JobSourceSnapshotUnsafeException("InvalidCheckpoint", diagnostics);
+        return state.ListingIdentity != listingIdentity || state.ListingTotal != total;
     }
 
     public static WorkdayRunCheckpoint Restart(WorkdayRunCheckpoint state, string listingIdentity,
         int total, int pages, WorkdayListingDiagnostics diagnostics, JobSourceRunResult committed, DateTime now)
     {
         ArgumentNullException.ThrowIfNull(state);
-        return state with { Version = 3, RebaseCount = checked(state.RebaseCount + 1),
+        return state with { Version = 4, RebaseCount = checked(state.RebaseCount + 1),
             ListingIdentity = listingIdentity, ListingTotal = total, ListingPages = pages,
             Cursor = 0, ProviderSkipped = 0, ObservedJobs = [], CompletedResult = null,
             ListingDiagnostics = diagnostics, CapturedAtUtc = now, CommittedAtUtc = now,

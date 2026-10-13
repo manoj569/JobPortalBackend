@@ -16,7 +16,7 @@ public sealed record ExternalJobSourceSnapshot(
     public IReadOnlyDictionary<string, int>? EligibilityReasonCounts { get; init; }
 }
 
-// Count equality is insufficient to authorize absence reconciliation after observed drift.
+// Workday progress and anomalies are diagnostic; they never authorize absence reconciliation.
 public sealed record WorkdayListingDiagnostics
 {
     public int InitialReportedTotal { get; init; }
@@ -29,6 +29,8 @@ public sealed record WorkdayListingDiagnostics
     public int LastOffset { get; init; }
     public int LastPageSize { get; init; }
     public int PageCount { get; init; }
+    public bool ProcessingComplete { get; init; }
+    public bool InfrastructureFailure { get; init; }
     public bool SnapshotStable { get; init; }
     public bool IngestionSafe { get; init; }
     public bool ReconciliationSafe { get; init; }

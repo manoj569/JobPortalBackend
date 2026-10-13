@@ -31,7 +31,7 @@ public interface IJobSourceRunCheckpoint
     void Enable(JobSource source);
     Task PrepareAsync(string sourceIdentity, string listingIdentity, int total, int pages, CancellationToken ct,
         WorkdayListingDiagnostics? listingDiagnostics = null);
-    Task CommitAsync(int cursor, int providerSkipped, IReadOnlyCollection<RawExternalJob> observed, CancellationToken ct);
+    Task CommitAsync(int cursor, int providerSkipped, IReadOnlyCollection<RawExternalJob> observed, CancellationToken ct, WorkdayListingDiagnostics? diagnostics = null);
     Task RefreshAsync(CancellationToken ct);
     JobIngestionResult? Replay(RawExternalJob raw);
     JobAutoPublishResult? ReplayedPublication(RawExternalJob raw);

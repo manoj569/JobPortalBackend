@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using JobPortal.Application.Abstractions.Jobs;
 using JobPortal.Application.Abstractions.Persistence;
+using JobPortal.Domain.Enums;
 
 namespace JobPortal.Application.Services;
 
@@ -273,7 +274,7 @@ public sealed partial class JobSourceRunner(
                     providerSnapshotComplete = false; reconciliationSafe = false;
                 }
                 listingDiagnostics = batch.ListingDiagnostics ?? listingDiagnostics;
-                if (batch.ListingDiagnostics is { IngestionSafe: false } unsafeListing)
+                if (source.AtsType != AtsType.Workday && batch.ListingDiagnostics is { IngestionSafe: false } unsafeListing)
                     throw new JobSourceSnapshotUnsafeException(unsafeListing.ReasonCode, unsafeListing);
                 observedJobs.AddRange(batch.Jobs);
                 continuationPending = batch.ContinuationPending;
@@ -525,10 +526,10 @@ public sealed partial class JobSourceRunner(
                 if (durable && batch.CheckpointCursor is { } cursor)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    if (autoPublishService is not null && newJobs.Any(x => checkpoint!.Replay(x)?.JobId is not null &&
+                    if (autoPublishService is not null && newJobs.Any(x => checkpoint!.Replay(x) is { JobId: not null, Outcome: JobIngestionOutcome.Created or JobIngestionOutcome.Updated or JobIngestionOutcome.Unchanged } &&
                         checkpoint.ReplayedPublication(x) is null))
                         throw new JobSourceContinuationException("PublicationRecoveryRequired");
-                    await checkpoint!.CommitAsync(cursor, snapshot?.Skipped ?? 0, observedJobs, cancellationToken);
+                    await checkpoint!.CommitAsync(cursor, snapshot?.Skipped ?? 0, observedJobs, cancellationToken, listingDiagnostics);
                     ReportProgress("CheckpointCommitted");
                 }
 
@@ -542,6 +543,7 @@ public sealed partial class JobSourceRunner(
             var hasCompleteIdentities = externalIdsForReconciliation.Length == observedJobs.Count &&
                 externalIdsForReconciliation.Distinct(StringComparer.Ordinal).Count() == observedJobs.Count;
             var blockers = new List<string>();
+            if (source.AtsType == AtsType.Workday) blockers.Add("WorkdayNonAuthoritative");
             if (!providerSnapshotComplete) blockers.Add("ProviderSnapshotIncomplete");
             if (snapshot is not { IsComplete: true } && providerSnapshotComplete)
                 blockers.Add("SelectionSnapshotIncomplete"); // Includes configured test caps.
@@ -581,7 +583,10 @@ public sealed partial class JobSourceRunner(
 
             // A complete-source provider's partial scan must never claim a successful
             // full run. Already committed items remain resumable on the next attempt.
-            var successful = provider is ICompleteExternalJobProvider ? canReconcile : skipped == 0 && failed == 0 &&
+            var successful = source.AtsType == AtsType.Workday
+                ? !continuationPending && (listingDiagnostics?.ProcessingComplete ?? true) &&
+                    listingDiagnostics?.InfrastructureFailure != true && failed == 0
+                : provider is ICompleteExternalJobProvider ? canReconcile : skipped == 0 && failed == 0 &&
                 !(snapshot?.EligibilityReasonCounts?.Keys.Any(x => x is "AmbiguousLocation" or "ContradictoryLocation" or "UnknownCountry") ?? false);
             source.LastSuccessfulRunAtUtc = successful ? now : previousSuccessfulRun;
             source.LastError = continuationPending ? previousError : successful ? null : "External job source scan was incomplete or had failed/skipped items.";
@@ -610,6 +615,7 @@ public sealed partial class JobSourceRunner(
                 RemainingWork = partialResult.RemainingWork, DurationMilliseconds = runTimer.Elapsed.TotalMilliseconds,
                 ContinuationPending = continuationPending,
                 StopReason = successful ? "Complete" : continuationPending ? "ExecutionSliceComplete" :
+                    source.AtsType == AtsType.Workday && (listingDiagnostics?.InfrastructureFailure == true || failed > 0) ? "InfrastructureFailure" :
                     listingDiagnostics is { ReasonCode: not "Complete" } ? listingDiagnostics.ReasonCode : "IncompleteOrUnsafeScan",
                 ListingDiagnostics = listingDiagnostics,
                 TotalReceived = observedJobs.Count + (snapshot?.Skipped ?? 0),

@@ -49,7 +49,7 @@ public sealed class WorkdayCheckpointPostgresTests(WorkdayCheckpointDatabase dat
         } while (result.ContinuationPending && executions < 20);
         Assert.Equal(6, executions);
         Assert.True(result.Succeeded);
-        Assert.True(result.ReconciliationSafe);
+        Assert.False(result.ReconciliationSafe);
         Assert.Equal(5001, result.CheckpointCursor);
         Assert.Equal(5001, result.ObservedIdentities);
         Assert.Equal(64, result.Created);
@@ -86,7 +86,7 @@ public sealed class WorkdayCheckpointPostgresTests(WorkdayCheckpointDatabase dat
         Assert.True(result.ContinuationPending);
         Assert.Equal(40, result.Created);
         while (result.ContinuationPending) result = await f.ExecuteAsync(run.Id, 40);
-        Assert.True(result.ReconciliationSafe);
+        Assert.False(result.ReconciliationSafe);
         Assert.True(result.Succeeded);
         Assert.Equal(44, result.Created);
         Assert.Equal(132, result.SelectionSkipped);
@@ -220,7 +220,7 @@ public sealed class WorkdayCheckpointPostgresTests(WorkdayCheckpointDatabase dat
     }
 
     [WorkdayLocalPostgresFact]
-    public async Task CompleteInventoryCanCloseMissingJobButPartialSlicesCannot()
+    public async Task CompleteInventoryNeverClosesMissingJobButPartialSlicesCannot()
     {
         var f = await Harness.CreateAsync(database, 4);
         var first = await f.EnqueueAsync();
@@ -234,8 +234,8 @@ public sealed class WorkdayCheckpointPostgresTests(WorkdayCheckpointDatabase dat
         Assert.Equal(0, await db.Jobs.CountAsync(x => x.CompanyId == f.Source.CompanyId && x.Status == JobStatus.Closed));
         var complete = await f.ExecuteAsync(second.Id, 2);
         Assert.True(complete.Succeeded);
-        Assert.Equal(1, complete.Closed);
-        Assert.Equal(1, await db.Jobs.CountAsync(x => x.CompanyId == f.Source.CompanyId && x.Status == JobStatus.Closed));
+        Assert.Equal(0, complete.Closed);
+        Assert.Equal(0, await db.Jobs.CountAsync(x => x.CompanyId == f.Source.CompanyId && x.Status == JobStatus.Closed));
     }
 
     [WorkdayLocalPostgresFact]
@@ -270,7 +270,7 @@ public sealed class WorkdayCheckpointPostgresTests(WorkdayCheckpointDatabase dat
     }
 
     [WorkdayLocalPostgresFact]
-    public async Task CrashAfterReconciliationCommitRecoversExactCompletionWithoutAnotherFetchOrClosure()
+    public async Task CrashAfterNonDestructiveCompletionCommitRecoversExactCompletionWithoutAnotherFetchOrClosure()
     {
         var f = await Harness.CreateAsync(database, 5);
         var first = await f.EnqueueAsync();
@@ -282,13 +282,13 @@ public sealed class WorkdayCheckpointPostgresTests(WorkdayCheckpointDatabase dat
         var beforeResume = f.DetailRequests;
         var result = await f.ExecuteAsync(run.Id, 3);
         Assert.True(result.Succeeded);
-        Assert.True(result.ReconciliationSafe);
-        Assert.Equal(2, result.Closed);
+        Assert.False(result.ReconciliationSafe);
+        Assert.Equal(0, result.Closed);
         Assert.Equal(0, result.Created);
         Assert.Equal(3, result.Existing);
         Assert.Equal(beforeResume, f.DetailRequests);
         await using var db = database.Open();
-        Assert.Equal(2, await db.Jobs.CountAsync(x => x.CompanyId == f.Source.CompanyId && x.Status == JobStatus.Closed));
+        Assert.Equal(0, await db.Jobs.CountAsync(x => x.CompanyId == f.Source.CompanyId && x.Status == JobStatus.Closed));
     }
 
     [WorkdayLocalPostgresFact]
@@ -325,8 +325,8 @@ public sealed class WorkdayCheckpointPostgresTests(WorkdayCheckpointDatabase dat
         Assert.Equal(6, executions);
         Assert.False(result.ContinuationPending);
         Assert.Equal("Complete", result.StopReason);
-        Assert.True(result.ReconciliationSafe);
-        Assert.Equal(1, result.Closed);
+        Assert.False(result.ReconciliationSafe);
+        Assert.Equal(0, result.Closed);
         Assert.Equal(42, result.CheckpointCursor);
         Assert.Equal(52, result.Existing);
         Assert.Equal(0, result.Created);
@@ -335,8 +335,8 @@ public sealed class WorkdayCheckpointPostgresTests(WorkdayCheckpointDatabase dat
             var stored = await db.JobSourceRuns.SingleAsync(x => x.Id == run.Id);
             Assert.Equal(JobSourceRunStatus.Succeeded, stored.Status);
             var state = JsonSerializer.Deserialize<WorkdayRunCheckpoint>(stored.CheckpointJson!)!;
-            Assert.Equal(3, state.Version);
-            Assert.True(state.ListingDiagnostics!.ReconciliationSafe);
+            Assert.Equal(4, state.Version);
+            Assert.False(state.ListingDiagnostics!.ReconciliationSafe);
             Assert.Equal(42, state.ListingDiagnostics.InitialReportedTotal);
             Assert.Equal(42, state.ListingDiagnostics.FinalReportedTotal);
             Assert.NotNull(state.CompletedResult);
@@ -352,7 +352,7 @@ public sealed class WorkdayCheckpointPostgresTests(WorkdayCheckpointDatabase dat
         var stable = await f.EnqueueAsync();
         var complete = await f.ExecuteAsync(stable.Id, 42);
         Assert.True(complete.Succeeded);
-        Assert.True(complete.ReconciliationSafe);
+        Assert.False(complete.ReconciliationSafe);
         Assert.Equal(0, complete.Created);
         Assert.Equal(0, complete.Closed);
     }
@@ -376,10 +376,10 @@ public sealed class WorkdayCheckpointPostgresTests(WorkdayCheckpointDatabase dat
         Assert.Equal(4, resumed.Existing + resumed.Created);
         JobSourceRunResult result = resumed;
         while (result.ContinuationPending) result = await f.ExecuteAsync(run.Id, 2);
-        Assert.True(result.Succeeded); Assert.True(result.ReconciliationSafe);
+        Assert.True(result.Succeeded); Assert.False(result.ReconciliationSafe);
         Assert.Equal(replacement, result.ObservedIdentities); Assert.Equal(replacement + 2, result.Created + result.Existing);
         Assert.Equal(Math.Max(0, replacement - 7), result.Created);
-        Assert.Equal(Math.Max(0, 7 - replacement), result.Closed);
+        Assert.Equal(0, result.Closed);
         await using var db = database.Open();
         Assert.Equal(Math.Max(7, replacement), await db.Jobs.CountAsync(x => x.JobSourceId == f.Source.Id));
         Assert.Equal(replacement, await db.Set<JobSourceRunItem>().CountAsync(x => x.RunId == run.Id));
@@ -422,7 +422,7 @@ public sealed class WorkdayCheckpointPostgresTests(WorkdayCheckpointDatabase dat
         JobSourceRunResult result;
         do { result = await f.ExecuteAsync(run.Id, 2); } while (result.ContinuationPending);
         Assert.True(result.Succeeded);
-        Assert.True(result.ReconciliationSafe);
+        Assert.False(result.ReconciliationSafe);
         Assert.Equal(6, result.ObservedIdentities);
         Assert.Equal(3, result.Created);
         Assert.Equal(2, result.Published);

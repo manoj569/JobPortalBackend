@@ -70,11 +70,11 @@ public sealed class WorkdayBatchIngestionTests(ITestOutputHelper output)
     }
 
     [Theory]
-    [InlineData(21, true)]
-    [InlineData(2000, false)]
-    [InlineData(2021, true)]
-    [InlineData(3879, true)]
-    public async Task CompletePaginationKeepsOnlySuspectedSearchCapIncomplete(int total, bool expectedComplete)
+    [InlineData(21)]
+    [InlineData(2000)]
+    [InlineData(2021)]
+    [InlineData(3879)]
+    public async Task CompletePaginationProcessesRetrievedJobsWithoutReconciliationAuthority(int total)
     {
         var offsets = new List<int>();
         using var http = new HttpClient(new Handler(async (request, ct) =>
@@ -98,7 +98,8 @@ public sealed class WorkdayBatchIngestionTests(ITestOutputHelper output)
         var result = await Provider(http, budget: 120).FetchSnapshotAsync(source);
         Assert.Equal(Enumerable.Range(0, (total + 19) / 20).Select(x => x * 20), offsets);
         Assert.Equal(total, result.Jobs.Count);
-        Assert.Equal(expectedComplete, result.IsComplete);
+        Assert.False(result.IsComplete);
+        Assert.True(result.ListingDiagnostics!.ProcessingComplete);
         Assert.Equal(total, result.Jobs.Select(x => x.ExternalId).Distinct().Count());
     }
 
@@ -111,13 +112,14 @@ public sealed class WorkdayBatchIngestionTests(ITestOutputHelper output)
             {
                 using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
                 var offset = body.RootElement.GetProperty("offset").GetInt32();
-                return Json(Listing(offset == 0 ? 40 : 41, offset, 20));
+                return Json(Listing(offset == 0 ? 40 : 41, offset, Math.Min(20, 41 - offset)));
             }
             return Json(Detail(request));
         }));
         var snapshot = await Provider(http).FetchSnapshotAsync(Source());
-        Assert.Equal(40, snapshot.Jobs.Count);
+        Assert.Equal(41, snapshot.Jobs.Count);
         Assert.False(snapshot.IsComplete);
+        Assert.True(snapshot.ListingDiagnostics!.ProcessingComplete);
     }
 
     [Theory]
@@ -138,18 +140,19 @@ public sealed class WorkdayBatchIngestionTests(ITestOutputHelper output)
             return Json(Listing(offset > 0 && omitContinuationTotal ? 0 : total, offset, Math.Min(20, total - offset)));
         }));
         var snapshot = await Provider(http).FetchSnapshotAsync(Source());
-        Assert.True(snapshot.IsComplete);
+        Assert.False(snapshot.IsComplete);
+        Assert.True(snapshot.ListingDiagnostics!.ProcessingComplete);
         Assert.Equal(total, snapshot.Jobs.Count);
         Assert.Equal(total, snapshot.Jobs.Select(x => x.ExternalId).Distinct().Count());
         Assert.Equal(Enumerable.Range(0, (total + 19) / 20).Select(x => x * 20)
-            .Concat(omitContinuationTotal && total > 20 ? Enumerable.Repeat(0, 1) : Enumerable.Empty<int>()), offsets);
+            , offsets);
         Assert.All(offsets, offset => Assert.InRange(offset, 0, total - 1));
     }
 
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task OmittedContinuationTotalsRequireAnUnchangedFirstPageAnchor(bool changePaths)
+    public async Task OmittedContinuationTotalsNeedNoFirstPageRevalidation(bool changePaths)
     {
         var firstReads = 0;
         using var http = new HttpClient(new Handler(async (request, ct) =>
@@ -165,12 +168,12 @@ public sealed class WorkdayBatchIngestionTests(ITestOutputHelper output)
         Assert.False(snapshot.IsComplete);
         Assert.Equal(40, snapshot.Jobs.Count);
         Assert.Equal(0, snapshot.Skipped);
-        Assert.Equal(2, firstReads);
+        Assert.Equal(1, firstReads);
         Assert.DoesNotContain(snapshot.Jobs, job => job.ExternalId == "REQ-100");
     }
 
     [Fact]
-    public async Task RepeatedZeroTotalContinuationPageRemainsUnsafeWithoutExtraAnchorRequests()
+    public async Task RepeatedZeroTotalContinuationStopsAndRetainsJobs()
     {
         var posts = 0;
         using var http = new HttpClient(new Handler((request, _) => Task.FromResult(request.Method == HttpMethod.Post
@@ -182,17 +185,19 @@ public sealed class WorkdayBatchIngestionTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public async Task EmptyContinuationBeforeAdvertisedTotalStillFailsClosed()
+    public async Task EmptyContinuationBeforeAdvertisedTotalRetainsUsefulJobs()
     {
         var posts = 0;
-        using var http = new HttpClient(new Handler((_, _) => Task.FromResult(++posts == 1
-            ? Json(Listing(40, 0, 20)) : Json(Listing(0, 20, 0)))));
-        await Assert.ThrowsAsync<InvalidDataException>(() => Provider(http).FetchSnapshotAsync(Source()));
+        using var http = new HttpClient(new Handler((request, _) => Task.FromResult(request.Method != HttpMethod.Post
+            ? Json(Detail(request)) : ++posts == 1 ? Json(Listing(40, 0, 20)) : Json(Listing(0, 20, 0)))));
+        var snapshot = await Provider(http).FetchSnapshotAsync(Source());
+        Assert.Equal(20, snapshot.Jobs.Count);
+        Assert.True(snapshot.ListingDiagnostics!.ProcessingComplete);
         Assert.Equal(2, posts);
     }
 
     [Fact]
-    public async Task AnchorFailureUsesBoundedHttpRetriesAndCannotCertifyCompleteness()
+    public async Task NoExtraAnchorRequestIsNeededToImportJobs()
     {
         var firstReads = 0;
         using var http = new HttpClient(new Handler(async (request, ct) =>
@@ -206,12 +211,12 @@ public sealed class WorkdayBatchIngestionTests(ITestOutputHelper output)
         var snapshot = await Provider(http, attempts: 2).FetchSnapshotAsync(Source());
         Assert.False(snapshot.IsComplete);
         Assert.Equal(40, snapshot.Jobs.Count);
-        Assert.Equal("AnchorRevalidationFailed", snapshot.ListingDiagnostics!.ReasonCode);
-        Assert.Equal(3, firstReads); // Initial anchor plus exactly two failed validation attempts.
+        Assert.True(snapshot.ListingDiagnostics!.ProcessingComplete);
+        Assert.Equal(1, firstReads);
     }
 
     [Fact]
-    public async Task ChangedAnchorPreventsClosingMissingVacanciesAndRepeatRemainsIdempotent()
+    public async Task EvenCleanWorkdayRerunsNeverCloseMissingVacancies()
     {
         using var f = Fixture();
         var total = 46;
@@ -243,21 +248,23 @@ public sealed class WorkdayBatchIngestionTests(ITestOutputHelper output)
         Assert.Equal(44, unsafeRun.Existing);
         Assert.Equal(0, unsafeRun.Published);
         Assert.Equal(0, unsafeRun.Closed);
-        Assert.Equal(previousSuccess, (await f.Repository.GetByIdAsync(f.Source.Id))!.LastSuccessfulRunAtUtc);
+        Assert.True((await f.Repository.GetByIdAsync(f.Source.Id))!.LastSuccessfulRunAtUtc >= previousSuccess);
+        Assert.True(unsafeRun.Succeeded);
         Assert.Equal(45, await f.Context.Jobs.CountAsync());
         firstReads = 0; changeAnchor = false;
         var safeRepeat = await runner.RunAsync(f.Source.Id);
-        Assert.True(safeRepeat.ScanComplete);
-        Assert.True(safeRepeat.ReconciliationSafe);
+        Assert.False(safeRepeat.ScanComplete);
+        Assert.False(safeRepeat.ReconciliationSafe);
         Assert.Equal(0, safeRepeat.Created);
         Assert.Equal(44, safeRepeat.Existing);
         Assert.Equal(0, safeRepeat.Published);
-        Assert.Equal(1, safeRepeat.Closed);
+        Assert.Equal(0, safeRepeat.Closed);
+        Assert.All(f.Context.Jobs, job => Assert.Equal(JobStatus.Published, job.Status));
         Assert.Equal(ids.Order(), (await f.Context.Jobs.Select(x => x.Id).ToArrayAsync()).Order());
     }
 
     [Fact]
-    public async Task ShortListingBeforeAdvertisedTotalFailsClosed()
+    public async Task ShortListingBeforeAdvertisedTotalKeepsReceivedJobs()
     {
         using var http = new HttpClient(new Handler((request, _) => Task.FromResult(Json(request.Method == HttpMethod.Post
             ? Listing(40, 0, 10) : Detail(request)))));
@@ -305,7 +312,8 @@ public sealed class WorkdayBatchIngestionTests(ITestOutputHelper output)
         var result = await Provider(http, attempts: 2).FetchSnapshotAsync(Source());
         Assert.Equal(2, requests);
         Assert.True(second - first >= TimeSpan.FromSeconds(2));
-        Assert.True(result.IsComplete);
+        Assert.False(result.IsComplete);
+        Assert.True(result.ListingDiagnostics!.ProcessingComplete);
     }
 
     [Fact]
@@ -472,7 +480,8 @@ public sealed class WorkdayBatchIngestionTests(ITestOutputHelper output)
         var result = await Provider(http, attempts: 2).FetchSnapshotAsync(Source());
         Assert.Equal(2, attempts);
         Assert.Single(result.Jobs);
-        Assert.True(result.IsComplete);
+        Assert.False(result.IsComplete);
+        Assert.True(result.ListingDiagnostics!.ProcessingComplete);
     }
 
     [Fact]
@@ -524,7 +533,8 @@ public sealed class WorkdayBatchIngestionTests(ITestOutputHelper output)
         var result = await Provider(http).FetchSnapshotAsync(Source());
         Assert.Equal("US", Assert.Single(Assert.Single(result.Jobs).CountryCodes));
         Assert.Equal(0, result.Skipped);
-        Assert.True(result.IsComplete);
+        Assert.False(result.IsComplete);
+        Assert.True(result.ListingDiagnostics!.ProcessingComplete);
         Assert.Equal(IndiaJobEligibilityDecision.Rejected, IndiaJobEligibilityPolicy.Evaluate(Assert.Single(result.Jobs)).Decision);
     }
 
@@ -699,7 +709,8 @@ public sealed class WorkdayBatchIngestionTests(ITestOutputHelper output)
         { Workday = new() { DetailConcurrency = concurrency, BatchSize = 50, MaximumAttempts = 1 } }), timeProvider: new FastClock());
         var watch = System.Diagnostics.Stopwatch.StartNew();
         var snapshot = await provider.FetchSnapshotAsync(Source());
-        Assert.True(snapshot.IsComplete);
+        Assert.False(snapshot.IsComplete);
+        Assert.True(snapshot.ListingDiagnostics!.ProcessingComplete);
         Assert.Equal(40, snapshot.Jobs.Count);
         Assert.InRange(peak, 2, concurrency);
         Assert.Equal(0, active);
@@ -755,7 +766,7 @@ public sealed class WorkdayBatchIngestionTests(ITestOutputHelper output)
         }));
         using var provider = new WorkdayJobSourceProvider(new Factory(http), options: Options.Create(new JobAggregationOptions
         { Workday = new() { BatchSize = 3, DetailConcurrency = 8, MaximumAttempts = 2 } }));
-        Assert.True((await provider.FetchSnapshotAsync(Source())).IsComplete);
+        Assert.True((await provider.FetchSnapshotAsync(Source())).ListingDiagnostics!.ProcessingComplete);
         var recorded = starts.ToArray();
         Assert.Equal(7, recorded.Length);
         for (var i = 1; i < recorded.Length; i++)

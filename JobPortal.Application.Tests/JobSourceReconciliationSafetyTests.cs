@@ -41,9 +41,10 @@ public sealed class JobSourceReconciliationSafetyTests
 
         var result = await runner.RunAsync(f.Source.Id);
         Assert.True(result.ScanComplete);
-        Assert.True(result.ReconciliationSafe);
+        Assert.Equal(ats != AtsType.Workday, result.ReconciliationSafe);
         Assert.True(result.Succeeded);
-        Assert.Empty(result.ReconciliationBlockReasons);
+        if (ats == AtsType.Workday) Assert.Contains("WorkdayNonAuthoritative", result.ReconciliationBlockReasons);
+        else Assert.Empty(result.ReconciliationBlockReasons);
         Assert.Equal(176, result.TotalReceived);
         Assert.Equal(0, result.Created);
         Assert.Equal(44, result.Existing);
@@ -53,12 +54,12 @@ public sealed class JobSourceReconciliationSafetyTests
         Assert.Equal(0, result.Skipped);
         Assert.Equal(0, result.Failed);
         Assert.Equal(0, result.Published);
-        Assert.Equal(1, result.Closed);
+        Assert.Equal(ats == AtsType.Workday ? 0 : 1, result.Closed);
         var inventory = await f.Context.Jobs.ToArrayAsync();
         Assert.Equal(46, inventory.Length);
         Assert.All(inventory, job => Assert.Equal(originalIds[job.ExternalJobId!], job.Id));
         Assert.Equal(JobStatus.Published, inventory.Single(x => x.ExternalJobId == "REQ45").Status);
-        Assert.Equal(JobStatus.Closed, inventory.Single(x => x.ExternalJobId == "REQ999").Status);
+        Assert.Equal(ats == AtsType.Workday ? JobStatus.Published : JobStatus.Closed, inventory.Single(x => x.ExternalJobId == "REQ999").Status);
         Assert.Null(f.Source.LastError);
         Assert.Equal(0, f.Source.ConsecutiveFailures);
         Assert.NotNull(f.Source.LastSuccessfulRunAtUtc);

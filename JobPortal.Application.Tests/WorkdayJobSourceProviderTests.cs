@@ -243,7 +243,8 @@ public sealed class WorkdayJobSourceProviderTests
 
         var snapshot = await provider.FetchSnapshotAsync(source);
 
-        Assert.True(snapshot.IsComplete);
+        Assert.False(snapshot.IsComplete);
+        Assert.True(snapshot.ListingDiagnostics!.ProcessingComplete);
         Assert.Equal(0, snapshot.Skipped);
         Assert.Equal(2, snapshot.Jobs.Count);
         Assert.Equal(

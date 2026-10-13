@@ -12,6 +12,7 @@ public sealed class JobSourceRunCheckpoint(JobPortalDbContext db, TimeProvider c
 {
     private JobSourceRun? run;
     private RawExternalJob? current;
+    private WorkdayRunCheckpoint? stagedState;
     private readonly Dictionary<int, JobSourceRunItem> committed = [];
     private readonly Dictionary<int, JobSourceRunItem> staged = [];
     private readonly Dictionary<JobIngestionOutcome, int> ingestionCounts = [];
@@ -28,7 +29,7 @@ public sealed class JobSourceRunCheckpoint(JobPortalDbContext db, TimeProvider c
     {
         this.run = run;
         State = run.CheckpointJson is null ? null : JsonSerializer.Deserialize<WorkdayRunCheckpoint>(run.CheckpointJson);
-        if (State is { Version: not (1 or 2 or 3) } ||
+        if (State is { Version: not (1 or 2 or 3 or 4) } ||
             State is { Version: 3 } && (State.ListingDiagnostics is not { IngestionSafe: true } || State.RebaseCount < 1 || State.ArchivedCounters is null) ||
             State is { Version: 2 } && State.ListingDiagnostics is not { IngestionSafe: true, ReconciliationSafe: false } ||
             State is { Version: 1, ListingDiagnostics.ReconciliationSafe: false } ||
@@ -42,6 +43,7 @@ public sealed class JobSourceRunCheckpoint(JobPortalDbContext db, TimeProvider c
 
     public async Task RefreshAsync(CancellationToken ct)
     {
+        stagedState = null;
         staged.Clear(); committed.Clear();
         ingestionCounts.Clear(); publicationCounts.Clear(); reasons.Clear(); validation.Clear(); quality.Clear();
         if (run is null) return;
@@ -77,14 +79,14 @@ public sealed class JobSourceRunCheckpoint(JobPortalDbContext db, TimeProvider c
                 await RefreshAsync(ct);
                 return;
             }
-            if (listingDiagnostics is { ReconciliationSafe: false } && State.ListingDiagnostics is not { ReconciliationSafe: false })
-                await SaveAsync(State with { Version = State.Version == 3 ? 3 : 2, ListingDiagnostics = listingDiagnostics }, ct);
+            await SaveAsync(State with { Version = 4, ListingDiagnostics = listingDiagnostics is null ? State.ListingDiagnostics :
+                listingDiagnostics with { InfrastructureFailure = State.ListingDiagnostics?.InfrastructureFailure == true } }, ct);
             return;
         }
         var next = new WorkdayRunCheckpoint
         {
-            // Prior binaries reject version 2 instead of silently dropping the safety restriction on rollback.
-            Version = listingDiagnostics is { ReconciliationSafe: false } ? 2 : 1,
+            // Older binaries must not resume permissive scans as authoritative snapshots.
+            Version = 4,
             SourceIdentity = sourceIdentity, ListingIdentity = listingIdentity, ListingTotal = total,
             ListingPages = pages, CapturedAtUtc = clock.GetUtcNow().UtcDateTime, CommittedAtUtc = clock.GetUtcNow().UtcDateTime,
             ListingDiagnostics = listingDiagnostics
@@ -92,7 +94,7 @@ public sealed class JobSourceRunCheckpoint(JobPortalDbContext db, TimeProvider c
         await SaveAsync(next, ct);
     }
 
-    public async Task CommitAsync(int cursor, int providerSkipped, IReadOnlyCollection<RawExternalJob> observed, CancellationToken ct)
+    public async Task CommitAsync(int cursor, int providerSkipped, IReadOnlyCollection<RawExternalJob> observed, CancellationToken ct, WorkdayListingDiagnostics? diagnostics = null)
     {
         if (!Enabled || State is null) return;
         if (cursor < State.Cursor || cursor > State.ListingTotal || observed.Count + providerSkipped != cursor || staged.Count != 0)
@@ -106,6 +108,7 @@ public sealed class JobSourceRunCheckpoint(JobPortalDbContext db, TimeProvider c
             SourceOrdinal = x.SourceOrdinal
         }).ToArray();
         await SaveAsync(State with { Cursor = cursor, ProviderSkipped = providerSkipped, ObservedJobs = lean,
+            ListingDiagnostics = diagnostics ?? State.ListingDiagnostics,
             CommittedAtUtc = clock.GetUtcNow().UtcDateTime }, ct);
     }
 
@@ -128,9 +131,7 @@ public sealed class JobSourceRunCheckpoint(JobPortalDbContext db, TimeProvider c
     {
         if (!Enabled || raw.SourceOrdinal is not { } ordinal) return null;
         var receipt = committed.GetValueOrDefault(ordinal);
-        if (receipt is not null && receipt.ExternalId != raw.ExternalId?.Trim())
-            throw new JobSourceSnapshotUnsafeException("DetailIdentityChanged");
-        return receipt;
+        return receipt?.ExternalId == raw.ExternalId?.Trim() ? receipt : null;
     }
 
     public JobIngestionResult? Replay(RawExternalJob raw) => Receipt(raw) is { } receipt ? new()
@@ -157,7 +158,22 @@ public sealed class JobSourceRunCheckpoint(JobPortalDbContext db, TimeProvider c
             ValidationReason = result.Outcome == JobIngestionOutcome.Invalid ? JobIngestionReasonCodes.ValidationDetail(result.Message) : null,
             CommittedAtUtc = clock.GetUtcNow().UtcDateTime
         };
-        db.Set<JobSourceRunItem>().Add(row); staged.Add(ordinal, row);
+        if (committed.TryGetValue(ordinal, out var previous))
+        {
+            // The live detail now represents another requisition at this position.
+            // Archive its old counters and replace its receipt atomically with the
+            // new ingestion; the old job itself remains untouched.
+            var state = stagedState ?? State ?? throw new InvalidOperationException("Checkpoint is not prepared.");
+            stagedState = state with { ArchivedCounters = WorkdayCheckpointRebasePolicy.AddCounters(
+                ReceiptCounters(previous), state.ArchivedCounters) };
+            StageState(stagedState);
+            var tracked = db.Set<JobSourceRunItem>().Local.SingleOrDefault(x => x.RunId == row.RunId && x.Ordinal == ordinal);
+            if (tracked is null) { tracked = Copy(previous); db.Attach(tracked); }
+            db.Entry(tracked).CurrentValues.SetValues(row);
+            row = tracked;
+        }
+        else db.Set<JobSourceRunItem>().Add(row);
+        staged.Add(ordinal, row);
     }
 
     public void StagePublication(Guid jobId, JobAutoPublishResult result)
@@ -180,6 +196,7 @@ public sealed class JobSourceRunCheckpoint(JobPortalDbContext db, TimeProvider c
             Tally(row, 1);
         }
         staged.Clear();
+        if (stagedState is not null) { State = stagedState; stagedState = null; }
     }
 
     public async Task CompleteItemAsync(RawExternalJob raw, JobIngestionResult result, JobAutoPublishResult? publication, CancellationToken ct)
@@ -196,17 +213,52 @@ public sealed class JobSourceRunCheckpoint(JobPortalDbContext db, TimeProvider c
         }
     }
 
-    // Joins the existing closure/source-success transaction. Recovery preserves its exact Closed counter.
+    // Joins source-success bookkeeping so recovery preserves non-destructive completion.
     public void StageCompletedResult(JobSourceRunResult result)
     {
-        if (!Enabled || State is null || !result.Succeeded || !result.ReconciliationSafe || State.Cursor != State.ListingTotal) return;
+        if (!Enabled || State is null || !result.Succeeded || result.ReconciliationSafe || result.Closed != 0 || State.Cursor != State.ListingTotal) return;
+        var next = State with { CompletedResult = result };
+        StageState(next);
+        State = next;
+    }
+
+    private void StageState(WorkdayRunCheckpoint next)
+    {
         var owner = run ?? throw new InvalidOperationException("Run is not bound.");
         var row = db.JobSourceRuns.Local.SingleOrDefault(x => x.Id == owner.Id);
         if (row is null) { row = new JobSourceRun { Id = owner.Id }; db.Attach(row); }
-        var next = State with { CompletedResult = result };
         var entry = db.Entry(row).Property(x => x.CheckpointJson);
         entry.CurrentValue = JsonSerializer.Serialize(next); entry.IsModified = true;
-        State = next;
+    }
+
+    private static JobSourceRunResult ReceiptCounters(JobSourceRunItem row)
+    {
+        var outcome = (JobIngestionOutcome)row.IngestionOutcome;
+        var publication = (JobAutoPublishOutcome?)row.PublicationOutcome;
+        var reason = (JobIngestionReasonCode)row.ReasonCode;
+        var reasonCounts = new Dictionary<JobIngestionReasonCode, int>();
+        if (reason != JobIngestionReasonCode.None) reasonCounts[reason] = 1;
+        if (publication == JobAutoPublishOutcome.JobNotFound)
+            reasonCounts[JobIngestionReasonCode.AutoPublishFailed] = reasonCounts.GetValueOrDefault(JobIngestionReasonCode.AutoPublishFailed) + 1;
+        return new()
+        {
+            TotalReceived = 1,
+            Created = outcome == JobIngestionOutcome.Created ? 1 : 0,
+            Updated = outcome == JobIngestionOutcome.Updated ? 1 : 0,
+            Unchanged = outcome == JobIngestionOutcome.Unchanged ? 1 : 0,
+            Matched = outcome is JobIngestionOutcome.MatchedByUrl or JobIngestionOutcome.MatchedByFingerprint or JobIngestionOutcome.MatchedByFuzzy ? 1 : 0,
+            Skipped = outcome is JobIngestionOutcome.Invalid or JobIngestionOutcome.CompanyNotFound ? 1 : 0,
+            Failed = (outcome == JobIngestionOutcome.Failed ? 1 : 0) + (publication == JobAutoPublishOutcome.JobNotFound ? 1 : 0),
+            Published = publication == JobAutoPublishOutcome.Published ? 1 : 0,
+            NeedsReview = publication == JobAutoPublishOutcome.NeedsReview ? 1 : 0,
+            QualityRejected = publication == JobAutoPublishOutcome.Rejected ? 1 : 0,
+            AutoPublishDisabled = publication == JobAutoPublishOutcome.Disabled ? 1 : 0,
+            PublishFailed = publication == JobAutoPublishOutcome.JobNotFound ? 1 : 0,
+            ReasonCounts = reasonCounts,
+            ValidationReasonCounts = row.ValidationReason is { } detail ? new Dictionary<string, int> { [detail] = 1 } : null,
+            QualityReasonCounts = (JsonSerializer.Deserialize<JobQualityReasonCode[]>(row.PublicationReasonsJson ?? "[]") ?? [])
+                .Distinct().ToDictionary(x => x, _ => 1)
+        };
     }
 
     public JobSourceRunResult CommittedCounters

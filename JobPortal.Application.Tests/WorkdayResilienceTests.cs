@@ -18,50 +18,44 @@ namespace JobPortal.Application.Tests;
 public sealed class WorkdayResilienceTests
 {
     [Theory]
-    [InlineData(174, 174, 174, false, "Complete", true)]
-    [InlineData(174, 174, 174, true, "Complete", true)]
-    [InlineData(21, 21, 21, false, "Complete", true)]
-    [InlineData(1086, 1085, 1085, true, "ListingTotalDrift", false)]
-    [InlineData(1085, 1085, 1086, true, "ListingTotalDrift", false)]
-    [InlineData(1086, 1085, 1086, true, "ListingEndedEarly", false)]
-    [InlineData(1086, 1050, 1050, true, "ListingTotalDrift", false)]
-    [InlineData(1086, 1100, 1100, true, "ListingTotalDrift", false)]
-    public async Task CountsAndFinalAnchorsNeverAuthorizeDriftedMembership(int initial, int observed, int final,
-        bool omitted, string reason, bool complete)
+    [InlineData(174, 174, false)]
+    [InlineData(174, 174, true)]
+    [InlineData(21, 21, false)]
+    [InlineData(1086, 1085, true)]
+    [InlineData(1086, 1050, true)]
+    [InlineData(1086, 1100, true)]
+    public async Task AdvertisedCountDifferencesKeepAllRetrievedJobsWithoutAuthority(int initial, int observed, bool omitted)
     {
-        using var handler = new Board(initial, observed, final) { OmitContinuationTotal = omitted };
+        using var handler = new Board(initial, observed, initial) { OmitContinuationTotal = omitted };
         using var http = new HttpClient(handler);
         using var provider = Provider(http);
         var snapshot = await provider.FetchSnapshotAsync(Source());
         Assert.Equal(observed, snapshot.Jobs.Count);
-        Assert.Equal(complete, snapshot.IsComplete);
+        Assert.False(snapshot.IsComplete);
         var evidence = Assert.IsType<WorkdayListingDiagnostics>(snapshot.ListingDiagnostics);
         Assert.Equal(initial, evidence.InitialReportedTotal);
         Assert.Equal(observed, evidence.RawSlots);
         Assert.Equal(observed, evidence.UniquePaths);
-        Assert.Equal(0, evidence.DuplicatePaths);
-        Assert.Equal(0, evidence.PlaceholderCount);
         Assert.True(evidence.IngestionSafe);
-        Assert.Equal(complete, evidence.ReconciliationSafe);
-        Assert.Equal(reason, evidence.ReasonCode);
-        Assert.Equal(!complete, evidence.RetryRecommended);
-        var anchorRequired = omitted || observed != initial;
-        Assert.Equal(anchorRequired ? (int?)final : null, evidence.FinalReportedTotal);
-        Assert.Equal((observed + 19) / 20 + (anchorRequired ? 1 : 0), handler.ListingRequests);
+        Assert.True(evidence.ProcessingComplete);
+        Assert.False(evidence.ReconciliationSafe);
+        Assert.False(evidence.RetryRecommended);
+        Assert.Equal((observed + 19) / 20, handler.ListingRequests);
+        Assert.Equal(1, handler.AnchorReads);
         Assert.Equal(observed, handler.DetailRequests);
-        Assert.Equal(observed, snapshot.Jobs.Select(job => job.ExternalId).Distinct(StringComparer.Ordinal).Count());
     }
 
     [Fact]
-    public async Task LiterallyMissingContinuationTotalStillUsesTrustedInitialAnchor()
+    public async Task MissingContinuationTotalDoesNotRequireAnchorRevalidation()
     {
         using var handler = new Board(41, 41, 41) { MissingContinuationTotal = true };
         using var http = new HttpClient(handler);
         using var provider = Provider(http);
         var snapshot = await provider.FetchSnapshotAsync(Source());
-        Assert.True(snapshot.IsComplete);
+        Assert.False(snapshot.IsComplete);
+        Assert.True(snapshot.ListingDiagnostics!.ProcessingComplete);
         Assert.Equal(41, snapshot.Jobs.Count);
-        Assert.Equal(4, handler.ListingRequests);
+        Assert.Equal(3, handler.ListingRequests);
     }
 
     [Fact]
@@ -78,10 +72,10 @@ public sealed class WorkdayResilienceTests
     [InlineData("repeated", "RepeatedPage")]
     [InlineData("duplicate", "DuplicateListingPaths")]
     [InlineData("placeholder", "ListingPlaceholders")]
-    [InlineData("anchorHttp", "AnchorRevalidationFailed")]
-    [InlineData("membership", "ListingMembershipChanged")]
+    [InlineData("anchorHttp", "Complete")]
+    [InlineData("membership", "Complete")]
     [InlineData("multipleChanges", "ListingTotalDrift")]
-    public async Task StructuralAndAnchorFailuresRemainBoundedAndUnsafe(string mutation, string reason)
+    public async Task ListingAnomaliesRemainBoundedAndPermitProcessing(string mutation, string reason)
     {
         var total = mutation == "repeated" ? 240 : 41;
         using var handler = new Board(total, total, total) { Mutation = mutation, OmitContinuationTotal = true };
@@ -91,7 +85,9 @@ public sealed class WorkdayResilienceTests
         Assert.False(snapshot.IsComplete);
         Assert.False(snapshot.ListingDiagnostics!.ReconciliationSafe);
         Assert.Equal(reason, snapshot.ListingDiagnostics.ReasonCode);
-        Assert.True(snapshot.ListingDiagnostics.RetryRecommended);
+        Assert.False(snapshot.ListingDiagnostics.RetryRecommended);
+        Assert.True(snapshot.ListingDiagnostics.ProcessingComplete);
+        Assert.True(snapshot.ListingDiagnostics.IngestionSafe);
         Assert.InRange(handler.ListingRequests, 2, (total + 19) / 20 + 1);
         if (mutation == "repeated") Assert.Equal(200, snapshot.ListingDiagnostics.LastOffset);
         if (mutation == "duplicate") Assert.Equal(1, snapshot.ListingDiagnostics.DuplicatePaths);
@@ -99,40 +95,46 @@ public sealed class WorkdayResilienceTests
     }
 
     [Fact]
-    public async Task TinyPlaceholderAnomalyAllowsIngestionButNeverReconciliation()
+    public async Task TwoThousandRawSlotsWithOnePlaceholderProcess1999Jobs()
     {
-        // 1 / 200 = 0.5%, exactly the conservative ingestion-only tolerance.
-        using var handler = new Board(200, 200, 200) { Mutation = "placeholder" };
+        // Production-shaped fixture: a capped search and a placeholder both permit ingestion.
+        using var handler = new Board(2000, 2000, 2000) { Mutation = "placeholder" };
         using var http = new HttpClient(handler);
         using var provider = Provider(http);
         var snapshot = await provider.FetchSnapshotAsync(Source());
 
         Assert.False(snapshot.IsComplete);
-        Assert.Equal(199, snapshot.Jobs.Count);
-        Assert.Equal(199, handler.DetailRequests);
+        Assert.Equal(1999, snapshot.Jobs.Count);
+        Assert.Equal(1999, handler.DetailRequests);
         Assert.True(snapshot.ListingDiagnostics!.IngestionSafe);
         Assert.False(snapshot.ListingDiagnostics.ReconciliationSafe);
         Assert.False(snapshot.ListingDiagnostics.SnapshotStable);
         Assert.Equal(1, snapshot.ListingDiagnostics.PlaceholderCount);
         Assert.Equal("ListingPlaceholders", snapshot.ListingDiagnostics.ReasonCode);
-        Assert.True(snapshot.ListingDiagnostics.RetryRecommended);
+        Assert.False(snapshot.ListingDiagnostics.RetryRecommended);
+        Assert.True(snapshot.ListingDiagnostics.ProcessingComplete);
+        Assert.True(snapshot.ListingDiagnostics.IngestionSafe);
     }
 
     [Fact]
-    public async Task PlaceholderAnomalyAboveToleranceStillBlocksIngestion()
+    public async Task MultiplePlaceholdersHaveNoPercentageThreshold()
     {
-        // 1 / 199 is slightly above 0.5%, so the existing fail-closed behavior remains.
-        using var handler = new Board(199, 199, 199) { Mutation = "placeholder" };
+        // Half of each page contains placeholders; the remaining real jobs still progress.
+        using var handler = new Board(200, 200, 200) { Mutation = "manyPlaceholders" };
         using var http = new HttpClient(handler);
         using var provider = Provider(http);
         var snapshot = await provider.FetchSnapshotAsync(Source());
 
         Assert.False(snapshot.IsComplete);
-        Assert.False(snapshot.ListingDiagnostics!.IngestionSafe);
+        Assert.True(snapshot.ListingDiagnostics!.IngestionSafe);
         Assert.False(snapshot.ListingDiagnostics.ReconciliationSafe);
-        Assert.Equal(1, snapshot.ListingDiagnostics.PlaceholderCount);
+        Assert.Equal(100, snapshot.ListingDiagnostics.PlaceholderCount);
+        Assert.Equal(100, snapshot.Jobs.Count);
+        Assert.Equal(100, handler.DetailRequests);
         Assert.Equal("ListingPlaceholders", snapshot.ListingDiagnostics.ReasonCode);
-        Assert.True(snapshot.ListingDiagnostics.RetryRecommended);
+        Assert.False(snapshot.ListingDiagnostics.RetryRecommended);
+        Assert.True(snapshot.ListingDiagnostics.ProcessingComplete);
+        Assert.True(snapshot.ListingDiagnostics.IngestionSafe);
     }
 
     [Theory]
@@ -149,15 +151,17 @@ public sealed class WorkdayResilienceTests
     }
 
     [Fact]
-    public async Task EmptyUnexpectedPageAndMalformedPathsAreRejectedBeforeDetails()
+    public async Task EarlyEmptyPagesRetainJobsAndUnsafePathsAreNeverRequested()
     {
         foreach (var mutation in new[] { "empty", "invalidPath" })
         {
             using var handler = new Board(41, 41, 41) { Mutation = mutation };
             using var http = new HttpClient(handler);
             using var provider = Provider(http);
-            await Assert.ThrowsAsync<InvalidDataException>(() => provider.FetchSnapshotAsync(Source()));
-            Assert.Equal(0, handler.DetailRequests);
+            var snapshot = await provider.FetchSnapshotAsync(Source());
+            Assert.True(snapshot.ListingDiagnostics!.ProcessingComplete);
+            Assert.Equal(mutation == "empty" ? 20 : 0, snapshot.Jobs.Count);
+            Assert.Equal(snapshot.Jobs.Count, handler.DetailRequests);
         }
     }
 
@@ -191,31 +195,34 @@ public sealed class WorkdayResilienceTests
         {
             handler.AnchorReads = 0;
             var result = await runner.RunAsync(f.Source.Id);
-            Assert.False(result.Succeeded);
+            Assert.True(result.Succeeded);
             Assert.False(result.ReconciliationSafe);
-            Assert.Equal("ListingTotalDrift", result.StopReason);
+            Assert.Equal("Complete", result.StopReason);
             Assert.Equal(42, result.Existing);
             Assert.Equal(0, result.Created);
             Assert.Equal(0, result.Closed);
-            Assert.Equal(successfulAt, f.Source.LastSuccessfulRunAtUtc);
+            Assert.True(f.Source.LastSuccessfulRunAtUtc >= successfulAt);
         }
         handler.Reset(43, 43, 43);
         handler.FailDetail = true;
         var incomplete = await runner.RunAsync(f.Source.Id);
         Assert.False(incomplete.ReconciliationSafe);
-        Assert.Equal("FailedDetails", incomplete.StopReason);
+        Assert.False(incomplete.Succeeded);
+        Assert.Equal("InfrastructureFailure", incomplete.StopReason);
         Assert.Equal(0, incomplete.Closed);
         Assert.All(f.Context.Jobs, job => { Assert.Equal(before[job.ExternalJobId!], job.Id); Assert.Equal(JobStatus.Published, job.Status); });
         Assert.Equal(43, await f.Context.Jobs.CountAsync());
         handler.Reset(43, 43, 43);
+        handler.FailDetail = false;
         handler.Mutation = "duplicate";
         var structural = await runner.RunAsync(f.Source.Id);
         Assert.False(structural.ReconciliationSafe);
-        Assert.Equal("DuplicateListingPaths", structural.StopReason);
+        Assert.True(structural.Succeeded);
+        Assert.Equal("DuplicateListingPaths", structural.ListingDiagnostics!.ReasonCode);
         Assert.Equal(0, structural.Created);
-        Assert.Equal(0, structural.Existing);
+        Assert.Equal(42, structural.Existing);
         Assert.Equal(0, structural.Closed);
-        Assert.False(structural.ListingDiagnostics!.IngestionSafe);
+        Assert.True(structural.ListingDiagnostics!.IngestionSafe);
         Assert.All(f.Context.Jobs, job => Assert.Equal(JobStatus.Published, job.Status));
     }
 
@@ -261,13 +268,13 @@ public sealed class WorkdayResilienceTests
         var first = await runner.RunAsync(f.Source.Id);
         Assert.True(first.ContinuationPending); Assert.Equal(5, first.Created); Assert.False(first.ReconciliationSafe);
         board.Reset(replacementTotal, replacementTotal, replacementTotal); board.ReverseOrder = reverse;
-        var changed = replacementTotal != 21 || reverse || drift;
+        var changed = replacementTotal != 21 || reverse;
         JobSourceRunResult result;
         var executions = 0;
         do { result = await runner.RunAsync(f.Source.Id); Assert.Equal(0, result.Failed); executions++; }
         while (result.ContinuationPending && executions < 12);
         Assert.False(result.ContinuationPending);
-        Assert.True(result.Succeeded); Assert.True(result.ReconciliationSafe);
+        Assert.True(result.Succeeded); Assert.False(result.ReconciliationSafe);
         Assert.Equal(replacementTotal, result.ObservedIdentities); Assert.Equal(replacementTotal, result.CheckpointCursor);
         Assert.Equal(replacementTotal, result.Created); Assert.Equal(changed ? 5 : 0, result.Existing);
         Assert.Equal(changed ? 1 : 0, journal.State!.RebaseCount);
@@ -324,7 +331,8 @@ public sealed class WorkdayResilienceTests
         }
         var first = await Execute();
         Assert.True(first.ContinuationPending); Assert.False(first.IsComplete);
-        Assert.True(first.ListingDiagnostics!.FirstPageChanged);
+        Assert.False(first.ListingDiagnostics!.FirstPageChanged);
+        Assert.Equal(1, board.AnchorReads);
         Assert.Equal(200, journal.State!.Cursor); Assert.Equal(1094, journal.State.ListingTotal);
         Assert.Equal(94, journal.CommittedCounters.Created); Assert.Equal(80, journal.CommittedCounters.Published);
         board.Reset(1095, 1095, 1095); board.Mutation = null;
@@ -337,7 +345,8 @@ public sealed class WorkdayResilienceTests
         var executions = 0;
         while (completed.ContinuationPending && executions++ < 8) completed = await Execute();
         Assert.False(completed.ContinuationPending);
-        Assert.True(completed.IsComplete); Assert.True(completed.ListingDiagnostics!.ReconciliationSafe);
+        Assert.False(completed.IsComplete); Assert.False(completed.ListingDiagnostics!.ReconciliationSafe);
+        Assert.True(completed.ListingDiagnostics.ProcessingComplete);
         Assert.Equal(1095, journal.State.Cursor); Assert.Equal(94, committedIds.Count);
         Assert.Equal(94, journal.CommittedCounters.Created); Assert.Equal(80, journal.CommittedCounters.Published);
         Assert.Equal(1295, board.DetailRequests);
@@ -381,7 +390,7 @@ public sealed class WorkdayResilienceTests
             new JobSourceRunResult { Created = 94, Published = 80, TotalReceived = 94 }, DateTime.UtcNow);
         var restored = JsonSerializer.Deserialize<WorkdayRunCheckpoint>(JsonSerializer.Serialize(reset))!;
         Assert.Equal(0, restored.Cursor); Assert.Empty(restored.ObservedJobs); Assert.Equal(1095, restored.ListingTotal);
-        Assert.Equal(3, restored.Version); Assert.Equal(1, restored.RebaseCount); Assert.Null(restored.CompletedResult);
+        Assert.Equal(4, restored.Version); Assert.Equal(1, restored.RebaseCount); Assert.Null(restored.CompletedResult);
         var counters = WorkdayCheckpointRebasePolicy.AddCounters(new() { Unchanged = 94 }, restored.ArchivedCounters);
         Assert.Equal(94, counters.Created); Assert.Equal(94, counters.Existing); Assert.Equal(80, counters.Published);
         Assert.False(counters.ReconciliationSafe); Assert.True(restored.ListingDiagnostics!.SnapshotStable);
@@ -401,11 +410,11 @@ public sealed class WorkdayResilienceTests
     [InlineData("ListingEndedEarly")]
     [InlineData("ListingTotalDrift")]
     [InlineData("FailedDetails")]
-    public void UnsafeReplacementCannotRebaseOrUpgradeAuthority(string reason)
+    public void ChangingListingsRebaseEvenWithoutReconciliationAuthority(string reason)
     {
         var state = new WorkdayRunCheckpoint { SourceIdentity = "source", ListingIdentity = "old", ListingTotal = 21, Cursor = 5 };
         var evidence = new WorkdayListingDiagnostics { IngestionSafe = true, ReconciliationSafe = false, ReasonCode = reason };
-        Assert.Throws<JobSourceSnapshotUnsafeException>(() => WorkdayCheckpointRebasePolicy.RequiresRebase(state, "source", "new", 22, evidence));
+        Assert.True(WorkdayCheckpointRebasePolicy.RequiresRebase(state, "source", "new", 22, evidence));
         Assert.Throws<JobSourceSnapshotUnsafeException>(() => WorkdayCheckpointRebasePolicy.RequiresRebase(state, "different-source", "old", 21, evidence));
         Assert.Equal(5, state.Cursor);
     }
@@ -450,10 +459,10 @@ public sealed class WorkdayResilienceTests
             };
             return Task.CompletedTask;
         }
-        public Task CommitAsync(int cursor, int providerSkipped, IReadOnlyCollection<RawExternalJob> observed, CancellationToken ct)
+        public Task CommitAsync(int cursor, int providerSkipped, IReadOnlyCollection<RawExternalJob> observed, CancellationToken ct, WorkdayListingDiagnostics? diagnostics = null)
         {
             Assert.Equal(cursor, observed.Count + providerSkipped);
-            State = State! with { Cursor = cursor, ProviderSkipped = providerSkipped, ObservedJobs = observed.ToArray() };
+            State = State! with { Cursor = cursor, ProviderSkipped = providerSkipped, ObservedJobs = observed.ToArray(), ListingDiagnostics = diagnostics ?? State.ListingDiagnostics };
             return Task.CompletedTask;
         }
         public JobIngestionResult? Replay(RawExternalJob raw)
@@ -524,6 +533,8 @@ public sealed class WorkdayResilienceTests
                 if (offset == 0 && AnchorReads > 1 && Mutation == "membership")
                     entries[0] = new { title = "New Engineer", externalPath = "/job/Pune/Engineer_999", locationsText = "Pune, India" };
                 if (Mutation == "placeholder" && offset == 20) entries[0] = new { bulletFields = Array.Empty<string>() };
+                if (Mutation == "manyPlaceholders")
+                    for (var i = 0; i < entries.Count; i += 2) entries[i] = new { bulletFields = Array.Empty<string>() };
                 var document = new Dictionary<string, object> { ["jobPostings"] = entries };
                 if (!(offset > 0 && MissingContinuationTotal) && !(offset == 0 && MissingInitialTotal))
                     document["total"] = offset == 0 ? AnchorReads > 1 ? final : initial :
