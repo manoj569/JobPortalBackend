@@ -17,6 +17,111 @@ public sealed class PublicJobSearchTests
     private static readonly DateTime Now =
         new(2026, 8, 2, 6, 0, 0, DateTimeKind.Utc);
 
+    [Theory]
+    [InlineData("Frontend Developer")]
+    [InlineData("frontend")]
+    [InlineData("  FRONTEND\t developer ")]
+    [InlineData("pwc")]
+    [InlineData("barclays")]
+    [InlineData("react")]
+    [InlineData("C#")]
+    [InlineData(".NET")]
+    [InlineData("dotnet")]
+    [InlineData("aspnet")]
+    [InlineData("C++")]
+    [InlineData("Node.js")]
+    [InlineData("pune")]
+    [InlineData("react developer pune")]
+    public async Task CanonicalQuerySearchesActualFieldsAndCrossFieldTerms(string q)
+    {
+        await using var fixture = await SearchFixture.CreateAsync();
+        fixture.Featured.Title = "Frontend Developer";
+        fixture.Featured.Description = "React .NET ASP.NET C++ Node.js";
+        fixture.Alpha.Name = q == "barclays" ? "Barclays" : "PwC";
+        // The second Alpha job must not match company search through visibility.
+        fixture.Flexible.IsHidden = true;
+        await fixture.Context.SaveChangesAsync();
+        var service = new PublicJobService(fixture.Repository, new PublicJobQueryValidator());
+        var page = await service.SearchAsync(new(Q: q, Keyword: "missing", Search: "missing", PageSize: 1));
+        Assert.Equal(fixture.Featured.Id, Assert.Single(page.Items).Id);
+        Assert.Equal(1, page.TotalCount);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(3)]
+    [InlineData(7)]
+    [InlineData(15)]
+    public async Task DateWindowsIncludeUtcBoundaryAndExcludeEarlierJobs(int days)
+    {
+        await using var fixture = await SearchFixture.CreateAsync();
+        fixture.Featured.Description = fixture.Latest.Description = fixture.Flexible.Description = "React";
+        fixture.Featured.PublishedAtUtc = Now.AddDays(-days);
+        fixture.Latest.PublishedAtUtc = Now.AddDays(-days).AddTicks(-1);
+        fixture.Flexible.PublishedAtUtc = Now.AddDays(-days - 1);
+        await fixture.Context.SaveChangesAsync();
+        var page = await fixture.Repository.SearchAsync(new(Q: "react", FreshnessDays: days));
+        Assert.Equal(fixture.Featured.Id, Assert.Single(page.Items).Id);
+        Assert.Equal(1, page.TotalCount);
+        Assert.Equal(3, (await fixture.Repository.SearchAsync(new(Q: "react"))).TotalCount);
+    }
+
+    [Fact]
+    public async Task CanonicalFiltersComposeBeforeCountAndPagingForBothBrowsePaths()
+    {
+        await using var fixture = await SearchFixture.CreateAsync();
+        fixture.Featured.Title = "React Developer";
+        fixture.Featured.IsFeatured = false;
+        fixture.Latest.IsFeatured = true;
+        fixture.Featured.ExperienceLevel = ExperienceLevel.Entry;
+        fixture.Latest.Description = "React";
+        fixture.Flexible.Description = "React";
+        await fixture.Context.SaveChangesAsync();
+        var query = new PublicJobQuery(Q: "react", PageSize: 1);
+        var first = await fixture.Repository.SearchAsync(query);
+        var second = await fixture.Repository.SearchAsync(query with { Page = 2 });
+        Assert.Equal(3, first.TotalCount);
+        Assert.Equal(3, second.TotalCount);
+        Assert.Equal(fixture.Featured.Id, Assert.Single(first.Items).Id);
+        Assert.NotEqual(first.Items.Single().Id, second.Items.Single().Id);
+        Assert.Equal(fixture.Featured.Id, Assert.Single((await fixture.Repository.SearchAsync(query with
+        {
+            Location = "Pune", FreshnessDays = 3, ExperienceLevel = ExperienceLevel.Entry,
+            EmploymentTypes = [EmploymentType.Internship, EmploymentType.Contract], WorkModes = [WorkplaceType.Hybrid]
+        })).Items).Id);
+        Assert.Empty((await fixture.Repository.SearchAsync(query with { Location = "Pune", ExperienceLevel = ExperienceLevel.Senior })).Items);
+        Assert.Equal(fixture.Latest.Id, Assert.Single((await fixture.Repository.SearchAsync(query with { Location = "Remote" })).Items).Id);
+        Assert.Equal(fixture.Latest.Id, Assert.Single((await fixture.Repository.SearchAsync(new(Q: "remote"))).Items).Id);
+        Assert.Equal(fixture.Latest.Id, Assert.Single((await fixture.Repository.SearchAsync(query with { SortBy = PublicJobSort.LatestPublished })).Items).Id);
+        var userId = Guid.NewGuid();
+        fixture.Context.JobApplications.Add(new JobApplication { UserId = userId, JobId = fixture.Featured.Id });
+        await fixture.Context.SaveChangesAsync();
+        var candidates = new CandidateRepository(fixture.Context, new FixedTimeProvider(Now));
+        var candidatePage = await candidates.GetCandidateBrowseJobsAsync(userId, query);
+        Assert.Equal(2, candidatePage.TotalCount);
+        Assert.Equal(fixture.Latest.Id, Assert.Single(candidatePage.Items).Id);
+        var candidateSecond = await candidates.GetCandidateBrowseJobsAsync(userId, query with { Page = 2 });
+        Assert.Equal(2, candidateSecond.TotalCount);
+        Assert.Equal(fixture.Flexible.Id, Assert.Single(candidateSecond.Items).Id);
+        Assert.Empty((await candidates.GetCandidateBrowseJobsAsync(userId, query with { Location = "Pune" })).Items);
+        Assert.Equal(3, (await fixture.Repository.SearchAsync(new(Q: " \t "))).TotalCount);
+    }
+
+    [Fact]
+    public void RankedQueryTranslatesToPostgresBeforePagination()
+    {
+        using var context = new JobPortalDbContext(new DbContextOptionsBuilder<JobPortalDbContext>()
+            .UseNpgsql("Host=localhost;Database=TranslationOnly;Username=postgres;SSL Mode=Disable").Options);
+        var repository = new PublicJobRepository(context, new FixedTimeProvider(Now));
+        var source = repository.FilteredJobsQuery(new(Q: "react developer pune"));
+        var sql = PublicJobRepository.ApplySorting(source, PublicJobSort.Recommended, "desc", "react developer pune")
+            .Skip(1).Take(1).Select(PublicJobProjections.Summary).ToQueryString();
+        Assert.Contains("CASE", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ORDER BY", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("LIMIT", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Location", sql, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task PublicJobDetailsIncludesApplicationUrlButSummaryContractDoesNot()
     {
@@ -104,6 +209,8 @@ public sealed class PublicJobSearchTests
         Assert.False(validator.Validate(new PublicJobQuery(PageNumber: int.MaxValue, PageSize: 100)).IsValid);
         Assert.False(validator.Validate(new PublicJobQuery(Page: int.MaxValue, PageSize: 100)).IsValid);
         Assert.True(validator.Validate(new PublicJobQuery(PageNumber: int.MaxValue, PageSize: 1)).IsValid);
+        Assert.False(validator.Validate(new PublicJobQuery(SortDirection: null!)).IsValid);
+        Assert.False(validator.Validate(new PublicJobQuery(SortDirection: string.Empty)).IsValid);
     }
 
     [Fact]
@@ -129,6 +236,10 @@ public sealed class PublicJobSearchTests
             new[] { fixture.Featured.Id, fixture.Latest.Id, fixture.Flexible.Id }.Order(),
             items.Select(item => item.Id).Order());
         Assert.Contains(items, item => item.Id == fixture.Flexible.Id && item.ExpiresAtUtc is null);
+        var candidatePage = await new CandidateRepository(fixture.Context, new FixedTimeProvider(Now))
+            .GetCandidateBrowseJobsAsync(Guid.NewGuid(), new(PageSize: 100));
+        Assert.Equal(3, candidatePage.TotalCount);
+        Assert.Equal(items.Select(item => item.Id).Order(), candidatePage.Items.Select(item => item.Id).Order());
     }
 
     [Fact]

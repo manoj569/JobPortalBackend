@@ -19,7 +19,11 @@ public sealed class PublicJobQueryValidator : AbstractValidator<PublicJobQuery>
         RuleFor(x => x.SalaryPeriod).IsInEnum();
         RuleFor(x => x.CurrencyCode).NotEmpty().When(x => x.SalaryPeriod.HasValue);
         RuleFor(x => x.SalaryPeriod).NotNull().When(x => x.CurrencyCode is not null);
+        RuleFor(x => x.Q).MaximumLength(250);
         RuleFor(x => x.Search).MaximumLength(250);
+        RuleFor(x => x.EmploymentType).IsInEnum();
+        RuleFor(x => x.WorkplaceType).IsInEnum();
+        RuleFor(x => x.ExperienceLevel).IsInEnum();
         RuleFor(x => x.Keyword).MaximumLength(250);
         RuleFor(x => x.Location).MaximumLength(250);
         RuleFor(x => x.CompanyName).MaximumLength(250);
@@ -41,8 +45,8 @@ public sealed class PublicJobQueryValidator : AbstractValidator<PublicJobQuery>
             .WithMessage("FreshnessDays must be one of: 1, 3, 7, 15, 30.");
         RuleFor(x => x.SortBy).IsInEnum();
         RuleFor(x => x.SortDirection)
-            .Must(value => value.Equals("asc", StringComparison.OrdinalIgnoreCase) ||
-                value.Equals("desc", StringComparison.OrdinalIgnoreCase))
+            .Must(value => string.Equals(value, "asc", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(value, "desc", StringComparison.OrdinalIgnoreCase))
             .WithMessage("SortDirection must be 'asc' or 'desc'.");
 
         ValidateStrings(x => x.Locations, 25, 250, "Locations");

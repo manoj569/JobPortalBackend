@@ -35,7 +35,7 @@ public sealed class CandidateJobSearchPostgresTests(WorkdayCheckpointDatabase da
         foreach (var keyword in new[] { ".NET", ".net", "  .NET  ", "NET", "C#", "C++", "Node.js", "SQL Server",
             "%", "_", "\\", "Azure", "React", "engineer azure" })
         {
-            var page = await service.SearchAsync(new(Keyword: keyword, PageSize: 1));
+            var page = await service.SearchAsync(new(Q: keyword, PageSize: 1));
             Assert.Equal(match.Id, Assert.Single(page.Items).Id);
             Assert.Equal(1, page.TotalCount);
             Assert.Equal(1, page.TotalPages);
@@ -44,6 +44,16 @@ public sealed class CandidateJobSearchPostgresTests(WorkdayCheckpointDatabase da
             MinExperienceYears: 2, MaxExperienceYears: 4, PageSize: 1);
         Assert.Equal(match.Id, Assert.Single((await service.SearchAsync(query)).Items).Id);
         Assert.Equal(1, Assert.Single((await service.GetFilterOptionsAsync(query)).Locations).Count);
+
+        match.Title = "React Developer";
+        unrelated.Description = "React";
+        await db.SaveChangesAsync();
+        var ranked = await service.SearchAsync(new(Q: "react", PageSize: 1));
+        Assert.Equal(match.Id, Assert.Single(ranked.Items).Id);
+        Assert.Equal(2, ranked.TotalCount);
+        Assert.Equal(unrelated.Id, Assert.Single((await service.SearchAsync(new(Q: "react", PageSize: 1, Page: 2))).Items).Id);
+        Assert.Equal(match.Id, Assert.Single((await service.SearchAsync(new(Q: "react developer pune"))).Items).Id);
+        Assert.Equal(match.Id, Assert.Single((await service.SearchAsync(new(Q: "dotnet"))).Items).Id);
     }
 
     private sealed class DisposablePostgresFactAttribute : FactAttribute

@@ -4,24 +4,29 @@ using JobPortal.Domain.Entities;
 using JobPortal.Domain.Enums;
 using JobPortal.Persistence.Context;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using System.Diagnostics;
 
 namespace JobPortal.Persistence.Repositories;
 
-public sealed class PublicJobRepository(
+public sealed partial class PublicJobRepository(
     JobPortalDbContext context,
-    TimeProvider timeProvider) : IPublicJobRepository
+    TimeProvider timeProvider,
+    ILogger<PublicJobRepository>? logger = null) : IPublicJobRepository
 {
     public async Task<(IReadOnlyCollection<PublicJobSummary> Items, int TotalCount)> SearchAsync(
         PublicJobQuery query,
         CancellationToken cancellationToken = default)
     {
+        var timer = Stopwatch.StartNew();
         var source = FilteredJobsQuery(query);
         var totalCount = await source.CountAsync(cancellationToken);
-        var items = await ApplySorting(source, query.SortBy, query.SortDirection)
+        var items = await ApplySorting(source, query.SortBy, query.SortDirection, JobBrowseQueryPolicy.SearchText(query))
             .Skip((query.EffectivePageNumber - 1) * query.PageSize)
             .Take(query.PageSize)
             .Select(PublicJobProjections.Summary)
             .ToArrayAsync(cancellationToken);
+        LogSearch(query, totalCount, timer.ElapsedMilliseconds);
         return (items, totalCount);
     }
 
@@ -326,7 +331,7 @@ public sealed class PublicJobRepository(
                 job.Referral.ApprovalStatus == JobReferralApprovalStatus.Approved &&
                 !job.Referral.ReferrerUser.IsDeleted && job.Referral.ReferrerUser.Status == UserStatus.Active &&
                 job.Status == JobStatus.Published);
-        var keyword = FirstValue(query.Keyword, query.Search);
+        var keyword = JobBrowseQueryPolicy.SearchText(query);
         source = CandidateJobKeywordQuery.Apply(source, keyword);
 
         if (query.CategoryId.HasValue)
@@ -358,14 +363,14 @@ public sealed class PublicJobRepository(
         }
         if (excluded != FacetDimension.Location)
         {
-            var location = FirstValue(query.Location);
+            var location = JobBrowseQueryPolicy.NormalizeText(query.Location);
             var locations = NormalizedValues(query.Locations);
             if (location is not null)
             {
                 var normalizedLocation = location.ToLowerInvariant();
                 source = source.Where(job =>
-                    job.Location != null &&
-                    job.Location.Trim().ToLower().Contains(normalizedLocation));
+                    (job.Location != null && job.Location.Trim().ToLower().Contains(normalizedLocation)) ||
+                    (normalizedLocation == "remote" && job.WorkplaceType == WorkplaceType.Remote));
             }
             if (locations.Length > 0)
                 source = source.Where(job =>
@@ -503,11 +508,13 @@ public sealed class PublicJobRepository(
     }
 #pragma warning restore CA1304, CA1311, CA1862
 
-    private static IOrderedQueryable<Job> ApplySorting(
+    internal static IOrderedQueryable<Job> ApplySorting(
         IQueryable<Job> source,
         PublicJobSort sortBy,
-        string sortDirection)
+        string sortDirection, string? keyword = null)
     {
+        if (sortBy == PublicJobSort.Recommended && JobBrowseQueryPolicy.NormalizeText(keyword) is { } search)
+            return CandidateJobKeywordQuery.Rank(source, search);
         var descending = sortDirection.Equals("desc", StringComparison.OrdinalIgnoreCase);
         return sortBy switch
         {
@@ -566,6 +573,30 @@ public sealed class PublicJobRepository(
 
     private static T[] Values<T>(T[]? values) where T : struct =>
         values?.Distinct().ToArray() ?? [];
+
+    internal void LogSearch(PublicJobQuery query, int totalCount, long durationMs)
+    {
+        if (logger is null) return;
+        // Search terms can contain personal data. Log only length, never raw free text.
+        var activeFilters = new object?[] { query.Location, query.Locations, query.CompanyId, query.CompanyIds,
+            query.CompanyName, query.CategoryId, query.CategoryName, query.EmploymentType, query.EmploymentTypes,
+            query.WorkplaceType, query.WorkModes, query.ExperienceLevel, query.MinExperienceYears, query.MaxExperienceYears,
+            query.FreshnessDays, query.Departments, query.RoleCategories, query.CompanyTypes, query.Industries,
+            query.EducationRequirements, query.PostedByTypes, query.MinimumSalary, query.MaximumSalary,
+            query.MinAmount, query.MaxAmount, query.InternshipDurationMonths, query.FlexibleDuration,
+            query.FeaturedOnly, query.IsFeatured, query.CurrencyCode, query.SalaryPeriod }
+            .Count(value => value switch { null => false, Array values => values.Length > 0,
+                string text => !string.IsNullOrWhiteSpace(text), _ => true });
+        if (query.ReferralOnly) activeFilters++;
+        BrowseCompleted(logger, JobBrowseQueryPolicy.SearchText(query)?.Length ?? 0,
+            query.Location?.Length ?? 0, activeFilters, query.SortBy.ToString(), query.EffectivePageNumber,
+            query.PageSize, totalCount, durationMs);
+    }
+
+    [LoggerMessage(EventId = 4101, Level = LogLevel.Information,
+        Message = "Browse jobs SearchQueryLength={searchQueryLength} LocationLength={locationLength} ActiveFilterCount={activeFilterCount} Sort={sort} Page={page} PageSize={pageSize} TotalCount={totalCount} DurationMs={durationMs}")]
+    private static partial void BrowseCompleted(ILogger logger, int searchQueryLength, int locationLength,
+        int activeFilterCount, string sort, int page, int pageSize, int totalCount, long durationMs);
 
     private enum FacetDimension
     {

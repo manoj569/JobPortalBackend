@@ -1,5 +1,7 @@
 # Candidate job search and filter audit
 
+Historical audit of the earlier keyword fix. For the current `q` contract, candidate browse filters, relevance ranking and latest validation, see [Browse Jobs production audit](browse-jobs-production-audit.md).
+
 ## Endpoint and root cause
 
 `GET /api/jobs`, `/api/jobs/search`, and `/api/jobs/filter` use the same stateless controller action and PublicJobQuery. Live typing, Enter, and Search Jobs must send the current query to this contract. Existing output caching varies by all query parameters.

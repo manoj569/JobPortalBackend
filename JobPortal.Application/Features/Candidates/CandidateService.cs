@@ -1,3 +1,4 @@
+using JobPortal.Application.Features.PublicJobs;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Buffers.Binary;
@@ -36,8 +37,10 @@ public sealed class CandidateService(
     IValidator<CreateJobApplicationRequest> applicationValidator,
     TimeProvider timeProvider,
     IResumeTextExtractor? resumeTextExtractor = null,
-    ILogger<CandidateService>? logger = null) : ICandidateService
+    ILogger<CandidateService>? logger = null,
+    IValidator<PublicJobQuery>? browseValidator = null) : ICandidateService
 {
+    private readonly IValidator<PublicJobQuery> browseQueryValidator = browseValidator ?? new PublicJobQueryValidator();
     private const long MaximumResumeBytes = 5 * 1024 * 1024;
     private const int MaximumProfilePhotoBytes = 1024 * 1024;
     private const int FreeMonthlyApplicationLimit = 10;
@@ -529,15 +532,16 @@ public sealed class CandidateService(
             query.PageNumber, query.PageSize, scored.Length);
     }
 
-    public async Task<CandidateBrowseJobsResponse> GetBrowseJobsAsync(Guid userId, CandidatePageQuery query, CancellationToken cancellationToken = default)
+    public async Task<CandidateBrowseJobsResponse> GetBrowseJobsAsync(Guid userId, PublicJobQuery query, CancellationToken cancellationToken = default)
     {
         await RequiredCandidateAsync(userId, cancellationToken);
-        await pageValidator.ValidateAndThrowAsync(query, cancellationToken);
+        await browseQueryValidator.ValidateAndThrowAsync(query, cancellationToken);
+        query = JobBrowseQueryPolicy.Normalize(query);
         var result = await candidates.GetCandidateBrowseJobsAsync(userId, query, cancellationToken);
         return new(result.Items.Select(x => new CandidateBrowseJobResponse(x.Id, x.ReferenceNumber, x.Title,
             x.Slug, x.CompanyId, x.CompanyName, x.CompanySlug, x.CompanyLogoUrl, x.CategoryId,
             x.CategoryName, x.Location, x.EmploymentType, x.WorkplaceType, x.ExperienceLevel,
-            x.IsFeatured, x.PublishedAtUtc, x.ExpiresAtUtc)).ToArray(), query.PageNumber,
+            x.IsFeatured, x.PublishedAtUtc, x.ExpiresAtUtc)).ToArray(), query.EffectivePageNumber,
             query.PageSize, result.TotalCount);
     }
 
