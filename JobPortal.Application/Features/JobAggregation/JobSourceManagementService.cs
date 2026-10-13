@@ -42,7 +42,7 @@ public sealed class JobSourceManagementService(
     {
         await saveValidator.ValidateAndThrowAsync(request, cancellationToken);
         var company = await RequiredCompanyAsync(request.CompanyId, cancellationToken);
-        var identifier = TextNormalizer.TrimOrNull(request.AtsIdentifier);
+        var identifier = SourceIdentifier(request);
         await EnsureUniqueAsync(request, identifier, null, cancellationToken);
         var source = new JobSource();
         Apply(source, request, company, identifier);
@@ -59,7 +59,7 @@ public sealed class JobSourceManagementService(
         await saveValidator.ValidateAndThrowAsync(request, cancellationToken);
         var source = await RequiredSourceAsync(id, cancellationToken);
         var company = await RequiredCompanyAsync(request.CompanyId, cancellationToken);
-        var identifier = TextNormalizer.TrimOrNull(request.AtsIdentifier);
+        var identifier = SourceIdentifier(request);
         await EnsureUniqueAsync(request, identifier, id, cancellationToken);
         Apply(source, request, company, identifier);
         // The source is tracked; do not call the runner's bookkeeping-only Update.
@@ -83,7 +83,7 @@ public sealed class JobSourceManagementService(
     {
         using var lease = runGuard.Acquire(id);
         await using var distributed = await AcquireExecutionAsync(id, cancellationToken);
-        _ = await RequiredSourceAsync(id, cancellationToken);
+        OracleRecruitingCloudConfiguration.RequireAuthorization(await RequiredSourceAsync(id, cancellationToken));
         await audit.AppendAsync(new(AuditAction.Submit, "JobSource", id.ToString(),
             new Dictionary<string, string?> { ["result"] = "manual_run_requested" }), cancellationToken);
         // Persist the request before the runner can clear its context after a bad record.
@@ -142,6 +142,11 @@ public sealed class JobSourceManagementService(
     private static ConflictException DuplicateSource() =>
         new("A job source with this company, ATS type and identifier already exists.", "duplicate_job_source");
 
+    private static string? SourceIdentifier(SaveJobSourceRequest request) =>
+        request.AtsType == AtsType.OracleRecruitingCloud
+            ? OracleRecruitingCloudConfiguration.Parse(request.AtsIdentifier)!.SourceIdentifier
+            : TextNormalizer.TrimOrNull(request.AtsIdentifier);
+
     private static void Apply(JobSource source, SaveJobSourceRequest request, Company company, string? identifier)
     {
         source.CompanyId = company.Id;
@@ -157,10 +162,15 @@ public sealed class JobSourceManagementService(
     {
         var categoryId = await categoryResolver.ResolveCategoryIdAsync(source, cancellationToken);
         var category = categoryId.HasValue ? await categories.GetByIdAsync(categoryId.Value, cancellationToken) : null;
+        var oracle = source.AtsType == AtsType.OracleRecruitingCloud;
+        var oracleConfig = oracle ? OracleRecruitingCloudConfiguration.Parse(source.AtsIdentifier) : null;
         return new(source.Id, source.CompanyId, source.Company.Name, source.CareerPageUrl,
             source.AtsType, source.AtsIdentifier, source.IsActive, source.ScanIntervalMinutes,
             source.LastRunAtUtc, source.LastSuccessfulRunAtUtc,
             source.LastError is null ? null : "External job source run failed.",
-            source.ConsecutiveFailures, category?.Id, category?.Name, source.CreatedAtUtc, source.UpdatedAtUtc);
+            source.ConsecutiveFailures, category?.Id, category?.Name, source.CreatedAtUtc, source.UpdatedAtUtc)
+        {
+            OracleRecruitingCloud = oracle ? new(oracleConfig?.OracleHost, oracleConfig?.CareerSiteId, source.AtsIdentifier) : null
+        };
     }
 }

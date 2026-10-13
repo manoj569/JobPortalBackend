@@ -111,7 +111,8 @@ public enum AtsType
     Lever = 2,
     Ashby = 3,
     SuccessFactors = 4,
-    Workday = 5
+    Workday = 5,
+    OracleRecruitingCloud = 6
 }
 
 public enum SalaryPeriod { Yearly = 1, Monthly, Hourly }

@@ -9,11 +9,16 @@ public sealed record JobSourceSearchQuery(
 // Category mapping is operator configuration, not persisted by these endpoints.
 public sealed record SaveJobSourceRequest(
     Guid CompanyId, string CareerPageUrl, AtsType AtsType, string? AtsIdentifier,
-    bool IsActive = true, int ScanIntervalMinutes = 720);
+    bool IsActive = true, int ScanIntervalMinutes = 720,
+    OracleRecruitingCloudSourceRequest? OracleRecruitingCloud = null);
 
 public sealed record JobSourceResponse(
     Guid Id, Guid CompanyId, string CompanyName, string CareerPageUrl,
     AtsType AtsType, string? AtsIdentifier, bool IsActive, int ScanIntervalMinutes,
     DateTime? LastRunAtUtc, DateTime? LastSuccessfulRunAtUtc, string? LastError,
     int ConsecutiveFailures, Guid? CategoryId, string? CategoryName,
-    DateTime CreatedAtUtc, DateTime? UpdatedAtUtc);
+    DateTime CreatedAtUtc, DateTime? UpdatedAtUtc)
+{
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public OracleRecruitingCloudSourceStatus? OracleRecruitingCloud { get; init; }
+}

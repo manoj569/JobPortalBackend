@@ -109,6 +109,19 @@ public sealed partial class JobSourceRunner(
             };
         }
 
+        // Oracle is configuration-only: block even pre-existing active rows and
+        // queued runs before checkpoints, ingestion, publication or reconciliation.
+        if (source.AtsType == Domain.Enums.AtsType.OracleRecruitingCloud)
+        {
+            return new JobSourceRunResult
+            {
+                JobSourceId = source.Id,
+                StopReason = Features.JobAggregation.OracleRecruitingCloudConfiguration.ErrorCode,
+                Error = Features.JobAggregation.OracleRecruitingCloudConfiguration.BlockedMessage,
+                ReconciliationBlockReasons = [Features.JobAggregation.OracleRecruitingCloudConfiguration.ErrorCode]
+            };
+        }
+
         if (!source.IsActive)
         {
             return new JobSourceRunResult

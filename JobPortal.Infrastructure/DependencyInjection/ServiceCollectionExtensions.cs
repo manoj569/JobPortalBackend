@@ -123,6 +123,7 @@ public static class ServiceCollectionExtensions
             client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("en-US");
         }).ConfigurePrimaryHttpMessageHandler(SuccessFactorsHttpTransport.CreateHandler);
         services.AddScoped<IExternalJobProvider, WorkdayJobSourceProvider>();
+        services.AddScoped<IExternalJobProvider, OracleRecruitingCloudJobSourceProvider>();
 
         services.Configure<AiExtractionOptions>(configuration.GetSection(AiExtractionOptions.SectionName));
         services.AddHttpClient(ClaudeJobUrlExtractionService.PageFetchClientName, client =>

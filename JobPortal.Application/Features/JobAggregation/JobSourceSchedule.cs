@@ -10,7 +10,7 @@ public static class JobSourceSchedule
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(cooldownMinutes, 1);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(cooldownMinutes, 10080);
-        return source => source.IsActive && !source.IsDeleted &&
+        return source => source.IsActive && !source.IsDeleted && source.AtsType != Domain.Enums.AtsType.OracleRecruitingCloud &&
             (source.LastSuccessfulRunAtUtc.HasValue &&
              (!source.LastRunAtUtc.HasValue || source.LastSuccessfulRunAtUtc >= source.LastRunAtUtc)
                 ? source.LastSuccessfulRunAtUtc.Value.AddMinutes(source.ScanIntervalMinutes) <= nowUtc

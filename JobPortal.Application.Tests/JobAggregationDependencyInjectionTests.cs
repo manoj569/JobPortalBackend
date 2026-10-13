@@ -20,6 +20,7 @@ public sealed class JobAggregationDependencyInjectionTests
     [Theory]
     [InlineData(AtsType.SuccessFactors, typeof(SuccessFactorsJobSourceProvider))]
     [InlineData(AtsType.Workday, typeof(WorkdayJobSourceProvider))]
+    [InlineData(AtsType.OracleRecruitingCloud, typeof(OracleRecruitingCloudJobSourceProvider))]
     [InlineData(AtsType.Greenhouse, typeof(GreenhouseExternalJobProvider))]
     [InlineData(AtsType.Lever, typeof(LeverExternalJobProvider))]
     [InlineData(AtsType.Ashby, typeof(AshbyExternalJobProvider))]
@@ -119,7 +120,7 @@ public sealed class JobAggregationDependencyInjectionTests
             .GetServices<IExternalJobProvider>()
             .ToArray();
 
-        Assert.Equal(5, providers.Length);
+        Assert.Equal(6, providers.Length);
 
         Assert.Contains(
             providers,

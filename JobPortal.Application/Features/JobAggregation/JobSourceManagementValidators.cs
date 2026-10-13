@@ -17,6 +17,30 @@ public sealed class SaveJobSourceRequestValidator : AbstractValidator<SaveJobSou
         RuleFor(x => x.AtsIdentifier).NotEmpty()
             .When(x => x.AtsType is AtsType.Greenhouse or AtsType.Lever or AtsType.Ashby or AtsType.SuccessFactors or AtsType.Workday);
         RuleFor(x => x.ScanIntervalMinutes).InclusiveBetween(1, 10080);
+        RuleFor(x => x).Custom((request, context) =>
+        {
+            if (request.AtsType != AtsType.OracleRecruitingCloud)
+            {
+                if (request.OracleRecruitingCloud is not null)
+                    context.AddFailure(nameof(request.OracleRecruitingCloud), "Oracle configuration requires the OracleRecruitingCloud provider.");
+                return;
+            }
+            var config = OracleRecruitingCloudConfiguration.Parse(request.AtsIdentifier);
+            if (config is null)
+                context.AddFailure(nameof(request.AtsIdentifier), "Use oracle:<approved-oracle-host>:<career-site-id>.");
+            else if (!config.MatchesCareerPage(request.CareerPageUrl))
+                context.AddFailure(nameof(request.CareerPageUrl), "Use the matching HTTPS Oracle career-site jobs URL without credentials, port, query or fragment.");
+            if (request.IsActive)
+                context.AddFailure(nameof(request.IsActive), OracleRecruitingCloudConfiguration.BlockedMessage);
+            if (request.OracleRecruitingCloud is { } settings)
+            {
+                if (config is null || !string.Equals(settings.OracleHost, config.OracleHost, StringComparison.OrdinalIgnoreCase) ||
+                    settings.CareerSiteId != config.CareerSiteId)
+                    context.AddFailure(nameof(request.OracleRecruitingCloud), "OracleHost and CareerSiteId must match AtsIdentifier.");
+                if (settings.AutoPublishEnabled || settings.AuthorizationStatus != OracleRecruitingCloudConfiguration.AuthorizationRequired)
+                    context.AddFailure(nameof(request.OracleRecruitingCloud), "Oracle AutoPublishEnabled must be false and AuthorizationStatus must be AuthorizationRequired. Admin input cannot grant integration authorization.");
+            }
+        });
     }
 }
 

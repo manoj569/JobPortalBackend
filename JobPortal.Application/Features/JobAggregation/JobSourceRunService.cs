@@ -65,6 +65,7 @@ public sealed class JobSourceRunService(IJobSourceRepository sources, IJobSource
     {
         var source = await sources.GetByIdAsync(sourceId, ct)
             ?? throw new NotFoundException("Job source was not found.");
+        OracleRecruitingCloudConfiguration.RequireAuthorization(source);
         if (!source.IsActive) throw new BadRequestException("Job source is inactive.", "job_source_inactive");
         return JobSourceRunResponse.From(await store.EnqueueAsync(sourceId, requestedBy, clock.GetUtcNow().UtcDateTime, ct));
     }
