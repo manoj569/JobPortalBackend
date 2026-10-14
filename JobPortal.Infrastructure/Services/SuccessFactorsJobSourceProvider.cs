@@ -172,9 +172,11 @@ public sealed partial class SuccessFactorsJobSourceProvider(
         // Single-page SuccessFactors boards may omit paginationItemLast entirely.
         // Multi-page boards must still expose a validated last-page link so snapshot
         // completeness remains fail-closed.
-        if (calculatedLastOffset > 0)
+        var lastMatch = LastPageRegex().Match(html);
+        // An omitted link is valid on a single page; a supplied link must always
+        // match this board and its calculated offset before declaring completeness.
+        if (calculatedLastOffset > 0 || lastMatch.Success)
         {
-            var lastMatch = LastPageRegex().Match(html);
             if (!lastMatch.Success)
                 throw InvalidDocument(FailureReason.ListingPaginationMetadataInvalid, "The SuccessFactors listing page did not contain valid last-page pagination metadata.");
 

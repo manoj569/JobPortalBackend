@@ -72,6 +72,17 @@ public sealed partial class JobSourceRunner(
     private readonly ILogger<JobSourceRunner>? _logger = logger;
     private readonly IJobRepository? _jobRepository = jobRepository;
 
+    [LoggerMessage(EventId = 4391, Level = LogLevel.Information,
+        Message = "JobSourcePublication SourceId={SourceId} SourceName={SourceName} Provider={Provider} AutoPublishEnabled={AutoPublishEnabled} JobId={JobId} ReasonCode={ReasonCode}.")]
+    private static partial void LogPublicationDecision(ILogger logger, Guid sourceId, string sourceName, string provider,
+        bool autoPublishEnabled, Guid jobId, string reasonCode);
+
+    [LoggerMessage(EventId = 4392, Level = LogLevel.Information,
+        Message = "JobSourcePublicationSummary SourceId={SourceId} SourceName={SourceName} Provider={Provider} AutoPublishEnabled={AutoPublishEnabled} ImportedCount={ImportedCount} UpdatedCount={UpdatedCount} PublishedCount={PublishedCount} UnpublishedCount={UnpublishedCount} SkippedCount={SkippedCount} RejectedCount={RejectedCount} PublicationFailureCount={PublicationFailureCount}.")]
+    private static partial void LogPublicationSummary(ILogger logger, Guid sourceId, string sourceName, string provider,
+        bool autoPublishEnabled, int importedCount, int updatedCount, int publishedCount, int unpublishedCount,
+        int skippedCount, int rejectedCount, int publicationFailureCount);
+
     [LoggerMessage(EventId = 4353, Level = LogLevel.Information,
         Message = "SuccessFactorsSyncCompleted Source={JobSourceId} Fetched={Fetched} Inserted={Inserted} Updated={Updated} Unchanged={Unchanged} Closed={Closed} Failed={Failed} DurationMs={DurationMs}.")]
     private static partial void LogSuccessFactorsSyncCompleted(ILogger logger, Guid jobSourceId, int fetched,
@@ -452,6 +463,10 @@ public sealed partial class JobSourceRunner(
                             publication ??= batchReview is not null && batchReview.TryGetValue(result.JobId.Value, out var reviewed)
                                 ? reviewed : await autoPublishService.TryPublishAsync(result.JobId.Value, cancellationToken);
                             durablePublication = publication;
+                            if (_logger is not null)
+                                LogPublicationDecision(_logger, source.Id, source.Company?.Name ?? string.Empty,
+                                    source.AtsType.ToString(), source.AutoPublishEnabled, result.JobId.Value,
+                                    publication.Outcome == JobAutoPublishOutcome.Published ? "AUTO_PUBLISHED" : publication.Outcome.ToString());
                             switch (publication.Outcome)
                             {
                                 case JobAutoPublishOutcome.Published: published++; break;
@@ -584,7 +599,8 @@ public sealed partial class JobSourceRunner(
             // A complete-source provider's partial scan must never claim a successful
             // full run. Already committed items remain resumable on the next attempt.
             var successful = source.AtsType == AtsType.Workday
-                ? !continuationPending && (listingDiagnostics?.ProcessingComplete ?? true) &&
+                ? !continuationPending && (listingDiagnostics?.ProcessingComplete ??
+                    blockers.All(reason => reason == "WorkdayNonAuthoritative")) &&
                     listingDiagnostics?.InfrastructureFailure != true && failed == 0
                 : provider is ICompleteExternalJobProvider ? canReconcile : skipped == 0 && failed == 0 &&
                 !(snapshot?.EligibilityReasonCounts?.Keys.Any(x => x is "AmbiguousLocation" or "ContradictoryLocation" or "UnknownCountry") ?? false);
@@ -654,6 +670,10 @@ public sealed partial class JobSourceRunner(
                 Progress(_logger, source.Id, "Enrichment and ingestion completed", processed, processingTimer.Elapsed.TotalMilliseconds, null);
                 Progress(_logger, source.Id, "Run completed", processed, runTimer.Elapsed.TotalMilliseconds, null);
                 PublicationCompleted(_logger, source.Id, published, needsReview, qualityRejected, publishFailed, disabled, null);
+                // Final counters after source/checkpoint SaveChanges; attempts are logged separately.
+                // Reconciliation closes jobs rather than issuing editorial unpublish operations.
+                LogPublicationSummary(_logger, source.Id, source.Company?.Name ?? string.Empty, source.AtsType.ToString(),
+                    source.AutoPublishEnabled, created, updated, published, closed, skipped, runResult.Rejected, publishFailed);
                 if (source.AtsType == JobPortal.Domain.Enums.AtsType.SuccessFactors)
                     LogSuccessFactorsSyncCompleted(_logger, source.Id, runResult.TotalReceived, created, updated, unchanged,
                         closed, failed, runTimer.Elapsed.TotalMilliseconds);

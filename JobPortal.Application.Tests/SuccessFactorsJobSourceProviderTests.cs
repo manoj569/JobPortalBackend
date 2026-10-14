@@ -170,6 +170,14 @@ public sealed class SuccessFactorsJobSourceProviderTests
     }
 
     [Fact]
+    public void SinglePageBoardMayOmitLastPageLink()
+    {
+        var html = $"<div>Results 1 to 1 of 1</div><table>{Row(55)}</table>";
+        var page = SuccessFactorsJobSourceProvider.ParseListingPage(html, 0, new Uri(BoardUrl));
+        Assert.Single(page.Results);
+    }
+
+    [Fact]
     public async Task DuplicateExternalIdsAndUnparseableDetailsAreIncomplete()
     {
         var provider = Provider((uri, _) => Task.FromResult(uri.AbsolutePath.StartsWith("/job/", StringComparison.Ordinal)

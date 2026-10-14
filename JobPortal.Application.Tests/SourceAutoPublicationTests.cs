@@ -22,6 +22,8 @@ public sealed class SourceAutoPublicationTests
     [InlineData(AtsType.Lever, true)]
     [InlineData(AtsType.Ashby, false)]
     [InlineData(AtsType.Ashby, true)]
+    [InlineData((AtsType)99, false)] // Future adapter using the normalized contract.
+    [InlineData((AtsType)99, true)]
     public async Task SourceControlsPublicationAndPublicQueryAcrossProviders(AtsType ats, bool enabled)
     {
         using var f = new JobSourceFixture();
@@ -154,6 +156,56 @@ public sealed class SourceAutoPublicationTests
         await f.Context.SaveChangesAsync();
         Assert.Equal(0, (await runner.RunAsync(f.Source.Id)).Published);
         Assert.Equal(JobStatus.Published, (await f.Context.Jobs.AsNoTracking().SingleAsync()).Status);
+    }
+
+    [Fact]
+    public async Task InactiveSourceCannotPublishAnExistingEligibleDraft()
+    {
+        using var f = new JobSourceFixture();
+        f.Source.AutoPublishEnabled = false;
+        await f.Context.SaveChangesAsync();
+        await Runner(f, new SnapshotProvider(f.Source.AtsType, [Vacancy(1)])).RunAsync(f.Source.Id);
+        f.Source.AutoPublishEnabled = true;
+        f.Source.IsActive = false;
+        await f.Context.SaveChangesAsync();
+        var id = await f.Context.Jobs.Select(x => x.Id).SingleAsync();
+        Assert.Equal(JobAutoPublishOutcome.Disabled, (await Publisher(f).TryPublishAsync(id)).Outcome);
+        Assert.Equal(JobStatus.Draft, (await f.Context.Jobs.AsNoTracking().SingleAsync()).Status);
+    }
+
+    [Theory]
+    [InlineData(JobStatus.Paused)]
+    [InlineData(JobStatus.Expired)]
+    [InlineData(JobStatus.Closed)]
+    public async Task SuppressedStatusCannotBeRepublishedEvenWithSourceOwnership(JobStatus status)
+    {
+        using var f = new JobSourceFixture();
+        var runner = Runner(f, new SnapshotProvider(f.Source.AtsType, [Vacancy(1)]));
+        await runner.RunAsync(f.Source.Id);
+        var job = await f.Context.Jobs.SingleAsync();
+        job.Status = status;
+        await f.Context.SaveChangesAsync();
+        Assert.Equal(0, (await runner.RunAsync(f.Source.Id)).Published);
+        Assert.Equal(status, (await f.Context.Jobs.AsNoTracking().SingleAsync()).Status);
+        Assert.Equal(0, (await new PublicJobRepository(f.Context, TimeProvider.System).SearchAsync(new())).TotalCount);
+    }
+
+    [Fact]
+    public async Task UpdatingPublishedJobPreservesOriginalPublicationTimestamp()
+    {
+        using var f = new JobSourceFixture();
+        var provider = new SnapshotProvider(f.Source.AtsType, [Vacancy(1)]);
+        var runner = Runner(f, provider);
+        await runner.RunAsync(f.Source.Id);
+        var before = await f.Context.Jobs.AsNoTracking().SingleAsync();
+        provider.Jobs = [Vacancy(1) with { Description = "Updated source description" }];
+        var result = await runner.RunAsync(f.Source.Id);
+        var after = await f.Context.Jobs.AsNoTracking().SingleAsync();
+        Assert.Equal(1, result.Updated);
+        Assert.Equal(0, result.Published);
+        Assert.Equal(before.Id, after.Id);
+        Assert.Equal(before.PublishedAtUtc, after.PublishedAtUtc);
+        Assert.Equal(JobStatus.Published, after.Status);
     }
 
     [Fact]

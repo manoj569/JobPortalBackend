@@ -77,8 +77,9 @@ public sealed class JobSourceReconciliationSafetyTests
             DiagnosticsJson = JsonSerializer.Serialize(result)
         });
         Assert.True(response.Succeeded);
-        Assert.True(response.Diagnostics!.ReconciliationSafe);
-        Assert.Empty(response.Diagnostics.ReconciliationBlockReasons);
+        Assert.Equal(ats != AtsType.Workday, response.Diagnostics!.ReconciliationSafe);
+        if (ats == AtsType.Workday) Assert.Contains("WorkdayNonAuthoritative", response.Diagnostics.ReconciliationBlockReasons);
+        else Assert.Empty(response.Diagnostics.ReconciliationBlockReasons);
         Assert.Equal(44, response.Existing);
     }
 
