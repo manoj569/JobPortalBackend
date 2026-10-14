@@ -468,7 +468,7 @@ public sealed class JobSourceAuthorizationTests
         Assert.Equal("Administrator", Assert.Single(attributes).Roles);
         Assert.Empty(controller.GetCustomAttributes<AllowAnonymousAttribute>());
         var actions = controller.GetMethods().Where(x => x.DeclaringType == controller && x.GetCustomAttributes<HttpMethodAttribute>().Any()).ToArray();
-        Assert.Equal(7, actions.Length);
+        Assert.Equal(8, actions.Length);
         Assert.All(actions, action => Assert.Empty(action.GetCustomAttributes<AllowAnonymousAttribute>()));
         var services = new ServiceCollection();
         services.AddLogging();

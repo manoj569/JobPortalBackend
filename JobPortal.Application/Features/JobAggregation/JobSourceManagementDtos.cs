@@ -11,7 +11,10 @@ public sealed record SaveJobSourceRequest(
     Guid CompanyId, string CareerPageUrl, AtsType AtsType, string? AtsIdentifier,
     bool IsActive = true, int ScanIntervalMinutes = 720,
     OracleRecruitingCloudSourceRequest? OracleRecruitingCloud = null,
-    bool AutoPublishEnabled = false);
+    bool? AutoPublishEnabled = null);
+
+// Missing/null must never be interpreted as a request to disable publication.
+public sealed record UpdateJobSourceAutoPublicationRequest(bool? AutoPublishEnabled = null);
 
 public sealed record JobSourceResponse(
     Guid Id, Guid CompanyId, string CompanyName, string CareerPageUrl,

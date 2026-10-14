@@ -38,6 +38,12 @@ public sealed class AdminJobSourcesController(IJobSourceManagementService source
         Ok(new ApiResponse<JobSourceResponse>(await sources.UpdateAsync(id, request, cancellationToken),
             "Job source updated successfully."));
 
+    [HttpPatch("{id:guid}/auto-publication")]
+    public async Task<ActionResult<ApiResponse<JobSourceResponse>>> UpdateAutoPublication(
+        Guid id, [FromBody] UpdateJobSourceAutoPublicationRequest request, CancellationToken cancellationToken) =>
+        Ok(new ApiResponse<JobSourceResponse>(await sources.UpdateAutoPublicationAsync(id, request, cancellationToken),
+            "Job source auto publication updated successfully."));
+
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
     {

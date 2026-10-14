@@ -47,7 +47,8 @@ public sealed class JobSourceManagementService(
         var source = new JobSource();
         Apply(source, request, company, identifier);
         await sources.AddAsync(source, cancellationToken);
-        await audit.AppendAsync(new(AuditAction.Create, "JobSource", source.Id.ToString()), cancellationToken);
+        await audit.AppendAsync(new(AuditAction.Create, "JobSource", source.Id.ToString(),
+            new Dictionary<string, string?> { ["autoPublishEnabled"] = source.AutoPublishEnabled.ToString() }), cancellationToken);
         await SaveAsync(cancellationToken);
         return await ToResponseAsync(source, cancellationToken);
     }
@@ -56,17 +57,43 @@ public sealed class JobSourceManagementService(
     {
         using var lease = runGuard.Acquire(id);
         await using var distributed = await AcquireExecutionAsync(id, cancellationToken);
-        await saveValidator.ValidateAndThrowAsync(request, cancellationToken);
         var source = await RequiredSourceAsync(id, cancellationToken);
+        await saveValidator.ValidateAndThrowAsync(request with
+            { AutoPublishEnabled = request.AutoPublishEnabled ?? source.AutoPublishEnabled }, cancellationToken);
         var company = await RequiredCompanyAsync(request.CompanyId, cancellationToken);
         var identifier = SourceIdentifier(request);
         await EnsureUniqueAsync(request, identifier, id, cancellationToken);
+        var previousAutoPublish = source.AutoPublishEnabled;
         Apply(source, request, company, identifier);
         // The source is tracked; do not call the runner's bookkeeping-only Update.
-        await audit.AppendAsync(new(AuditAction.Update, "JobSource", id.ToString()), cancellationToken);
+        await AppendPublicationConfigurationAuditAsync(source, previousAutoPublish, cancellationToken);
         await SaveAsync(cancellationToken);
         return await ToResponseAsync(source, cancellationToken);
     }
+
+    public async Task<JobSourceResponse> UpdateAutoPublicationAsync(Guid id,
+        UpdateJobSourceAutoPublicationRequest request, CancellationToken cancellationToken = default)
+    {
+        if (request.AutoPublishEnabled is not { } enabled)
+            throw new BadRequestException("AutoPublishEnabled must be explicitly true or false.", "auto_publish_enabled_required");
+        using var lease = runGuard.Acquire(id);
+        await using var distributed = await AcquireExecutionAsync(id, cancellationToken);
+        var source = await RequiredSourceAsync(id, cancellationToken);
+        if (enabled) OracleRecruitingCloudConfiguration.RequireAuthorization(source);
+        var previous = source.AutoPublishEnabled;
+        source.AutoPublishEnabled = enabled;
+        await AppendPublicationConfigurationAuditAsync(source, previous, cancellationToken);
+        await SaveAsync(cancellationToken);
+        return await ToResponseAsync(source, cancellationToken);
+    }
+
+    private Task AppendPublicationConfigurationAuditAsync(JobSource source, bool previous, CancellationToken token) =>
+        audit.AppendAsync(new(AuditAction.Update, "JobSource", source.Id.ToString(),
+            new Dictionary<string, string?>
+            {
+                ["autoPublishEnabledBefore"] = previous.ToString(),
+                ["autoPublishEnabledAfter"] = source.AutoPublishEnabled.ToString()
+            }), token);
 
     public async Task DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
@@ -155,7 +182,9 @@ public sealed class JobSourceManagementService(
         source.AtsType = request.AtsType;
         source.AtsIdentifier = identifier;
         source.IsActive = request.IsActive;
-        source.AutoPublishEnabled = request.AutoPublishEnabled;
+        // New sources retain the existing explicit-opt-in default. Omitted updates
+        // from older clients preserve the persisted decision rather than disabling it.
+        source.AutoPublishEnabled = request.AutoPublishEnabled ?? source.AutoPublishEnabled;
         source.ScanIntervalMinutes = request.ScanIntervalMinutes;
     }
 

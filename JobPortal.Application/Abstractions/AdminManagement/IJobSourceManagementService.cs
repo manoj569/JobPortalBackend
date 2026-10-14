@@ -10,6 +10,7 @@ public interface IJobSourceManagementService
     Task<JobSourceResponse> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
     Task<JobSourceResponse> CreateAsync(SaveJobSourceRequest request, CancellationToken cancellationToken = default);
     Task<JobSourceResponse> UpdateAsync(Guid id, SaveJobSourceRequest request, CancellationToken cancellationToken = default);
+    Task<JobSourceResponse> UpdateAutoPublicationAsync(Guid id, UpdateJobSourceAutoPublicationRequest request, CancellationToken cancellationToken = default);
     Task DeleteAsync(Guid id, CancellationToken cancellationToken = default);
     Task<JobSourceRunResult> RunAsync(Guid id, CancellationToken cancellationToken = default);
 }

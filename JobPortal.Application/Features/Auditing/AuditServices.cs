@@ -95,6 +95,9 @@ internal static class AuditMetadataPolicy
         new(StringComparer.Ordinal)
         {
             "amount",
+            "autoPublishEnabled",
+            "autoPublishEnabledBefore",
+            "autoPublishEnabledAfter",
             "categoryId",
             "changedFields",
             "completed",
