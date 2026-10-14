@@ -34,12 +34,12 @@ public sealed class SourceAutoPublicationTests
             Vacancy(3) with { Location = "Remote" }]);
         var runner = Runner(f, provider);
         var first = await runner.RunAsync(f.Source.Id);
-        Assert.Equal(1, first.Created);
+        Assert.Equal(3, first.Created);
         Assert.Equal(enabled ? 1 : 0, first.Published);
-        Assert.Equal(enabled ? 0 : 1, first.AutoPublishDisabled);
-        Assert.Equal(1, first.NonIndiaRejected);
-        Assert.Equal(1, first.AmbiguousLocationHeld);
-        var job = Assert.Single(await f.Context.Jobs.AsNoTracking().ToArrayAsync());
+        Assert.Equal(enabled ? 0 : 3, first.AutoPublishDisabled);
+        Assert.Equal(0, first.NonIndiaRejected); Assert.Equal(0, first.AmbiguousLocationHeld);
+        Assert.Equal(enabled ? 2 : 3,first.NotPublished);
+        var job = await f.Context.Jobs.AsNoTracking().SingleAsync(job => job.ExternalJobId == "REQ1");
         Assert.Equal(enabled ? JobStatus.Published : JobStatus.Draft, job.Status);
         Assert.True(job.SourceOwnsPublication);
         Assert.Equal(f.Source.Id, job.JobSourceId);
@@ -48,7 +48,7 @@ public sealed class SourceAutoPublicationTests
         var second = await runner.RunAsync(f.Source.Id);
         Assert.Equal(0, second.Created);
         Assert.Equal(0, second.Published);
-        Assert.Equal(job.Id, Assert.Single(await f.Context.Jobs.AsNoTracking().ToArrayAsync()).Id);
+        Assert.Equal(job.Id, (await f.Context.Jobs.AsNoTracking().SingleAsync(job => job.ExternalJobId == "REQ1")).Id);
     }
 
     [Fact]

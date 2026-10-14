@@ -2,33 +2,34 @@ using System.Text.Json;
 using JobPortal.Application.Abstractions.Jobs;
 using JobPortal.Domain.Entities;
 using JobPortal.Domain.Enums;
+using JobPortal.Application.Features.JobAggregation;
 
 namespace JobPortal.Infrastructure.Services;
 
-public sealed class LeverExternalJobProvider(IHttpClientFactory clients) : ICompleteExternalJobProvider
+public sealed class LeverExternalJobProvider(IHttpClientFactory clients) : IBatchedExternalJobProvider
 {
     public const string HttpClientName = "LeverJobAggregation";
     public AtsType AtsType => AtsType.Lever;
 
-    public async Task<ExternalJobSourceSnapshot> FetchSnapshotAsync(JobSource source, CancellationToken cancellationToken = default)
+    public Task<ExternalJobSourceSnapshot> FetchSnapshotAsync(JobSource source, CancellationToken cancellationToken = default) =>
+        PublicAtsSnapshot.CollectAsync(FetchBatchesAsync(source,cancellationToken),cancellationToken);
+    public async IAsyncEnumerable<ExternalJobSourceSnapshot> FetchBatchesAsync(JobSource source,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         const int pageSize = 100;
-        var jobs = new List<RawExternalJob>();
-        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var seen = new HashSet<string>(StringComparer.Ordinal); var received = 0; var healthy = true;
         for (var offset = 0; offset <= PublicAtsSnapshot.MaximumRecords; offset += pageSize)
         {
             var page = await ReadPageAsync(source, $"&skip={offset}&limit={pageSize}", cancellationToken);
-            if (page.Count > pageSize || jobs.Count + page.Count > PublicAtsSnapshot.MaximumRecords)
-                throw new InvalidDataException("lever_pagination_record_limit");
-            foreach (var job in page)
-                if (job.ExternalId is { Length: > 0 } id && !seen.Add(id))
-                    throw new InvalidDataException("lever_repeated_page_or_identity");
-            jobs.AddRange(page);
-            if (page.Count < pageSize) return PublicAtsSnapshot.Validate(source, jobs, true);
+            if (page.Count > pageSize || received + page.Count > PublicAtsSnapshot.MaximumRecords) throw new InvalidDataException("lever_pagination_record_limit");
+            foreach (var job in page) if (job.ExternalId is { Length: > 0 } id && !seen.Add(id)) throw new InvalidDataException("lever_repeated_page_or_identity");
+            received += page.Count;
+            var batch = PublicAtsSnapshot.Validate(source, page, true); healthy &= batch.Skipped == 0;
+            yield return batch with { IsComplete = healthy && page.Count < pageSize };
+            if (page.Count < pageSize) yield break;
         }
         throw new InvalidDataException("lever_pagination_record_limit");
     }
-
     public async Task<IReadOnlyCollection<RawExternalJob>> FetchJobsAsync(JobSource source, CancellationToken cancellationToken = default)
         => await ReadPageAsync(source, string.Empty, cancellationToken);
 
@@ -36,8 +37,7 @@ public sealed class LeverExternalJobProvider(IHttpClientFactory clients) : IComp
     {
         ArgumentNullException.ThrowIfNull(source);
         cancellationToken.ThrowIfCancellationRequested();
-        var token = source.AtsIdentifier?.Trim();
-        if (string.IsNullOrWhiteSpace(token)) throw new InvalidOperationException("Lever ATS identifier is required.");
+        var token = JobSourceConfiguration.Require(AtsType.Lever, source.CareerPageUrl, source.AtsIdentifier).Identifier!;
         var client = clients.CreateClient(HttpClientName);
         // EU boards use Lever's separately documented EU API, never a source-controlled host.
         var path = $"v0/postings/{Uri.EscapeDataString(token)}?mode=json{pagination}";

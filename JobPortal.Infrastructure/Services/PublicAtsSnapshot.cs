@@ -9,32 +9,53 @@ internal static class PublicAtsSnapshot
 {
     internal const int MaximumRecords = 20_000;
 
+    internal static async Task<ExternalJobSourceSnapshot> CollectAsync(IAsyncEnumerable<ExternalJobSourceSnapshot> batches,
+        CancellationToken cancellationToken)
+    {
+        var jobs = new List<RawExternalJob>(); var skipped = 0; var complete = false; int? total = null;
+        var reasons = new Dictionary<string,int>(StringComparer.Ordinal);
+        await foreach (var batch in batches.WithCancellation(cancellationToken))
+        {
+            jobs.AddRange(batch.Jobs); skipped += batch.Skipped; complete = batch.IsComplete;
+            total = batch.ReportedListingTotal ?? total;
+            foreach (var (reason,count) in batch.ProviderReasonCounts ?? new Dictionary<string,int>())
+                reasons[reason] = reasons.GetValueOrDefault(reason) + count;
+        }
+        return new(jobs,skipped,complete) { ReportedListingTotal = total, ProviderReasonCounts = reasons };
+    }
+
     internal static ExternalJobSourceSnapshot Validate(JobSource source,
         IReadOnlyCollection<RawExternalJob> records, bool complete)
     {
         if (records.Count > MaximumRecords) throw new InvalidDataException("public_ats_record_limit");
         var identifiers = new HashSet<string>(StringComparer.Ordinal);
         var jobs = new List<RawExternalJob>();
+        var reasons = new Dictionary<string,int>(StringComparer.Ordinal);
         var skipped = 0;
         foreach (var job in records)
         {
-            if (string.IsNullOrWhiteSpace(job.Title) || string.IsNullOrWhiteSpace(job.Description) ||
-                string.IsNullOrWhiteSpace(job.ExternalId) || !ValidApplicationUrl(source, job.ApplicationUrl, job.ExternalId) ||
-                !identifiers.Add(job.ExternalId))
+            var reason = string.IsNullOrWhiteSpace(job.Title) ? "PROVIDER_TITLE_INVALID" :
+                string.IsNullOrWhiteSpace(job.Description) ? "PROVIDER_DESCRIPTION_MISSING" :
+                string.IsNullOrWhiteSpace(job.ExternalId) ? "PROVIDER_IDENTITY_INVALID" :
+                !ValidApplicationUrl(source, job.ApplicationUrl, job.ExternalId) ? "PROVIDER_APPLICATION_URL_UNVERIFIED" :
+                !identifiers.Add(job.ExternalId) ? "PROVIDER_DUPLICATE_IDENTITY" : null;
+            if (reason is not null)
             {
                 skipped++;
+                reasons[reason] = reasons.GetValueOrDefault(reason) + 1;
                 continue;
             }
             jobs.Add(job);
         }
-        return new(jobs, skipped, complete && skipped == 0);
+        return new(jobs, skipped, complete && skipped == 0) { ProviderReasonCounts = reasons };
     }
 
     internal static bool ValidApplicationUrl(JobSource source, string? value, string id)
     {
         if (!SafeHttps(value, out var uri)) return false;
         var parts = uri!.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        var board = source.AtsIdentifier?.Trim();
+        var board = JobPortal.Application.Features.JobAggregation.JobSourceConfiguration.Resolve(
+            source.AtsType, source.CareerPageUrl, source.AtsIdentifier).Identifier;
         var valid = source.AtsType switch
         {
             AtsType.Greenhouse => uri.Host is "boards.greenhouse.io" or "job-boards.greenhouse.io" &&

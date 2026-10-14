@@ -2,20 +2,36 @@ using System.Text.Json;
 using JobPortal.Application.Abstractions.Jobs;
 using JobPortal.Domain.Entities;
 using JobPortal.Domain.Enums;
+using JobPortal.Application.Features.JobAggregation;
 
 namespace JobPortal.Infrastructure.Services;
 
-public sealed class AshbyExternalJobProvider(IHttpClientFactory clients) : ICompleteExternalJobProvider
+public sealed class AshbyExternalJobProvider(IHttpClientFactory clients) : IBatchedExternalJobProvider
 {
     public const string HttpClientName = "AshbyJobAggregation";
     public AtsType AtsType => AtsType.Ashby;
 
-    public async Task<ExternalJobSourceSnapshot> FetchSnapshotAsync(JobSource source, CancellationToken cancellationToken = default)
+    public Task<ExternalJobSourceSnapshot> FetchSnapshotAsync(JobSource source, CancellationToken cancellationToken = default) =>
+        PublicAtsSnapshot.CollectAsync(FetchBatchesAsync(source,cancellationToken),cancellationToken);
+    public async IAsyncEnumerable<ExternalJobSourceSnapshot> FetchBatchesAsync(JobSource source,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var (records, complete) = await ReadJobsAsync(source, cancellationToken);
-        return PublicAtsSnapshot.Validate(source, records, complete);
+        var seen = new HashSet<string>(StringComparer.Ordinal); var healthy = complete; var entries = records.ToArray();
+        if (entries.Length == 0) { yield return new([], 0, complete); yield break; }
+        for (var start = 0; start < entries.Length; start += 50)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var group = entries.Skip(start).Take(50).ToArray();
+            var unique = group.Where(job => job.ExternalId is not { Length: > 0 } id || seen.Add(id)).ToArray();
+            var duplicate = group.Length - unique.Length;
+            var batch = PublicAtsSnapshot.Validate(source, unique, true); healthy &= duplicate == 0 && batch.Skipped == 0;
+            var reasons = new Dictionary<string,int>(batch.ProviderReasonCounts ?? new Dictionary<string,int>(),StringComparer.Ordinal);
+            if (duplicate > 0) reasons["PROVIDER_DUPLICATE_IDENTITY"] = reasons.GetValueOrDefault("PROVIDER_DUPLICATE_IDENTITY") + duplicate;
+            yield return batch with { Skipped = batch.Skipped + duplicate, IsComplete = healthy && start + group.Length == entries.Length,
+                ProviderReasonCounts = reasons };
+        }
     }
-
     public async Task<IReadOnlyCollection<RawExternalJob>> FetchJobsAsync(JobSource source, CancellationToken cancellationToken = default)
         => (await ReadJobsAsync(source, cancellationToken)).Jobs;
 
@@ -23,8 +39,7 @@ public sealed class AshbyExternalJobProvider(IHttpClientFactory clients) : IComp
     {
         ArgumentNullException.ThrowIfNull(source);
         cancellationToken.ThrowIfCancellationRequested();
-        var token = source.AtsIdentifier?.Trim();
-        if (string.IsNullOrWhiteSpace(token)) throw new InvalidOperationException("Ashby ATS identifier is required.");
+        var token = JobSourceConfiguration.Require(AtsType.Ashby, source.CareerPageUrl, source.AtsIdentifier).Identifier!;
         using var response = await clients.CreateClient(HttpClientName)
             .GetAsync($"posting-api/job-board/{Uri.EscapeDataString(token)}", cancellationToken);
         response.EnsureSuccessStatusCode();

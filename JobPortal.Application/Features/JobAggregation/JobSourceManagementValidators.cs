@@ -14,11 +14,16 @@ public sealed class SaveJobSourceRequestValidator : AbstractValidator<SaveJobSou
             .WithMessage("CareerPageUrl must be an absolute HTTP or HTTPS URL without credentials.");
         RuleFor(x => x.AtsType).IsInEnum();
         RuleFor(x => x.AtsIdentifier).MaximumLength(255);
-        RuleFor(x => x.AtsIdentifier).NotEmpty()
-            .When(x => x.AtsType is AtsType.Greenhouse or AtsType.Lever or AtsType.Ashby or AtsType.SuccessFactors or AtsType.Workday);
         RuleFor(x => x.ScanIntervalMinutes).InclusiveBetween(1, 10080);
         RuleFor(x => x).Custom((request, context) =>
         {
+            if (request.AtsType is not AtsType.OracleRecruitingCloud and not AtsType.Custom)
+            {
+                var result = JobSourceConfiguration.Resolve(request.AtsType, request.CareerPageUrl, request.AtsIdentifier);
+                if (!result.IsValid)
+                    context.AddFailure(new FluentValidation.Results.ValidationFailure(nameof(request.AtsIdentifier), $"{result.ReasonCode}: {result.Message}")
+                        { ErrorCode = result.ReasonCode });
+            }
             if (request.AtsType != AtsType.OracleRecruitingCloud)
             {
                 if (request.OracleRecruitingCloud is not null)

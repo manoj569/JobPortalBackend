@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using JobPortal.Application.Abstractions.Jobs;
 using JobPortal.Application.Abstractions.Persistence;
 using JobPortal.Domain.Enums;
+using JobPortal.Application.Features.JobAggregation;
 
 namespace JobPortal.Application.Services;
 
@@ -72,6 +73,21 @@ public sealed partial class JobSourceRunner(
     private readonly ILogger<JobSourceRunner>? _logger = logger;
     private readonly IJobRepository? _jobRepository = jobRepository;
 
+    [LoggerMessage(EventId = 4410, Level = LogLevel.Information,
+        Message = "ProviderBatchStage SourceId={SourceId} Provider={Provider} Stage={Stage} Created={Created} Existing={Existing} Rejected={Rejected} Published={Published}.")]
+    private static partial void LogBatchStage(ILogger logger, Guid sourceId, string provider, string stage, int created, int existing, int rejected, int published);
+    [LoggerMessage(EventId = 4411, Level = LogLevel.Warning,
+        Message = "ProviderRequestFailed SourceId={SourceId} Provider={Provider} Stage={Stage} ErrorType={ErrorType} ReasonCode={ReasonCode} StatusCode={StatusCode}.")]
+    private static partial void LogProviderFailure(ILogger logger, Guid sourceId, string provider, string stage, string errorType, string reasonCode, int? statusCode);
+    [LoggerMessage(EventId = 4412, Level = LogLevel.Information,
+        Message = "JobSourceExecutionSummary SourceId={SourceId} Provider={Provider} Stage={Stage} Status={Status} ReasonCode={ReasonCode} Fetched={Fetched} Parsed={Parsed} Created={Created} Existing={Existing} Published={Published} ReconciliationSafe={ReconciliationSafe}.")]
+    private static partial void LogExecutionSummary(ILogger logger, Guid sourceId, string provider, string stage, string status,
+        string? reasonCode, int fetched, int parsed, int created, int existing, int published, bool reconciliationSafe);
+
+    [LoggerMessage(EventId = 4413, Level = LogLevel.Information,
+        Message = "GreenhouseEligibleBatchReady SourceId={SourceId} Parsed={Parsed} Eligible={Eligible} NonIndiaRejected={NonIndiaRejected} Held={Held}.")]
+    private static partial void LogGreenhouseEligibility(ILogger logger, Guid sourceId, int parsed, int eligible, int nonIndiaRejected, int held);
+
     [LoggerMessage(EventId = 4391, Level = LogLevel.Information,
         Message = "JobSourcePublication SourceId={SourceId} SourceName={SourceName} Provider={Provider} AutoPublishEnabled={AutoPublishEnabled} JobId={JobId} ReasonCode={ReasonCode}.")]
     private static partial void LogPublicationDecision(ILogger logger, Guid sourceId, string sourceName, string provider,
@@ -105,6 +121,32 @@ public sealed partial class JobSourceRunner(
         Guid jobSourceId,
         CancellationToken cancellationToken = default)
     {
+        var execution = new ExecutionContext();
+        try { return await RunCoreAsync(jobSourceId, execution, cancellationToken); }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception exception) when (execution.Provider == AtsType.Workday)
+        {
+            if (_logger is not null && execution.Provider == AtsType.Workday)
+                WorkdayExecutionDiagnostics.PreExecutionFailure(_logger, jobSourceId, execution.Stage, exception);
+            return (runProgress?.Snapshot.Counters ?? new JobSourceRunResult()) with
+            {
+                JobSourceId = jobSourceId, Succeeded = false, ReconciliationSafe = false,
+                FailureReasonCode = JobSourceFailure.Code(exception), FailureStage = execution.Stage,
+                StopReason = JobSourceFailure.Code(exception), Error = "Job source execution failed before completion.",
+                ReconciliationBlockReasons = ["ExecutionFailed"]
+            };
+        }
+    }
+
+    private sealed class ExecutionContext
+    {
+        public AtsType? Provider { get; set; }
+        public string Stage { get; set; } = "SourceLookup";
+    }
+
+    private async Task<JobSourceRunResult> RunCoreAsync(Guid jobSourceId, ExecutionContext execution,
+        CancellationToken cancellationToken)
+    {
         cancellationToken.ThrowIfCancellationRequested();
 
         var source = await sources.GetByIdAsync(
@@ -120,6 +162,10 @@ public sealed partial class JobSourceRunner(
                 Error = "Job source was not found."
             };
         }
+
+        execution.Provider = source.AtsType;
+        execution.Stage = "ConfigurationInput";
+        if (_logger is not null && source.AtsType == AtsType.Workday) WorkdayExecutionDiagnostics.Input(_logger, source);
 
         // Oracle is configuration-only: block even pre-existing active rows and
         // queued runs before checkpoints, ingestion, publication or reconciliation.
@@ -151,12 +197,14 @@ public sealed partial class JobSourceRunner(
         // Admin and scheduler callers already hold the SAME local/distributed
         // execution guards. Save the attempt before any provider/network work.
         var attemptAt = timeProvider.GetUtcNow().UtcDateTime;
+        execution.Stage = "RecordAttempt";
         source.LastRunAtUtc = attemptAt;
         sources.Update(source);
         await unitOfWork.SaveChangesAsync(cancellationToken);
         if (_logger is not null) LogAttempt(_logger, source.Id, attemptAt);
         cancellationToken.ThrowIfCancellationRequested();
 
+        execution.Stage = "ProviderResolution";
         var provider = providers.FirstOrDefault(
             x => x.AtsType == source.AtsType);
 
@@ -173,7 +221,8 @@ public sealed partial class JobSourceRunner(
             {
                 JobSourceId = source.Id,
                 Succeeded = false,
-                Error = source.LastError
+                Error = source.LastError,
+                FailureReasonCode = "PROVIDER_UNSUPPORTED", FailureStage = "ConfigurationValidation"
             };
         }
 
@@ -186,9 +235,12 @@ public sealed partial class JobSourceRunner(
         var processed = 0;
         var partialResult = new JobSourceRunResult { JobSourceId = source.Id };
         WorkdayListingDiagnostics? listingDiagnostics = checkpoint?.State?.ListingDiagnostics;
+        var providerReasons = new Dictionary<string, int>(StringComparer.Ordinal);
+        var reportedListingTotal = 0;
 
         try
         {
+            execution.Stage = "SourcePolicy";
             publicationPolicy?.ApplyLicensedLogo(source);
             ExternalJobSourceSnapshot? snapshot = null;
             var providerSnapshotComplete = false;
@@ -246,7 +298,8 @@ public sealed partial class JobSourceRunner(
                 {
                     JobSourceId = source.Id, RunId = durable ? checkpoint!.RunId : null,
                     ListingDiagnostics = listingDiagnostics,
-                    ListingTotal = durable ? checkpoint!.State?.ListingTotal ?? 0 : listingDiagnostics?.UniquePaths ?? 0,
+                    ProviderReasonCounts = new Dictionary<string,int>(providerReasons),
+                    ListingTotal = durable ? checkpoint!.State?.ListingTotal ?? 0 : listingDiagnostics?.UniquePaths ?? reportedListingTotal,
                     RebaseCount = durable ? checkpoint!.State?.RebaseCount ?? 0 : 0,
                     ListingPages = durable ? checkpoint!.State?.ListingPages ?? 0 : listingDiagnostics?.PageCount ?? 0,
                     CheckpointCursor = durable ? checkpoint!.State?.Cursor ?? 0 : 0,
@@ -274,8 +327,15 @@ public sealed partial class JobSourceRunner(
             }
             ReportProgress("Ingestion");
 
+            execution.Stage = "ProviderFetch";
             await foreach (var batch in FetchBatchesAsync(provider, source, cancellationToken))
             {
+                execution.Stage = "BatchIngestionOrPublication";
+                reportedListingTotal = batch.ReportedListingTotal ?? reportedListingTotal;
+                foreach (var (reason, count) in batch.ProviderReasonCounts ?? new Dictionary<string,int>())
+                    providerReasons[reason] = providerReasons.GetValueOrDefault(reason) + count;
+                if (_logger is not null) LogBatchStage(_logger, source.Id, source.AtsType.ToString(),
+                    source.AtsType + "PersistenceStarted", 0, 0, batch.Skipped, 0);
                 // Provider prepares the replacement before its first yield. Old observed
                 // identities and selection skips cannot join the new census.
                 if (durable && checkpoint!.State?.RebaseCount != traversalRebaseCount)
@@ -287,13 +347,19 @@ public sealed partial class JobSourceRunner(
                 listingDiagnostics = batch.ListingDiagnostics ?? listingDiagnostics;
                 if (source.AtsType != AtsType.Workday && batch.ListingDiagnostics is { IngestionSafe: false } unsafeListing)
                     throw new JobSourceSnapshotUnsafeException(unsafeListing.ReasonCode, unsafeListing);
-                observedJobs.AddRange(batch.Jobs);
+                // Capture original provider facts once per received item, before
+                // display normalization. Avoid reserializing earlier batches on
+                // each cumulative selection pass for large employer boards.
+                observedJobs.AddRange(batch.Jobs.Select(job => job with
+                {
+                    SourceMetadataJson = job.SourceMetadataJson ?? System.Text.Json.JsonSerializer.Serialize(job with { SourceMetadataJson = null })
+                }));
                 continuationPending = batch.ContinuationPending;
                 var providerSkipped = (snapshot?.Skipped ?? 0) + batch.Skipped;
                 providerSnapshotComplete = provider is ICompleteExternalJobProvider && batch.IsComplete;
                 snapshot = new(observedJobs, providerSkipped, providerSnapshotComplete);
                 // Apply the policy cumulatively: a configured 20-job cap must not
-                // become 20 jobs PER batch. Geography selection preserves census completeness.
+                // become 20 jobs PER batch. Business eligibility never removes source jobs.
                 var selected = selectionPolicy.Select(source, snapshot);
                 if (selected is not null) snapshot = selected;
                 var accepted = selected?.Jobs ?? observedJobs;
@@ -304,6 +370,10 @@ public sealed partial class JobSourceRunner(
                     CompanyName = source.Company?.Name ?? x.CompanyName
                 }).ToArray();
                 rawJobs.AddRange(newJobs);
+                if (_logger is not null && source.AtsType == AtsType.Greenhouse)
+                    LogGreenhouseEligibility(_logger, source.Id, batch.Jobs.Count, newJobs.Length,
+                        (snapshot.SelectionReasonCounts?.GetValueOrDefault("NonIndiaLocation") ?? 0) + (snapshot.SelectionReasonCounts?.GetValueOrDefault("IndiaRemoteExcluded") ?? 0),
+                        (snapshot.SelectionReasonCounts?.GetValueOrDefault("AmbiguousLocation") ?? 0) + (snapshot.SelectionReasonCounts?.GetValueOrDefault("ContradictoryLocation") ?? 0) + (snapshot.SelectionReasonCounts?.GetValueOrDefault("UnknownCountry") ?? 0));
                 if (_logger is not null) Progress(_logger, source.Id, "Eligible batch received", newJobs.Length, runTimer.Elapsed.TotalMilliseconds, null);
                 skipped += batch.Skipped;
                 if (batch.Skipped > 0)
@@ -547,8 +617,15 @@ public sealed partial class JobSourceRunner(
                     await checkpoint!.CommitAsync(cursor, snapshot?.Skipped ?? 0, observedJobs, cancellationToken, listingDiagnostics);
                     ReportProgress("CheckpointCommitted");
                 }
-
+                ReportProgress("BatchPersisted");
+                if (_logger is not null)
+                {
+                    LogBatchStage(_logger, source.Id, source.AtsType.ToString(), source.AtsType + "PersistenceCompleted", created, updated + unchanged + matched, skipped, published);
+                    LogBatchStage(_logger, source.Id, source.AtsType.ToString(), source.AtsType + "PublicationCompleted", created, updated + unchanged + matched, needsReview + disabled + qualityRejected, published);
+                }
+                execution.Stage = "ProviderFetch";
             }
+            execution.Stage = "Reconciliation";
             cancellationToken.ThrowIfCancellationRequested();
             var closed = 0;
             var externalIdsForReconciliation = observedJobs.Select(x => x.ExternalId)
@@ -560,7 +637,7 @@ public sealed partial class JobSourceRunner(
             var blockers = new List<string>();
             if (source.AtsType == AtsType.Workday) blockers.Add("WorkdayNonAuthoritative");
             if (!providerSnapshotComplete) blockers.Add("ProviderSnapshotIncomplete");
-            if (snapshot is not { IsComplete: true } && providerSnapshotComplete)
+            if (snapshot?.SelectionLimited == true || (snapshot is not { IsComplete: true } && providerSnapshotComplete))
                 blockers.Add("SelectionSnapshotIncomplete"); // Includes configured test caps.
             if (snapshot is null || snapshot.Skipped != 0) blockers.Add("ProviderSkippedItems");
             if (!hasCompleteIdentities) blockers.Add("IncompleteOrDuplicateSourceIdentities");
@@ -599,11 +676,10 @@ public sealed partial class JobSourceRunner(
             // A complete-source provider's partial scan must never claim a successful
             // full run. Already committed items remain resumable on the next attempt.
             var successful = source.AtsType == AtsType.Workday
-                ? !continuationPending && (listingDiagnostics?.ProcessingComplete ??
+                ? !continuationPending && !blockers.Contains("SelectionSnapshotIncomplete") && (listingDiagnostics?.ProcessingComplete ??
                     blockers.All(reason => reason == "WorkdayNonAuthoritative")) &&
                     listingDiagnostics?.InfrastructureFailure != true && failed == 0
-                : provider is ICompleteExternalJobProvider ? canReconcile : skipped == 0 && failed == 0 &&
-                !(snapshot?.EligibilityReasonCounts?.Keys.Any(x => x is "AmbiguousLocation" or "ContradictoryLocation" or "UnknownCountry") ?? false);
+                : provider is ICompleteExternalJobProvider ? canReconcile : skipped == 0 && failed == 0;
             source.LastSuccessfulRunAtUtc = successful ? now : previousSuccessfulRun;
             source.LastError = continuationPending ? previousError : successful ? null : "External job source scan was incomplete or had failed/skipped items.";
             source.ConsecutiveFailures = continuationPending ? previousFailures : successful ? 0 : previousFailures + 1;
@@ -624,6 +700,11 @@ public sealed partial class JobSourceRunner(
             {
                 JobSourceId = source.Id,
                 RunId = partialResult.RunId, ListingTotal = partialResult.ListingTotal, ListingPages = partialResult.ListingPages,
+                ProviderReasonCounts = new Dictionary<string,int>(providerReasons),
+                FailureReasonCode = successful ? null : failed > 0 ? "INGESTION_OR_PUBLICATION_FAILED" :
+                    snapshot?.SelectionLimited == true ? "SELECTION_LIMITED" : providerReasons.Keys.FirstOrDefault() ?? "PROVIDER_PARSE_PARTIAL",
+                FailureStage = successful ? null : failed > 0 ? "IngestionOrPublication" :
+                    snapshot?.SelectionLimited == true ? "Selection" : "ProviderResponseValidation",
                 RebaseCount = partialResult.RebaseCount,
                 ObservedIdentities = partialResult.ObservedIdentities, DetailAttempted = partialResult.DetailAttempted,
                 DetailSucceeded = partialResult.DetailSucceeded, DetailFailed = partialResult.DetailFailed,
@@ -661,6 +742,7 @@ public sealed partial class JobSourceRunner(
             };
 
             checkpoint?.StageCompletedResult(runResult);
+            execution.Stage = "FinalBookkeepingPersistence";
             await unitOfWork.SaveChangesAsync(cancellationToken);
 
             if (_logger is not null)
@@ -691,6 +773,7 @@ public sealed partial class JobSourceRunner(
 
             }
 
+            partialResult = runResult;
             return runResult;
         }
         catch (JobSourceContinuationException exception)
@@ -699,8 +782,9 @@ public sealed partial class JobSourceRunner(
             source.LastSuccessfulRunAtUtc = previousSuccessfulRun;
             source.LastError = previousError; source.ConsecutiveFailures = previousFailures;
             if (durable) partialResult = partialResult.WithDetailProgress(checkpoint!.Details);
-            return partialResult with { Succeeded = false, ContinuationPending = true, StopReason = exception.ReasonCode, DurationMilliseconds = runTimer.Elapsed.TotalMilliseconds,
+            partialResult = partialResult with { Succeeded = false, ContinuationPending = true, StopReason = exception.ReasonCode, DurationMilliseconds = runTimer.Elapsed.TotalMilliseconds,
                 ReconciliationSafe = false, ReconciliationBlockReasons = ["ExecutionInterrupted"] };
+            return partialResult;
         }
         catch (OperationCanceledException)
             when (cancellationToken.IsCancellationRequested)
@@ -710,6 +794,9 @@ public sealed partial class JobSourceRunner(
             source.LastError = previousError;
             source.ConsecutiveFailures = previousFailures;
             if (_logger is not null) LogCancelled(_logger, source.Id, processed, runTimer.Elapsed.TotalMilliseconds);
+            partialResult = partialResult with { Succeeded = false, ReconciliationSafe = false,
+                FailureReasonCode = "EXECUTION_CANCELLED", FailureStage = "SourceExecution", StopReason = "EXECUTION_CANCELLED" };
+            runProgress?.Report(new("Cancelled", processed, partialResult));
             throw;
         }
         catch (Exception exception)
@@ -723,6 +810,11 @@ public sealed partial class JobSourceRunner(
             {
                 SourceRunFailed(_logger, source.Id, null);
                 LogFailed(_logger, source.Id, exception.GetType().Name);
+                LogProviderFailure(_logger, source.Id, source.AtsType.ToString(), JobSourceFailure.Stage(exception), exception.GetType().Name,
+                    JobSourceFailure.Code(exception), exception is HttpRequestException requestError ? (int?)requestError.StatusCode : null);
+                if (source.AtsType == AtsType.Workday && (exception is InvalidOperationException || JobSourceFailure.Code(exception) == "UNEXPECTED_INTERNAL_ERROR"))
+                    WorkdayExecutionDiagnostics.PreExecutionFailure(_logger, source.Id,
+                        exception.Data["JobSourceReasonCode"] is string ? "ConfigurationValidation" : execution.Stage, exception);
             }
 
             // Exception messages can contain response bodies, URLs or credentials.
@@ -735,11 +827,13 @@ public sealed partial class JobSourceRunner(
 
             var snapshotReason = exception is JobSourceSnapshotUnsafeException unsafeSnapshot ? unsafeSnapshot.ReasonCode :
                 exception is InvalidDataException && exception.Data["WorkdayFailureReason"] is { } providerReason ? providerReason.ToString() : null;
-            return partialResult with { Succeeded = false, Error = source.LastError,
+            partialResult = partialResult with { Succeeded = false, Error = source.LastError,
                 ListingDiagnostics = (exception as JobSourceSnapshotUnsafeException)?.ListingDiagnostics ?? listingDiagnostics,
-                StopReason = snapshotReason ?? "InfrastructureFailure",
+                StopReason = snapshotReason ?? (exception is InvalidOperationException ? JobSourceFailure.Code(exception) : "InfrastructureFailure"),
+                FailureReasonCode = JobSourceFailure.Code(exception), FailureStage = JobSourceFailure.Stage(exception) == "IngestionOrPersistence" ? execution.Stage : JobSourceFailure.Stage(exception),
                 ReconciliationSafe = false, ReconciliationBlockReasons = snapshotReason is not null
                     ? ["SnapshotUnsafe"] : ["ExecutionFailed"] };
+            return partialResult;
         }
         finally
         {
@@ -747,6 +841,10 @@ public sealed partial class JobSourceRunner(
             // prevents the normal completion block from running.
             if (_logger is not null)
             {
+                LogExecutionSummary(_logger, source.Id, source.AtsType.ToString(), source.AtsType + "RunCompleted",
+                    cancellationToken.IsCancellationRequested ? "Cancelled" : partialResult.Succeeded ? "Completed" : "PartialOrFailed",
+                    partialResult.FailureReasonCode ?? partialResult.StopReason, partialResult.TotalReceived, partialResult.Parsed,
+                    partialResult.Created, partialResult.Existing, partialResult.Published, partialResult.ReconciliationSafe);
                 LogPersistenceSummary(_logger, source.Id, partialResult.Created, partialResult.Existing,
                     partialResult.IngestionRejected, partialResult.ProviderSkipped, partialResult.SelectionSkipped, partialResult.Failed);
                 foreach (var (reason, count) in partialResult.ReasonCounts ?? new Dictionary<JobIngestionReasonCode, int>())

@@ -82,18 +82,16 @@ public sealed class DeloitteSuccessFactorsJobSourceProviderTests
     }
 
     [Theory]
-    [InlineData(null)]
-    [InlineData("")]
     [InlineData("deloitte")]
     [InlineData("https://southasiacareers.deloitte.com/go/Deloitte-India/718244")]
-    public async Task ProviderRequiresExactDeloitteBoardIdentifier(string? identifier)
+    public async Task ProviderRejectsConflictingBoardIdentifier(string? identifier)
     {
         var factory = new FakeClientFactory(_ => throw new InvalidOperationException("No HTTP call is expected."));
         var provider = new SuccessFactorsJobSourceProvider(factory);
         var source = Source();
         source.AtsIdentifier = identifier;
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => provider.FetchSnapshotAsync(source));
-        Assert.Equal("SuccessFactors source must use a public HTTPS /go/{board}/{numeric-id} URL matching its ATS identifier.", exception.Message);
+        Assert.Equal("SUCCESSFACTORS_CONFIGURATION_CONFLICT", exception.Data["JobSourceReasonCode"]);
     }
 
     [Fact]

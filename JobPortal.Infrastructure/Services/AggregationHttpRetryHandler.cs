@@ -61,7 +61,7 @@ public sealed class AggregationHttpRetryHandler(TimeProvider clock, ILogger<Aggr
                     var maximum = DateTimeOffset.MaxValue - now;
                     retryState.Defer(provider, now + (cooldown > maximum ? maximum : cooldown));
                 }
-                var transient = response.StatusCode == HttpStatusCode.TooManyRequests || status is 500 or 502 or 503 or 504;
+                var transient = response.StatusCode == HttpStatusCode.TooManyRequests || status is 408 or 500 or 502 or 503 or 504;
                 if (!transient || attempt == MaxAttempts) return response;
                 delay = RetryDelay(response, attempt);
                 // Never retry earlier than the server requests. Large Retry-After
@@ -73,7 +73,7 @@ public sealed class AggregationHttpRetryHandler(TimeProvider clock, ILogger<Aggr
                 response?.Dispose();
                 throw;
             }
-            catch (Exception exception) when (exception is HttpRequestException or OperationCanceledException)
+            catch (Exception exception) when (exception is OperationCanceledException || exception is HttpRequestException { StatusCode: null })
             {
                 response?.Dispose();
                 response = null;

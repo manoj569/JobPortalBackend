@@ -1,4 +1,3 @@
-using System.Text.Json;
 using JobPortal.Application.Services;
 using JobPortal.Application.Abstractions.Jobs;
 using JobPortal.Application.Common.Exceptions;
@@ -13,7 +12,7 @@ public interface IJobSourcePublicationPolicy
     void ApplyLicensedLogo(JobSource source);
 }
 
-// Optional import/geography and licensed-logo metadata. Never a publication authorization gate.
+// Optional execution cap and licensed-logo metadata. No business eligibility gate.
 public sealed class JobSourcePublicationPolicy(IOptions<JobAggregationOptions> options, TimeProvider clock)
     : IJobSourcePublicationPolicy
 {
@@ -29,34 +28,26 @@ public sealed class JobSourcePublicationPolicy(IOptions<JobAggregationOptions> o
     public ExternalJobSourceSnapshot Select(JobSource source, ExternalJobSourceSnapshot snapshot)
     {
         var approval = Settings(source);
-        var jobs = new List<RawExternalJob>();
-        var rejected = new Dictionary<string, int>(StringComparer.Ordinal);
-        var reasons = new Dictionary<string, int>(StringComparer.Ordinal);
-        foreach (var job in snapshot.Jobs)
+        // Employer ingestion is geography/experience neutral. Preserve original
+        // provider facts for downstream product and publication decisions.
+        var jobs = snapshot.Jobs.Select(job => job with
         {
-            var result = IndiaJobEligibilityPolicy.Evaluate(job);
-            reasons[result.ReasonCode] = reasons.GetValueOrDefault(result.ReasonCode) + 1;
-            if (result.Decision != IndiaJobEligibilityDecision.Accepted)
-            {
-                rejected[result.ReasonCode] = rejected.GetValueOrDefault(result.ReasonCode) + 1;
-                continue;
-            }
-            jobs.Add(job with
-            {
-                Location = IndiaJobEligibilityPolicy.DisplayLocation(job.Location),
-                EligibilityReasonCode = result.ReasonCode,
-                SourceMetadataJson = JsonSerializer.Serialize(job with { SourceMetadataJson = null, EligibilityReasonCode = result.ReasonCode })
-            });
-        }
+            Location = IndiaJobEligibilityPolicy.DisplayLocation(job.Location)
+        }).ToArray();
         var limited = approval.TestImportLimit > 0;
-        if (limited && jobs.Count > approval.TestImportLimit) rejected["TestImportLimit"] = jobs.Count - approval.TestImportLimit;
-        // Geography selects jobs to ingest; the full observed identities still protect
-        // held/foreign vacancies during absence reconciliation. A test cap remains unsafe.
-        return new(limited ? jobs.Take(approval.TestImportLimit).ToArray() : jobs,
-            snapshot.Skipped, snapshot.IsComplete && !limited)
-        { SelectionReasonCounts = rejected.Count == 0 ? null : rejected, EligibilityReasonCounts = reasons };
+        var omitted = limited ? Math.Max(0, jobs.Length - approval.TestImportLimit) : 0;
+        // Diagnostic facts only: no geography result removes a provider record.
+        var reasons = jobs.GroupBy(job => IndiaJobEligibilityPolicy.Evaluate(job).ReasonCode, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+        return snapshot with
+        {
+            Jobs = limited ? jobs.Take(approval.TestImportLimit).ToArray() : jobs,
+            IsComplete = snapshot.IsComplete && !limited,
+            SelectionLimited = limited,
+            SelectionReasonCounts = omitted == 0 ? null : new Dictionary<string,int> { ["TestImportLimit"] = omitted },
+            EligibilityReasonCounts = reasons
+        };
     }
-
     public void ApplyLicensedLogo(JobSource source)
     {
         // Retain strict matching for optional logo assets only. Missing/expired metadata simply skips the logo.

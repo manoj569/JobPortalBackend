@@ -153,21 +153,24 @@ public sealed partial class WorkdayJobSourceProvider(
         var skipped = 0;
         var complete = false;
         WorkdayListingDiagnostics? diagnostics = null;
+        var reasons = new Dictionary<string,int>(StringComparer.Ordinal);
         await foreach (var batch in FetchBatchesAsync(source, cancellationToken))
         {
             jobs.AddRange(batch.Jobs);
             skipped += batch.Skipped;
             complete = batch.IsComplete;
             diagnostics = batch.ListingDiagnostics ?? diagnostics;
+            foreach (var (reason,count) in batch.ProviderReasonCounts ?? new Dictionary<string,int>())
+                reasons[reason] = reasons.GetValueOrDefault(reason) + count;
         }
-        return new(jobs, skipped, complete) { ListingDiagnostics = diagnostics };
+        return new(jobs, skipped, complete) { ListingDiagnostics = diagnostics, ProviderReasonCounts = reasons };
     }
 
     public async IAsyncEnumerable<ExternalJobSourceSnapshot> FetchBatchesAsync(
         JobSource source,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        if (!Settings.IsValid()) throw new InvalidOperationException("Invalid bounded Workday fetch settings.");
+        ValidateFetchSettings(source, Settings);
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var channel = Channel.CreateBounded<ExternalJobSourceSnapshot>(new BoundedChannelOptions(2)
         { SingleReader = true, SingleWriter = true, FullMode = BoundedChannelFullMode.Wait });
@@ -201,9 +204,9 @@ public sealed partial class WorkdayJobSourceProvider(
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(source);
-        var target = ValidateSource(source);
+        var target = InitializeSource(source);
         var settings = Settings;
-        if (!settings.IsValid()) throw new InvalidOperationException("Invalid bounded Workday fetch settings.");
+        ValidateFetchSettings(source, settings);
         using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(settings.RunBudgetSeconds), Clock);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, budget.Token);
         var token = linked.Token;
@@ -230,9 +233,7 @@ public sealed partial class WorkdayJobSourceProvider(
                 var selection = options?.Value.SourceApprovals.GetValueOrDefault(source.Id.ToString("D"));
                 var policyIdentity = JsonSerializer.Serialize(new
                 {
-                    IndiaOnly = selection?.IndiaOnly ?? true,
-                    Locations = selection?.VerifiedIndiaLocations.Order(StringComparer.OrdinalIgnoreCase).ToArray() ?? [],
-                    WorldwideRemote = selection?.AllowExplicitWorldwideRemote ?? false,
+                    IngestionPolicy = "AllTechnicallyValidSourceJobsV2",
                     Limit = selection?.TestImportLimit ?? 0
                 });
                 var sourceIdentity = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
@@ -264,6 +265,7 @@ public sealed partial class WorkdayJobSourceProvider(
                 var detailTimer = Stopwatch.StartNew();
                 token.ThrowIfCancellationRequested();
                 var parsed = new ConcurrentDictionary<int, RawExternalJob>();
+                var detailReasons = new ConcurrentDictionary<string,int>(StringComparer.Ordinal);
                 var batchFailed = 0;
                 await Parallel.ForEachAsync(chunk.Select((entry, index) => (entry, index)),
                     new ParallelOptions { MaxDegreeOfParallelism = Math.Min(settings.DetailConcurrency, Volatile.Read(ref adaptiveConcurrency)), CancellationToken = token },
@@ -277,6 +279,7 @@ public sealed partial class WorkdayJobSourceProvider(
                             if (detail is null)
                             {
                                 Interlocked.Increment(ref batchFailed);
+                                detailReasons.AddOrUpdate("PROVIDER_RESPONSE_INVALID", 1, (_, count) => count + 1);
                                 if (durable) checkpoint!.Details.RecordFailure();
                             }
                             else
@@ -289,6 +292,7 @@ public sealed partial class WorkdayJobSourceProvider(
                         catch (Exception exception) when (exception is HttpRequestException or TimeoutException or InvalidDataException)
                         {
                             Interlocked.Increment(ref batchFailed);
+                            detailReasons.AddOrUpdate(JobSourceFailure.Code(exception), 1, (_, count) => count + 1);
                             if (exception is HttpRequestException or TimeoutException) Interlocked.Exchange(ref infrastructureFailure, 1);
                             if (durable) checkpoint!.Details.RecordFailure();
                             if (logger is not null) LogSourceFailure(logger, source.Id, "detail_fetch", item.index,
@@ -310,7 +314,8 @@ public sealed partial class WorkdayJobSourceProvider(
                 cursor += chunk.Length;
                 listingDiagnostics = listingDiagnostics with { InfrastructureFailure = infrastructureFailure != 0 };
                 yield return new(jobs, batchFailed, false)
-                { CheckpointCursor = durable ? cursor : null, ListingDiagnostics = listingDiagnostics with { ReconciliationSafe = false } };
+                { CheckpointCursor = durable ? cursor : null, ListingDiagnostics = listingDiagnostics with { ReconciliationSafe = false },
+                    ProviderReasonCounts = detailReasons.IsEmpty ? null : new Dictionary<string,int>(detailReasons) };
             }
             token.ThrowIfCancellationRequested();
             // Processing completion carries no authority to infer that absent jobs closed.
@@ -349,72 +354,67 @@ public sealed partial class WorkdayJobSourceProvider(
 
     internal static WorkdayTarget ValidateSource(JobSource source)
     {
-        if (source.AtsType != AtsType.Workday ||
-            string.IsNullOrWhiteSpace(source.AtsIdentifier) ||
-            !Uri.TryCreate(source.CareerPageUrl?.Trim(), UriKind.Absolute, out var uri) ||
-            uri.Scheme != Uri.UriSchemeHttps ||
-            !uri.IsDefaultPort ||
-            !string.IsNullOrEmpty(uri.UserInfo) ||
-            !string.IsNullOrEmpty(uri.Query) ||
-            !string.IsNullOrEmpty(uri.Fragment) ||
-            uri.HostNameType != UriHostNameType.Dns ||
-            uri.IsLoopback)
-        {
-            throw new InvalidOperationException(
-                "Workday source must use a public HTTPS myworkdayjobs.com career-site URL and an ATS identifier in tenant/site format.");
-        }
-
-        var hostMatch = WorkdayHostRegex().Match(uri.IdnHost);
-        if (!hostMatch.Success)
-            throw new InvalidOperationException(
-                "Workday source host must match {tenant}.wd{number}.myworkdayjobs.com.");
-
-        var tenant = hostMatch.Groups["tenant"].Value;
-        var segments = uri.AbsolutePath
-            .Split('/', StringSplitOptions.RemoveEmptyEntries)
-            .Select(Uri.UnescapeDataString)
-            .ToArray();
-
-        string site;
-        if (segments.Length == 1)
-        {
-            site = segments[0];
-        }
-        else if (segments.Length == 2 && LocaleRegex().IsMatch(segments[0]))
-        {
-            site = segments[1];
-        }
-        else
-        {
-            throw new InvalidOperationException(
-                "Workday CareerPageUrl must point to the Workday site root, for example https://tenant.wdN.myworkdayjobs.com/SiteName.");
-        }
-
-        if (!SiteRegex().IsMatch(site))
-            throw new InvalidOperationException("Workday career-site name contains unsupported characters.");
-
-        var expectedIdentifier = $"{tenant}/{site}";
-        if (!string.Equals(
-                source.AtsIdentifier.Trim(),
-                expectedIdentifier,
-                StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException(
-                $"Workday ATS identifier must exactly match '{expectedIdentifier}' for this CareerPageUrl.");
-        }
-
-        var origin = new UriBuilder(Uri.UriSchemeHttps, uri.IdnHost).Uri;
-        var apiRoot = new Uri(
-            origin,
-            $"wday/cxs/{Uri.EscapeDataString(tenant)}/{Uri.EscapeDataString(site)}");
-
-        return new WorkdayTarget(
-            origin,
-            apiRoot,
-            tenant,
-            site);
+        var result = ValidateConfiguration(source);
+        if (!result.IsValid) throw ConfigurationError(result);
+        var configuration = result.Configuration!;
+        return new(configuration.Origin, configuration.ApiRoot, configuration.Tenant, configuration.CareerSite);
     }
 
+    private static WorkdaySourceValidation ValidateConfiguration(JobSource source) => source.AtsType == AtsType.Workday
+        ? WorkdaySourceConfiguration.Validate(source.CareerPageUrl, source.AtsIdentifier)
+        : new(null, "WORKDAY_CONFIGURATION_INVALID", "Source provider must be Workday.", "", "", "");
+
+    private WorkdayTarget InitializeSource(JobSource source)
+    {
+        if (logger is not null) WorkdayExecutionDiagnostics.Input(logger, source);
+        var result = ValidateConfiguration(source);
+        if (logger is not null) WorkdayExecutionDiagnostics.Resolved(logger, source.Id, result);
+        if (logger is not null && result.IsValid)
+            LogConfiguration(logger, source.Id, source.Company?.Name ?? string.Empty, "Workday", result.Host,
+                result.Tenant, result.CareerSite, "ConfigurationValidation", result.IsValid ? "" : nameof(InvalidOperationException),
+                result.ReasonCode, result.Message);
+        if (!result.IsValid)
+        {
+            LogConfigurationFailure(source, result, "ConfigurationValidation");
+            throw ConfigurationError(result);
+        }
+        var configuration = result.Configuration!;
+        return new(configuration.Origin, configuration.ApiRoot, configuration.Tenant, configuration.CareerSite);
+    }
+
+    [LoggerMessage(EventId = 4393, Level = LogLevel.Information,
+        Message = "WorkdayProviderConfiguration SourceId={SourceId} SourceName={SourceName} Provider={Provider} Host={Host} Tenant={Tenant} CareerSite={CareerSite} Stage={Stage} ErrorType={ErrorType} ReasonCode={ReasonCode} Message={DiagnosticMessage}.")]
+    private static partial void LogConfiguration(ILogger logger, Guid sourceId, string sourceName, string provider,
+        string host, string tenant, string careerSite, string stage, string errorType, string reasonCode, string diagnosticMessage);
+
+    private void ValidateFetchSettings(JobSource source, WorkdayFetchOptions settings)
+    {
+        if (settings.IsValid()) return;
+        var configuration = ValidateConfiguration(source);
+        LogConfigurationFailure(source, configuration with
+            { ReasonCode = "WORKDAY_CONFIGURATION_INVALID", Message = "Invalid bounded Workday fetch settings." }, "FetchSettings");
+        throw ConfigurationError(configuration with { ReasonCode = "CONFIGURATION_INVALID", Message = "Invalid bounded Workday fetch settings." });
+    }
+
+    private static InvalidOperationException ConfigurationError(WorkdaySourceValidation result)
+    {
+        var error = new InvalidOperationException(result.Message);
+        error.Data["JobSourceReasonCode"] = result.ReasonCode;
+        return error;
+    }
+
+    private void LogConfigurationFailure(JobSource source, WorkdaySourceValidation result, string stage)
+    {
+        if (logger is not null) WorkdayExecutionDiagnostics.Rejected(logger, source.Id, result);
+        if (logger is not null)
+            LogFailure(logger, source.Id, source.Company?.Name ?? string.Empty, "Workday", result.Host,
+                result.Tenant, result.CareerSite, stage, nameof(InvalidOperationException), result.ReasonCode, result.Message);
+    }
+
+    [LoggerMessage(EventId = 4394, Level = LogLevel.Warning,
+        Message = "WorkdayProviderFailure SourceId={SourceId} SourceName={SourceName} Provider={Provider} Host={Host} Tenant={Tenant} CareerSite={CareerSite} Stage={Stage} ErrorType={ErrorType} ReasonCode={ReasonCode} Message={DiagnosticMessage}.")]
+    private static partial void LogFailure(ILogger logger, Guid sourceId, string sourceName, string provider,
+        string host, string tenant, string careerSite, string stage, string errorType, string reasonCode, string diagnosticMessage);
     internal static ListingPage ParseListingPage(string json)
     {
         if (string.IsNullOrWhiteSpace(json))
@@ -849,7 +849,7 @@ initialTotal ?? page.Total, page.Total, page.RawEntryCount, omitted);
                 if (attempt >= Settings.MaximumAttempts) throw new TimeoutException("Workday request attempts timed out.");
             }
             catch (HttpRequestException exception) when (exception.StatusCode is null or HttpStatusCode.TooManyRequests or
-                HttpStatusCode.InternalServerError or HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable or HttpStatusCode.GatewayTimeout)
+                HttpStatusCode.RequestTimeout or HttpStatusCode.InternalServerError or HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable or HttpStatusCode.GatewayTimeout)
             {
                 if (exception.StatusCode == HttpStatusCode.TooManyRequests)
                 {
@@ -1227,21 +1227,6 @@ initialTotal ?? page.Total, page.Total, page.RawEntryCount, omitted);
 
         return null;
     }
-
-    [GeneratedRegex(
-        @"^(?<tenant>[a-z0-9][a-z0-9-]{0,62})\.wd[0-9]+\.myworkdayjobs\.com$",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex WorkdayHostRegex();
-
-    [GeneratedRegex(
-        @"^[a-z]{2}-[a-z]{2}$",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex LocaleRegex();
-
-    [GeneratedRegex(
-        @"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
-        RegexOptions.CultureInvariant)]
-    private static partial Regex SiteRegex();
 
     internal sealed record WorkdayTarget(
         Uri Origin,

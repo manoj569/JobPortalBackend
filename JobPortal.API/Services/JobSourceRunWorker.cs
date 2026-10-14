@@ -94,9 +94,13 @@ public sealed partial class JobSourceRunWorker(IServiceScopeFactory scopes, JobS
         var checkpoint = services.GetService<IJobSourceRunCheckpoint>();
         var heartbeat = HeartbeatAsync(run, progress, execution, checkpoint, heartbeatStop.Token);
         var status = JobSourceRunStatus.Interrupted;
+        AtsType? executionProvider = null;
+        var executionStage = "SourceLookup";
         try
         {
             var source = await services.GetRequiredService<IJobSourceRepository>().GetByIdAsync(run.JobSourceId, execution.Token);
+            executionProvider = source?.AtsType;
+            executionStage = "CheckpointBinding";
             if (run.DiagnosticsJson is not null)
                 progress.Report(new("Resuming", run.Processed,
                     System.Text.Json.JsonSerializer.Deserialize<JobSourceRunResult>(run.DiagnosticsJson) ?? new()));
@@ -125,6 +129,7 @@ public sealed partial class JobSourceRunWorker(IServiceScopeFactory scopes, JobS
                     return;
                 }
             }
+            executionStage = "RunnerResolutionOrExecution";
             var result = await services.GetRequiredService<IJobSourceRunner>().RunAsync(run.JobSourceId, execution.Token);
             status = result.ContinuationPending ? JobSourceRunStatus.Paused : result.Succeeded ? JobSourceRunStatus.Succeeded :
                 checkpoint?.Enabled == true && result.StopReason != "InfrastructureFailure" ? JobSourceRunStatus.Unsafe : JobSourceRunStatus.Failed;
@@ -132,11 +137,18 @@ public sealed partial class JobSourceRunWorker(IServiceScopeFactory scopes, JobS
             // A final infrastructure failure can return a zero-counter error result
             // after per-item durable commits. Keep the last observed progress in that case.
             var counters = !result.Succeeded && result.TotalReceived == 0 && captured.Counters.TotalReceived > 0
-                ? captured.Counters with { Succeeded = false, Error = null } : result;
+                ? captured.Counters with { Succeeded = false, Error = null, ReconciliationSafe = false,
+                    FailureReasonCode = result.FailureReasonCode, FailureStage = result.FailureStage, StopReason = result.StopReason } : result;
+            counters = counters with { RunId = run.Id };
             progress.Report(new("Finalizing", captured.Processed, counters));
         }
         catch (OperationCanceledException) when (execution.IsCancellationRequested)
         {
+            var cancellationProgress = progress.Snapshot;
+            progress.Report(cancellationProgress with { Counters = cancellationProgress.Counters with
+            { RunId = run.Id, Succeeded = false, ReconciliationSafe = false, FailureStage = "SourceExecution",
+              FailureReasonCode = stoppingToken.IsCancellationRequested ? "HOST_SHUTDOWN" : "LEASE_INTERRUPTED",
+              StopReason = stoppingToken.IsCancellationRequested ? "HostShutdown" : "LeaseInterrupted" } });
             if (checkpoint?.Enabled == true)
             {
                 status = JobSourceRunStatus.Paused;
@@ -156,10 +168,15 @@ public sealed partial class JobSourceRunWorker(IServiceScopeFactory scopes, JobS
             { RunId = run.Id, StopReason = exception.ReasonCode, ReconciliationSafe = false,
                 ListingDiagnostics = exception.ListingDiagnostics ?? captured.Counters.ListingDiagnostics } });
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            if (executionProvider == AtsType.Workday)
+                WorkdayExecutionDiagnostics.PreExecutionFailure(logger, run.JobSourceId, executionStage, exception);
             status = JobSourceRunStatus.Failed;
             Warning(logger, run.Id, run.JobSourceId, "source_run_failed");
+            var captured = progress.Snapshot;
+            progress.Report(captured with { Counters = captured.Counters with { Succeeded = false,
+                ReconciliationSafe = false, FailureReasonCode = JobSourceFailure.Code(exception), FailureStage = "SourceExecution" } });
         }
         finally
         {

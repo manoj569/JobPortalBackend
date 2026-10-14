@@ -7,6 +7,7 @@ using System.Text.RegularExpressions;
 using JobPortal.Application.Abstractions.Jobs;
 using JobPortal.Domain.Entities;
 using JobPortal.Domain.Enums;
+using JobPortal.Application.Features.JobAggregation;
 using Microsoft.Extensions.Logging;
 
 namespace JobPortal.Infrastructure.Services;
@@ -17,7 +18,7 @@ namespace JobPortal.Infrastructure.Services;
 /// </summary>
 public sealed partial class SuccessFactorsJobSourceProvider(
     IHttpClientFactory clients,
-    ILogger<SuccessFactorsJobSourceProvider>? logger = null) : ICompleteExternalJobProvider
+    ILogger<SuccessFactorsJobSourceProvider>? logger = null) : IBatchedExternalJobProvider
 {
     public const string HttpClientName = "SuccessFactorsJobAggregation";
     private const int PageSize = 25;
@@ -53,7 +54,10 @@ public sealed partial class SuccessFactorsJobSourceProvider(
     public async Task<IReadOnlyCollection<RawExternalJob>> FetchJobsAsync(JobSource source, CancellationToken cancellationToken = default) =>
         (await FetchSnapshotAsync(source, cancellationToken)).Jobs;
 
-    public async Task<ExternalJobSourceSnapshot> FetchSnapshotAsync(JobSource source, CancellationToken cancellationToken = default)
+    public Task<ExternalJobSourceSnapshot> FetchSnapshotAsync(JobSource source, CancellationToken cancellationToken = default) =>
+        PublicAtsSnapshot.CollectAsync(FetchBatchesAsync(source,cancellationToken),cancellationToken);
+    public async IAsyncEnumerable<ExternalJobSourceSnapshot> FetchBatchesAsync(JobSource source,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(source);
         var boardUri = ValidateSource(source);
@@ -87,7 +91,7 @@ public sealed partial class SuccessFactorsJobSourceProvider(
                         "The SuccessFactors listing pagination did not provide a safe, bounded complete result set.");
                 }
                 if (page.TotalCount != expectedTotal || page.LastOffset != expectedLastOffset ||
-                    page.FirstResult != offset + 1 || page.Results.Count != Math.Min(PageSize, Math.Max(0, expectedTotal - offset)))
+                    (expectedTotal > 0 && page.FirstResult != offset + 1) || page.Results.Count != Math.Min(PageSize, Math.Max(0, expectedTotal - offset)))
                     throw InvalidDocument(page.TotalCount != expectedTotal ? FailureReason.ListingTotalChanged :
                         page.LastOffset != expectedLastOffset ? FailureReason.ListingLastOffsetChanged : FailureReason.ListingSnapshotChanged,
                         "The SuccessFactors listing changed during pagination; refusing an incomplete snapshot.");
@@ -117,13 +121,18 @@ public sealed partial class SuccessFactorsJobSourceProvider(
             throw exception;
         }
 
+        var seenIds = new HashSet<string>(StringComparer.Ordinal);
+        var healthy = true; var totalParsed = 0; var totalSkipped = 0;
+        var lastRequestAt = DateTimeOffset.MinValue;
+        for (var start = 0; start < Math.Max(1,pages.Count); start += 25)
+        {
         var parsed = new ConcurrentDictionary<int, RawExternalJob>();
+        var reasons = new ConcurrentDictionary<string,int>(StringComparer.Ordinal);
         var skipped = 0;
         var nextIndex = 0;
         using var concurrency = new SemaphoreSlim(2, 2);
         using var pace = new SemaphoreSlim(1, 1);
-        var lastRequestAt = DateTimeOffset.MinValue;
-        await Parallel.ForEachAsync(pages.Select((entry, index) => (entry, index)),
+        await Parallel.ForEachAsync(pages.Skip(start).Take(25).Select((entry, index) => (entry, index)),
             new ParallelOptions { MaxDegreeOfParallelism = 2, CancellationToken = cancellationToken }, async (item, token) =>
             {
                 await concurrency.WaitAsync(token);
@@ -139,21 +148,29 @@ public sealed partial class SuccessFactorsJobSourceProvider(
                     finally { pace.Release(); }
 
                     var detailResponse = await GetHtmlAsync(client, item.entry.DetailUrl, source.Id, "detail_response",
-                        (item.index / PageSize) * PageSize, token);
+                        ((start + item.index) / PageSize) * PageSize, token);
                     var detail = ParseDetail(detailResponse.Html, item.entry, source.Company?.Name ?? string.Empty);
-                    if (detail is null) Interlocked.Increment(ref skipped);
+                    if (detail is null) { Interlocked.Increment(ref skipped); reasons.AddOrUpdate("PROVIDER_RESPONSE_INVALID", 1, (_, count) => count + 1); }
                     else parsed[item.index] = detail;
                     Interlocked.Increment(ref nextIndex);
                 }
+                catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+                catch (Exception error) when (error is HttpRequestException or InvalidDataException or OperationCanceledException)
+                { Interlocked.Increment(ref skipped); reasons.AddOrUpdate(JobSourceFailure.Code(error), 1, (_, count) => count + 1); }
                 finally { concurrency.Release(); }
             });
 
         var ordered = parsed.OrderBy(x => x.Key).Select(x => x.Value).ToArray();
         var uniqueExternalIds = ordered.Select(x => x.ExternalId).Where(x => !string.IsNullOrWhiteSpace(x))
             .Distinct(StringComparer.Ordinal).Count();
-        var isComplete = skipped == 0 && nextIndex == pages.Count && ordered.Length == expectedTotal && uniqueExternalIds == expectedTotal;
-        if (logger is not null) Completed(logger, source.Id, pages.Count, ordered.Length, skipped, stopwatch.Elapsed.TotalMilliseconds, null);
-        return new(ordered, skipped, isComplete);
+        healthy &= skipped == 0 && uniqueExternalIds == ordered.Length && ordered.All(job => job.ExternalId is { } id && seenIds.Add(id));
+        totalParsed += ordered.Length;
+        var isComplete = healthy && start + 25 >= pages.Count && totalParsed == expectedTotal;
+        totalSkipped += skipped;
+        if (logger is not null && start + 25 >= pages.Count) Completed(logger, source.Id, pages.Count, totalParsed, totalSkipped, stopwatch.Elapsed.TotalMilliseconds, null);
+        yield return new(ordered, skipped, isComplete) { ReportedListingTotal = expectedTotal,
+            ProviderReasonCounts = reasons.IsEmpty ? null : new Dictionary<string,int>(reasons) };
+        }
     }
 
     internal static ListingPage ParseListingPage(string html, int requestedOffset, Uri boardUri)
@@ -212,8 +229,11 @@ public sealed partial class SuccessFactorsJobSourceProvider(
         }
 
         var expectedCount = total == 0 ? 0 : Math.Min(PageSize, Math.Max(0, total - requestedOffset));
-        if (first != requestedOffset + 1 || last < first || total < 0 || rows.Length != expectedCount || results.Count != expectedCount)
-            throw InvalidDocument(first != requestedOffset + 1 || last < first || total < 0 ? FailureReason.ListingRangeInvalid :
+        var invalidRange = total == 0
+            ? requestedOffset != 0 || first != 0 || last != 0
+            : first != requestedOffset + 1 || last < first;
+        if (invalidRange || total < 0 || rows.Length != expectedCount || results.Count != expectedCount)
+            throw InvalidDocument(invalidRange || total < 0 ? FailureReason.ListingRangeInvalid :
                 rows.Length != expectedCount ? FailureReason.ListingRowCountMismatch : rowFailure ?? FailureReason.ListingRowsUnparseable,
                 "The SuccessFactors listing page contained malformed or incomplete job rows.");
         return new(first, last, total, lastOffset, results);
@@ -294,20 +314,10 @@ public sealed partial class SuccessFactorsJobSourceProvider(
 
     internal static Uri ValidateSource(JobSource source)
     {
-        if (source.AtsType != AtsType.SuccessFactors || string.IsNullOrWhiteSpace(source.AtsIdentifier) ||
-            !Uri.TryCreate(source.CareerPageUrl, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps ||
-            !uri.IsDefaultPort || !string.IsNullOrEmpty(uri.UserInfo) || !string.IsNullOrEmpty(uri.Query) ||
-            !string.IsNullOrEmpty(uri.Fragment) || uri.HostNameType != UriHostNameType.Dns ||
-            !uri.Host.Contains('.') || uri.IsLoopback ||
-            uri.Host.EndsWith(".local", StringComparison.OrdinalIgnoreCase) ||
-            uri.Host.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("SuccessFactors source must use a public HTTPS /go/{board}/{numeric-id} URL matching its ATS identifier.");
-        var board = BoardPathRegex().Match(uri.AbsolutePath);
-        if (!board.Success || board.Groups[1].Value != source.AtsIdentifier)
-            throw new InvalidOperationException("SuccessFactors source must use a public HTTPS /go/{board}/{numeric-id} URL matching its ATS identifier.");
-        return uri;
+        if (source.AtsType != AtsType.SuccessFactors) throw new InvalidOperationException("Source provider must be SuccessFactors.");
+        JobSourceConfiguration.Require(AtsType.SuccessFactors, source.CareerPageUrl, source.AtsIdentifier);
+        return new Uri(source.CareerPageUrl.Trim());
     }
-
     private static Uri ListingUri(Uri boardUri, int offset)
     {
         var root = new Uri(boardUri.AbsoluteUri.TrimEnd('/') + "/");
@@ -405,8 +415,6 @@ public sealed partial class SuccessFactorsJobSourceProvider(
     private static partial Regex ListingTotalRegex();
     [GeneratedRegex("""(?is)<a\b(?=[^>]*\bclass\s*=\s*(['"])[^'"]*\bpaginationItemLast\b[^'"]*\1)[^>]*\bhref\s*=\s*(['"])(.*?)\2[^>]*>""", RegexOptions.CultureInvariant)]
     private static partial Regex LastPageRegex();
-    [GeneratedRegex(@"^/go/[A-Za-z0-9_-]+/([0-9]+)/?$", RegexOptions.CultureInvariant)]
-    private static partial Regex BoardPathRegex();
     [GeneratedRegex(@"/(\d+)/?$", RegexOptions.CultureInvariant)]
     private static partial Regex PostingIdRegex();
     [GeneratedRegex(@"(?is)Job requisition ID\s*(?:</strong>)?\s*:?[\s·•]*([0-9]+)", RegexOptions.CultureInvariant)]

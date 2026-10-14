@@ -11,9 +11,12 @@ public sealed record ExternalJobSourceSnapshot(
     public int? CheckpointCursor { get; init; }
     public bool ContinuationPending { get; init; }
     public WorkdayListingDiagnostics? ListingDiagnostics { get; init; }
+    public int? ReportedListingTotal { get; init; }
+    public IReadOnlyDictionary<string, int>? ProviderReasonCounts { get; init; }
     // Selection diagnostics only: these items never reached ingestion validation.
     public IReadOnlyDictionary<string, int>? SelectionReasonCounts { get; init; }
     public IReadOnlyDictionary<string, int>? EligibilityReasonCounts { get; init; }
+    public bool SelectionLimited { get; init; }
 }
 
 // Workday progress and anomalies are diagnostic; they never authorize absence reconciliation.

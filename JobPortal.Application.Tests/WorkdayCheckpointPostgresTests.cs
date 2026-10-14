@@ -52,28 +52,28 @@ public sealed class WorkdayCheckpointPostgresTests(WorkdayCheckpointDatabase dat
         Assert.False(result.ReconciliationSafe);
         Assert.Equal(5001, result.CheckpointCursor);
         Assert.Equal(5001, result.ObservedIdentities);
-        Assert.Equal(64, result.Created);
+        Assert.Equal(5001, result.Created);
         Assert.Equal(0, result.Existing);
         Assert.Equal(0, result.Failed);
         Assert.Equal(64, result.Published);
-        Assert.Equal(4937, result.SelectionSkipped);
+        Assert.Equal(0, result.SelectionSkipped);
         Assert.Equal(5001, f.DetailRequests);
         await using var db = database.Open();
-        Assert.Equal(64, await db.Jobs.CountAsync(x => x.CompanyId == f.Source.CompanyId));
-        Assert.Equal(64, await db.Set<JobSourceRunItem>().CountAsync(x => x.RunId == run.Id));
+        Assert.Equal(5001, await db.Jobs.CountAsync(x => x.CompanyId == f.Source.CompanyId));
+        Assert.Equal(5001, await db.Set<JobSourceRunItem>().CountAsync(x => x.RunId == run.Id));
         var status = JobSourceRunResponse.From((await new JobSourceRunStore(db).GetAsync(f.Source.Id, run.Id, default))!);
         Assert.Equal("Succeeded", status.Status);
-        Assert.Equal(64, status.Created);
+        Assert.Equal(5001, status.Created);
         Assert.Equal(0, status.Diagnostics!.RemainingWork);
         var repeatedRun = await f.EnqueueAsync();
         do { result = await f.ExecuteAsync(repeatedRun.Id, 1000); } while (result.ContinuationPending);
         Assert.True(result.Succeeded);
         Assert.Equal(0, result.Created);
-        Assert.Equal(64, result.Existing);
+        Assert.Equal(5001, result.Existing);
         Assert.Equal(0, result.Published);
-        Assert.Equal(4937, result.SelectionSkipped);
-        Assert.Equal(64, await db.Jobs.CountAsync(x => x.CompanyId == f.Source.CompanyId));
-        output.WriteLine($"5001 fixture vacancies with real PostgreSQL: executions={executions}; first Created=64 Published=64 GeographySkipped=4937; repeat Created=0 Existing=64 Published=0.");
+        Assert.Equal(0, result.SelectionSkipped);
+        Assert.Equal(5001, await db.Jobs.CountAsync(x => x.CompanyId == f.Source.CompanyId));
+        output.WriteLine($"5001 fixture vacancies with real PostgreSQL: executions={executions}; first Created=5001 Published=64 GeographySkipped=0; repeat Created=0 Existing=5001 Published=0.");
     }
 
     [WorkdayLocalPostgresFact]
@@ -88,13 +88,13 @@ public sealed class WorkdayCheckpointPostgresTests(WorkdayCheckpointDatabase dat
         while (result.ContinuationPending) result = await f.ExecuteAsync(run.Id, 40);
         Assert.False(result.ReconciliationSafe);
         Assert.True(result.Succeeded);
-        Assert.Equal(44, result.Created);
-        Assert.Equal(132, result.SelectionSkipped);
+        Assert.Equal(176, result.Created);
+        Assert.Equal(0, result.SelectionSkipped);
         Assert.Equal(176, result.ObservedIdentities);
         await using var db = database.Open();
         var jobs = await db.Jobs.Where(x => x.CompanyId == f.Source.CompanyId).ToArrayAsync();
-        Assert.Equal(44, jobs.Length);
-        Assert.All(jobs, x => Assert.Equal(JobStatus.Published, x.Status));
+        Assert.Equal(176, jobs.Length);
+        Assert.Equal(44, jobs.Count(x => x.Status == JobStatus.Published));
         Assert.All(jobs, x => Assert.Null(x.CategoryId));
         var publicRepository = new PublicJobRepository(db, TimeProvider.System);
         var discover = await publicRepository.SearchAsync(new(CompanyId: f.Source.CompanyId));
@@ -113,10 +113,10 @@ public sealed class WorkdayCheckpointPostgresTests(WorkdayCheckpointDatabase dat
         do { result = await f.ExecuteAsync(repeated.Id, 40); } while (result.ContinuationPending);
         Assert.True(result.Succeeded);
         Assert.Equal(0, result.Created);
-        Assert.Equal(44, result.Existing);
-        Assert.Equal(132, result.SelectionSkipped);
+        Assert.Equal(176, result.Existing);
+        Assert.Equal(0, result.SelectionSkipped);
         Assert.Equal(0, result.Published);
-        Assert.Empty(result.ReconciliationBlockReasons);
+        Assert.Contains("WorkdayNonAuthoritative", result.ReconciliationBlockReasons);
     }
 
     [WorkdayLocalPostgresTheory]
@@ -424,14 +424,14 @@ public sealed class WorkdayCheckpointPostgresTests(WorkdayCheckpointDatabase dat
         Assert.True(result.Succeeded);
         Assert.False(result.ReconciliationSafe);
         Assert.Equal(6, result.ObservedIdentities);
-        Assert.Equal(3, result.Created);
+        Assert.Equal(6, result.Created);
         Assert.Equal(2, result.Published);
-        Assert.Equal(1, result.NeedsReview);
+        Assert.Equal(3, result.NeedsReview);
         Assert.Equal(2, result.IndiaEligible);
         Assert.Equal(1, result.MissingLocationAccepted);
-        Assert.Equal(1, result.NonIndiaRejected);
-        Assert.Equal(2, result.AmbiguousLocationHeld);
-        Assert.Equal(3, result.SelectionSkipped);
+        Assert.Equal(0, result.NonIndiaRejected);
+        Assert.Equal(0, result.AmbiguousLocationHeld);
+        Assert.Equal(0, result.SelectionSkipped);
         Assert.Equal(0, result.Failed);
     }
 

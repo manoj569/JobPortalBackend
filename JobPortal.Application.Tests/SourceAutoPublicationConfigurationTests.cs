@@ -31,7 +31,9 @@ public sealed class SourceAutoPublicationConfigurationTests
     {
         using var f = new JobSourceFixture();
         var created = await f.Service.CreateAsync(f.Request with
-            { AtsType = provider, AtsIdentifier = "new-source", AutoPublishEnabled = enabled });
+            { AtsType = provider, AtsIdentifier = provider == AtsType.Workday ? "tenant/Site" : provider == AtsType.SuccessFactors ? "123456" : "new-source",
+                CareerPageUrl = provider == AtsType.Workday ? "https://tenant.wd504.myworkdayjobs.com/Site" : provider == AtsType.SuccessFactors ? "https://careers.example.test/go/Example-Careers/123456" : f.Request.CareerPageUrl,
+                AutoPublishEnabled = enabled });
         f.Context.ChangeTracker.Clear();
         Assert.Equal(enabled, (await f.Repository.GetByIdAsync(created.Id))!.AutoPublishEnabled);
         Assert.Equal(enabled, (await f.Service.GetByIdAsync(created.Id)).AutoPublishEnabled);

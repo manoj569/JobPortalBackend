@@ -9,6 +9,7 @@ namespace JobPortal.Application.Tests;
 public sealed class JobAggregationHttpResilienceTests
 {
     [Theory]
+    [InlineData(408)]
     [InlineData(429)]
     [InlineData(500)]
     [InlineData(502)]

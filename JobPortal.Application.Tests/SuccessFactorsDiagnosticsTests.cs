@@ -166,7 +166,9 @@ public sealed class SuccessFactorsDiagnosticsTests
             if (uri.AbsolutePath.StartsWith("/job/", StringComparison.Ordinal)) response.Content.Headers.ContentLength = 4 * 1024 * 1024 + 1;
             return Task.FromResult(response);
         }, logs);
-        await Assert.ThrowsAsync<InvalidDataException>(() => provider.FetchSnapshotAsync(source));
+        var snapshot = await provider.FetchSnapshotAsync(source);
+        Assert.False(snapshot.IsComplete); Assert.Equal(1, snapshot.Skipped);
+        Assert.Equal(1, snapshot.ProviderReasonCounts!["PROVIDER_RESPONSE_INVALID"]);
         AssertFailure(logs, source.Id, "detail_response", 0, "ResponseDeclaredSizeExceeded", 200);
     }
 

@@ -49,6 +49,8 @@ public sealed record JobSourceRunResponse(
     public int ExistingDuplicate => Matched;
     public int Existing => Diagnostics?.Existing ?? Updated + Unchanged + Matched;
     public int Rejected => Diagnostics?.Rejected ?? Skipped;
+    public int NotPublished => Diagnostics?.NotPublished ?? NeedsReview + QualityRejected + AutoPublishDisabled + PublishFailed;
+    public int SkippedInvalid => Diagnostics?.SkippedInvalid ?? Skipped;
     public static JobSourceRunResponse From(JobSourceRun row) => new(row.Id, row.JobSourceId, row.Status.ToString(),
         row.AttemptCount, row.Status == JobSourceRunStatus.Paused || row.Status == JobSourceRunStatus.Interrupted && row.AttemptCount < JobSourceRun.MaximumAttempts,
         row.QueuedAtUtc, row.StartedAtUtc, row.CompletedAtUtc, row.InterruptedAtUtc, row.NextAttemptAtUtc,
@@ -67,6 +69,11 @@ public sealed class JobSourceRunService(IJobSourceRepository sources, IJobSource
             ?? throw new NotFoundException("Job source was not found.");
         OracleRecruitingCloudConfiguration.RequireAuthorization(source);
         if (!source.IsActive) throw new BadRequestException("Job source is inactive.", "job_source_inactive");
+        if (source.AtsType != JobPortal.Domain.Enums.AtsType.Custom)
+        {
+            var configuration = JobSourceConfiguration.Resolve(source.AtsType, source.CareerPageUrl, source.AtsIdentifier);
+            if (!configuration.IsValid) throw new BadRequestException(configuration.Message, configuration.ReasonCode);
+        }
         return JobSourceRunResponse.From(await store.EnqueueAsync(sourceId, requestedBy, clock.GetUtcNow().UtcDateTime, ct));
     }
 

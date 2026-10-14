@@ -172,7 +172,8 @@ public sealed class JobSourceManagementService(
     private static string? SourceIdentifier(SaveJobSourceRequest request) =>
         request.AtsType == AtsType.OracleRecruitingCloud
             ? OracleRecruitingCloudConfiguration.Parse(request.AtsIdentifier)!.SourceIdentifier
-            : TextNormalizer.TrimOrNull(request.AtsIdentifier);
+            : request.AtsType == AtsType.Custom ? TextNormalizer.TrimOrNull(request.AtsIdentifier)
+            : JobSourceConfiguration.Require(request.AtsType, request.CareerPageUrl, request.AtsIdentifier).Identifier;
 
     private static void Apply(JobSource source, SaveJobSourceRequest request, Company company, string? identifier)
     {

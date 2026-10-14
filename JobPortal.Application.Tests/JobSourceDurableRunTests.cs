@@ -156,6 +156,9 @@ public sealed class JobSourceDurableRunTests
         Assert.Equal(JobSourceRunStatus.Interrupted, row.Status);
         Assert.Equal(475, row.Created); Assert.Equal(475, row.Processed);
         Assert.Equal(1500, row.TotalReceived); Assert.Null(row.LeaseOwner);
+        var interrupted = System.Text.Json.JsonSerializer.Deserialize<JobSourceRunResult>(row.DiagnosticsJson!);
+        Assert.Equal("HOST_SHUTDOWN", interrupted!.FailureReasonCode);
+        Assert.False(interrupted.Succeeded); Assert.False(interrupted.ReconciliationSafe);
         f.Clock.Now = row.NextAttemptAtUtc;
         f.Run = (progress, _) =>
         {
@@ -399,7 +402,8 @@ public sealed class JobSourceDurableRunTests
             }
         }
         private static void SaveProgress(JobSourceRun row, JobSourceRunProgressSnapshot p)
-        { row.Phase = p.Phase; row.Processed = p.Processed; row.TotalReceived = p.Counters.TotalReceived; row.Created = p.Counters.Created; row.Updated = p.Counters.Updated; }
+        { row.Phase = p.Phase; row.Processed = p.Processed; row.TotalReceived = p.Counters.TotalReceived; row.Created = p.Counters.Created; row.Updated = p.Counters.Updated;
+            row.DiagnosticsJson = JsonSerializer.Serialize(p.Counters); }
     }
     private sealed class Clock : TimeProvider
     {

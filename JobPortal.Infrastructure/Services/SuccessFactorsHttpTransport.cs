@@ -10,6 +10,7 @@ internal static class SuccessFactorsHttpTransport
     internal static SocketsHttpHandler CreateHandler() => new()
     {
         AllowAutoRedirect = false,
+        UseCookies = false,
         UseProxy = false,
         ConnectCallback = ConnectAsync
     };

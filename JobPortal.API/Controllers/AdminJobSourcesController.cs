@@ -12,7 +12,8 @@ namespace JobPortal.API.Controllers;
 [Authorize(Roles = "Administrator")]
 [Route("api/admin/job-sources")]
 [Produces("application/json")]
-public sealed class AdminJobSourcesController(IJobSourceManagementService sources, JobSourceRunService? runs = null) : ControllerBase
+public sealed class AdminJobSourcesController(IJobSourceManagementService sources, JobSourceRunService? runs = null,
+    IJobSourceConnectionTester? connectionTester = null) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<ApiResponse<PagedResponse<JobSourceResponse>>>> Search(
@@ -58,6 +59,17 @@ public sealed class AdminJobSourcesController(IJobSourceManagementService source
         var result = await RequiredRuns.EnqueueAsync(id, requestedBy, cancellationToken);
         return AcceptedAtAction(nameof(GetRun), new { id, runId = result.RunId },
             new ApiResponse<JobSourceRunResponse>(result, "Job source run accepted. Poll the run status for completion."));
+    }
+
+    [HttpPost("{id:guid}/test")]
+    public async Task<ActionResult<ApiResponse<JobSourceConnectionResult>>> Test(Guid id, CancellationToken cancellationToken)
+    {
+        var saved = await sources.GetByIdAsync(id, cancellationToken);
+        var source = new JobPortal.Domain.Entities.JobSource { Id = saved.Id, CompanyId = saved.CompanyId,
+            AtsType = saved.AtsType, AtsIdentifier = saved.AtsIdentifier, CareerPageUrl = saved.CareerPageUrl };
+        var result = await (connectionTester ?? throw new InvalidOperationException("Connection testing is not registered."))
+            .TestAsync(source, cancellationToken);
+        return Ok(new ApiResponse<JobSourceConnectionResult>(result));
     }
 
     [HttpGet("{id:guid}/runs/{runId:guid}")]

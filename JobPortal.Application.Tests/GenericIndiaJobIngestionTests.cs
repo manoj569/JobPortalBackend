@@ -59,16 +59,19 @@ public sealed class GenericIndiaJobIngestionTests
     [InlineData("Worldwide remote; India excluded", null, false)]
     [InlineData("Unknown", null, true)]
     [InlineData("Brazil", null, false)]
-    public async Task ForeignAndAmbiguousJobsAreNotPersistedOrPublished(string location, string? country, bool held)
+    public async Task ForeignAndAmbiguousJobsArePersistedBeforeExistingPublicationReview(string location, string? country, bool held)
     {
         using var f = new JobSourceFixture();
         var provider = new SnapshotProvider(f.Source.AtsType, [Vacancy(1) with { Location = location, CountryCodes = country is null ? [] : [country] }]);
         var result = await Runner(f, provider).RunAsync(f.Source.Id);
-        Assert.Equal(0, result.Created);
+        Assert.Equal(1, result.Created);
         Assert.Equal(0, result.Published);
-        Assert.True(result.AmbiguousLocationHeld == (held ? 1 : 0), System.Text.Json.JsonSerializer.Serialize(result));
-        Assert.True(result.NonIndiaRejected == (held ? 0 : 1), System.Text.Json.JsonSerializer.Serialize(result));
-        Assert.Empty(await f.Context.Jobs.ToArrayAsync());
+        Assert.Equal(0, result.AmbiguousLocationHeld); Assert.Equal(0, result.NonIndiaRejected);
+        Assert.Equal(1,result.NotPublished); Assert.True(result.Succeeded);
+        var saved = Assert.Single(await f.Context.Jobs.ToArrayAsync());
+        Assert.Equal(JobStatus.Draft,saved.Status);
+        Assert.Equal(held,ImportedJobIntegrity.Eligibility(saved).Decision == IndiaJobEligibilityDecision.Review);
+        Assert.Equal(1,result.NeedsReview);
         Assert.Equal(0, (await new PublicJobRepository(f.Context, TimeProvider.System).SearchAsync(new())).TotalCount);
         Assert.Equal(0, result.Closed);
     }
@@ -83,17 +86,17 @@ public sealed class GenericIndiaJobIngestionTests
     }
 
     [Fact]
-    public async Task MultipleLocationsKeepOriginalFactsAndRequireAtLeastOneIndianLocation()
+    public async Task MultipleLocationsKeepOriginalFactsWithoutRestrictingIngestion()
     {
         using var f = new JobSourceFixture();
         var provider = new SnapshotProvider(f.Source.AtsType, [
             Vacancy(1) with { Location = "London", AdditionalLocations = ["Paris", "Pune, India"], CountryCodes = ["GB", "FR", "IN"] },
             Vacancy(2) with { Location = "London", AdditionalLocations = ["Paris"], CountryCodes = ["GB", "FR"] }]);
         var result = await Runner(f, provider).RunAsync(f.Source.Id);
-        Assert.Equal(1, result.Created);
+        Assert.Equal(2, result.Created);
         Assert.True(result.Published == 1, System.Text.Json.JsonSerializer.Serialize(result));
-        Assert.Equal(1, result.NonIndiaRejected);
-        var job = Assert.Single(await f.Context.Jobs.ToArrayAsync());
+        Assert.Equal(0, result.NonIndiaRejected);
+        var job = await f.Context.Jobs.SingleAsync(job => job.ExternalJobId == "REQ1");
         Assert.Equal("London", job.Location);
         Assert.Contains("Pune, India", job.SourceMetadataJson!);
         Assert.Contains("FR", job.SourceMetadataJson!);
@@ -114,16 +117,16 @@ public sealed class GenericIndiaJobIngestionTests
         var provider = new SnapshotProvider(ats, [Vacancy(1), Vacancy(1), Vacancy(2) with { Location = "US", CountryCodes = ["US"] }]);
         var runner = Runner(f, provider);
         var first = await runner.RunAsync(f.Source.Id);
-        Assert.Equal(1, first.Created);
+        Assert.Equal(2, first.Created);
         Assert.Equal(1, first.Existing);
         Assert.Equal(1, first.Published);
-        Assert.Equal(1, first.NonIndiaRejected);
-        var id = Assert.Single(await f.Context.Jobs.ToArrayAsync()).Id;
+        Assert.Equal(0, first.NonIndiaRejected);
+        var id = (await f.Context.Jobs.SingleAsync(job => job.ExternalJobId == "REQ1")).Id;
         var second = await runner.RunAsync(f.Source.Id);
         Assert.Equal(0, second.Created);
-        Assert.Equal(2, second.Existing);
+        Assert.Equal(3, second.Existing);
         Assert.Equal(0, second.Published);
-        Assert.Equal(id, Assert.Single(await f.Context.Jobs.ToArrayAsync()).Id);
+        Assert.Equal(id, (await f.Context.Jobs.SingleAsync(job => job.ExternalJobId == "REQ1")).Id);
         Assert.Equal(1, (await new PublicJobRepository(f.Context, TimeProvider.System).SearchAsync(new())).TotalCount);
     }
 
@@ -237,13 +240,15 @@ public sealed class GenericIndiaJobIngestionTests
     }
     internal static JobAutoPublishService Publisher(JobSourceFixture f) => new(new JobRepository(f.Context), new JobQualityGate(),
         ManualService(f), Options.Create(new JobAggregationOptions { AutoPublishEnabled = false }), TimeProvider.System, f.Repository, f.Locks);
-    internal static JobSourceRunner Runner(JobSourceFixture f, SnapshotProvider provider)
+    internal static JobSourceRunner Runner(JobSourceFixture f, IExternalJobProvider provider,
+        IJobSourceRunProgress? progress = null, Microsoft.Extensions.Logging.ILogger<JobSourceRunner>? logger = null,
+        JobPortal.Application.Abstractions.Persistence.IJobSourceRepository? sources = null)
     {
         var jobs = new JobRepository(f.Context); var unit = new UnitOfWork(f.Context); var fingerprint = new JobFingerprintService(); var canonical = new UrlCanonicalizer();
         var ingestion = new JobIngestionService(jobs, new CompanyManagementRepository(f.Context), new CategoryManagementRepository(f.Context),
             new JobDeduplicationService(jobs, fingerprint, canonical), fingerprint, unit, TimeProvider.System, f.Locks, canonical);
-        return new(f.Repository, [provider], ingestion, unit, TimeProvider.System, f.Resolver, new ExternalJobNormalizer(),
-            autoPublishService: Publisher(f), jobRepository: jobs);
+        return new(sources ?? f.Repository, [provider], ingestion, unit, TimeProvider.System, f.Resolver, new ExternalJobNormalizer(), logger,
+            autoPublishService: Publisher(f), jobRepository: jobs, runProgress: progress);
     }
     internal sealed class SnapshotProvider(AtsType ats, RawExternalJob[] jobs) : ICompleteExternalJobProvider
     {

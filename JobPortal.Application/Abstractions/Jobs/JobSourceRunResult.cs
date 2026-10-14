@@ -6,6 +6,9 @@ public sealed record JobSourceRunResult
     public Guid? RunId { get; init; }
     public bool ContinuationPending { get; init; }
     public string? StopReason { get; init; }
+    public string? FailureReasonCode { get; init; }
+    public string? FailureStage { get; init; }
+    public IReadOnlyDictionary<string, int>? ProviderReasonCounts { get; init; }
     public WorkdayListingDiagnostics? ListingDiagnostics { get; init; }
     public int ListingTotal { get; init; }
     public int RebaseCount { get; init; }
@@ -31,10 +34,10 @@ public sealed record JobSourceRunResult
     public int IndiaEligible => (EligibilityReasonCounts?.GetValueOrDefault("IndiaLocationConfirmed") ?? 0) +
         (EligibilityReasonCounts?.GetValueOrDefault("ExplicitIndiaRemote") ?? 0);
     public int MissingLocationAccepted => EligibilityReasonCounts?.GetValueOrDefault("MissingLocationAccepted") ?? 0;
-    public int NonIndiaRejected => (EligibilityReasonCounts?.GetValueOrDefault("NonIndiaLocation") ?? 0) +
-        (EligibilityReasonCounts?.GetValueOrDefault("IndiaRemoteExcluded") ?? 0);
-    public int AmbiguousLocationHeld => (EligibilityReasonCounts?.GetValueOrDefault("AmbiguousLocation") ?? 0) +
-        (EligibilityReasonCounts?.GetValueOrDefault("ContradictoryLocation") ?? 0) + (EligibilityReasonCounts?.GetValueOrDefault("UnknownCountry") ?? 0);
+    public int NonIndiaRejected => (SelectionReasonCounts?.GetValueOrDefault("NonIndiaLocation") ?? 0) +
+        (SelectionReasonCounts?.GetValueOrDefault("IndiaRemoteExcluded") ?? 0);
+    public int AmbiguousLocationHeld => (SelectionReasonCounts?.GetValueOrDefault("AmbiguousLocation") ?? 0) +
+        (SelectionReasonCounts?.GetValueOrDefault("ContradictoryLocation") ?? 0) + (SelectionReasonCounts?.GetValueOrDefault("UnknownCountry") ?? 0);
     public int DuplicatesPrevented => Existing;
     public int InvalidRequiredDataRejected => ValidationRejected;
 
@@ -58,6 +61,8 @@ public sealed record JobSourceRunResult
     public int QualityRejected { get; init; }
     public int PublishFailed { get; init; }
     public int AutoPublishDisabled { get; init; }
+    public int NotPublished => NeedsReview + QualityRejected + AutoPublishDisabled + PublishFailed;
+    public int SkippedInvalid => ProviderSkipped + ValidationRejected;
     public IReadOnlyDictionary<JobQualityReasonCode, int>? QualityReasonCounts { get; init; }
 
     /// <summary>

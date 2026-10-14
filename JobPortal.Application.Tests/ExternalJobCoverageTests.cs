@@ -28,21 +28,21 @@ public sealed class ExternalJobCoverageTests
     [InlineData(AtsType.Greenhouse, "{\"jobs\":[]}")]
     [InlineData(AtsType.Lever, "[]")]
     [InlineData(AtsType.Ashby, "{\"jobs\":[]}")]
-    public async Task IdentifierIsEncodedAsOnePathSegment(AtsType type, string response)
+    public async Task IdentifierCannotBeAUrlOrMultiplePathSegments(AtsType type, string response)
     {
         using var handler = new Handler(response);
         using var factory = new Factory(handler);
         var source = Source(type);
         source.AtsIdentifier = "acme/team?extra=1";
-        Assert.Empty(await Provider(type, factory).FetchJobsAsync(source));
-        Assert.Contains("acme%2Fteam%3Fextra%3D1", handler.Uri!.AbsoluteUri, StringComparison.OrdinalIgnoreCase);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Provider(type, factory).FetchJobsAsync(source));
+        Assert.Null(handler.Uri);
     }
 
     [Fact]
     public async Task ActualProviderOutputPassesThroughSharedRunnerAndCategoryMapping()
     {
         using var f = new JobSourceFixture();
-        using var handler = new Handler("""[{"text":" C#   Engineer ","hostedUrl":"https://example.test/1","categories":{"department":"Engineering","commitment":"contract"},"workplaceType":"remote"}]""");
+        using var handler = new Handler("""[{"text":" C#   Engineer ","hostedUrl":"https://example.test/1","categories":{"location":"Pune, India","department":"Engineering","commitment":"contract"},"workplaceType":"remote"}]""");
         using var factory = new Factory(handler);
         f.Provider.Jobs = await new LeverExternalJobProvider(factory).FetchJobsAsync(f.Source);
         f.MapExternal("engineering", f.Category.Id.ToString());

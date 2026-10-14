@@ -130,9 +130,7 @@ public sealed class ExternalJobProviderTests
             await Assert.ThrowsAsync<InvalidOperationException>(
                 () => provider.FetchJobsAsync(source));
 
-        Assert.Equal(
-            "Greenhouse ATS identifier is required.",
-            exception.Message);
+        Assert.Equal("GREENHOUSE_BOARD_IDENTIFIER_MISSING", exception.Data["JobSourceReasonCode"]);
 
         Assert.Equal(0, handler.CallCount);
     }
@@ -153,9 +151,7 @@ public sealed class ExternalJobProviderTests
             await Assert.ThrowsAsync<InvalidOperationException>(
                 () => provider.FetchJobsAsync(source));
 
-        Assert.Equal(
-            "Lever ATS identifier is required.",
-            exception.Message);
+        Assert.Equal("LEVER_IDENTIFIER_MISSING", exception.Data["JobSourceReasonCode"]);
 
         Assert.Equal(0, handler.CallCount);
     }

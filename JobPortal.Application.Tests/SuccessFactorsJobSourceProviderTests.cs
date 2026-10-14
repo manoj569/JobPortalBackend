@@ -116,7 +116,6 @@ public sealed class SuccessFactorsJobSourceProviderTests
     [Theory]
     [InlineData("http://careers.example.com/go/Example-Careers/123456", "123456")]
     [InlineData("https://careers.example.com/go/Example-Careers/123456", "999")]
-    [InlineData("https://careers.example.com/go/Example-Careers/123456", null)]
     [InlineData("https://careers.example.com/go/Example-Careers/123456", "deloitte")]
     [InlineData("https://careers.example.com/go/Example-Careers/123456?url=http://localhost", "123456")]
     [InlineData("https://careers.example.com/go/Example-Careers/123456#fragment", "123456")]
@@ -137,6 +136,16 @@ public sealed class SuccessFactorsJobSourceProviderTests
         var provider = Provider((_, _) => { calls++; return Task.FromResult(string.Empty); });
         await Assert.ThrowsAsync<InvalidOperationException>(() => provider.FetchSnapshotAsync(source));
         Assert.Equal(0, calls);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public async Task BoardUrlCanSupplyTheNumericIdentifier(string? identifier)
+    {
+        var source = Source(); source.AtsIdentifier = identifier;
+        var provider = Provider((_, _) => Task.FromResult("<div>Results 0 to 0 of 0</div>"));
+        Assert.True((await provider.FetchSnapshotAsync(source)).IsComplete);
     }
 
     [Theory]

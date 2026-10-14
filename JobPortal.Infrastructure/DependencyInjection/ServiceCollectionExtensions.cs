@@ -124,6 +124,7 @@ public static class ServiceCollectionExtensions
         }).ConfigurePrimaryHttpMessageHandler(SuccessFactorsHttpTransport.CreateHandler);
         services.AddScoped<IExternalJobProvider, WorkdayJobSourceProvider>();
         services.AddScoped<IExternalJobProvider, OracleRecruitingCloudJobSourceProvider>();
+        services.AddScoped<IJobSourceConnectionTester, JobSourceConnectionTester>();
 
         services.Configure<AiExtractionOptions>(configuration.GetSection(AiExtractionOptions.SectionName));
         services.AddHttpClient(ClaudeJobUrlExtractionService.PageFetchClientName, client =>
