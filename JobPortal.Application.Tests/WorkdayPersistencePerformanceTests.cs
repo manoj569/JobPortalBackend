@@ -165,7 +165,9 @@ public sealed class WorkdayPersistencePerformanceTests(ITestOutputHelper output)
     {
         using var f = new JobSourceFixture();
         var (service, _, probe) = Service(f);
-        var saved = await service.IngestBatchAsync(Jobs(f, 50).Select(x => x with { Location = "Remote" }).ToArray());
+        var saved = await service.IngestBatchAsync(Jobs(f, 50).Select(x => x with { Location = "Pune, India" }).ToArray());
+        foreach (var job in await f.Context.Jobs.ToArrayAsync()) job.Location = "Remote";
+        await f.Context.SaveChangesAsync();
         var repository = DispatchProxy.Create<IJobRepository, LargeSourceIngestionTests.Probe<IJobRepository>>();
         var reviewsProbe = (LargeSourceIngestionTests.Probe<IJobRepository>)(object)repository;
         reviewsProbe.Inner = new JobRepository(f.Context);

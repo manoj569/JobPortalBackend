@@ -17,7 +17,8 @@ public sealed partial class JobAutoPublishService(
     IJobSourceRepository sources,
     IExternalJobCreationLock? publicationLock = null,
     IJobSourceRunCheckpoint? checkpoint = null,
-    ILogger<JobAutoPublishService>? logger = null) : IJobAutoPublishService, IJobAutoPublishBatchReview
+    ILogger<JobAutoPublishService>? logger = null,
+    JobPortal.Application.Features.FresherAcquisition.IFresherAcquisitionStore? acquisitionSources = null) : IJobAutoPublishService, IJobAutoPublishBatchReview
 {
     public async Task<IReadOnlyDictionary<Guid, JobAutoPublishResult>> ReviewBatchAsync(IReadOnlyCollection<Guid> jobIds,
         CancellationToken cancellationToken = default)
@@ -55,7 +56,7 @@ public sealed partial class JobAutoPublishService(
             };
         }
 
-        if (job.JobSourceId is null) return new() { Outcome = JobAutoPublishOutcome.NotImported };
+        if (job.JobSourceId is null && job.AcquisitionSourceId is null) return new() { Outcome = JobAutoPublishOutcome.NotImported };
         await using var publicationLease = publicationLock is null ? null : await publicationLock.AcquireAsync(
             new UrlCanonicalizer().Canonicalize(job.ApplicationUrl), new JobFingerprintService().GenerateFingerprint(job.Title, job.Company?.Name ?? job.CompanyId.ToString(), job.Location), cancellationToken);
         job = await jobs.GetFreshByIdAsync(jobId, cancellationToken);
@@ -80,6 +81,23 @@ public sealed partial class JobAutoPublishService(
 
     private async Task<JobAutoPublishResult?> EvaluateAsync(Job job, CancellationToken token)
     {
+        if (job.JobSourceId is null && job.AcquisitionSourceId is { } acquisitionId)
+        {
+            var acquisition = acquisitionSources is null ? null : await acquisitionSources.GetSourceByIdAsync(acquisitionId, token);
+            if (acquisition is null || acquisition.IsDeleted || !acquisition.IsEnabled)
+                return new() { Outcome = JobAutoPublishOutcome.Disabled };
+            if (!acquisition.AutoPublishEnabled)
+                return new() { Outcome = JobAutoPublishOutcome.Disabled };
+            if (job.IsDeleted || job.IsHidden || job.Status != JobStatus.Draft || !job.SourceOwnsPublication)
+                return new() { Outcome = JobAutoPublishOutcome.NeedsReview, Reasons = [JobQualityReasonCode.PublicationOwnershipUnverified] };
+            var acquisitionQuality = qualityGate.Evaluate(job, timeProvider.GetUtcNow().UtcDateTime);
+            if (!acquisitionQuality.IsEligible)
+                return new() { Outcome = acquisitionQuality.Decision == JobQualityDecision.Rejected
+                    ? JobAutoPublishOutcome.Rejected : JobAutoPublishOutcome.NeedsReview, Reasons = acquisitionQuality.Reasons };
+            if (ImportedJobIntegrity.Eligibility(job).ReasonCode == "MissingLocationAccepted")
+                return new() { Outcome = JobAutoPublishOutcome.NeedsReview, Reasons = [JobQualityReasonCode.MissingLocation] };
+            return null;
+        }
         if (job.JobSourceId is not { } sourceId)
             return new() { Outcome = JobAutoPublishOutcome.NotImported };
         var source = await sources.GetByIdAsync(sourceId, token);

@@ -80,6 +80,9 @@ public sealed class JobPortalDbContext(DbContextOptions<JobPortalDbContext> opti
     public DbSet<AIApplyWorkerInstance> AIApplyWorkerInstances => Set<AIApplyWorkerInstance>();
     public DbSet<AIApplySiteOperationalState> AIApplySiteOperationalStates => Set<AIApplySiteOperationalState>();
     public DbSet<JobSource> JobSources => Set<JobSource>();
+    public DbSet<AcquisitionSource> AcquisitionSources => Set<AcquisitionSource>();
+    public DbSet<AcquisitionImportRun> AcquisitionImportRuns => Set<AcquisitionImportRun>();
+    public DbSet<AcquisitionImportItem> AcquisitionImportItems => Set<AcquisitionImportItem>();
     public DbSet<JobSourceRun> JobSourceRuns => Set<JobSourceRun>();
     public DbSet<AIResumeSession> AIResumeSessions => Set<AIResumeSession>();
     public DbSet<AIResumeCreditWallet> AIResumeCreditWallets => Set<AIResumeCreditWallet>();
@@ -137,7 +140,10 @@ public sealed class JobPortalDbContext(DbContextOptions<JobPortalDbContext> opti
             if (entry.Entity is Job job && entry.State is EntityState.Added or EntityState.Modified)
                 job.CanonicalApplicationUrlHash = ApplicationUrlIdentity.Hash(job.ApplicationUrl);
             if (entry.Entity is Company company && entry.State is EntityState.Added or EntityState.Modified)
+            {
                 company.NormalizedName = CompanyNameNormalizer.Normalize(company.Name);
+                company.NormalizedWebsiteDomain = CompanyDomainNormalizer.Normalize(company.WebsiteUrl);
+            }
             if (entry.State == EntityState.Added)
             {
                 entry.Entity.CreatedAtUtc = utcNow;

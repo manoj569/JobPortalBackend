@@ -322,8 +322,8 @@ public sealed partial class JobSourceRunner(
                     ValidationReasonCounts = new Dictionary<string, int>(validationReasons),
                     SelectionReasonCounts = snapshot?.SelectionReasonCounts
                 };
-                if (durable) partialResult = partialResult.WithDetailProgress(checkpoint!.Details);
-                runProgress?.Report(new(phase, processed, partialResult));
+                if (durable) partialResult = partialResult.WithArchivedCensus(checkpoint!.State?.ArchivedCounters).WithDetailProgress(checkpoint.Details);
+                runProgress?.Report(new(phase, partialResult.TotalReceived, partialResult));
             }
             ReportProgress("Ingestion");
 
@@ -358,8 +358,8 @@ public sealed partial class JobSourceRunner(
                 var providerSkipped = (snapshot?.Skipped ?? 0) + batch.Skipped;
                 providerSnapshotComplete = provider is ICompleteExternalJobProvider && batch.IsComplete;
                 snapshot = new(observedJobs, providerSkipped, providerSnapshotComplete);
-                // Apply the policy cumulatively: a configured 20-job cap must not
-                // become 20 jobs PER batch. Business eligibility never removes source jobs.
+                // Apply the policy cumulatively: the configured cap spans the full
+                // census, while only positively India-eligible jobs reach ingestion.
                 var selected = selectionPolicy.Select(source, snapshot);
                 if (selected is not null) snapshot = selected;
                 var accepted = selected?.Jobs ?? observedJobs;
@@ -741,6 +741,7 @@ public sealed partial class JobSourceRunner(
                 Error = source.LastError
             };
 
+            if (durable) runResult = runResult.WithArchivedCensus(checkpoint!.State?.ArchivedCounters);
             checkpoint?.StageCompletedResult(runResult);
             execution.Stage = "FinalBookkeepingPersistence";
             await unitOfWork.SaveChangesAsync(cancellationToken);

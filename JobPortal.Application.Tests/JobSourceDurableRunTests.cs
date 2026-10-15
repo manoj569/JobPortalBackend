@@ -154,7 +154,7 @@ public sealed class JobSourceDurableRunTests
         stop.Cancel(); await worker;
         var row = Assert.Single(f.Store.Rows);
         Assert.Equal(JobSourceRunStatus.Interrupted, row.Status);
-        Assert.Equal(475, row.Created); Assert.Equal(475, row.Processed);
+        Assert.Equal(475, row.Created); Assert.Equal(1500, row.Processed);
         Assert.Equal(1500, row.TotalReceived); Assert.Null(row.LeaseOwner);
         var interrupted = System.Text.Json.JsonSerializer.Deserialize<JobSourceRunResult>(row.DiagnosticsJson!);
         Assert.Equal("HOST_SHUTDOWN", interrupted!.FailureReasonCode);
@@ -222,7 +222,7 @@ public sealed class JobSourceDurableRunTests
         await f.Worker().RunOnceAsync(default);
         var row = f.Store.Rows.Single();
         Assert.Equal(JobSourceRunStatus.Failed, row.Status);
-        Assert.Equal(475, row.Processed); Assert.Equal(475, row.Created); Assert.Equal(1500, row.TotalReceived);
+        Assert.Equal(1500, row.Processed); Assert.Equal(475, row.Created); Assert.Equal(1500, row.TotalReceived);
     }
 
     [Fact]

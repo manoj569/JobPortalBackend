@@ -36,7 +36,7 @@ public sealed class JobClassificationService : IJobClassificationService
 {
     // Avoid per-pattern compiled-runner JIT inside the first match's timeout window.
     private static Regex Rx(string pattern) => new(pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
-        TimeSpan.FromMilliseconds(100));
+        TimeSpan.FromMilliseconds(500));
     private static readonly Regex Negation = Rx(@"\b(?:not|no)(?: an?)?\s+$");
     private static readonly Regex PreferredHeading = Rx(@"^\s*(?:preferred|desired|nice to have)\s*(?:qualifications|requirements|skills)?\s*:?\s*$");
     private static readonly Regex RequiredHeading = Rx(@"^\s*(?:required|basic|minimum)\s*(?:qualifications|requirements|skills)\s*:?\s*$");

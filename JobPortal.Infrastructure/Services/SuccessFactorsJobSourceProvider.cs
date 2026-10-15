@@ -98,8 +98,31 @@ public sealed partial class SuccessFactorsJobSourceProvider(
             }
             catch (InvalidDataException exception)
             {
+                if (exception.Data[ReasonDataKey] is FailureReason reason)
+                {
+                    var totalMatch = ListingTotalRegex().Match(response.Html);
+                    var currentTotal = totalMatch.Success && int.TryParse(totalMatch.Groups[3].Value,
+                        NumberStyles.None, CultureInfo.InvariantCulture, out var parsedTotal) ? parsedTotal : -1;
+                    if (currentTotal > MaxJobs)
+                    {
+                        stage = "listing_pagination";
+                        exception = InvalidDocument(FailureReason.ListingRecordLimitExceeded,
+                            "The SuccessFactors listing exceeded the supported result limit.");
+                    }
+                    else if (reason == FailureReason.ListingLastOffsetMismatch)
+                    {
+                        stage = "listing_pagination";
+                        if (offset > 0 && currentTotal != expectedTotal)
+                            exception = InvalidDocument(FailureReason.ListingTotalChanged,
+                                "The SuccessFactors listing total changed during pagination.");
+                        else if (offset > 0 && TryGetLastOffset(response.Html, boardUri, out var currentLastOffset) &&
+                                 currentLastOffset != expectedLastOffset)
+                            exception = InvalidDocument(FailureReason.ListingLastOffsetChanged,
+                                "The SuccessFactors listing last-page offset changed during pagination.");
+                    }
+                }
                 LogInvalidDocument(source.Id, stage, offset, response.StatusCode, exception);
-                throw;
+                throw exception;
             }
 
             pages.AddRange(page.Results);
@@ -329,6 +352,20 @@ public sealed partial class SuccessFactorsJobSourceProvider(
         candidate.Scheme == boardUri.Scheme && candidate.Port == boardUri.Port &&
         string.Equals(candidate.IdnHost, boardUri.IdnHost, StringComparison.OrdinalIgnoreCase) &&
         string.IsNullOrEmpty(candidate.UserInfo) && string.IsNullOrEmpty(candidate.Fragment);
+
+    private static bool TryGetLastOffset(string html, Uri boardUri, out int offset)
+    {
+        offset = 0;
+        var match = LastPageRegex().Match(html);
+        if (!match.Success) return false;
+        var root = new Uri(boardUri.AbsoluteUri.TrimEnd('/') + "/");
+        if (!Uri.TryCreate(root, WebUtility.HtmlDecode(match.Groups[3].Value), out var candidate) ||
+            !SameOrigin(boardUri, candidate)) return false;
+        var prefix = boardUri.AbsolutePath.TrimEnd('/') + "/";
+        return candidate.AbsolutePath.StartsWith(prefix, StringComparison.Ordinal) &&
+            int.TryParse(candidate.AbsolutePath[prefix.Length..].TrimEnd('/'), NumberStyles.None,
+                CultureInfo.InvariantCulture, out offset);
+    }
 
     private static bool TryDetailUrl(Uri boardUri, string href, out Uri uri)
     {

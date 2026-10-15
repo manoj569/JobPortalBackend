@@ -89,7 +89,7 @@ public sealed class JobSourceRunStore(JobPortalDbContext db) : IJobSourceRunStor
     public async Task<bool> HeartbeatAsync(JobSourceRun run, DateTime now, DateTime expiry, JobSourceRunProgressSnapshot p, CancellationToken ct) =>
         await Owned(run, now).ExecuteUpdateAsync(s => s.SetProperty(x => x.HeartbeatAtUtc, now)
             .SetProperty(x => x.LeaseExpiresAtUtc, expiry).SetProperty(x => x.Phase, p.Phase)
-            .SetProperty(x => x.Processed, p.Processed).SetProperty(x => x.TotalReceived, p.Counters.TotalReceived)
+            .SetProperty(x => x.Processed, p.Counters.TotalReceived).SetProperty(x => x.TotalReceived, p.Counters.TotalReceived)
             .SetProperty(x => x.Created, p.Counters.Created).SetProperty(x => x.Updated, p.Counters.Updated)
             .SetProperty(x => x.Unchanged, p.Counters.Unchanged).SetProperty(x => x.Closed, p.Counters.Closed)
             .SetProperty(x => x.Matched, p.Counters.Matched).SetProperty(x => x.Skipped, p.Counters.Skipped)
@@ -131,7 +131,7 @@ public sealed class JobSourceRunStore(JobPortalDbContext db) : IJobSourceRunStor
                 status == JobSourceRunStatus.Paused ? "continuation_pending" : status == JobSourceRunStatus.Unsafe ? "unsafe_snapshot" :
                 status == JobSourceRunStatus.Cancelled ? "source_unavailable" : status == JobSourceRunStatus.Interrupted ? "worker_interrupted" : "source_run_failed")
             .SetProperty(x => x.LeaseOwner, (Guid?)null).SetProperty(x => x.LeaseExpiresAtUtc, (DateTime?)null)
-            .SetProperty(x => x.Processed, p.Processed).SetProperty(x => x.TotalReceived, p.Counters.TotalReceived)
+            .SetProperty(x => x.Processed, p.Counters.TotalReceived).SetProperty(x => x.TotalReceived, p.Counters.TotalReceived)
             .SetProperty(x => x.Created, p.Counters.Created).SetProperty(x => x.Updated, p.Counters.Updated)
             .SetProperty(x => x.Unchanged, p.Counters.Unchanged).SetProperty(x => x.Closed, p.Counters.Closed)
             .SetProperty(x => x.Matched, p.Counters.Matched).SetProperty(x => x.Skipped, p.Counters.Skipped)

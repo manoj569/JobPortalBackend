@@ -162,6 +162,8 @@ public sealed class CompanyConfiguration : IEntityTypeConfiguration<Company>
         builder.Property(x => x.Slug).HasMaxLength(220).IsRequired();
         builder.Property(x => x.Description).HasMaxLength(4000);
         builder.Property(x => x.WebsiteUrl).HasMaxLength(2048);
+        builder.Property(x => x.NormalizedWebsiteDomain).HasMaxLength(253);
+        builder.HasIndex(x => x.NormalizedWebsiteDomain).HasFilter("\"IsDeleted\" = FALSE AND \"NormalizedWebsiteDomain\" IS NOT NULL");
         builder.Property(x => x.LogoUrl).HasMaxLength(2048);
         builder.Property(x => x.Industry).HasMaxLength(150);
         builder.Property(x => x.Location).HasMaxLength(250);
@@ -229,6 +231,8 @@ public sealed class JobConfiguration : IEntityTypeConfiguration<Job>
         builder.Property(x => x.Requirements).HasMaxLength(8000);
         builder.Property(x => x.Benefits).HasMaxLength(4000);
         builder.Property(x => x.ApplicationUrl).HasMaxLength(2048).IsRequired();
+        builder.Property(x => x.DiscoveredUrl).HasMaxLength(2048);
+        builder.Property(x => x.CanonicalJobUrl).HasMaxLength(2048);
         builder.Property(x => x.CanonicalApplicationUrlHash).HasMaxLength(64);
         builder.Property(x => x.SourceMetadataJson).HasColumnType("jsonb");
         builder.HasIndex(x => x.CanonicalApplicationUrlHash)
@@ -243,11 +247,15 @@ public sealed class JobConfiguration : IEntityTypeConfiguration<Job>
         builder.Property(x => x.EducationRequirement).HasMaxLength(200);
         builder.Property(x => x.FingerprintHash).HasMaxLength(64);
         builder.Property(x => x.ExternalJobId).HasMaxLength(255);
+        builder.Property(x => x.AcquisitionExternalId).HasMaxLength(255);
         builder.HasOne<JobSource>().WithMany().HasForeignKey(x => x.JobSourceId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne(x => x.AcquisitionSource).WithMany(x => x.Jobs).HasForeignKey(x => x.AcquisitionSourceId).OnDelete(DeleteBehavior.Restrict);
         builder.HasIndex(x => x.JobSourceId);
         builder.HasIndex(x => new { x.JobSourceId, x.ExternalJobId })
             .IsUnique()
             .HasFilter("\"IsDeleted\" = FALSE AND \"JobSourceId\" IS NOT NULL AND \"ExternalJobId\" IS NOT NULL");
+        builder.HasIndex(x => new { x.AcquisitionSourceId, x.AcquisitionExternalId }).IsUnique()
+            .HasFilter("\"IsDeleted\" = FALSE AND \"AcquisitionSourceId\" IS NOT NULL AND \"AcquisitionExternalId\" IS NOT NULL");
         builder.HasIndex(x => x.ReferenceNumber).IsUnique().HasFilter("\"IsDeleted\" = FALSE");
         builder.HasIndex(x => x.Slug).IsUnique().HasFilter("\"IsDeleted\" = FALSE");
         builder.HasIndex(x => new { x.CompanyId, x.Status, x.PublishedAtUtc });
@@ -266,6 +274,60 @@ public sealed class JobConfiguration : IEntityTypeConfiguration<Job>
         builder.HasIndex(x => x.LastSeenAtUtc);
         builder.HasOne(x => x.Company).WithMany(x => x.Jobs).HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(x => x.Category).WithMany(x => x.Jobs).HasForeignKey(x => x.CategoryId).OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public sealed class AcquisitionSourceConfiguration : IEntityTypeConfiguration<AcquisitionSource>
+{
+    public void Configure(EntityTypeBuilder<AcquisitionSource> builder)
+    {
+        builder.ToTable("AcquisitionSources");
+        builder.ConfigureBaseEntity();
+        builder.Property(x => x.ProviderKey).HasMaxLength(100).IsRequired();
+        builder.Property(x => x.Name).HasMaxLength(160).IsRequired();
+        builder.HasIndex(x => x.ProviderKey).IsUnique().HasFilter("\"IsDeleted\" = FALSE");
+    }
+}
+
+public sealed class AcquisitionImportRunConfiguration : IEntityTypeConfiguration<AcquisitionImportRun>
+{
+    public void Configure(EntityTypeBuilder<AcquisitionImportRun> builder)
+    {
+        builder.ToTable("AcquisitionImportRuns");
+        builder.ConfigureBaseEntity();
+        builder.Property(x => x.BatchId).HasMaxLength(100).IsRequired();
+        builder.Property(x => x.CorrelationId).HasMaxLength(100).IsRequired();
+        builder.Property(x => x.Status).HasMaxLength(24).IsRequired();
+        builder.Property(x => x.FailureSummary).HasMaxLength(500);
+        builder.HasOne(x => x.AcquisitionSource).WithMany().HasForeignKey(x => x.AcquisitionSourceId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasIndex(x => new { x.AcquisitionSourceId, x.BatchId }).IsUnique().HasFilter("\"IsDeleted\" = FALSE");
+        builder.HasIndex(x => new { x.AcquisitionSourceId, x.StartedAtUtc });
+    }
+}
+
+public sealed class AcquisitionImportItemConfiguration : IEntityTypeConfiguration<AcquisitionImportItem>
+{
+    public void Configure(EntityTypeBuilder<AcquisitionImportItem> builder)
+    {
+        builder.ToTable("AcquisitionImportItems");
+        builder.ConfigureBaseEntity();
+        builder.Property(x => x.IdentityKey).HasMaxLength(64).IsRequired();
+        builder.Property(x => x.ItemIndex).IsRequired();
+        builder.Property(x => x.ExternalId).HasMaxLength(255);
+        builder.Property(x => x.DiscoveredUrl).HasMaxLength(2048);
+        builder.Property(x => x.CanonicalUrl).HasMaxLength(2048);
+        builder.Property(x => x.ApplyUrl).HasMaxLength(2048);
+        builder.Property(x => x.CompanyNameNormalized).HasMaxLength(200).IsRequired();
+        builder.Property(x => x.TitleNormalized).HasMaxLength(250).IsRequired();
+        builder.Property(x => x.LocationNormalized).HasMaxLength(250).IsRequired();
+        builder.Property(x => x.EligibilityDecision).HasMaxLength(32).IsRequired();
+        builder.Property(x => x.ReasonCode).HasMaxLength(80).IsRequired();
+        builder.Property(x => x.Outcome).HasMaxLength(32).IsRequired();
+        builder.HasOne(x => x.Run).WithMany(x => x.Items).HasForeignKey(x => x.AcquisitionImportRunId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne(x => x.Job).WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasIndex(x => new { x.AcquisitionImportRunId, x.IdentityKey }).IsUnique().HasFilter("\"IsDeleted\" = FALSE");
+        builder.HasIndex(x => x.JobId).HasFilter("\"JobId\" IS NOT NULL");
+        builder.HasIndex(x => new { x.AcquisitionSourceId, x.ExternalId, x.LastSeenAtUtc });
     }
 }
 

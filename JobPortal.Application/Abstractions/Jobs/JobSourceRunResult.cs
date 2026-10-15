@@ -38,6 +38,25 @@ public sealed record JobSourceRunResult
         (SelectionReasonCounts?.GetValueOrDefault("IndiaRemoteExcluded") ?? 0);
     public int AmbiguousLocationHeld => (SelectionReasonCounts?.GetValueOrDefault("AmbiguousLocation") ?? 0) +
         (SelectionReasonCounts?.GetValueOrDefault("ContradictoryLocation") ?? 0) + (SelectionReasonCounts?.GetValueOrDefault("UnknownCountry") ?? 0);
+    public int IndiaEligibilityUnknown => AmbiguousLocationHeld;
+
+    // Persistence receipts span every traversal of this run. The census must
+    // span those same traversals; cursor/detail diagnostics remain traversal-local.
+    public JobSourceRunResult WithArchivedCensus(JobSourceRunResult? archived) => archived is null ? this : this with
+    {
+        TotalReceived = TotalReceived + archived.TotalReceived,
+        Parsed = Parsed + archived.Parsed,
+        EligibilityReasonCounts = Merge(EligibilityReasonCounts, archived.EligibilityReasonCounts),
+        SelectionReasonCounts = Merge(SelectionReasonCounts, archived.SelectionReasonCounts)
+    };
+
+    private static Dictionary<string, int> Merge(IReadOnlyDictionary<string, int>? current, IReadOnlyDictionary<string, int>? archived)
+    {
+        var result = current?.ToDictionary(x => x.Key, x => x.Value, StringComparer.Ordinal) ?? new(StringComparer.Ordinal);
+        foreach (var (key, value) in archived ?? new Dictionary<string, int>())
+            result[key] = result.GetValueOrDefault(key) + value;
+        return result;
+    }
     public int DuplicatesPrevented => Existing;
     public int InvalidRequiredDataRejected => ValidationRejected;
 

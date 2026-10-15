@@ -76,6 +76,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICandidatePortfolioRepository, CandidatePortfolioRepository>();
         services.AddScoped<ICompanyManagementRepository, CompanyManagementRepository>();
         services.AddScoped<ICategoryManagementRepository, CategoryManagementRepository>();
+        services.AddScoped<JobPortal.Application.Features.FresherAcquisition.IFresherAcquisitionStore,
+            JobPortal.Persistence.Repositories.FresherAcquisitionStore>();
         services.AddScoped<IUnitOfWork, UnitOfWork>();
         services.AddScoped<IAIApplyRepository, AIApplyRepository>();
         services.AddScoped<IAIApplyOperationalStore, AIApplyOperationalStore>();

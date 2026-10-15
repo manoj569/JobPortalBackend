@@ -34,11 +34,11 @@ public sealed class SourceAutoPublicationTests
             Vacancy(3) with { Location = "Remote" }]);
         var runner = Runner(f, provider);
         var first = await runner.RunAsync(f.Source.Id);
-        Assert.Equal(3, first.Created);
+        Assert.Equal(1, first.Created);
         Assert.Equal(enabled ? 1 : 0, first.Published);
-        Assert.Equal(enabled ? 0 : 3, first.AutoPublishDisabled);
-        Assert.Equal(0, first.NonIndiaRejected); Assert.Equal(0, first.AmbiguousLocationHeld);
-        Assert.Equal(enabled ? 2 : 3,first.NotPublished);
+        Assert.Equal(enabled ? 0 : 1, first.AutoPublishDisabled);
+        Assert.Equal(1, first.NonIndiaRejected); Assert.Equal(1, first.AmbiguousLocationHeld);
+        Assert.Equal(enabled ? 0 : 1,first.NotPublished);
         var job = await f.Context.Jobs.AsNoTracking().SingleAsync(job => job.ExternalJobId == "REQ1");
         Assert.Equal(enabled ? JobStatus.Published : JobStatus.Draft, job.Status);
         Assert.True(job.SourceOwnsPublication);
@@ -117,14 +117,15 @@ public sealed class SourceAutoPublicationTests
     }
 
     [Fact]
-    public async Task MissingLocationCanBeStoredButCannotAutomaticallyBecomeVisible()
+    public async Task MissingLocationIsHeldBeforePersistenceAndNeverPublished()
     {
         using var f = new JobSourceFixture();
         var result = await Runner(f, new SnapshotProvider(f.Source.AtsType, [Vacancy(1) with { Location = null }])).RunAsync(f.Source.Id);
-        Assert.Equal(1, result.Created);
-        Assert.Equal(1, result.NeedsReview);
+        Assert.Equal(0, result.Created);
+        Assert.Equal(0, result.NeedsReview);
         Assert.Equal(0, result.Published);
-        Assert.Equal(JobStatus.Draft, (await f.Context.Jobs.SingleAsync()).Status);
+        Assert.Equal(1, result.AmbiguousLocationHeld);
+        Assert.Empty(await f.Context.Jobs.ToArrayAsync());
         Assert.Equal(0, (await new PublicJobRepository(f.Context, TimeProvider.System).SearchAsync(new())).TotalCount);
     }
 

@@ -129,6 +129,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<JobSourceRunGuard>();
         services.AddScoped<JobSourceRunService>();
         services.AddScoped<IJobSourceRunProgress, JobSourceRunProgress>();
+        services.AddScoped<JobPortal.Application.Features.FresherAcquisition.IFresherBulkImportService,
+            JobPortal.Application.Features.FresherAcquisition.FresherBulkImportService>();
 
         return services;
     }

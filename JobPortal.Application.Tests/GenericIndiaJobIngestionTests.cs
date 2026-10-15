@@ -17,9 +17,9 @@ namespace JobPortal.Application.Tests;
 public sealed class GenericIndiaJobIngestionTests
 {
     [Theory]
-    [InlineData("Pune", null, null, "IndiaLocationConfirmed")]
-    [InlineData("Bengaluru", "Hybrid", null, "IndiaLocationConfirmed")]
-    [InlineData("Hyderabad", null, null, "IndiaLocationConfirmed")]
+    [InlineData("Pune, India", null, null, "IndiaLocationConfirmed")]
+    [InlineData("Bengaluru, India", "Hybrid", null, "IndiaLocationConfirmed")]
+    [InlineData("Hyderabad, India", null, null, "IndiaLocationConfirmed")]
     [InlineData("India-wide remote", "Remote", null, "ExplicitIndiaRemote")]
     [InlineData("Remote", "Remote", "Remote hiring from India", "ExplicitIndiaRemote")]
     public async Task EligibleJobsArePublishedAndVisibleInDiscoverWithOptionalMetadataAbsent(string? location, string? mode, string? eligibility, string reason)
@@ -49,31 +49,42 @@ public sealed class GenericIndiaJobIngestionTests
     }
 
     [Theory]
-    [InlineData("New York, United States", "US", false)]
-    [InlineData("UK-only remote", "GB", false)]
-    [InlineData("Remote", null, true)]
-    [InlineData("London", "IN", true)]
-    [InlineData("Pune", "US", true)]
-    [InlineData("Remote excluding India", null, false)]
-    [InlineData("Not India", null, false)]
-    [InlineData("Worldwide remote; India excluded", null, false)]
-    [InlineData("Unknown", null, true)]
-    [InlineData("Brazil", null, false)]
-    public async Task ForeignAndAmbiguousJobsArePersistedBeforeExistingPublicationReview(string location, string? country, bool held)
+    [InlineData(AtsType.Greenhouse)]
+    [InlineData(AtsType.Lever)]
+    [InlineData(AtsType.Ashby)]
+    [InlineData(AtsType.Workday)]
+    [InlineData(AtsType.SuccessFactors)]
+    public async Task EachProviderRequiresPositiveIndiaEligibilityBeforePersistence(AtsType ats)
     {
-        using var f = new JobSourceFixture();
-        var provider = new SnapshotProvider(f.Source.AtsType, [Vacancy(1) with { Location = location, CountryCodes = country is null ? [] : [country] }]);
-        var result = await Runner(f, provider).RunAsync(f.Source.Id);
-        Assert.Equal(1, result.Created);
-        Assert.Equal(0, result.Published);
-        Assert.Equal(0, result.AmbiguousLocationHeld); Assert.Equal(0, result.NonIndiaRejected);
-        Assert.Equal(1,result.NotPublished); Assert.True(result.Succeeded);
-        var saved = Assert.Single(await f.Context.Jobs.ToArrayAsync());
-        Assert.Equal(JobStatus.Draft,saved.Status);
-        Assert.Equal(held,ImportedJobIntegrity.Eligibility(saved).Decision == IndiaJobEligibilityDecision.Review);
-        Assert.Equal(1,result.NeedsReview);
-        Assert.Equal(0, (await new PublicJobRepository(f.Context, TimeProvider.System).SearchAsync(new())).TotalCount);
-        Assert.Equal(0, result.Closed);
+        var samples = new (RawExternalJob Job, bool Eligible)[]
+        {
+        (Vacancy(1) with { Location = "New York, United States", CountryCodes = ["US"] }, false),
+            (Vacancy(2) with { Location = "UK-only remote", CountryCodes = ["GB"] }, false),
+            (Vacancy(3) with { Location = "Remote", WorkplaceTypeText = "remote" }, false),
+            (Vacancy(4) with { Location = "London", CountryCodes = ["IN"] }, false),
+            (Vacancy(5) with { Location = "Pune", CountryCodes = ["US"] }, false),
+            (Vacancy(6) with { Location = "Remote excluding India" }, false),
+            (Vacancy(7) with { Location = "Unknown" }, false),
+            (Vacancy(8) with { Location = "Brazil" }, false),
+            (Vacancy(9) with { Location = "Remote", WorkplaceTypeText = "remote", RemoteEligibilityText = "Remote hiring from India" }, true),
+            (Vacancy(10) with { Location = null, CountryCodes = ["IN"] }, true),
+        (Vacancy(11) with { Location = "London", AdditionalLocations = ["Pune, India"], CountryCodes = ["GB"] }, true),
+            (Vacancy(12) with { Location = "London", AdditionalLocations = ["Paris"], CountryCodes = ["GB", "FR"] }, false)
+        };
+
+        foreach (var (job, eligible) in samples)
+        {
+            using var f = new JobSourceFixture();
+            f.Source.AtsType = ats;
+            await f.Context.SaveChangesAsync();
+            var result = await Runner(f, new SnapshotProvider(ats, [job])).RunAsync(f.Source.Id);
+            Assert.Equal(eligible ? 1 : 0, result.Created);
+            Assert.Equal(eligible ? 1 : 0, result.IndiaEligible);
+            Assert.Equal(eligible ? 0 : 1, result.SelectionSkipped);
+            Assert.Equal(eligible ? 1 : 0, await f.Context.Jobs.CountAsync());
+            Assert.Equal(eligible ? 1 : 0, result.Published);
+            Assert.Equal(0, result.NeedsReview);
+        }
     }
 
     [Fact]
@@ -86,16 +97,16 @@ public sealed class GenericIndiaJobIngestionTests
     }
 
     [Fact]
-    public async Task MultipleLocationsKeepOriginalFactsWithoutRestrictingIngestion()
+    public async Task MultipleLocationsRequirePositiveIndiaEvidenceBeforePersistence()
     {
         using var f = new JobSourceFixture();
         var provider = new SnapshotProvider(f.Source.AtsType, [
             Vacancy(1) with { Location = "London", AdditionalLocations = ["Paris", "Pune, India"], CountryCodes = ["GB", "FR", "IN"] },
             Vacancy(2) with { Location = "London", AdditionalLocations = ["Paris"], CountryCodes = ["GB", "FR"] }]);
         var result = await Runner(f, provider).RunAsync(f.Source.Id);
-        Assert.Equal(2, result.Created);
-        Assert.True(result.Published == 1, System.Text.Json.JsonSerializer.Serialize(result));
-        Assert.Equal(0, result.NonIndiaRejected);
+        Assert.Equal(1, result.Created);
+        Assert.Equal(1, result.Published);
+        Assert.Equal(1, result.NonIndiaRejected);
         var job = await f.Context.Jobs.SingleAsync(job => job.ExternalJobId == "REQ1");
         Assert.Equal("London", job.Location);
         Assert.Contains("Pune, India", job.SourceMetadataJson!);
@@ -117,14 +128,15 @@ public sealed class GenericIndiaJobIngestionTests
         var provider = new SnapshotProvider(ats, [Vacancy(1), Vacancy(1), Vacancy(2) with { Location = "US", CountryCodes = ["US"] }]);
         var runner = Runner(f, provider);
         var first = await runner.RunAsync(f.Source.Id);
-        Assert.Equal(2, first.Created);
+        Assert.Equal(1, first.Created);
         Assert.Equal(1, first.Existing);
         Assert.Equal(1, first.Published);
-        Assert.Equal(0, first.NonIndiaRejected);
+        Assert.Equal(1, first.NonIndiaRejected);
         var id = (await f.Context.Jobs.SingleAsync(job => job.ExternalJobId == "REQ1")).Id;
         var second = await runner.RunAsync(f.Source.Id);
         Assert.Equal(0, second.Created);
-        Assert.Equal(3, second.Existing);
+        Assert.Equal(2, second.Existing);
+        Assert.Equal(1, second.NonIndiaRejected);
         Assert.Equal(0, second.Published);
         Assert.Equal(id, (await f.Context.Jobs.SingleAsync(job => job.ExternalJobId == "REQ1")).Id);
         Assert.Equal(1, (await new PublicJobRepository(f.Context, TimeProvider.System).SearchAsync(new())).TotalCount);
@@ -188,6 +200,45 @@ public sealed class GenericIndiaJobIngestionTests
     }
 
     [Fact]
+    public async Task PersistenceBoundaryRejectsUnknownOrForeignDataBeforeMatchingAnExistingJob()
+    {
+        using var f = new JobSourceFixture();
+        var runner = Runner(f, new SnapshotProvider(f.Source.AtsType, [Vacancy(1)]));
+        Assert.Equal(1, (await runner.RunAsync(f.Source.Id)).Created);
+        var existing = await f.Context.Jobs.SingleAsync();
+        var originalTitle = existing.Title;
+        var originalMetadata = existing.SourceMetadataJson;
+
+        var jobs = new JobRepository(f.Context);
+        var fingerprints = new JobFingerprintService();
+        var canonical = new UrlCanonicalizer();
+        var ingestion = new JobIngestionService(jobs, new CompanyManagementRepository(f.Context),
+            new CategoryManagementRepository(f.Context), new JobDeduplicationService(jobs, fingerprints, canonical),
+            fingerprints, new UnitOfWork(f.Context), TimeProvider.System, f.Locks, canonical);
+        var result = await ingestion.IngestAsync(Vacancy(99) with
+        {
+            Title = "Foreign replacement title", Location = "London, United Kingdom",
+            ApplicationUrl = Vacancy(1).ApplicationUrl, CompanyId = f.Company.Id, JobSourceId = f.Source.Id,
+            SourceMetadataJson = "{\"location\":\"London, United Kingdom\"}"
+        });
+        Assert.Equal(JobIngestionOutcome.Invalid, result.Outcome);
+        Assert.Equal("Validation:INDIA_ELIGIBILITY_NON_INDIA", result.Message);
+        existing = await f.Context.Jobs.SingleAsync();
+        Assert.Equal(originalTitle, existing.Title);
+        Assert.Equal(originalMetadata, existing.SourceMetadataJson);
+        Assert.Single(await f.Context.Jobs.ToArrayAsync());
+
+        var unknown = await ingestion.IngestAsync(Vacancy(100) with
+        {
+            Location = "Remote", WorkplaceTypeText = "remote", ApplicationUrl = "https://example.test/jobs/100",
+            CompanyId = f.Company.Id, JobSourceId = f.Source.Id
+        });
+        Assert.Equal(JobIngestionOutcome.Invalid, unknown.Outcome);
+        Assert.Equal("Validation:INDIA_ELIGIBILITY_UNKNOWN", unknown.Message);
+        Assert.Single(await f.Context.Jobs.ToArrayAsync());
+    }
+
+    [Fact]
     public async Task CountryEvidenceWithoutACityKeepsTheMissingCityDisplayLabel()
     {
         using var f = new JobSourceFixture();
@@ -229,7 +280,7 @@ public sealed class GenericIndiaJobIngestionTests
     internal static CreateJobRequest ManualRequest(JobSourceFixture f, string url, string? location) =>
         new("Associate Engineer", "", f.Company.Id, null, url, null, null, null, location, null, null, "INR", default, default, default, null);
     internal static RawExternalJob Vacancy(int id) => new() { ExternalId = $"REQ{id}", Title = "Associate Engineer", CompanyName = "Acme",
-        Location = "Pune", ApplicationUrl = $"https://example.test/jobs/REQ{id}" };
+        Location = "Pune, India", ApplicationUrl = $"https://example.test/jobs/REQ{id}" };
     internal static JobService ManualService(JobSourceFixture f)
     {
         var jobs = new JobRepository(f.Context); var fingerprint = new JobFingerprintService(); var canonical = new UrlCanonicalizer();

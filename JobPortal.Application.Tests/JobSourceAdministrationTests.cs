@@ -164,6 +164,24 @@ public sealed class JobSourceAdministrationTests
         await Assert.ThrowsAsync<ValidationException>(() => f.Service.CreateAsync(f.Request with { CareerPageUrl = url }));
     }
 
+    [Fact]
+    public async Task UpdatingGreenhouseSourceRejectsStaleBoardIdentifierBeforeSaving()
+    {
+        using var f = new JobSourceFixture();
+        var request = f.Request with
+        {
+            CareerPageUrl = "https://boards.greenhouse.io/airbnb",
+            AtsIdentifier = "airbnb"
+        };
+        var saved = await f.Service.UpdateAsync(f.Source.Id, request);
+        Assert.Equal("airbnb", saved.AtsIdentifier);
+
+        await Assert.ThrowsAsync<ValidationException>(() => f.Service.UpdateAsync(f.Source.Id,
+            request with { AtsIdentifier = "enterpret" }));
+        Assert.Equal("airbnb", (await f.Service.GetByIdAsync(f.Source.Id)).AtsIdentifier);
+        Assert.Equal(request.CareerPageUrl, (await f.Service.GetByIdAsync(f.Source.Id)).CareerPageUrl);
+    }
+
     [Theory]
     [InlineData(AtsType.Greenhouse, null)]
     [InlineData(AtsType.Greenhouse, " ")]
@@ -361,16 +379,19 @@ public sealed class JobSourceManualRunTests
     }
 
     [Fact]
-    public async Task NewUnmappedJobIsSkippedWithoutClaimingSuccessfulRun()
+    public async Task NewUnmappedIndiaEligibleJobCanBeStoredWithoutInventingCategory()
     {
         using var f = new JobSourceFixture();
+        f.Provider.Jobs = [f.Provider.Jobs.Single() with { Title = "Unmapped Listing", ExternalCategory = "Unmapped domain" }];
         var result = await f.Service.RunAsync(f.Source.Id);
-        Assert.False(result.Succeeded);
-        Assert.Equal(1, result.Skipped);
-        Assert.Empty(await f.Context.Jobs.ToArrayAsync());
-        Assert.Null(f.Source.LastSuccessfulRunAtUtc);
+        Assert.True(result.Succeeded);
+        Assert.Equal(1, result.Created);
+        var imported = Assert.Single(await f.Context.Jobs.ToArrayAsync());
+        Assert.Null(imported.CategoryId);
+        Assert.Equal(f.Source.Id, imported.JobSourceId);
+        Assert.NotNull(f.Source.LastSuccessfulRunAtUtc);
         Assert.NotNull(f.Source.LastRunAtUtc);
-        Assert.Equal(1, f.Source.ConsecutiveFailures);
+        Assert.Equal(0, f.Source.ConsecutiveFailures);
     }
 
     [Fact]

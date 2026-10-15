@@ -419,15 +419,14 @@ public sealed class MultiCompanyProviderTests
     [InlineData("Hyderabad, Pakistan", "", false, true)]
     [InlineData("Remote", "XX", false, true)]
     [InlineData("Worldwide", "", false, true)]
-    public void GeographyDiagnosticsDoNotRestrictEmployerIngestion(string location, string country, bool included, bool complete)
+    public void GeographyDiagnosticsGatePersistenceSelection(string location, string country, bool included, bool complete)
     {
         var source = Source(AtsType.Greenhouse);
         var selected = Policy(source).Select(source, new([new RawExternalJob
         { Location = location, CountryCodes = country.Length == 0 ? [] : [country], WorkplaceTypeText = "remote" }], 0, true));
-        var record = Assert.Single(selected.Jobs);
-        Assert.Equal(included, IndiaJobEligibilityPolicy.Evaluate(record).Decision == IndiaJobEligibilityDecision.Accepted);
-        Assert.Null(selected.SelectionReasonCounts);
-        // Product eligibility is diagnostic; it cannot restrict source ingestion.
+        Assert.Equal(included ? 1 : 0, selected.Jobs.Count);
+        Assert.Equal(included, (selected.EligibilityReasonCounts?.GetValueOrDefault("IndiaLocationConfirmed") ?? 0) > 0);
+        Assert.Equal(included ? 0 : 1, selected.SelectionReasonCounts?.Values.Sum() ?? 0);
         Assert.Equal(complete, selected.IsComplete);
     }
 
@@ -443,13 +442,14 @@ public sealed class MultiCompanyProviderTests
     }
 
     [Fact]
-    public void BlankLocationIsAcceptedWithoutClaimingIndiaVerification()
+    public void BlankLocationIsHeldBeforePersistenceWithoutIndiaVerification()
     {
         var source = Source(AtsType.Greenhouse);
         var approval = Approval(source);
         approval.VerifiedIndiaLocations = [""];
         var selected = Policy(source, approval).Select(source, new([new RawExternalJob { Location = "  " }], 0, true));
-        Assert.Equal("Location not specified", Assert.Single(selected.Jobs).Location);
+        Assert.Empty(selected.Jobs);
+        Assert.Equal(1, selected.SelectionReasonCounts!["AmbiguousLocation"]);
         Assert.True(selected.IsComplete);
     }
 

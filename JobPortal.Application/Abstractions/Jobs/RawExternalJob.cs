@@ -7,6 +7,7 @@ public sealed record RawExternalJob
     public string Title { get; init; } = string.Empty;
     public string CompanyName { get; init; } = string.Empty;
     public Guid? CompanyId { get; init; }
+    public string? CompanyWebsiteUrl { get; init; }
     public string? Location { get; init; }
     // Provider facts used for eligibility; not inferred from "remote" alone.
     public IReadOnlyCollection<string> AdditionalLocations { get; init; } = [];
@@ -23,6 +24,11 @@ public sealed record RawExternalJob
     public int? SourceOrdinal { get; init; }
     // Set by JobSourceRunner only for providers that return a complete snapshot.
     public Guid? JobSourceId { get; init; }
+    public Guid? AcquisitionSourceId { get; init; }
+    public string? AcquisitionExternalId { get; init; }
+    public string? DiscoveredUrl { get; init; }
+    public string? CanonicalJobUrl { get; init; }
+    public DateTime? LastVerifiedAtUtc { get; init; }
     public DateTime? SourcePostedAtUtc { get; init; }
     // Source-provided deadline only; providers must supply an explicit UTC instant.
     public DateTime? ExpiresAtUtc { get; init; }
@@ -43,4 +49,5 @@ public sealed record RawExternalJob
     public decimal? SalaryMax { get; init; }
 
     public Guid? CategoryId { get; init; }
+    public IReadOnlyCollection<string> Skills { get; init; } = [];
 }

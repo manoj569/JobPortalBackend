@@ -37,7 +37,7 @@ public static partial class JobSourceConfiguration
         {
             var known = provider switch
             {
-                AtsType.Greenhouse => career!.Host is "boards.greenhouse.io" or "job-boards.greenhouse.io",
+                AtsType.Greenhouse => career!.Host is "boards.greenhouse.io" or "job-boards.greenhouse.io" or "boards-api.greenhouse.io",
                 AtsType.Lever => career!.Host is "jobs.lever.co" or "jobs.eu.lever.co",
                 _ => career!.Host == "jobs.ashbyhq.com"
             };
@@ -45,6 +45,12 @@ public static partial class JobSourceConfiguration
             {
                 var path = RawPath(careerUrl!);
                 var parts = path.Trim('/').Split('/');
+                if (provider == AtsType.Greenhouse && career!.Host == "boards-api.greenhouse.io")
+                {
+                    if (parts.Length != 4 || parts[0] != "v1" || parts[1] != "boards" || parts[3] != "jobs")
+                        return Invalid(prefix + "_CONFIGURATION_INVALID", "Use a canonical Greenhouse board jobs URL.");
+                    parts = [parts[2]];
+                }
                 if (parts.Length != 1 || !IdentifierPattern().IsMatch(parts[0]) || path.Contains('%') || path.Contains('\\'))
                     return Invalid(prefix + "_CONFIGURATION_INVALID", "Use the provider's board root, not a job/detail URL.");
                 derived = parts[0];

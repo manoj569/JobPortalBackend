@@ -10,6 +10,7 @@ public sealed class Company : BaseEntity
     public string Slug { get; set; } = string.Empty;
     public string? Description { get; set; }
     public string? WebsiteUrl { get; set; }
+    public string? NormalizedWebsiteDomain { get; set; }
     public string? LogoUrl { get; set; }
     public string? Industry { get; set; }
     public string? Location { get; set; }

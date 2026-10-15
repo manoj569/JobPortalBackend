@@ -42,6 +42,13 @@ public sealed class CompanyManagementRepository(JobPortalDbContext context) : IC
 #pragma warning restore CA1304, CA1311, CA1862
     }
 
+    public async Task<Company?> FindByWebsiteDomainAsync(string normalizedDomain, CancellationToken cancellationToken = default)
+    {
+        var matches = await context.Companies.Where(x => x.NormalizedWebsiteDomain == normalizedDomain && !x.IsDeleted)
+            .Take(2).ToArrayAsync(cancellationToken);
+        return matches.Length == 1 ? matches[0] : null;
+    }
+
     public Task<CompanyResponse?> GetResponseAsync(Guid id, CancellationToken cancellationToken = default) =>
         Project(context.Companies.AsNoTracking().IgnoreQueryFilters().Where(x => x.Id == id))
             .SingleOrDefaultAsync(cancellationToken);

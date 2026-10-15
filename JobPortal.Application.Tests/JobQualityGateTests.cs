@@ -27,15 +27,15 @@ public sealed class JobQualityGateTests
     }
 
     [Fact]
-    public void Evaluate_MissingLocation_ReturnsEligible()
+    public void Evaluate_MissingLocationRequiresReview()
     {
         var job = CreateValidJob();
         job.Location = null;
 
         var result = _gate.Evaluate(job, Now);
 
-        Assert.Equal(JobQualityDecision.Eligible, result.Decision);
-        Assert.Empty(result.Reasons);
+        Assert.Equal(JobQualityDecision.NeedsReview, result.Decision);
+        Assert.Contains(JobQualityReasonCode.MissingLocation, result.Reasons);
     }
 
     [Fact]

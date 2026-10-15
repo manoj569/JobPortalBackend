@@ -9,6 +9,7 @@ public interface ICompanyManagementRepository
     Task<Company?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
     Task<Company?> FindByNameOrSlugAsync(string normalizedName, string slug, CancellationToken cancellationToken = default) =>
         Task.FromResult<Company?>(null);
+    Task<Company?> FindByWebsiteDomainAsync(string normalizedDomain, CancellationToken cancellationToken = default) => Task.FromResult<Company?>(null);
     Task<CompanyResponse?> GetResponseAsync(Guid id, CancellationToken cancellationToken = default);
     Task<bool> SlugExistsAsync(string slug, Guid? excludingId = null, CancellationToken cancellationToken = default);
     Task<bool> NameExistsAsync(string normalizedName, Guid? excludingId = null, CancellationToken cancellationToken = default);

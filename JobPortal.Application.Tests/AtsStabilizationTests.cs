@@ -24,6 +24,8 @@ public sealed class AtsStabilizationTests
     [Theory]
     [InlineData("stripe",200,true)]
     [InlineData("airbnb",200,true)]
+    [InlineData("stripe",300,true)]
+    [InlineData("airbnb",300,true)]
     [InlineData("stripe",500,true)]
     [InlineData("airbnb",500,true)]
     [InlineData("stripe",500,false)]
@@ -47,11 +49,124 @@ public sealed class AtsStabilizationTests
         Assert.Equal(1, proof); Assert.Equal(total, details);
         Assert.Equal(total, result.Fetched); Assert.Equal(total, result.Parsed);
         Assert.Equal(total, result.Created); Assert.Equal(autoPublish ? total : 0, result.Published);
+        Assert.True(result.Created <= result.IndiaEligible);
         Assert.Equal(autoPublish ? 0 : total,result.AutoPublishDisabled); Assert.Equal(autoPublish ? 0 : total,result.NotPublished);
         Assert.True(result.Succeeded); Assert.True(result.ReconciliationSafe);
         Assert.Equal(total, await f.Context.Jobs.CountAsync());
         var again = await Runner(f, new GreenhouseExternalJobProvider(factory)).RunAsync(f.Source.Id);
         Assert.Equal(0, again.Created); Assert.Equal(total, again.Existing); Assert.Equal(0, again.Published);
+    }
+
+    [Theory]
+    [InlineData("airbnb", "https://boards.greenhouse.io/airbnb")]
+    [InlineData("stripe", "https://job-boards.greenhouse.io/stripe")]
+    [InlineData("enterpret", "https://boards-api.greenhouse.io/v1/boards/enterpret/jobs")]
+    public async Task GreenhouseCanonicalUrlsAndIdentifiersFetchOnlyTheirResolvedBoard(string board, string careerUrl)
+    {
+        var paths = new List<string>();
+        using var handler = new Handler((request, _) =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            paths.Add(path);
+            return Task.FromResult(Json(path.EndsWith("/jobs", StringComparison.Ordinal)
+                ? Greenhouse(board, 1) : "{\"id\":1}"));
+        });
+        using var factory = new Factory(handler);
+        var source = new JobSource { Id = Guid.NewGuid(), AtsType = AtsType.Greenhouse,
+            CareerPageUrl = careerUrl, AtsIdentifier = board };
+        var jobs = await new GreenhouseExternalJobProvider(factory).FetchJobsAsync(source);
+        Assert.Single(jobs);
+        Assert.Equal(board, JobSourceConfiguration.Resolve(AtsType.Greenhouse, careerUrl, board).Identifier);
+        Assert.Equal(2, paths.Count);
+        Assert.All(paths, path => Assert.Contains($"/boards/{board}/", path, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task GreenhouseConflictStopsBeforeAnyRequestOrJobInsert()
+    {
+        using var f = new JobSourceFixture();
+        f.Source.CareerPageUrl = "https://boards.greenhouse.io/airbnb";
+        f.Source.AtsIdentifier = "enterpret";
+        await f.Context.SaveChangesAsync();
+        var requests = 0;
+        using var handler = new Handler((_, _) => { requests++; return Task.FromResult(Json("{\"jobs\":[]}")); });
+        using var factory = new Factory(handler);
+        var result = await Runner(f, new GreenhouseExternalJobProvider(factory)).RunAsync(f.Source.Id);
+        Assert.Equal(0, requests);
+        Assert.Empty(await f.Context.Jobs.ToArrayAsync());
+        Assert.Equal("GREENHOUSE_BOARD_CONFIGURATION_CONFLICT", result.FailureReasonCode);
+        Assert.False(result.ReconciliationSafe);
+    }
+
+    [Fact]
+    public async Task ThreeOneHundredJobBatchesCreateEachEligibleJobExactlyOnce()
+    {
+        using var f = new JobSourceFixture();
+        Configure(f, AtsType.Greenhouse, "batch-board");
+        f.Source.AutoPublishEnabled = false;
+        await f.Context.SaveChangesAsync();
+        var progress = new RecordingProgress();
+        var runner = Runner(f, new ThreeBatchesProvider(), progress);
+        var result = await runner.RunAsync(f.Source.Id);
+
+        Assert.Equal(300, result.Fetched);
+        Assert.Equal(300, result.Parsed);
+        Assert.Equal(300, result.IndiaEligible);
+        Assert.Equal(300, result.Created);
+        Assert.Equal(0, result.Existing);
+        Assert.Equal(300, await f.Context.Jobs.CountAsync());
+        Assert.All(progress.Snapshots, item =>
+        {
+            Assert.Equal(item.Counters.TotalReceived, item.Processed);
+            Assert.True(item.Counters.Created <= item.Counters.IndiaEligible);
+        });
+
+        var replay = await runner.RunAsync(f.Source.Id);
+        Assert.Equal(0, replay.Created);
+        Assert.Equal(300, replay.Existing);
+        Assert.Equal(300, await f.Context.Jobs.CountAsync());
+    }
+
+    [Fact]
+    public void RunStatusDtoExposesOneCumulativeCounterScope()
+    {
+        var diagnostics = new JobSourceRunResult
+        {
+            TotalReceived = 300, Parsed = 300, Created = 100, Updated = 20,
+            EligibilityReasonCounts = new Dictionary<string, int> { ["IndiaLocationConfirmed"] = 100 },
+            SelectionReasonCounts = new Dictionary<string, int> { ["NonIndiaLocation"] = 180, ["AmbiguousLocation"] = 20 }
+        };
+        var progress = new JobSourceRunProgress();
+        progress.Report(new("Running", 120, diagnostics));
+        Assert.Equal(300, progress.Snapshot.Processed);
+
+        var response = JobSourceRunResponse.From(new JobSourceRun
+        {
+            Id = Guid.NewGuid(), JobSourceId = Guid.NewGuid(), Status = JobSourceRunStatus.Running,
+            QueuedAtUtc = DateTime.UtcNow, NextAttemptAtUtc = DateTime.UtcNow,
+            Processed = progress.Snapshot.Processed, TotalReceived = diagnostics.TotalReceived,
+            Created = diagnostics.Created, Updated = diagnostics.Updated,
+            DiagnosticsJson = JsonSerializer.Serialize(diagnostics)
+        });
+        Assert.Equal(response.TotalReceived, response.Processed);
+        Assert.Equal(300, response.Fetched);
+        Assert.Equal(300, response.Parsed);
+        Assert.Equal(100, response.IndiaEligible);
+        Assert.Equal(180, response.NonIndiaRejected);
+        Assert.Equal(20, response.IndiaEligibilityUnknown);
+        Assert.Equal(100, response.Created);
+        Assert.True(response.Created <= response.IndiaEligible);
+    }
+
+    [Fact]
+    public void GreenhouseBoardTokenComparisonPreservesProviderPathCasing()
+    {
+        var conflict = JobSourceConfiguration.Resolve(AtsType.Greenhouse,
+            "https://boards.greenhouse.io/airbnb", "Airbnb");
+        Assert.False(conflict.IsValid);
+        Assert.Equal("GREENHOUSE_BOARD_CONFIGURATION_CONFLICT", conflict.ReasonCode);
+        Assert.True(JobSourceConfiguration.Resolve(AtsType.Greenhouse,
+            "https://boards.greenhouse.io/Airbnb", "Airbnb").IsValid);
     }
 
     [Fact]
@@ -102,7 +217,7 @@ public sealed class AtsStabilizationTests
     }
 
     [Fact]
-    public async Task GreenhouseForeignBoardReachesPersistenceWithoutGeographySelection()
+    public async Task GreenhouseForeignBoardIsFilteredBeforePersistence()
     {
         using var f = new JobSourceFixture(); Configure(f, AtsType.Greenhouse, "stripe"); await f.Context.SaveChangesAsync();
         using var handler = new Handler((request, _) =>
@@ -114,9 +229,9 @@ public sealed class AtsStabilizationTests
         });
         using var factory = new Factory(handler);
         var result = await Runner(f, new GreenhouseExternalJobProvider(factory)).RunAsync(f.Source.Id);
-        Assert.True(result.Succeeded); Assert.Equal(200, result.Fetched); Assert.Equal(0, result.NonIndiaRejected);
-        Assert.Equal(200, result.Created); Assert.Equal(0, result.Published); Assert.Equal(200,result.NotPublished);
-        Assert.Equal(200,await f.Context.Jobs.CountAsync()); Assert.Equal(0,result.SkippedInvalid);
+        Assert.True(result.Succeeded); Assert.Equal(200, result.Fetched); Assert.Equal(200, result.NonIndiaRejected);
+        Assert.Equal(0, result.Created); Assert.Equal(0, result.Published); Assert.Equal(0,result.NotPublished);
+        Assert.Equal(0,await f.Context.Jobs.CountAsync()); Assert.Equal(0,result.SkippedInvalid);
     }
 
     [Theory]
@@ -128,7 +243,7 @@ public sealed class AtsStabilizationTests
         f.Source.CareerPageUrl = careerUrl; await f.Context.SaveChangesAsync();
         var body = JsonSerializer.Serialize(new { meta = new { total = 1 }, jobs = new[] { new { id = 1,
             internal_job_id = 10,title = "Principal Engineer", content = "Senior engineer with 12 years of experience.",
-            location = new { name = "London, United Kingdom" }, absolute_url = applyUrl } } });
+            location = new { name = "Pune, India" }, absolute_url = applyUrl } } });
         using var handler = new Handler((request, _) => Task.FromResult(Json(request.RequestUri!.AbsolutePath.EndsWith("/jobs",StringComparison.Ordinal) ? body : "{\"id\":1}")));
         using var factory = new Factory(handler);
         var result = await Runner(f,new GreenhouseExternalJobProvider(factory)).RunAsync(f.Source.Id);
@@ -167,6 +282,8 @@ public sealed class AtsStabilizationTests
         using var factory = new Factory(handler);
         var result = await Runner(f, Provider(provider, factory)).RunAsync(f.Source.Id);
         Assert.True(result.Succeeded); Assert.Equal(1, result.Created); Assert.Equal(1, result.Published);
+        Assert.Equal(1, result.IndiaEligible);
+        Assert.True(result.Created <= result.IndiaEligible);
         Assert.Equal(board, (await f.Repository.GetByIdAsync(f.Source.Id))!.AtsIdentifier);
     }
 
@@ -304,6 +421,8 @@ public sealed class AtsStabilizationTests
             Assert.Equal(8, dispatcher.Results.Count); Assert.InRange(dispatcher.Peak,2,3);
             Assert.Equal(6, dispatcher.Results.Values.Count(result => result.Succeeded));
             Assert.Equal(2, dispatcher.Results.Values.Count(result => !result.Succeeded));
+            Assert.All(dispatcher.Results.Values.Where(result => result.Succeeded), result =>
+            { Assert.Equal(1, result.IndiaEligible); Assert.True(result.Created <= result.IndiaEligible); });
             Assert.All(dispatcher.Results.Values.Where(result => !result.Succeeded), result =>
             { Assert.False(result.ReconciliationSafe); Assert.Equal(0,result.Closed); Assert.Equal(0,result.Created); });
             Assert.Contains(dispatcher.Results.Values, result => result.FailureReasonCode == "PROVIDER_NOT_FOUND");
@@ -428,11 +547,11 @@ public sealed class AtsStabilizationTests
     private static HttpResponseMessage Response(AtsType provider, string board, HttpRequestMessage request)
     {
         if (provider == AtsType.Greenhouse) return request.RequestUri!.AbsolutePath.EndsWith("/jobs", StringComparison.Ordinal) ? Json(Greenhouse(board, 1)) : Json("{\"id\":1}");
-        if (provider == AtsType.Lever) return Json(JsonSerializer.Serialize(new[] { new { id = "REQ1", text = $"Graduate {board} Engineer", descriptionPlain = "Build safe systems", applyUrl = $"https://jobs.lever.co/{board}/REQ1/apply", categories = new { location = "Pune" } } }));
+        if (provider == AtsType.Lever) return Json(JsonSerializer.Serialize(new[] { new { id = "REQ1", text = $"Graduate {board} Engineer", descriptionPlain = "Build safe systems", applyUrl = $"https://jobs.lever.co/{board}/REQ1/apply", categories = new { location = "Pune, India" } } }));
         const string uuid = "00000000-0000-0000-0000-000000000001";
-        return Json(JsonSerializer.Serialize(new { apiVersion = "1", jobs = new[] { new { title = $"Graduate {board} Engineer", descriptionPlain = "Build safe systems", location = "Pune", isListed = true, jobUrl = $"https://jobs.ashbyhq.com/{board}/{uuid}", applyUrl = $"https://jobs.ashbyhq.com/{board}/{uuid}/application" } } }));
+        return Json(JsonSerializer.Serialize(new { apiVersion = "1", jobs = new[] { new { title = $"Graduate {board} Engineer", descriptionPlain = "Build safe systems", location = "Pune, India", isListed = true, jobUrl = $"https://jobs.ashbyhq.com/{board}/{uuid}", applyUrl = $"https://jobs.ashbyhq.com/{board}/{uuid}/application" } } }));
     }
-    private static string Greenhouse(string board, int total, string location = "Pune") => JsonSerializer.Serialize(new
+    private static string Greenhouse(string board, int total, string location = "Pune, India") => JsonSerializer.Serialize(new
     { meta = new { total }, jobs = Enumerable.Range(1, total).Select(id => new { id, internal_job_id = id, title = $"Graduate {board} Engineer {id}", content = "Build safe systems", location = new { name = location }, absolute_url = $"https://job-boards.greenhouse.io/{board}/jobs/{id}" }) });
     private static HttpResponseMessage Json(string value) => new(HttpStatusCode.OK) { Content = new StringContent(value, System.Text.Encoding.UTF8, "application/json") };
     private sealed class Handler(Func<HttpRequestMessage,CancellationToken,Task<HttpResponseMessage>> callback) : HttpMessageHandler
@@ -446,5 +565,33 @@ public sealed class AtsStabilizationTests
             clients.Add(client); return client;
         }
         public void Dispose() { foreach (var client in clients) client.Dispose(); }
+    }
+
+    private sealed class ThreeBatchesProvider : IBatchedExternalJobProvider
+    {
+        public AtsType AtsType => AtsType.Greenhouse;
+        public Task<IReadOnlyCollection<RawExternalJob>> FetchJobsAsync(JobSource source, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyCollection<RawExternalJob>>(Enumerable.Range(1, 300).Select(Vacancy).ToArray());
+        public Task<ExternalJobSourceSnapshot> FetchSnapshotAsync(JobSource source, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new ExternalJobSourceSnapshot(Enumerable.Range(1, 300).Select(Vacancy).ToArray(), 0, true));
+        public async IAsyncEnumerable<ExternalJobSourceSnapshot> FetchBatchesAsync(JobSource source,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            for (var batch = 0; batch < 3; batch++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var jobs = Enumerable.Range(batch * 100 + 1, 100).Select(Vacancy).ToArray();
+                yield return new(jobs, 0, batch == 2);
+                await Task.Yield();
+            }
+        }
+    }
+
+    private sealed class RecordingProgress : IJobSourceRunProgress
+    {
+        private readonly List<JobSourceRunProgressSnapshot> snapshots = [];
+        public IReadOnlyList<JobSourceRunProgressSnapshot> Snapshots => snapshots;
+        public JobSourceRunProgressSnapshot Snapshot => snapshots.LastOrDefault() ?? new("ProviderFetch", 0, new());
+        public void Report(JobSourceRunProgressSnapshot snapshot) => snapshots.Add(snapshot);
     }
 }

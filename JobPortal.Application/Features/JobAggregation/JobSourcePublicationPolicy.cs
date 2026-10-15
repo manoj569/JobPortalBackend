@@ -12,7 +12,7 @@ public interface IJobSourcePublicationPolicy
     void ApplyLicensedLogo(JobSource source);
 }
 
-// Optional execution cap and licensed-logo metadata. No business eligibility gate.
+// Positive India evidence is required before ingestion; retain the full census for reconciliation.
 public sealed class JobSourcePublicationPolicy(IOptions<JobAggregationOptions> options, TimeProvider clock)
     : IJobSourcePublicationPolicy
 {
@@ -28,23 +28,28 @@ public sealed class JobSourcePublicationPolicy(IOptions<JobAggregationOptions> o
     public ExternalJobSourceSnapshot Select(JobSource source, ExternalJobSourceSnapshot snapshot)
     {
         var approval = Settings(source);
-        // Employer ingestion is geography/experience neutral. Preserve original
-        // provider facts for downstream product and publication decisions.
-        var jobs = snapshot.Jobs.Select(job => job with
+        // Normalize display text before evaluating provider location evidence.
+        var observed = snapshot.Jobs.Select(job => new ExternalJobNormalizer().Normalize(job)).Select(job => job with
         {
             Location = IndiaJobEligibilityPolicy.DisplayLocation(job.Location)
         }).ToArray();
+        var evaluations = observed.Select(job => IndiaJobEligibilityPolicy.Evaluate(job)).ToArray();
+        var jobs = observed.Where((_, index) => evaluations[index].Decision == IndiaJobEligibilityDecision.Accepted).ToArray();
         var limited = approval.TestImportLimit > 0;
         var omitted = limited ? Math.Max(0, jobs.Length - approval.TestImportLimit) : 0;
-        // Diagnostic facts only: no geography result removes a provider record.
-        var reasons = jobs.GroupBy(job => IndiaJobEligibilityPolicy.Evaluate(job).ReasonCode, StringComparer.Ordinal)
+        // Partition every parsed record, including records held outside Jobs.
+        var reasons = evaluations.GroupBy(result => result.ReasonCode, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+        var rejected = evaluations.Where(result => result.Decision != IndiaJobEligibilityDecision.Accepted)
+            .GroupBy(result => result.ReasonCode, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+        if (omitted > 0) rejected["TestImportLimit"] = omitted;
         return snapshot with
         {
             Jobs = limited ? jobs.Take(approval.TestImportLimit).ToArray() : jobs,
             IsComplete = snapshot.IsComplete && !limited,
             SelectionLimited = limited,
-            SelectionReasonCounts = omitted == 0 ? null : new Dictionary<string,int> { ["TestImportLimit"] = omitted },
+            SelectionReasonCounts = rejected,
             EligibilityReasonCounts = reasons
         };
     }

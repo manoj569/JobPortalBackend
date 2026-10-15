@@ -9,9 +9,11 @@ namespace JobPortal.Application.Tests;
 public sealed class ExternalJobExpiryTests
 {
     [Fact]
-    public async Task Greenhouse_DeadlineSurvivesRunnerPersistenceWithoutRefreshingDuplicateExpiry()
+    public async Task Greenhouse_RepeatUpdatesOwnedDeadlineWithoutCreatingDuplicate()
     {
         using var fixture = new JobSourceFixture();
+        fixture.Source.CareerPageUrl = "https://job-boards.greenhouse.io/acme";
+        await fixture.Context.SaveChangesAsync();
         using var handler = new DeadlineHandler("""{"id":123,"application_deadline":"2026-12-01T17:30:00+05:30"}""");
         using var client = new HttpClient(handler) { BaseAddress = new Uri("https://example.test/") };
         fixture.Map(fixture.Category.Id.ToString());
@@ -26,10 +28,10 @@ public sealed class ExternalJobExpiryTests
 
         fixture.Provider.Jobs = [fixture.Provider.Jobs.Single() with { ExpiresAtUtc = expected.AddDays(30) }];
         result = await fixture.Runner.RunAsync(fixture.Source.Id);
-        Assert.Equal(1, result.Matched);
+        Assert.Equal(1, result.Existing);
         Assert.Equal(0, result.Created);
         fixture.Context.ChangeTracker.Clear();
-        Assert.Equal(expected, Assert.Single(fixture.Context.Jobs).ExpiresAtUtc);
+        Assert.Equal(expected.AddDays(30), Assert.Single(fixture.Context.Jobs).ExpiresAtUtc);
     }
 
     [Theory]
@@ -162,7 +164,7 @@ public sealed class ExternalJobExpiryTests
             return Task.FromResult(new HttpResponseMessage(isList ? HttpStatusCode.OK : status)
             {
                 Content = new StringContent(isList
-                    ? "{\"jobs\":[{\"id\":123,\"title\":\"Engineer\",\"content\":\"Apply before December\"}]}"
+                    ? "{\"jobs\":[{\"id\":123,\"title\":\"Engineer\",\"content\":\"Apply before December\",\"location\":{\"name\":\"Pune, India\"},\"absolute_url\":\"https://job-boards.greenhouse.io/acme/jobs/123\"}]}"
                     : detail)
             });
         }

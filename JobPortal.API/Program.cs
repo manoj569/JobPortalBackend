@@ -5,6 +5,7 @@ using System.Security.Claims;
 using System.Text;
 using System.Threading.RateLimiting;
 using JobPortal.API.Health;
+using JobPortal.API.Controllers;
 using JobPortal.API.Hubs;
 using JobPortal.API.Authorization;
 using JobPortal.API.HostedServices;
@@ -16,6 +17,7 @@ using JobPortal.Application;
 using JobPortal.Application.Features.JobDiscovery;
 using JobPortal.Application.Features.AIApply;
 using JobPortal.Application.Features.JobAggregation;
+using JobPortal.Application.Features.FresherAcquisition;
 using JobPortal.Application.Abstractions.Auditing;
 using JobPortal.Application.Abstractions.Authentication;
 using JobPortal.Infrastructure;
@@ -302,6 +304,14 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit = 0,
                 AutoReplenishment = true
             }));
+    options.AddPolicy("FresherBulkImport", _ =>
+        RateLimitPartition.GetFixedWindowLimiter("fresher-bulk-import", _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 30,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0,
+            AutoReplenishment = true
+        }));
     options.AddPolicy("AIResumeAnalysis", context => RateLimitPartition.GetFixedWindowLimiter(
         context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
         _ => new FixedWindowRateLimiterOptions { PermitLimit = 5, Window = TimeSpan.FromMinutes(10), QueueLimit = 0, AutoReplenishment = true }));
@@ -422,6 +432,9 @@ builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddPersistence(builder.Configuration);
 builder.Services.AddPostgresAggregationLocks();
 builder.Services.AddScoped<AdminBootstrapInitializer>();
+builder.Services.Configure<FresherAcquisitionOptions>(builder.Configuration.GetSection(FresherAcquisitionOptions.SectionName));
+builder.Services.AddScoped<FresherServiceTokenFilter>();
+builder.Services.AddScoped<FresherRequestLimitFilter>();
 
 var app = builder.Build();
 

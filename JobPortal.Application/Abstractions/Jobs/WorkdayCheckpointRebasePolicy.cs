@@ -31,6 +31,9 @@ public static class WorkdayCheckpointRebasePolicy
         if (archived is null) return current;
         return current with {
             TotalReceived = current.TotalReceived + archived.TotalReceived,
+            Parsed = current.Parsed + archived.Parsed,
+            EligibilityReasonCounts = Add(current.EligibilityReasonCounts, archived.EligibilityReasonCounts),
+            SelectionReasonCounts = Add(current.SelectionReasonCounts, archived.SelectionReasonCounts),
             Created = current.Created + archived.Created, Updated = current.Updated + archived.Updated,
             Unchanged = current.Unchanged + archived.Unchanged, Matched = current.Matched + archived.Matched,
             Skipped = current.Skipped + archived.Skipped, Failed = current.Failed + archived.Failed,

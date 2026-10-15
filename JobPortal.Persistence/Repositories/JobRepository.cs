@@ -176,6 +176,11 @@ public sealed class JobRepository(JobPortalDbContext context) : IJobRepository
             .FirstOrDefaultAsync(x => x.JobSourceId == jobSourceId && x.ExternalJobId == externalJobId && !x.IsDeleted,
                 cancellationToken);
 
+    public Task<Job?> FindByAcquisitionIdentityAsync(Guid acquisitionSourceId, string externalJobId,
+        CancellationToken cancellationToken = default) => context.Jobs
+            .FirstOrDefaultAsync(x => x.AcquisitionSourceId == acquisitionSourceId && x.AcquisitionExternalId == externalJobId && !x.IsDeleted,
+                cancellationToken);
+
     public async Task<IReadOnlyCollection<Job>?> FindSourceOwnedJobsAsync(Guid sourceId,
         IReadOnlyCollection<string> externalIds, CancellationToken cancellationToken = default)
     {

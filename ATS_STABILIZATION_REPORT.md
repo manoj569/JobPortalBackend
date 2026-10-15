@@ -1,169 +1,82 @@
-# Backend-only ATS ingestion incident report
+# CareerHarbor ATS ingestion and accounting report
 
 Backend repository: `C:\Users\Ashish\Documents\Codex\2026-07-27\you-are-a-principal-net-9`
 
-This pass fixes employer-source ingestion and preserves the existing automatic-publication workflow. No frontend or `ats-frontend-patch` files were modified in this pass. No fresher, internship, seniority or experience filtering was added. No deployment, production database mutation, company-specific provider condition, migration or analyzer-setting change was performed.
+This pass enforces positive India eligibility before external ATS records can create or update a `Job`, stabilizes Greenhouse board identity, and aligns run-status progress counters. No frontend source was changed, no production database was queried or changed, and nothing was deployed or pushed.
 
-## 1. Greenhouse Stripe/Airbnb: demonstrated root causes
+## India-only persistence rule
 
-Two independent repository defects can prevent fetched records from reaching creation:
+The source runner now partitions the complete provider census using `IndiaJobEligibilityPolicy` before constructing the ingestion list. Only `Accepted` records reach persistence. `Rejected` (non-India or explicitly India-excluded) and `Review` (unknown, ambiguous, or contradictory evidence) records remain in the provider census for diagnostics and identity reconciliation, but they are not inserted, updated, published, or allowed to mutate a pre-existing job.
 
-1. **Whole-board detail buffering.** The earlier implementation awaited detail work for the entire board before returning a snapshot. A later timeout, exception or host cancellation could therefore occur after many HTTP 200s but before the first persistence call. The existing stabilization repair now uses 25-job groups through `IBatchedExternalJobProvider`; the runner processes and commits a yielded group before the next detail group. Regression tests demonstrate that 25 jobs already exist in the database when detail request 26 starts.
-2. **Business geography selection before persistence.** `JobSourcePublicationPolicy.Select` evaluated India eligibility and removed foreign/ambiguous records before `JobSourceRunner` invoked ingestion. The Greenhouse adapter also skipped details for records classified as foreign. This violates the clarified contract to ingest all technically valid active employer jobs. This pass removes both geography-based decisions. The shared source policy retains only the established explicit test/execution cap and metadata/display handling. Country facts remain diagnostic and cannot restrict ingestion or mark a technically complete run unsuccessful.
+`JobIngestionService.IngestAsync` repeats the eligibility check before deduplication, lookup-driven mutation, or creation. This is the persistence-boundary guard for callers that bypass the source runner; bulk ingestion delegates through that same guarded method. The rule applies generically to Greenhouse, Lever, Ashby, Workday, and SuccessFactors.
 
-Exact affected files:
+Regression coverage checks foreign, generic remote, unknown, contradictory, and positive India cases across all five ATS types. A direct ingestion test also tries to update an existing India job with a foreign posting at the same canonical URL and verifies the existing row remains unchanged. No draft, review, unpublished, or auto-publish state is used as a substitute for the persistence guard.
 
-- `C:\Users\Ashish\Documents\Codex\2026-07-27\you-are-a-principal-net-9\JobPortal.Infrastructure\Services\GreenhouseExternalJobProvider.cs`
-- `C:\Users\Ashish\Documents\Codex\2026-07-27\you-are-a-principal-net-9\JobPortal.Application\Features\JobAggregation\JobSourcePublicationPolicy.cs`
-- `C:\Users\Ashish\Documents\Codex\2026-07-27\you-are-a-principal-net-9\JobPortal.Application\Services\JobSourceRunner.cs`
+## Greenhouse board configuration
 
-The exact end-to-end path is: named Greenhouse client reads the listing -> bounded detail group -> detail identity/deadline parsing -> technical snapshot validation -> yield -> runner captures original metadata once -> cumulative execution-cap handling -> normalizer/enrichment/category mapping -> source identity/canonical URL deduplication -> existing ingestion/unit-of-work saves -> separate existing auto-publication service -> safe reconciliation and source bookkeeping -> worker persists terminal status. Original metadata is serialized once per received record rather than repeatedly serializing all earlier groups as the cumulative board grows.
+The shared resolver is used both by create/update validation and by the provider. For trusted Greenhouse board hosts, a board token derived from the URL must exactly match the supplied `AtsIdentifier`; otherwise the request is rejected with `GREENHOUSE_BOARD_CONFIGURATION_CONFLICT` before any HTTP request. The resolver preserves provider path casing and does not guess a company-to-board mapping from an employer-hosted URL.
 
-### Technical exclusions are explicit
+Tests cover the canonical Airbnb, Stripe, and Enterpret forms, mismatched URL/identifier pairs, case-sensitive board tokens, and admin update rejection. For employer-hosted career URLs with no trusted Greenhouse token in the path, the identifier remains the board identity; this is intentionally generic and contains no company-specific branch.
 
-`PublicAtsSnapshot` still enforces established technical rules: title/description/stable identity, approved application URL shape and unique identities. It now produces individual codes including:
+The repository establishes that a stale identifier paired with a token-bearing board URL would be rejected before provider HTTP. A generic employer URL plus stale identifier could instead direct the provider to that identifier’s board. Production `CareerPageUrl` and `AtsIdentifier` values were not available, so this code-path analysis does not claim which configuration was persisted for a particular employer. Production verification remains required.
 
-- `PROVIDER_TITLE_INVALID`
-- `PROVIDER_DESCRIPTION_MISSING`
-- `PROVIDER_IDENTITY_INVALID`
-- `PROVIDER_APPLICATION_URL_UNVERIFIED`
-- `PROVIDER_DUPLICATE_IDENTITY`
+## Run-counter root cause and correction
 
-Greenhouse, Lever and Ashby preserve those codes into run diagnostics. Invalid details, prospect posts, explicit expiry, duplicate identities and malformed snapshots retain their established safe behavior; no business title or seniority threshold was introduced. Unsafe application URLs are not allowed merely to increase Created.
+The source-level defect was a mixed counter scope. `Created` is cumulative across committed Workday checkpoint receipts, but the legacy `Processed` value could represent a traversal/checkpoint progress count. The worker persisted that `Processed` value separately from run-wide `TotalReceived`, and the status response exposed both. A status consumer reading `Processed` as “Total Received” could therefore display a smaller, traversal-local value beside cumulative `Created` (for example, 300 beside 400).
 
-Exact technical-validation file: `C:\Users\Ashish\Documents\Codex\2026-07-27\you-are-a-principal-net-9\JobPortal.Infrastructure\Services\PublicAtsSnapshot.cs`.
+The traced persistence path has no second `Created` increment during publication. A successful ingestion receipt increments `Created` once; publication only changes publication counters. Durable checkpoint receipts are keyed by provider ordinal and external identity. A replay of the same committed ordinal reuses its receipt, and Workday’s resume path excludes checkpointed identities from the new batch. Rebase archives receipt outcomes and retires old receipts atomically; it does not add a second creation receipt for the same stable item.
 
-Read-only public listing checks on 2026-10-14 observed **726 Stripe jobs** and **165 Airbnb jobs**, with worldwide locations. [Stripe's public listing](https://boards-api.greenhouse.io/v1/boards/stripe/jobs?content=false) returned links shaped like `https://stripe.com/jobs/search?gh_jid=<id>`. [Airbnb's public listing](https://boards-api.greenhouse.io/v1/boards/airbnb/jobs?content=false) returned links shaped like `https://careers.airbnb.com/positions/<id>?gh_jid=<id>`. Those reads did not ingest or change any jobs.
+The fix makes `TotalReceived` the single run-status progress scope: progress snapshots normalize `Processed` to `Counters.TotalReceived`, the worker persists both fields from `TotalReceived`, and the admin run-status DTO returns `Processed` from `row.TotalReceived`. The DTO also exposes parsed and India eligibility diagnostics from the same cumulative result. Running and final status therefore use the same scope.
 
-The existing company-hosted Greenhouse URL rule requires the public career-page host to match the job-link host and `gh_jid` to match the identity. A mismatched saved career URL can therefore still produce zero creations as a technical configuration/URL-verification failure. That rule is preserved, and a regression now demonstrates an explicit `PROVIDER_APPLICATION_URL_UNVERIFIED` count with `ReconciliationSafe=false`. Employer-hosted Stripe/Airbnb-shaped links with matching configuration are proven to reach persistence, including a Principal Engineer job outside India.
+The literal production tuple `TotalReceived=300, Created=400` cannot be reproduced from the repository test data, and production run rows/diagnostics were not supplied. The mixed-field-scope defect is reproducible from the old worker/DTO mapping and is fixed; no claim is made that a different undocumented production data corruption is ruled out without inspecting that run’s saved diagnostics.
 
-The supplied old HTTP-only production logs cannot prove which of buffering/cancellation, geography selection, technical URL validation or another runtime branch actually terminated those specific production runs. The repository defects and their fixes are demonstrated; attribution of the exact historical production branch is **PRODUCTION VERIFICATION REQUIRED**.
+Regression tests verify:
 
-### Creation and publication remain separate
+- Three batches of 100 eligible unique jobs produce `Created=300`, never 600.
+- A replay of those committed identities produces `Created=0` and `Existing=300`.
+- Publication increments `Published` without changing `Created`.
+- Durable interrupted/retry counters preserve committed receipts without adding creation outcomes twice.
+- Running progress, persisted status fields, and final API response keep `Processed == TotalReceived`.
+- API response diagnostics remain cumulative and `Created <= IndiaEligible` in the 300-job example.
 
-All technically valid active jobs reach generic ingestion regardless of country, seniority or experience. `AutoPublishEnabled=false` cannot prevent creation. `AutoPublishEnabled=true` invokes the existing automatic-publication service and its quality/moderation/ownership checks after persistence. Existing publication review may keep a foreign/ambiguous job as a draft; that outcome is counted as NotPublished, not an ingestion rejection. No manual publication or unrelated product policy was redesigned.
+`IndiaEligible` and persistence outcomes are separate dimensions: geographic eligibility is counted before persistence, while validation failures/skips are retained as explicit ingestion diagnostics. `Published` is also separate from `Created`; disabled auto-publish and review outcomes do not alter creation totals.
 
-Run result and admin status now separately expose **Created**, **Updated/Existing**, **Published**, **NotPublished**, **SkippedInvalid** and **Failed**. `NonIndiaRejected` and `AmbiguousLocationHeld` are computed from actual selection exclusions rather than mislabeling diagnostic country facts as dropped jobs. Standard source ingestion now reports zero such business exclusions.
+## Root-cause summary
 
-Exact accounting files:
+The India leakage path was that geography was evaluated only as a later publication/review decision, after a `Job` could already be inserted or updated. The shared source-selection step and a second guard in `JobIngestionService` now stop every non-accepted geography decision before persistence.
 
-- `C:\Users\Ashish\Documents\Codex\2026-07-27\you-are-a-principal-net-9\JobPortal.Application\Abstractions\Jobs\JobSourceRunResult.cs`
-- `C:\Users\Ashish\Documents\Codex\2026-07-27\you-are-a-principal-net-9\JobPortal.Application\Features\JobAggregation\JobSourceRunService.cs`
+The counter mismatch path was that legacy `Processed` and run-wide `TotalReceived` were stored and surfaced as separate values, even though the run’s `Created` count was cumulative. `TotalReceived` is now authoritative for both fields and the API status value.
 
-An explicit `TestImportLimit` remains an operational partial-run mechanism: it produces `SELECTION_LIMITED`, unsuccessful full-run accounting and unsafe reconciliation. It does not silently claim a capped traversal ingested the whole source.
+For Greenhouse, create/update validation and provider execution now share the same board resolver, so token-bearing URL/identifier conflicts fail deterministically before HTTP instead of silently selecting one value.
 
-### Large-board and failure evidence
+## Legacy rows and safe cleanup
 
-| Regression | Demonstrated result |
-|---|---|
-| Stripe and Airbnb, 200/500 valid jobs, AutoPublish=true | All jobs created/published through real SQLite repositories and existing JobService; first 25 committed before request 26; repeat creates zero and matches all identities. |
-| Stripe and Airbnb, 500 valid jobs, AutoPublish=false | Created=500, Published=0, NotPublished=500, AutoPublishDisabled=500. |
-| 200 valid foreign jobs | Created=200, ingestion geography rejected/held=0; existing publication review accounts for all 200 as NotPublished. |
-| Cancellation after 50 safe details | 50 new committed jobs retained; older published job retained; no closure; cancellation progress is unsuccessful and reconciliation unsafe. |
-| One malformed/timed-out/missing detail among 60 | Other 59 records created/published; safe provider reason and skip count; no full success or unsafe closure. |
-| Employer-hosted application links | Matching Stripe/Airbnb-style career hosts and gh_jid links persist; unverified host is explicitly counted and cannot authorize closure. |
-| Mixed-source scheduler | Successful actual Greenhouse/Lever/Ashby/Workday adapters continue alongside isolated 404/429 sources under the bounded source concurrency setting. |
+The number of legacy non-India or unknown ATS rows is **unknown** because no production database access or export was provided. Do not delete rows based on a location-only SQL predicate: eligibility considers structured country codes, additional locations, explicit remote eligibility, exclusions, and contradictions.
 
-HTTP request cancellation controls enqueue acceptance, not the durable worker's execution token. Execution scopes, heartbeat cleanup and Workday producer tasks are awaited. Generic partial batches remain durable idempotent work; non-Workday adapters do not claim persisted Workday-style detail cursors. A hard process kill cannot emit a final log, so existing lease recovery handles abandoned Running rows. Workday remains non-authoritative for absence reconciliation; partial, capped, malformed or interrupted runs cannot close missing jobs.
+Use a read-only application-side audit first: enumerate source-owned jobs (`JobSourceId` plus external identity), reconstruct the original geography facts from stored source metadata where available, evaluate each with the deployed `IndiaJobEligibilityPolicy`, and export grouped counts by `Accepted` / `Rejected` / `Review` with IDs only in a protected admin report. Manually curated or source-unowned jobs should be excluded. Any later cleanup should be a separately reviewed, source-scoped operation with a dry-run count and reversible archival plan; this pass performs no cleanup.
 
-## 2. Workday Airbus/Walmart: what is proven
+## Verification
 
-The supplied intended configurations resolve generically, without company branches:
+The full solution Release build passed with **0 warnings and 0 errors**. The focused ATS/India/counter/checkpoint suite passed **315/315**. The provider diagnostics/Workday recheck passed **61/61**, and the isolated Workday `Retry-After` regression passed **1/1**.
 
-| Control/source | CareerPageUrl | Canonical AtsIdentifier |
-|---|---|---|
-| J&J | `https://jj.wd5.myworkdayjobs.com/JJ` | `jj/JJ` |
-| Airbus | `https://ag.wd3.myworkdayjobs.com/Airbus` | `ag/Airbus` |
-| Walmart | `https://walmart.wd504.myworkdayjobs.com/walmartexternal` | `walmart/walmartexternal` |
+The last full solution run completed with **2,752 passed, 84 failed, 32 skipped** (2,868 total). The failures were outside the changed ATS paths: 29 `CareerSessionTests`, 29 `CareerTrustTests`, 11 `CareerSessionReviewTests`, 5 `CareerAnalyticsTests`, 3 `CareerFinanceTests`, 3 `CareerReservationExpiryTests`, 1 `CareerSchedulingMigrationTests`, 1 `ExternalJobEnrichmentTests`, 1 `NotificationEligibilityTests`, and 1 `NotificationOutboxTests`. No test in the final run failed in the Greenhouse, Workday, SuccessFactors, India eligibility, source runner, or run-counter groups. The skips include opt-in PostgreSQL tests for which this environment has no configured disposable database. These broad failures were not altered as part of ATS stabilization, and this report does not claim the full backend suite is green.
 
-The earlier repository contract could accept weak configuration at save time and reject it before HTTP at execution. Its strict identifier contract rejected site-only/tenant-only inputs, while its failure path could reduce InvalidOperationException to a generic InfrastructureFailure. Shared resolution now derives only verified URL metadata, accepts matching canonical/tenant/site shorthand or a blank identifier, preserves URL career-site case, rejects conflicts early, and persists canonical metadata only on explicit create/update. Runtime resolution does not silently edit production source rows.
+Build/test evidence is under `Logs/IndiaGreenhouse/`: `ats-solution-release-build-final.log`, `ats-focused-final.trx`, `ats-provider-diagnostics-recheck.trx`, `workday-retry-after-final.trx`, and `ats-solution-broad-final-confirmed.trx`.
 
-The hostname structure accepts numeric `wdN` instances, including wd1, wd3, wd5, wd12, wd504 and larger valid numeric forms under the existing myworkdayjobs security model. **wd504 was not proven to be unsupported in the old code**. The supplied intended canonical configurations already match the recognized structure; no claim is made that production actually saved those values or a particular malformed alias.
+Production saved Greenhouse/Workday configuration, the exact historic 300/400 status row, and hosting behavior still need post-deployment verification. No production writes were made.
 
-Tests verify J&J/Airbus/Walmart endpoints, request headers/body, listing/detail parsing, aliases, conflict rejection before HTTP and sanitized unexpected pre-provider failures. Relevant files:
-
-- `C:\Users\Ashish\Documents\Codex\2026-07-27\you-are-a-principal-net-9\JobPortal.Application\Features\JobAggregation\WorkdaySourceConfiguration.cs`
-- `C:\Users\Ashish\Documents\Codex\2026-07-27\you-are-a-principal-net-9\JobPortal.Application\Features\JobAggregation\WorkdayExecutionDiagnostics.cs`
-- `C:\Users\Ashish\Documents\Codex\2026-07-27\you-are-a-principal-net-9\JobPortal.Application\Features\JobAggregation\JobSourceConfiguration.cs`
-- `C:\Users\Ashish\Documents\Codex\2026-07-27\you-are-a-principal-net-9\JobPortal.Infrastructure\Services\WorkdayJobSourceProvider.cs`
-- `C:\Users\Ashish\Documents\Codex\2026-07-27\you-are-a-principal-net-9\JobPortal.API\Services\JobSourceRunWorker.cs`
-
-The exact Airbus/Walmart production exception branch cannot be proven from InvalidOperationException + ListingTotal=0 alone. **PRODUCTION VERIFICATION REQUIRED**. It is not a local ATS blocker or justification for company-specific code.
-
-Diagnostics retained for that verification:
-
-- `WorkdayConfigurationInput`: source ID, sanitized identifier, verified public host/path.
-- `WorkdayConfigurationResolved`: resolved host, tenant, site and validation result.
-- `WorkdayConfigurationRejected`: specific code, type and fixed safe message.
-- `WorkdayPreExecutionFailure`: actual stage, original error type, safe code and sanitized exception containing the original server-side stack. Original exception messages/Data and inner exceptions are excluded; browser responses contain no stack.
-- Specific configuration/request/response failure codes are persisted in run diagnostics; InvalidOperationException no longer appears only as InfrastructureFailure. Known unsafe-checkpoint reasons now retain their own code rather than being misclassified as unexpected internal errors.
-
-The Workday checkpoint source identity includes the new technical-only ingestion-policy marker. An older paused traversal must not silently acknowledge records omitted by the old geography policy. The existing source-identity fence rejects such a resume with `SourceConfigurationChanged`, without closing or deleting jobs; a fresh explicit run uses normal idempotent ingestion. Existing already-completed receipts/finalization recovery remain non-destructive.
-
-## 3. Backend verification and baseline separation
-
-| Completed run | Passed | Failed | Skipped |
-|---|---:|---:|---:|
-| Final focused ATS/ingestion/publication/reconciliation regressions | 227 | 0 | 0 |
-| Final broad ATS/scheduler/worker/normalization/classification suite | 1033 | 8 | 17 |
-| Previously captured unchanged-HEAD baseline reproduction | 2 | 9 | 0 |
-
-All eight final broad failures match the previously reproduced failing tests on unchanged `a81e6e1`; **zero new failing tests** remain. The prior geography-dependent Workday accounting test is now updated for the explicitly changed ingestion contract and passes. Negative geography-selection tests were replaced by positive persistence/metadata/publication-separation assertions, without weakening technical checks or adding skips. PostgreSQL contract expectations were updated to all-location ingestion but remain opt-in; their skips are not claimed as passes.
-
-Baseline-only failures retained:
-
-1. `ExternalJobNormalizationPipelineTests.UnmappedNewAndMalformedRecordsFailClosedWithoutLosingValidRecords`.
-2. `ExternalJobExpiryTests.Greenhouse_DeadlineSurvivesRunnerPersistenceWithoutRefreshingDuplicateExpiry`.
-3. `ExternalJobEnrichmentTests.BroadDepartmentsDoNotImplyTechnologyRoles` — Civil Engineer/Infrastructure.
-4. `JobSourceManualRunTests.NewUnmappedJobIsSkippedWithoutClaimingSuccessfulRun`.
-5. `MastercardWorkdayVerificationTests.BoundedFixtureIngestionIsIdempotentAndIncompleteDetailsNeverReconcile`.
-6–7. `SuccessFactorsDiagnosticsTests.PaginationChangesReportTheFailingOffset` — total/last-offset.
-8. `SuccessFactorsDiagnosticsTests.InitialRecordAndPaginationBoundsRemainFailClosed` — 26/0 diagnostic stage.
-
-Unrelated baseline debt was not repaired to make this task green. Per the requested scope, those baseline failures and existing test analyzer debt do not block backend staging.
-
-**Backend production Release build: passed, 0 warnings, 0 errors.** Test runs use invocation-only `-p:TreatWarningsAsErrors=false`; analyzers remain enabled and no repository setting was changed. The established 186 test analyzer diagnostics remain baseline debt; no new diagnostic is retained after correcting an unused theory-parameter warning with a persisted-metadata assertion. `RunAnalyzers=false` was not used. No frontend build/test was run in this backend-only pass.
-
-Commands from the backend root:
-
-```powershell
-dotnet build JobPortal.API/JobPortal.API.csproj -c Release --no-restore -m:1 /nodeReuse:false
-
-dotnet test JobPortal.Application.Tests/JobPortal.Application.Tests.csproj -c Release --no-restore -m:1 /nodeReuse:false -p:TreatWarningsAsErrors=false --filter 'FullyQualifiedName~AtsStabilizationTests|FullyQualifiedName~GenericWorkdayConfigurationTests|FullyQualifiedName~GenericIndiaJobIngestionTests|FullyQualifiedName~SourceAutoPublicationTests|FullyQualifiedName~JobSourceReconciliationSafetyTests|FullyQualifiedName~WorkdayIngestionDiagnosticsTests|FullyQualifiedName~MultiCompanyProviderTests|FullyQualifiedName~EvenCleanWorkdayRerunsNeverCloseMissingVacancies' --logger 'trx;LogFileName=backend-only-focused-final.trx' --results-directory 'Logs/BackendOnly'
-
-dotnet test JobPortal.Application.Tests/JobPortal.Application.Tests.csproj -c Release --no-build --no-restore -m:1 /nodeReuse:false --filter 'FullyQualifiedName~AtsStabilizationTests|FullyQualifiedName~JobAggregation|FullyQualifiedName~JobSource|FullyQualifiedName~Workday|FullyQualifiedName~SuccessFactors|FullyQualifiedName~MultiCompanyProviderTests|FullyQualifiedName~ExternalJob|FullyQualifiedName~GenericIndia|FullyQualifiedName~SourceAutoPublication|FullyQualifiedName~OracleRecruitingCloud|FullyQualifiedName~JobQualityGateTests|FullyQualifiedName~JobClassificationTests' --logger 'trx;LogFileName=backend-only-broad-final.trx' --results-directory 'Logs/BackendOnly' --blame-hang-timeout 7m
-```
-
-Evidence: `Logs/BackendOnly/backend-only-focused-final.trx`, `Logs/BackendOnly/backend-only-broad-final.trx`, `backend-only-focused-final.log`, `backend-only-broad-final.log`, and `backend-only-release-build.log`, all in the backend repository. Original unchanged-HEAD baseline evidence is retained at `C:\Users\Ashish\Documents\Codex\2026-07-27\ats-stabilization-results\ats-baseline.trx` from the prior pass. No new baseline copy or frontend edits were made.
-
-Lever and Ashby actual-adapter regressions retain pagination/identity validation and publication integration. SuccessFactors actual-adapter regressions retain its secure transport/template validation and bounded detail groups. Generic all-location ingestion now applies equally to all five adapters. Oracle authorization-only and unsupported Custom behavior are unchanged.
-
-## 4. Post-deployment verification (prepared, not executed)
-
-`VERIFY_ATS_AFTER_DEPLOYMENT.ps1` remains syntax-checked and ready. It uses the existing Administrator-authenticated API at `https://job-portal-lgjc.onrender.com`, prompts for a bearer token with hidden input, and reads safe saved fields for J&J, Airbus, Walmart, Stripe and Airbnb. Optional switches enqueue each selected source exactly once and poll persisted status through canonical source/run IDs. It never edits configuration, retries an uncertain POST, follows arbitrary returned status URLs, prints a token or deploys anything.
-
-Inspect saved configuration first:
+The existing authenticated admin script reads safe source fields (ID, provider, career URL, identifier, active, auto-publish, interval) for Airbus, Walmart, J&J, Stripe, and Airbnb:
 
 ```powershell
 & 'C:\Users\Ashish\Documents\Codex\2026-07-27\you-are-a-principal-net-9\VERIFY_ATS_AFTER_DEPLOYMENT.ps1'
 ```
 
-After deployment, verify Workday once each:
+After deployment, this command reads configuration and enqueues Airbus and Walmart exactly once each, then polls their run-status endpoints:
 
 ```powershell
 & 'C:\Users\Ashish\Documents\Codex\2026-07-27\you-are-a-principal-net-9\VERIFY_ATS_AFTER_DEPLOYMENT.ps1' -RunAirbusAndWalmart
 ```
 
-After deployment, verify Stripe/Airbnb once each:
+The script uses the existing Administrator bearer token entered through hidden input, targets `https://job-portal-lgjc.onrender.com`, and does not retry an uncertain enqueue. J&J is read as the control source. No source configuration is changed.
 
-```powershell
-& 'C:\Users\Ashish\Documents\Codex\2026-07-27\you-are-a-principal-net-9\VERIFY_ATS_AFTER_DEPLOYMENT.ps1' -RunGreenhouse
-```
-
-Both switches can be combined. J&J remains a read-only control. Output distinguishes SUCCESS, failed/partial execution and an unconfirmed monitoring timeout, and includes Created/Existing/Published/NotPublished/SkippedInvalid/Failed, safe reason/stage, StopReason and reconciliation safety. A configuration rejection is reported even when no run can be enqueued. Check Greenhouse's saved career host against its employer-hosted job-link host if `PROVIDER_APPLICATION_URL_UNVERIFIED` is returned.
-
-## 5. Backend staging decision
-
-No remaining demonstrated local ATS ingestion blocker. Production saved configuration/termination attribution and hosting behavior still require the explicit post-deployment verification above. Opt-in PostgreSQL integration tests remain skipped without a disposable local test database; their behavior is not claimed as executed. Existing technical validity, idempotent replay, moderation/ownership and incomplete-run reconciliation safeguards remain.
-
-READY FOR BACKEND STAGING
+**ATS-SCOPE READY FOR STAGED REVIEW. FULL BACKEND SUITE NOT GREEN. PRODUCTION VERIFICATION REQUIRED.**

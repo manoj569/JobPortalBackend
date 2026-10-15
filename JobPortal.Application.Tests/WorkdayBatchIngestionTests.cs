@@ -238,8 +238,9 @@ public sealed class WorkdayBatchIngestionTests(ITestOutputHelper output)
         var runner = Runner(f, Provider(http));
         var initial = await runner.RunAsync(f.Source.Id);
         Assert.True(initial.Succeeded);
-        Assert.Equal(46, initial.Created);
+        Assert.Equal(45, initial.Created);
         Assert.Equal(45, initial.Published);
+        Assert.Equal(1, initial.NonIndiaRejected);
         var ids = await f.Context.Jobs.Select(x => x.Id).ToArrayAsync();
         var previousSuccess = (await f.Repository.GetByIdAsync(f.Source.Id))!.LastSuccessfulRunAtUtc;
         total = 45; firstReads = 0; changeAnchor = true;
@@ -247,22 +248,22 @@ public sealed class WorkdayBatchIngestionTests(ITestOutputHelper output)
         Assert.False(unsafeRun.ScanComplete);
         Assert.False(unsafeRun.ReconciliationSafe);
         Assert.Equal(0, unsafeRun.Created);
-        Assert.Equal(45, unsafeRun.Existing);
+        Assert.Equal(44, unsafeRun.Existing);
         Assert.Equal(0, unsafeRun.Published);
         Assert.Equal(0, unsafeRun.Closed);
         Assert.True((await f.Repository.GetByIdAsync(f.Source.Id))!.LastSuccessfulRunAtUtc >= previousSuccess);
         Assert.True(unsafeRun.Succeeded);
-        Assert.Equal(46, await f.Context.Jobs.CountAsync());
+        Assert.Equal(45, await f.Context.Jobs.CountAsync());
         firstReads = 0; changeAnchor = false;
         var safeRepeat = await runner.RunAsync(f.Source.Id);
         Assert.False(safeRepeat.ScanComplete);
         Assert.False(safeRepeat.ReconciliationSafe);
         Assert.Equal(0, safeRepeat.Created);
-        Assert.Equal(45, safeRepeat.Existing);
+        Assert.Equal(44, safeRepeat.Existing);
         Assert.Equal(0, safeRepeat.Published);
         Assert.Equal(0, safeRepeat.Closed);
         Assert.Equal(45, await f.Context.Jobs.CountAsync(job => job.Status == JobStatus.Published));
-        Assert.Equal(JobStatus.Draft, (await f.Context.Jobs.SingleAsync(job => job.ExternalJobId == "REQ-44")).Status);
+        Assert.False(await f.Context.Jobs.AnyAsync(job => job.ExternalJobId == "REQ-44"));
         Assert.Equal(ids.Order(), (await f.Context.Jobs.Select(x => x.Id).ToArrayAsync()).Order());
     }
 
@@ -307,7 +308,7 @@ public sealed class WorkdayBatchIngestionTests(ITestOutputHelper output)
             {
                 first = timer.Elapsed;
                 var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
-                response.Headers.RetryAfter = new(TimeSpan.FromSeconds(2));
+                response.Headers.RetryAfter = new(TimeSpan.FromSeconds(3));
                 return Task.FromResult(response);
             }
             second = timer.Elapsed;
@@ -315,7 +316,7 @@ public sealed class WorkdayBatchIngestionTests(ITestOutputHelper output)
         }));
         var result = await Provider(http, attempts: 2).FetchSnapshotAsync(Source());
         Assert.Equal(2, requests);
-        Assert.True(second - first >= TimeSpan.FromSeconds(2));
+        Assert.True(second - first >= TimeSpan.FromSeconds(2.9));
         Assert.False(result.IsComplete);
         Assert.True(result.ListingDiagnostics!.ProcessingComplete);
     }

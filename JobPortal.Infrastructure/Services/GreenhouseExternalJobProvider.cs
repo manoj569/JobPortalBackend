@@ -37,7 +37,23 @@ public sealed partial class GreenhouseExternalJobProvider(IHttpClientFactory cli
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(source);
-        var token = JobSourceConfiguration.Require(AtsType.Greenhouse, source.CareerPageUrl, source.AtsIdentifier).Identifier!;
+        if (logger is not null)
+            LogConfigurationInput(logger, source.Id, SafeIdentifier(source.AtsIdentifier), CareerHost(source.CareerPageUrl), CareerPath(source.CareerPageUrl));
+        ResolvedJobSourceConfiguration resolved;
+        try
+        {
+            resolved = JobSourceConfiguration.Require(AtsType.Greenhouse, source.CareerPageUrl, source.AtsIdentifier);
+        }
+        catch (InvalidOperationException exception)
+        {
+            if (logger is not null)
+                LogConfigurationRejected(logger, source.Id,
+                    exception.Data["JobSourceReasonCode"] as string ?? "GREENHOUSE_CONFIGURATION_INVALID",
+                    exception.GetType().Name, "Greenhouse board configuration was rejected.");
+            throw;
+        }
+        var token = resolved.Identifier!;
+        if (logger is not null) LogConfigurationResolved(logger, source.Id, token, resolved.ReasonCode);
         var concurrency = options?.Value.GreenhouseDetailConcurrency ?? 2;
         if (concurrency is < 1 or > 4)
         {
@@ -120,6 +136,18 @@ public sealed partial class GreenhouseExternalJobProvider(IHttpClientFactory cli
     private static partial void LogBatchCompleted(ILogger logger, Guid sourceId, int batchNumber, int succeeded, int failed);
     [LoggerMessage(EventId = 4403, Level = LogLevel.Information, Message = "GreenhouseParsedBatchReady SourceId={SourceId} BatchNumber={BatchNumber} Parsed={Parsed} Skipped={Skipped}.")]
     private static partial void LogReady(ILogger logger, Guid sourceId, int batchNumber, int parsed, int skipped);
+    [LoggerMessage(EventId = 4410, Level = LogLevel.Information, Message = "GreenhouseConfigurationInput SourceId={SourceId} AtsIdentifier={AtsIdentifier} CareerPageHost={CareerPageHost} CareerPagePath={CareerPagePath}.")]
+    private static partial void LogConfigurationInput(ILogger logger, Guid sourceId, string atsIdentifier, string careerPageHost, string careerPagePath);
+    [LoggerMessage(EventId = 4411, Level = LogLevel.Information, Message = "GreenhouseConfigurationResolved SourceId={SourceId} ResolvedBoardToken={ResolvedBoardToken} ValidationResult={ValidationResult}.")]
+    private static partial void LogConfigurationResolved(ILogger logger, Guid sourceId, string resolvedBoardToken, string validationResult);
+    [LoggerMessage(EventId = 4412, Level = LogLevel.Warning, Message = "GreenhouseConfigurationRejected SourceId={SourceId} ReasonCode={ReasonCode} ErrorType={ErrorType} SanitizedMessage={SanitizedMessage}.")]
+    private static partial void LogConfigurationRejected(ILogger logger, Guid sourceId, string reasonCode, string errorType, string sanitizedMessage);
+
+    private static string SafeIdentifier(string? value) =>
+        !string.IsNullOrWhiteSpace(value) && System.Text.RegularExpressions.Regex.IsMatch(value.Trim(), @"\A[A-Za-z0-9][A-Za-z0-9_.-]{0,254}\z", System.Text.RegularExpressions.RegexOptions.CultureInvariant)
+            ? value.Trim() : string.IsNullOrWhiteSpace(value) ? "<empty>" : "<invalid>";
+    private static string CareerHost(string? value) => Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps ? uri.Host : "<invalid>";
+    private static string CareerPath(string? value) => Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps ? uri.AbsolutePath : "<invalid>";
     private static async Task<(DateTime? Deadline, bool Available, string? Reason)> ReadDeadlineAsync(
         HttpClient client, string token, string id, CancellationToken cancellationToken)
     {

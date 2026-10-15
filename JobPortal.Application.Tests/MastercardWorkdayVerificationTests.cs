@@ -83,7 +83,7 @@ public sealed class MastercardWorkdayVerificationTests
     [Theory]
     [InlineData("Remote", "remote", IndiaJobEligibilityDecision.Review)]
     [InlineData("Unknown", null, IndiaJobEligibilityDecision.Review)]
-    [InlineData(null, null, IndiaJobEligibilityDecision.Accepted)]
+    [InlineData(null, null, IndiaJobEligibilityDecision.Review)]
     public void GeographyFixturesDoNotTreatGenericRemoteAsIndia(string? location, string? remote,
         IndiaJobEligibilityDecision expected)
     {
@@ -146,7 +146,7 @@ public sealed class MastercardWorkdayVerificationTests
             fixture.Resolver, new ExternalJobNormalizer(), autoPublishService: publisher, jobRepository: jobs);
         var first = await runner.RunAsync(fixture.Source.Id);
         Assert.True(first.Succeeded);
-        Assert.True(first.ReconciliationSafe);
+        Assert.False(first.ReconciliationSafe); // Workday does not authorize absence reconciliation.
         Assert.Equal(4, first.Created);
         Assert.Equal(4, first.Published);
         Assert.Equal(1, first.NonIndiaRejected);

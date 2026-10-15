@@ -545,7 +545,8 @@ public class JobSourceRunnerTests
     {
         Title = title,
         CompanyName = "Acme Corp",
-        ApplicationUrl = "https://example.com/" + title
+        ApplicationUrl = "https://example.com/" + title,
+        Location = "Pune, India"
     };
 
     private sealed class UnmappedCategoryResolver : IJobSourceCategoryResolver

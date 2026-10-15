@@ -89,7 +89,7 @@ public sealed class DeloitteSourceReconciliationTests
         Assert.Equal(0, partial.Closed);
         Assert.Equal(JobStatus.Draft, imported.Status);
 
-        provider.Snapshot = new ExternalJobSourceSnapshot([external with { ExternalId = null }], 0, true);
+        provider.Snapshot = new ExternalJobSourceSnapshot([changedSourceJob with { ExternalId = null }], 0, true);
         var missingIdentity = await runner.RunAsync(f.Source.Id);
         Assert.Equal(0, missingIdentity.Closed);
         Assert.Equal(JobStatus.Draft, imported.Status);
@@ -121,7 +121,7 @@ public sealed class DeloitteSourceReconciliationTests
     {
         ExternalId = id, Title = "External engineer", CompanyName = f.Company.Name,
         Description = "Source description", ApplicationUrl = $"https://source.test/jobs/{id}",
-        CategoryId = f.Category.Id, ExpiresAtUtc = JobSourceFixture.Now.AddDays(5)
+        CategoryId = f.Category.Id, ExpiresAtUtc = JobSourceFixture.Now.AddDays(5), Location = "Pune, India"
     };
 
     private sealed class SnapshotProvider(ExternalJobSourceSnapshot snapshot) : ICompleteExternalJobProvider

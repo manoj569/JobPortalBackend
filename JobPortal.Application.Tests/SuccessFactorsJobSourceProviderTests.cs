@@ -40,7 +40,9 @@ public sealed class SuccessFactorsJobSourceProviderTests
                 Microsoft.Extensions.Options.Options.Create(new JobPortal.Application.Features.JobAggregation.JobAggregationOptions()),
                 TimeProvider.System));
 
-        Assert.Equal(1, (await runner.RunAsync(f.Source.Id)).Created);
+        var imported = await runner.RunAsync(f.Source.Id);
+        Assert.Equal(1, imported.Created);
+        Assert.Equal(1, imported.IndiaEligible);
         var second = await runner.RunAsync(f.Source.Id);
         Assert.Equal(0, second.Created);
         Assert.Equal(1, second.Unchanged);

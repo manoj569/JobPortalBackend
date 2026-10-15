@@ -4,6 +4,7 @@ using JobPortal.Application.Abstractions.Persistence;
 using JobPortal.Application.Common.Text;
 using JobPortal.Domain.Entities;
 using JobPortal.Domain.Enums;
+using JobPortal.Domain.Common;
 
 namespace JobPortal.Application.Services;
 
@@ -73,7 +74,7 @@ public sealed class JobIngestionService(
         foreach (var raw in rawJobs)
         {
             var name = TextNormalizer.TrimOrNull(raw.CompanyName) ?? string.Empty;
-            var company = await ResolveCompanyAsync(name, SlugGenerator.Generate(name), raw.CompanyId, cancellationToken);
+            var company = await ResolveCompanyAsync(name, SlugGenerator.Generate(name), raw.CompanyId, raw.CompanyWebsiteUrl, cancellationToken);
             identities.Add((raw.ApplicationUrl is null ? null : canonicalizer.Canonicalize(raw.ApplicationUrl),
                 fingerprintService.GenerateFingerprint(raw.Title ?? string.Empty, company?.Name ?? name, raw.Location)));
         }
@@ -238,6 +239,14 @@ public sealed class JobIngestionService(
         ArgumentNullException.ThrowIfNull(rawJob);
         cancellationToken.ThrowIfCancellationRequested();
 
+        // This is the last boundary before either creation or mutation of Jobs.
+        // Publication status cannot substitute for positive hiring-location evidence.
+        rawJob = new ExternalJobNormalizer().Normalize(rawJob);
+        var eligibility = IndiaJobEligibilityPolicy.Evaluate(rawJob);
+        if (eligibility.Decision != IndiaJobEligibilityDecision.Accepted)
+            return Invalid("Validation:INDIA_ELIGIBILITY_" +
+                (eligibility.Decision == IndiaJobEligibilityDecision.Rejected ? "NON_INDIA" : "UNKNOWN"));
+
         var title = TextNormalizer.TrimOrNull(rawJob.Title);
         var companyName = TextNormalizer.TrimOrNull(rawJob.CompanyName);
 
@@ -268,6 +277,7 @@ public sealed class JobIngestionService(
             companyName,
             companySlug,
             rawJob.CompanyId,
+            rawJob.CompanyWebsiteUrl,
             cancellationToken);
 
         if (company is null)
@@ -285,6 +295,23 @@ public sealed class JobIngestionService(
         // Source identity takes precedence over general deduplication so a provider
         // can update only records it owns; URL/fingerprint matches remain untouched.
         var sourceExternalId = TextNormalizer.TrimOrNull(rawJob.ExternalId);
+        var acquisitionExternalId = TextNormalizer.TrimOrNull(rawJob.AcquisitionExternalId);
+        if (rawJob.JobSourceId.HasValue && rawJob.AcquisitionSourceId.HasValue)
+            return new JobIngestionResult { Outcome = JobIngestionOutcome.Invalid, ExplicitReasonCode = JobIngestionReasonCode.InvalidSourceData,
+                Message = "A job cannot be owned by both source types." };
+        if (rawJob.AcquisitionSourceId.HasValue && acquisitionExternalId is not null &&
+            await jobs.FindByAcquisitionIdentityAsync(rawJob.AcquisitionSourceId.Value, acquisitionExternalId, cancellationToken) is { } acquired)
+        {
+            var changed = ApplySourceFields(acquired, rawJob, title, company, location, applicationUrl);
+            acquired.DiscoveredUrl = rawJob.DiscoveredUrl;
+            acquired.CanonicalJobUrl = rawJob.CanonicalJobUrl;
+            acquired.LastVerifiedAtUtc = rawJob.LastVerifiedAtUtc;
+            acquired.LastSeenAtUtc = now;
+            acquired.FirstSeenAtUtc ??= now;
+            await PersistAsync(cancellationToken);
+            return new JobIngestionResult { Outcome = changed ? JobIngestionOutcome.Updated : JobIngestionOutcome.Unchanged,
+                JobId = acquired.Id, ExplicitReasonCode = JobIngestionReasonCode.None };
+        }
         if (rawJob.JobSourceId.HasValue && sourceExternalId is not null)
         {
             var owned = _ownedJobs.GetValueOrDefault((rawJob.JobSourceId.Value, sourceExternalId));
@@ -329,13 +356,29 @@ public sealed class JobIngestionService(
                 ? null
                 : await (_creationRun ?? creationLock).AcquireAsync(
                     applicationUrl is null ? null : canonicalizer.Canonicalize(applicationUrl),
-                    fingerprintService.GenerateFingerprint(title, company.Name, location),
+                    fingerprintService.GenerateFingerprint(title, company.Name, location) +
+                    (rawJob.AcquisitionSourceId.HasValue && acquisitionExternalId is not null
+                        ? $":acquisition:{rawJob.AcquisitionSourceId.Value:N}:{acquisitionExternalId}"
+                        : string.Empty),
                     cancellationToken);
 
         if (creationLease is not null)
         {
             // Negative preload results are not authoritative across writers. Recheck under
             // the same creation locks before dedup/save; never trust cached absence here.
+            if (rawJob.AcquisitionSourceId.HasValue && acquisitionExternalId is not null &&
+                await jobs.FindByAcquisitionIdentityAsync(rawJob.AcquisitionSourceId.Value, acquisitionExternalId, cancellationToken) is { } concurrentAcquired)
+            {
+                var changed = ApplySourceFields(concurrentAcquired, rawJob, title, company, location, applicationUrl);
+                concurrentAcquired.DiscoveredUrl = rawJob.DiscoveredUrl;
+                concurrentAcquired.CanonicalJobUrl = rawJob.CanonicalJobUrl;
+                concurrentAcquired.LastVerifiedAtUtc = rawJob.LastVerifiedAtUtc;
+                concurrentAcquired.LastSeenAtUtc = timeProvider.GetUtcNow().UtcDateTime;
+                concurrentAcquired.FirstSeenAtUtc ??= concurrentAcquired.LastSeenAtUtc;
+                await PersistAsync(cancellationToken);
+                return new JobIngestionResult { Outcome = changed ? JobIngestionOutcome.Updated : JobIngestionOutcome.Unchanged,
+                    JobId = concurrentAcquired.Id, ExplicitReasonCode = JobIngestionReasonCode.None };
+            }
             if (rawJob.JobSourceId.HasValue && sourceExternalId is not null &&
                 await jobs.FindBySourceIdentityAsync(rawJob.JobSourceId.Value, sourceExternalId, cancellationToken) is { } concurrentOwned)
             {
@@ -423,6 +466,29 @@ public sealed class JobIngestionService(
 
         var id = Guid.NewGuid();
 
+        var skillNames = rawJob.Skills.Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => string.Join(' ', x.Split(' ', StringSplitOptions.RemoveEmptyEntries)).Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var skillsByName = new Dictionary<string, Skill>(StringComparer.OrdinalIgnoreCase);
+        if (skillNames.Length > 0)
+        {
+            var normalizedSkills = skillNames.Select(x => x.ToUpperInvariant()).ToArray();
+            var existingSkills = await jobs.GetSkillsByNormalizedNamesAsync(normalizedSkills, cancellationToken);
+            skillsByName = existingSkills.ToDictionary(x => x.NormalizedName, StringComparer.OrdinalIgnoreCase);
+            var newSkills = new List<Skill>();
+            foreach (var skillName in skillNames)
+            {
+                var normalized = skillName.ToUpperInvariant();
+                if (!skillsByName.TryGetValue(normalized, out var skill))
+                {
+                    skill = new Skill { Name = skillName, NormalizedName = normalized };
+                    skillsByName.Add(normalized, skill);
+                    newSkills.Add(skill);
+                }
+            }
+            await jobs.AddSkillsAsync(newSkills, cancellationToken);
+        }
+
         var job = new Job
         {
             Id = id,
@@ -453,10 +519,21 @@ public sealed class JobIngestionService(
             FirstSeenAtUtc = now,
             LastSeenAtUtc = now,
             JobSourceId = rawJob.JobSourceId,
-            SourceOwnsPublication = rawJob.JobSourceId.HasValue,
+            AcquisitionSourceId = rawJob.AcquisitionSourceId,
+            AcquisitionExternalId = acquisitionExternalId,
+            DiscoveredUrl = rawJob.DiscoveredUrl,
+            CanonicalJobUrl = rawJob.CanonicalJobUrl,
+            LastVerifiedAtUtc = rawJob.LastVerifiedAtUtc,
+            SourceOwnsPublication = rawJob.JobSourceId.HasValue || rawJob.AcquisitionSourceId.HasValue,
             ExternalJobId = sourceExternalId,
             SourcePostedAtUtc = rawJob.SourcePostedAtUtc is { Kind: DateTimeKind.Utc } posted ? posted : null
         };
+
+        foreach (var skillName in skillNames)
+        {
+            var matchedSkill = skillsByName[skillName.ToUpperInvariant()];
+            job.JobSkills.Add(new JobSkill { JobId = job.Id, SkillId = matchedSkill.Id, Skill = matchedSkill, IsRequired = true });
+        }
 
         ApplyClassification(job, rawJob);
         checkpoint?.StageIngestion(rawJob, new JobIngestionResult
@@ -633,16 +710,21 @@ public sealed class JobIngestionService(
         string companyName,
         string companySlug,
         Guid? companyId,
+        string? companyWebsiteUrl,
         CancellationToken cancellationToken)
     {
-        var cacheKey = $"{companyId}\u001F{companyName}\u001F{companySlug}";
+        var domain = CompanyDomainNormalizer.Normalize(companyWebsiteUrl);
+        var cacheKey = $"{companyId}\u001F{domain}\u001F{companyName}\u001F{companySlug}";
 
         if (_companyCache.TryGetValue(cacheKey, out var cached))
             return cached;
 
         var company = companyId.HasValue
             ? await companies.GetByIdAsync(companyId.Value, cancellationToken)
-            : await companies.FindByNameOrSlugAsync(companyName, companySlug, cancellationToken);
+            : domain is not null
+                ? await companies.FindByWebsiteDomainAsync(domain, cancellationToken)
+                : null;
+        company ??= companyId.HasValue ? null : await companies.FindByNameOrSlugAsync(companyName, companySlug, cancellationToken);
 
         if (company is not null)
             _companyCache[cacheKey] = company;

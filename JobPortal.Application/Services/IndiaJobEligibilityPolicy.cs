@@ -60,7 +60,7 @@ public static partial class IndiaJobEligibilityPolicy
             return new(IndiaJobEligibilityDecision.Rejected, "NonIndiaLocation");
         if (locations.Length == 0 && countries.Length == 0 &&
             job.WorkplaceType != WorkplaceType.Remote && !string.Equals(job.WorkplaceTypeText, "remote", StringComparison.OrdinalIgnoreCase) &&
-            !Usable(job.RemoteEligibilityText)) return new(IndiaJobEligibilityDecision.Accepted, "MissingLocationAccepted");
+            !Usable(job.RemoteEligibilityText)) return new(IndiaJobEligibilityDecision.Review, "AmbiguousLocation");
         if (locations.Length > 0 && locations.All(x => IsForeignLocation(x)))
             return new(IndiaJobEligibilityDecision.Rejected, "NonIndiaLocation");
         return new(IndiaJobEligibilityDecision.Review, "AmbiguousLocation");

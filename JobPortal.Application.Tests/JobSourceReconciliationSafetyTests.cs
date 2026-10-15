@@ -20,7 +20,7 @@ public sealed class JobSourceReconciliationSafetyTests
     [InlineData(AtsType.Lever)]
     [InlineData(AtsType.Ashby)]
     [InlineData(AtsType.SuccessFactors)]
-    public async Task CompleteCensusIngestsEveryLocationAndClosesOnlyAbsentJobs(AtsType ats)
+    public async Task CompleteCensusPersistsOnlyIndiaJobsAndClosesOnlyTrulyAbsentJobs(AtsType ats)
     {
         using var f = new JobSourceFixture();
         f.Source.AtsType = ats;
@@ -46,17 +46,17 @@ public sealed class JobSourceReconciliationSafetyTests
         if (ats == AtsType.Workday) Assert.Contains("WorkdayNonAuthoritative", result.ReconciliationBlockReasons);
         else Assert.Empty(result.ReconciliationBlockReasons);
         Assert.Equal(176, result.TotalReceived);
-        Assert.Equal(131, result.Created);
-        Assert.Equal(45, result.Existing);
-        Assert.Equal(0, result.SelectionSkipped);
-        Assert.Equal(0, result.NonIndiaRejected);
-        Assert.Equal(0, result.AmbiguousLocationHeld);
+        Assert.Equal(0, result.Created);
+        Assert.Equal(44, result.Existing);
+        Assert.Equal(132, result.SelectionSkipped);
+        Assert.Equal(88, result.NonIndiaRejected);
+        Assert.Equal(44, result.AmbiguousLocationHeld);
         Assert.Equal(0, result.Skipped);
         Assert.Equal(0, result.Failed);
         Assert.Equal(0, result.Published);
         Assert.Equal(ats == AtsType.Workday ? 0 : 1, result.Closed);
         var inventory = await f.Context.Jobs.ToArrayAsync();
-        Assert.Equal(177, inventory.Length);
+        Assert.Equal(46, inventory.Length);
         Assert.All(inventory.Where(job => originalIds.ContainsKey(job.ExternalJobId!)), job => Assert.Equal(originalIds[job.ExternalJobId!], job.Id));
         Assert.Equal(JobStatus.Published, inventory.Single(x => x.ExternalJobId == "REQ45").Status);
         Assert.Equal(ats == AtsType.Workday ? JobStatus.Published : JobStatus.Closed, inventory.Single(x => x.ExternalJobId == "REQ999").Status);
@@ -65,7 +65,7 @@ public sealed class JobSourceReconciliationSafetyTests
         Assert.NotNull(f.Source.LastSuccessfulRunAtUtc);
         var repeated = await runner.RunAsync(f.Source.Id);
         Assert.True(repeated.Succeeded);
-        Assert.Equal(176, repeated.Existing);
+        Assert.Equal(44, repeated.Existing);
         Assert.Equal(0, repeated.Created);
         Assert.Equal(0, repeated.Published);
         Assert.Equal(0, repeated.Closed);
@@ -80,7 +80,7 @@ public sealed class JobSourceReconciliationSafetyTests
         Assert.Equal(ats != AtsType.Workday, response.Diagnostics!.ReconciliationSafe);
         if (ats == AtsType.Workday) Assert.Contains("WorkdayNonAuthoritative", response.Diagnostics.ReconciliationBlockReasons);
         else Assert.Empty(response.Diagnostics.ReconciliationBlockReasons);
-        Assert.Equal(45, response.Existing);
+        Assert.Equal(44, response.Existing);
     }
 
     [Theory]

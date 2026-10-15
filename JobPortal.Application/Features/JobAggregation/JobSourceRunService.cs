@@ -18,7 +18,11 @@ public sealed class JobSourceRunProgress : IJobSourceRunProgress
 {
     private JobSourceRunProgressSnapshot current = new("ProviderFetch", 0, new());
     public JobSourceRunProgressSnapshot Snapshot => Volatile.Read(ref current);
-    public void Report(JobSourceRunProgressSnapshot snapshot) => Volatile.Write(ref current, snapshot);
+    // The legacy Processed column is surfaced as a run-status progress value.
+    // Keep it on the same cumulative scope as TotalReceived, including filtered
+    // records and archived Workday traversals.
+    public void Report(JobSourceRunProgressSnapshot snapshot) =>
+        Volatile.Write(ref current, snapshot with { Processed = snapshot.Counters.TotalReceived });
 }
 
 public interface IJobSourceRunStore
@@ -51,10 +55,15 @@ public sealed record JobSourceRunResponse(
     public int Rejected => Diagnostics?.Rejected ?? Skipped;
     public int NotPublished => Diagnostics?.NotPublished ?? NeedsReview + QualityRejected + AutoPublishDisabled + PublishFailed;
     public int SkippedInvalid => Diagnostics?.SkippedInvalid ?? Skipped;
+    public int Fetched => Diagnostics?.Fetched ?? TotalReceived;
+    public int Parsed => Diagnostics?.Parsed ?? TotalReceived;
+    public int IndiaEligible => Diagnostics?.IndiaEligible ?? 0;
+    public int NonIndiaRejected => Diagnostics?.NonIndiaRejected ?? 0;
+    public int IndiaEligibilityUnknown => Diagnostics?.IndiaEligibilityUnknown ?? 0;
     public static JobSourceRunResponse From(JobSourceRun row) => new(row.Id, row.JobSourceId, row.Status.ToString(),
         row.AttemptCount, row.Status == JobSourceRunStatus.Paused || row.Status == JobSourceRunStatus.Interrupted && row.AttemptCount < JobSourceRun.MaximumAttempts,
         row.QueuedAtUtc, row.StartedAtUtc, row.CompletedAtUtc, row.InterruptedAtUtc, row.NextAttemptAtUtc,
-        row.HeartbeatAtUtc, row.Phase, row.Processed, row.TotalReceived, row.Created, row.Updated, row.Unchanged,
+        row.HeartbeatAtUtc, row.Phase, row.TotalReceived, row.TotalReceived, row.Created, row.Updated, row.Unchanged,
         row.Closed, row.Matched, row.Skipped, row.Failed, row.Published, row.NeedsReview, row.QualityRejected,
         row.PublishFailed, row.AutoPublishDisabled, row.Status == JobSourceRunStatus.Succeeded,
         row.ErrorCode)

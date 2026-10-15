@@ -233,7 +233,7 @@ public sealed partial class WorkdayJobSourceProvider(
                 var selection = options?.Value.SourceApprovals.GetValueOrDefault(source.Id.ToString("D"));
                 var policyIdentity = JsonSerializer.Serialize(new
                 {
-                    IngestionPolicy = "AllTechnicallyValidSourceJobsV2",
+                    IngestionPolicy = "PositiveIndiaEvidenceV3",
                     Limit = selection?.TestImportLimit ?? 0
                 });
                 var sourceIdentity = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(

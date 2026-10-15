@@ -214,9 +214,13 @@ public sealed partial class JobSourceRunWorker(IServiceScopeFactory scopes, JobS
                                         ? journal.State.ListingDiagnostics : captured.Counters.ListingDiagnostics,
                                     ListingPages = journal.State?.ListingPages ?? captured.Counters.ListingPages,
                                     TotalReceived = journal.State?.RebaseCount > captured.Counters.RebaseCount
-                                        ? journal.State.Cursor : Math.Max(captured.Counters.TotalReceived, journal.State?.Cursor ?? 0),
+                                        ? counters.TotalReceived : Math.Max(captured.Counters.TotalReceived, counters.TotalReceived),
                                     Parsed = journal.State?.RebaseCount > captured.Counters.RebaseCount
-                                        ? journal.State.ObservedJobs.Count : Math.Max(captured.Counters.Parsed, journal.State?.ObservedJobs.Count ?? 0),
+                                        ? counters.Parsed : Math.Max(captured.Counters.Parsed, counters.Parsed),
+                                    EligibilityReasonCounts = journal.State?.RebaseCount > captured.Counters.RebaseCount
+                                        ? counters.EligibilityReasonCounts : captured.Counters.EligibilityReasonCounts ?? counters.EligibilityReasonCounts,
+                                    SelectionReasonCounts = journal.State?.RebaseCount > captured.Counters.RebaseCount
+                                        ? counters.SelectionReasonCounts : captured.Counters.SelectionReasonCounts ?? counters.SelectionReasonCounts,
                                     Created = counters.Created, Updated = counters.Updated, Unchanged = counters.Unchanged,
                                     Matched = counters.Matched, Failed = counters.Failed, Published = counters.Published,
                                     Skipped = counters.Skipped + recoveredProviderSkipped, ReasonCounts = reasons,

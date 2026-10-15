@@ -1034,6 +1034,252 @@ namespace JobPortal.Persistence.Postgres.Migrations
                         });
                 });
 
+            modelBuilder.Entity("JobPortal.Domain.Entities.AcquisitionImportItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AcquisitionImportRunId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AcquisitionSourceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ApplyUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.Property<string>("CanonicalUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.Property<string>("CompanyNameNormalized")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DiscoveredUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.Property<string>("EligibilityDecision")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("ExternalId")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<DateTime>("FirstSeenAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("IdentityKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("ItemIndex")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("JobId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("LastSeenAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("LastVerifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LocationNormalized")
+                        .IsRequired()
+                        .HasMaxLength(250)
+                        .HasColumnType("character varying(250)");
+
+                    b.Property<string>("Outcome")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("ReasonCode")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<DateTime?>("SourceExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("TitleNormalized")
+                        .IsRequired()
+                        .HasMaxLength(250)
+                        .HasColumnType("character varying(250)");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsDeleted");
+
+                    b.HasIndex("JobId")
+                        .HasFilter("\"JobId\" IS NOT NULL");
+
+                    b.HasIndex("AcquisitionImportRunId", "IdentityKey")
+                        .IsUnique()
+                        .HasFilter("\"IsDeleted\" = FALSE");
+
+                    b.HasIndex("AcquisitionSourceId", "ExternalId", "LastSeenAtUtc");
+
+                    b.ToTable("AcquisitionImportItems", (string)null);
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.AcquisitionImportRun", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AcquisitionSourceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("BatchId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTime?>("CompletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CorrelationId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("CreatedCount")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("EligibleCount")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ExistingCount")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("FailedCount")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("FailureSummary")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<int>("InvalidUrlCount")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("PublishedCount")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ReceivedCount")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("RejectedCount")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("RejectedExperienceCount")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("RejectedGeographyCount")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("RejectedInvalidDataCount")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("StartedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("UpdatedCount")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsDeleted");
+
+                    b.HasIndex("AcquisitionSourceId", "BatchId")
+                        .IsUnique()
+                        .HasFilter("\"IsDeleted\" = FALSE");
+
+                    b.HasIndex("AcquisitionSourceId", "StartedAtUtc");
+
+                    b.ToTable("AcquisitionImportRuns", (string)null);
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.AcquisitionSource", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("AutoPublishEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<string>("ProviderKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsDeleted");
+
+                    b.HasIndex("ProviderKey")
+                        .IsUnique()
+                        .HasFilter("\"IsDeleted\" = FALSE");
+
+                    b.ToTable("AcquisitionSources", (string)null);
+                });
+
             modelBuilder.Entity("JobPortal.Domain.Entities.ApplicationQuotaUsage", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3502,6 +3748,10 @@ namespace JobPortal.Persistence.Postgres.Migrations
                         .HasMaxLength(160)
                         .HasColumnType("character varying(160)");
 
+                    b.Property<string>("NormalizedWebsiteDomain")
+                        .HasMaxLength(253)
+                        .HasColumnType("character varying(253)");
+
                     b.Property<Guid>("OwnerUserId")
                         .HasColumnType("uuid");
 
@@ -3530,6 +3780,9 @@ namespace JobPortal.Persistence.Postgres.Migrations
                     b.HasIndex("NormalizedName")
                         .IsUnique()
                         .HasFilter("\"IsDeleted\" = FALSE");
+
+                    b.HasIndex("NormalizedWebsiteDomain")
+                        .HasFilter("\"IsDeleted\" = FALSE AND \"NormalizedWebsiteDomain\" IS NOT NULL");
 
                     b.HasIndex("OwnerUserId");
 
@@ -3868,6 +4121,13 @@ namespace JobPortal.Persistence.Postgres.Migrations
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("AcquisitionExternalId")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<Guid?>("AcquisitionSourceId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("ApplicationUrl")
                         .IsRequired()
                         .HasMaxLength(2048)
@@ -3880,6 +4140,10 @@ namespace JobPortal.Persistence.Postgres.Migrations
                     b.Property<string>("CanonicalApplicationUrlHash")
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
+
+                    b.Property<string>("CanonicalJobUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
 
                     b.Property<Guid?>("CategoryId")
                         .HasColumnType("uuid");
@@ -3909,6 +4173,10 @@ namespace JobPortal.Persistence.Postgres.Migrations
                         .IsRequired()
                         .HasMaxLength(16000)
                         .HasColumnType("character varying(16000)");
+
+                    b.Property<string>("DiscoveredUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
 
                     b.Property<string>("EducationRequirement")
                         .HasMaxLength(200)
@@ -3953,6 +4221,9 @@ namespace JobPortal.Persistence.Postgres.Migrations
                         .HasColumnType("uuid");
 
                     b.Property<DateTime?>("LastSeenAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("LastVerifiedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Location")
@@ -4062,6 +4333,10 @@ namespace JobPortal.Persistence.Postgres.Migrations
                     b.HasIndex("Slug")
                         .IsUnique()
                         .HasFilter("\"IsDeleted\" = FALSE");
+
+                    b.HasIndex("AcquisitionSourceId", "AcquisitionExternalId")
+                        .IsUnique()
+                        .HasFilter("\"IsDeleted\" = FALSE AND \"AcquisitionSourceId\" IS NOT NULL AND \"AcquisitionExternalId\" IS NOT NULL");
 
                     b.HasIndex("CategoryId", "Status");
 
@@ -6900,6 +7175,35 @@ namespace JobPortal.Persistence.Postgres.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("JobPortal.Domain.Entities.AcquisitionImportItem", b =>
+                {
+                    b.HasOne("JobPortal.Domain.Entities.AcquisitionImportRun", "Run")
+                        .WithMany("Items")
+                        .HasForeignKey("AcquisitionImportRunId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("JobPortal.Domain.Entities.Job", "Job")
+                        .WithMany()
+                        .HasForeignKey("JobId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Job");
+
+                    b.Navigation("Run");
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.AcquisitionImportRun", b =>
+                {
+                    b.HasOne("JobPortal.Domain.Entities.AcquisitionSource", "AcquisitionSource")
+                        .WithMany()
+                        .HasForeignKey("AcquisitionSourceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AcquisitionSource");
+                });
+
             modelBuilder.Entity("JobPortal.Domain.Entities.ApplicationQuotaUsage", b =>
                 {
                     b.HasOne("JobPortal.Domain.Entities.User", "User")
@@ -7544,6 +7848,11 @@ namespace JobPortal.Persistence.Postgres.Migrations
 
             modelBuilder.Entity("JobPortal.Domain.Entities.Job", b =>
                 {
+                    b.HasOne("JobPortal.Domain.Entities.AcquisitionSource", "AcquisitionSource")
+                        .WithMany("Jobs")
+                        .HasForeignKey("AcquisitionSourceId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("JobPortal.Domain.Entities.Category", "Category")
                         .WithMany("Jobs")
                         .HasForeignKey("CategoryId")
@@ -7559,6 +7868,8 @@ namespace JobPortal.Persistence.Postgres.Migrations
                         .WithMany()
                         .HasForeignKey("JobSourceId")
                         .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("AcquisitionSource");
 
                     b.Navigation("Category");
 
@@ -8050,6 +8361,16 @@ namespace JobPortal.Persistence.Postgres.Migrations
                     b.Navigation("Job");
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.AcquisitionImportRun", b =>
+                {
+                    b.Navigation("Items");
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.AcquisitionSource", b =>
+                {
+                    b.Navigation("Jobs");
                 });
 
             modelBuilder.Entity("JobPortal.Domain.Entities.CandidatePortfolio", b =>

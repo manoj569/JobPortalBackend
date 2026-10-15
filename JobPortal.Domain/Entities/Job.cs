@@ -13,6 +13,8 @@ public sealed class Job : BaseEntity
     public string? Requirements { get; set; }
     public string? Benefits { get; set; }
     public string ApplicationUrl { get; set; } = string.Empty;
+    public string? DiscoveredUrl { get; set; }
+    public string? CanonicalJobUrl { get; set; }
     // Derived lookup metadata. The actionable URL above remains unchanged.
     public string? CanonicalApplicationUrlHash { get; set; }
     public string? Location { get; set; }
@@ -57,9 +59,13 @@ public sealed class Job : BaseEntity
 
     // Nullable source identity is populated only for provider-owned imports.
     public Guid? JobSourceId { get; set; }
+    public Guid? AcquisitionSourceId { get; set; }
+    public AcquisitionSource? AcquisitionSource { get; set; }
+    public string? AcquisitionExternalId { get; set; }
     // Set only on new provider-owned imports. Editorial suppression revokes it.
     // False for legacy rows whose publication ownership cannot be inferred safely.
     public bool SourceOwnsPublication { get; set; }
     public string? ExternalJobId { get; set; }
     public DateTime? SourcePostedAtUtc { get; set; }
+    public DateTime? LastVerifiedAtUtc { get; set; }
 }

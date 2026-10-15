@@ -304,14 +304,17 @@ public sealed class ExternalJobNormalizationPipelineTests
     {
         using var f = new JobSourceFixture();
         f.Provider.Jobs = [new() { Title = " New ", CompanyName = " Acme " }, new(),
-            new() { Title = "Good", CompanyName = "Acme", CategoryId = f.Category.Id },
-            new() { Title = "Bad URL", CompanyName = "Acme", CategoryId = f.Category.Id, ApplicationUrl = "javascript:bad" }];
+            new() { Title = "Good", CompanyName = "Acme", CategoryId = f.Category.Id, Location = "Pune, India", ApplicationUrl = "https://example.test/good" },
+            new() { Title = "Bad URL", CompanyName = "Acme", CategoryId = f.Category.Id, ApplicationUrl = "javascript:bad", Location = "Pune, India" }];
         var result = await f.Runner.RunAsync(f.Source.Id);
         Assert.False(result.Succeeded);
         Assert.Null(f.Source.LastSuccessfulRunAtUtc);
         Assert.Equal(0, result.Closed);
         Assert.Equal(4, result.TotalReceived);
-        Assert.Equal(3, result.Skipped);
+        Assert.Equal(1, result.Skipped);
+        Assert.Equal(2, result.IndiaEligibilityUnknown);
+        Assert.Equal(2, result.IndiaEligible);
+        Assert.Equal(1, result.SkippedInvalid);
         Assert.Equal(1, result.Created);
         Assert.Equal(0, result.Failed);
         Assert.Single(await f.Context.Jobs.ToArrayAsync());

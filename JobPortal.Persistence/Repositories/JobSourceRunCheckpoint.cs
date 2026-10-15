@@ -243,6 +243,8 @@ public sealed class JobSourceRunCheckpoint(JobPortalDbContext db, TimeProvider c
         return new()
         {
             TotalReceived = 1,
+            Parsed = 1,
+            EligibilityReasonCounts = new Dictionary<string, int> { ["IndiaLocationConfirmed"] = 1 },
             Created = outcome == JobIngestionOutcome.Created ? 1 : 0,
             Updated = outcome == JobIngestionOutcome.Updated ? 1 : 0,
             Unchanged = outcome == JobIngestionOutcome.Unchanged ? 1 : 0,
@@ -261,13 +263,32 @@ public sealed class JobSourceRunCheckpoint(JobPortalDbContext db, TimeProvider c
         };
     }
 
+    private JobSourceRunResult ArchiveCensus(JobSourceRunResult counters)
+    {
+        var state = State!;
+        var decisions = state.ObservedJobs.Select(JobPortal.Application.Services.IndiaJobEligibilityPolicy.Evaluate).ToArray();
+        var reasons = decisions.GroupBy(x => x.ReasonCode).ToDictionary(x => x.Key, x => x.Count());
+        // A batch can commit receipts before its cursor commits. Include these
+        // positively eligible items once, alongside the checkpointed full census.
+        var pending = committed.Keys.Count(ordinal => ordinal >= state.Cursor);
+        reasons["IndiaLocationConfirmed"] = reasons.GetValueOrDefault("IndiaLocationConfirmed") + pending;
+        return (counters with
+        {
+            TotalReceived = state.Cursor + pending,
+            Parsed = state.ObservedJobs.Count + pending,
+            EligibilityReasonCounts = reasons,
+            SelectionReasonCounts = decisions.Where(x => x.Decision != JobPortal.Application.Services.IndiaJobEligibilityDecision.Accepted)
+                .GroupBy(x => x.ReasonCode).ToDictionary(x => x.Key, x => x.Count())
+        }).WithArchivedCensus(state.ArchivedCounters);
+    }
+
     public JobSourceRunResult CommittedCounters
     {
         get
         {
             int Ingestion(JobIngestionOutcome outcome) => ingestionCounts.GetValueOrDefault(outcome);
             int Publication(JobAutoPublishOutcome outcome) => publicationCounts.GetValueOrDefault(outcome);
-            return WorkdayCheckpointRebasePolicy.AddCounters(new()
+            var counters = WorkdayCheckpointRebasePolicy.AddCounters(new()
             {
                 TotalReceived = committed.Count,
                 Created = Ingestion(JobIngestionOutcome.Created), Updated = Ingestion(JobIngestionOutcome.Updated),
@@ -281,6 +302,7 @@ public sealed class JobSourceRunCheckpoint(JobPortalDbContext db, TimeProvider c
                 ValidationReasonCounts = new Dictionary<string, int>(validation, StringComparer.Ordinal),
                 QualityReasonCounts = new Dictionary<JobQualityReasonCode, int>(quality)
             }, State?.ArchivedCounters);
+            return State is null ? counters : ArchiveCensus(counters);
         }
     }
 

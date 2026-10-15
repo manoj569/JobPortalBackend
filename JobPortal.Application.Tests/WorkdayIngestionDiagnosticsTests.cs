@@ -13,7 +13,7 @@ namespace JobPortal.Application.Tests;
 public sealed class WorkdayIngestionDiagnosticsTests
 {
     [Fact]
-    public void GeographyReasonsAreDiagnosticAndNeverRestrictSourceIngestion()
+    public void GeographyReasonsFilterJobsBeforeTheCommonPersistenceBoundary()
     {
         var policy = new JobSourcePublicationPolicy(Options.Create(new JobAggregationOptions()), TimeProvider.System);
         var selected = policy.Select(new JobSource(), new([
@@ -22,8 +22,9 @@ public sealed class WorkdayIngestionDiagnosticsTests
             new RawExternalJob { ExternalId = "unknown", Location = "Unknown" },
             new RawExternalJob { ExternalId = "remote", Location = "Remote", WorkplaceTypeText = "remote" }
         ], 0, true));
-        Assert.Equal(4, selected.Jobs.Count);
-        Assert.Null(selected.SelectionReasonCounts);
+        Assert.Single(selected.Jobs);
+        Assert.Equal(1, selected.SelectionReasonCounts!["NonIndiaLocation"]);
+        Assert.Equal(2, selected.SelectionReasonCounts["AmbiguousLocation"]);
         Assert.Equal(1, selected.EligibilityReasonCounts!["NonIndiaLocation"]);
         Assert.Equal(2, selected.EligibilityReasonCounts["AmbiguousLocation"]);
         Assert.True(selected.IsComplete);
@@ -57,19 +58,20 @@ public sealed class WorkdayIngestionDiagnosticsTests
         Assert.True(first.Succeeded);
         Assert.True(first.ScanComplete);
         Assert.False(first.ReconciliationSafe);
-        Assert.Equal(0, first.SelectionSkipped);
-        Assert.Equal(0, first.AmbiguousLocationHeld);
-        Assert.Equal(4, first.Created);
-        Assert.Equal(0, first.Rejected);
-        Assert.Equal(1, first.EligibilityReasonCounts!["NonIndiaLocation"]);
+        Assert.Equal(2, first.SelectionSkipped);
+        Assert.Equal(2, first.Created);
+        Assert.Equal(1, first.Rejected);
+        Assert.Equal(1, first.NonIndiaRejected);
+        Assert.Equal(1, first.AmbiguousLocationHeld);
         var repeated = await runner.RunAsync(f.Source.Id);
         Assert.True(repeated.Succeeded);
         Assert.False(repeated.ReconciliationSafe);
-        Assert.Equal(0, repeated.SelectionSkipped);
+        Assert.Equal(2, repeated.SelectionSkipped);
         Assert.Equal(0, repeated.Created);
-        Assert.Equal(4, repeated.Unchanged);
-        Assert.Equal(1, repeated.EligibilityReasonCounts!["NonIndiaLocation"]);
-        Assert.Equal(4, await f.Context.Jobs.CountAsync());
+        Assert.Equal(2, repeated.Unchanged);
+        Assert.Equal(1, repeated.NonIndiaRejected);
+        Assert.Equal(1, repeated.AmbiguousLocationHeld);
+        Assert.Equal(2, await f.Context.Jobs.CountAsync());
     }
 
     [Fact]
