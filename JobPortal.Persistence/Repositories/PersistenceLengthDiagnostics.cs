@@ -6,8 +6,13 @@ using JobPortal.Persistence.Context;
 
 namespace JobPortal.Persistence.Repositories;
 
-internal static class PersistenceLengthDiagnostics
+internal static partial class PersistenceLengthDiagnostics
 {
+    [LoggerMessage(EventId = 22001, EventName = "PersistenceLengthViolation", Level = LogLevel.Warning,
+        Message = "PersistenceLengthViolation Table={Table} Column={Column} Property={Property} ObservedLength={ObservedLength} MaxLength={MaxLength}")]
+    private static partial void LengthViolation(ILogger logger, string table, string? column, string property,
+        int observedLength, int maxLength);
+
     public static void Report(JobPortalDbContext context, DbUpdateException exception, ILogger? logger)
     {
         var violations = new List<string>();
@@ -25,9 +30,8 @@ internal static class PersistenceLengthDiagnostics
                 var column = property.Metadata.GetColumnName(store);
                 violations.Add($"{table}.{column} ({entry.Metadata.ClrType.Name}.{property.Metadata.Name}): {length}/{limit}");
                 // Never log values, identifiers, URLs, SQL, or the database exception.
-                logger?.LogWarning(new EventId(22001, "PersistenceLengthViolation"),
-                    "PersistenceLengthViolation Table={Table} Column={Column} Property={Property} ObservedLength={ObservedLength} MaxLength={MaxLength}",
-                    table, column, property.Metadata.Name, length, limit);
+                if (logger is not null)
+                    LengthViolation(logger, table, column, property.Metadata.Name, length, limit);
             }
         }
         exception.Data["PersistenceLengthViolations"] = string.Join("; ", violations);
