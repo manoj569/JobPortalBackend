@@ -26,7 +26,8 @@ internal static class JobValidationRules
         Expression<Func<T, PostedByType?>> postedByType)
     {
         validator.RuleFor(title).NotEmpty().Must(JobPortal.Application.Services.ImportedJobIntegrity.HasMeaningfulTitle).MaximumLength(250);
-        validator.RuleFor(description).MaximumLength(16000);
+        // Description is long-form content; publication must accept the complete
+        // employer description persisted by provider ingestion.
         validator.RuleFor(companyId).NotEmpty();
 
         validator.RuleFor(responsibilities).MaximumLength(8000);

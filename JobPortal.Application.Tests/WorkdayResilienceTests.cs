@@ -94,18 +94,23 @@ public sealed class WorkdayResilienceTests
         if (mutation == "placeholder") Assert.Equal(1, snapshot.ListingDiagnostics.PlaceholderCount);
     }
 
-    [Fact]
-    public async Task TwoThousandRawSlotsWithOnePlaceholderProcess1999Jobs()
+    [Theory]
+    [InlineData(2000)]
+    [InlineData(294)]
+    public async Task RawSlotsWithOnePlaceholderProcessAllRealJobsWithoutReconciliation(int total)
     {
         // Production-shaped fixture: a capped search and a placeholder both permit ingestion.
-        using var handler = new Board(2000, 2000, 2000) { Mutation = "placeholder" };
+        using var handler = new Board(total, total, total) { Mutation = "placeholder" };
         using var http = new HttpClient(handler);
         using var provider = Provider(http);
         var snapshot = await provider.FetchSnapshotAsync(Source());
 
         Assert.False(snapshot.IsComplete);
-        Assert.Equal(1999, snapshot.Jobs.Count);
-        Assert.Equal(1999, handler.DetailRequests);
+        Assert.Equal(total - 1, snapshot.Jobs.Count);
+        Assert.Equal(total - 1, handler.DetailRequests);
+        Assert.Equal(total, snapshot.ListingDiagnostics!.InitialReportedTotal);
+        Assert.Equal(total, snapshot.ListingDiagnostics.RawSlots);
+        Assert.Equal(total - 1, snapshot.ListingDiagnostics.UniquePaths);
         Assert.True(snapshot.ListingDiagnostics!.IngestionSafe);
         Assert.False(snapshot.ListingDiagnostics.ReconciliationSafe);
         Assert.False(snapshot.ListingDiagnostics.SnapshotStable);

@@ -656,6 +656,38 @@ public sealed class WorkdayBatchIngestionTests(ITestOutputHelper output)
         public void ResetAfterFailure() => inner.ResetAfterFailure();
     }
 
+    [Theory]
+    [InlineData(100)]
+    [InlineData(20001)]
+    public async Task CompleteDescriptionPublishesAndExistingPublishedJobRemainsPublished(int length)
+    {
+        using var f = Fixture();
+        var content = "Build reliable software. " + new string('x', length);
+        using var http = new HttpClient(new Handler((request, _) => Task.FromResult(request.Method == HttpMethod.Post
+            ? Json(Listing(1, 0, 1)) : Json(Detail(request, "<p>" + content + "</p>")))));
+        var runner = Runner(f, new ExplicitPublicationFixture(Provider(http)), publish: true);
+        var first = await runner.RunAsync(f.Source.Id);
+        Assert.True(first.Succeeded);
+        Assert.Equal(1, first.Created);
+        Assert.Equal(1, first.Published);
+        var saved = await f.Context.Jobs.SingleAsync();
+        Assert.Equal(content, saved.Description);
+        Assert.Contains(content, saved.SourceMetadataJson!);
+        var repeat = await runner.RunAsync(f.Source.Id);
+        Assert.True(repeat.Succeeded);
+        Assert.Equal(0, repeat.Created);
+        Assert.Equal(0, repeat.Published);
+        Assert.Equal(JobStatus.Published, saved.Status);
+        Assert.Equal(content, saved.Description);
+        var jobs = new JobRepository(f.Context);
+        var unit = new UnitOfWork(f.Context);
+        var service = new JobService(jobs, unit, f.Audit, new CreateJobRequestValidator(), new UpdateJobRequestValidator(),
+            new UpdateRecruiterContactRequestValidator(), new JobSearchQueryValidator(), TimeProvider.System, sources: f.Repository);
+        var publisher = new JobAutoPublishService(jobs, new JobQualityGate(), service,
+            Options.Create(new JobAggregationOptions()), TimeProvider.System, f.Repository);
+        Assert.Equal(JobAutoPublishOutcome.AlreadyPublished, (await publisher.TryPublishAsync(saved.Id)).Outcome);
+    }
+
     // Supplies explicitly known fixture facts to test the unchanged publication
     // pipeline. Production Workday must not invent expiry/experience to pass it.
     private sealed class ExplicitPublicationFixture(WorkdayJobSourceProvider inner) : IBatchedExternalJobProvider
@@ -718,11 +750,11 @@ public sealed class WorkdayBatchIngestionTests(ITestOutputHelper output)
         { title = $"Engineer {i}", externalPath = $"/job/Pune/Engineer_{i}", locationsText = "Pune" })
     });
 
-    private static string Detail(HttpRequestMessage request)
+    private static string Detail(HttpRequestMessage request, string? description = null)
     {
         var id = request.RequestUri!.AbsolutePath.Split('_').Last();
         return JsonSerializer.Serialize(new { jobPostingInfo = new { title = $"Engineer {id}", jobReqId = $"REQ-{id}",
-            jobDescription = $"<p>Build reliable software for product {id}, collaborating with the engineering team and delivering high quality code.</p>",
+            jobDescription = description ?? $"<p>Build reliable software for product {id}, collaborating with the engineering team and delivering high quality code.</p>",
             location = "Pune, India", timeType = "Full time", remoteType = "On-site", startDate = DateTime.UtcNow.ToString("yyyy-MM-dd") } });
     }
 

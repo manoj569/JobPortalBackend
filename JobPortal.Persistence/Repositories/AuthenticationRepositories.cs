@@ -228,13 +228,19 @@ public sealed class RefreshTokenRepository(JobPortalDbContext context) : IRefres
                 .SetProperty(x => x.UpdatedAtUtc, revokedAtUtc), cancellationToken);
 }
 
-public sealed class UnitOfWork(JobPortalDbContext context) : IUnitOfWork
+public sealed class UnitOfWork(JobPortalDbContext context, Microsoft.Extensions.Logging.ILogger<UnitOfWork>? logger = null) : IUnitOfWork
 {
     public async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
         try
         {
             return await context.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException exception)
+            when (exception.InnerException is PostgresException { SqlState: "22001" })
+        {
+            PersistenceLengthDiagnostics.Report(context, exception, logger);
+            throw;
         }
         catch (DbUpdateException exception)
             when (exception.InnerException is PostgresException { SqlState: "23505" })

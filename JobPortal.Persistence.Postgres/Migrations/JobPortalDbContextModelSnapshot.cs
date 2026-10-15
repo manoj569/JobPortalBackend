@@ -4191,8 +4191,7 @@ namespace JobPortal.Persistence.Postgres.Migrations
 
                     b.Property<string>("Description")
                         .IsRequired()
-                        .HasMaxLength(16000)
-                        .HasColumnType("character varying(16000)");
+                        .HasColumnType("text");
 
                     b.Property<string>("DiscoveredUrl")
                         .HasMaxLength(2048)

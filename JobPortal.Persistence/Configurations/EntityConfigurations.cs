@@ -226,7 +226,8 @@ public sealed class JobConfiguration : IEntityTypeConfiguration<Job>
         builder.Property(x => x.ReferenceNumber).HasMaxLength(50).IsRequired();
         builder.Property(x => x.Title).HasMaxLength(250).IsRequired();
         builder.Property(x => x.Slug).HasMaxLength(270).IsRequired();
-        builder.Property(x => x.Description).HasMaxLength(16000).IsRequired();
+        // Employer-authored long-form content is unbounded (PostgreSQL text).
+        builder.Property(x => x.Description).IsRequired();
         builder.Property(x => x.Responsibilities).HasMaxLength(8000);
         builder.Property(x => x.Requirements).HasMaxLength(8000);
         builder.Property(x => x.Benefits).HasMaxLength(4000);
