@@ -1,11 +1,10 @@
 using System.Text.Json;
-using System.Security.Cryptography;
-using System.Text;
 using JobPortal.Application.Abstractions.Jobs;
 using JobPortal.Domain.Enums;
 using JobPortal.Application.Abstractions.Persistence;
 using JobPortal.Application.Common.Text;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace JobPortal.Application.Features.FresherAcquisition;
 
@@ -20,7 +19,8 @@ public sealed partial class FresherBulkImportService(
     IFresherAcquisitionStore? acquisitionStore = null,
     IJobAutoPublishService? autoPublish = null,
     TimeProvider? clock = null,
-    ICategoryManagementRepository? categories = null) : IFresherBulkImportService
+    ICategoryManagementRepository? categories = null,
+    IOptions<FresherAcquisitionOptions>? options = null) : IFresherBulkImportService
 {
     public async Task<FresherBulkImportResponse> ImportAsync(FresherBulkImportRequest request, CancellationToken cancellationToken = default)
     {
@@ -29,29 +29,70 @@ public sealed partial class FresherBulkImportService(
         JobPortal.Domain.Entities.AcquisitionImportRun? run = null;
         if (acquisitionStore is not null)
         {
-            var providerKey = request.SourceType.Trim().ToLowerInvariant();
-            source = await acquisitionStore.GetEnabledSourceAsync(providerKey, cancellationToken);
+            source = await acquisitionStore.GetEnabledSourceAsync(request.SourceType.Trim().ToLowerInvariant(), cancellationToken);
             if (source is null)
                 return new(request.ImportId, request.Jobs.Count, 0, 0, 0, 0, 0, 0, 0, 0, request.Jobs.Count,
                     Enumerable.Range(0, request.Jobs.Count).Select(i => new FresherImportItemOutcome(i, "Failed", "ACQUISITION_SOURCE_DISABLED")).ToArray());
-            var start = await acquisitionStore.StartRunAsync(source.Id, request.ImportId, Guid.NewGuid().ToString("N"), request.Jobs.Count, cancellationToken);
+        }
+        var identityKeys = request.Jobs.Select(x => FresherCandidateIdentity.Create(source?.Id ?? Guid.Empty, x)).ToArray();
+        var requestFingerprint = FresherCandidateIdentity.Fingerprint(identityKeys);
+        IReadOnlyDictionary<string, FresherImportReceiptSnapshot> priorReceipts = new Dictionary<string, FresherImportReceiptSnapshot>();
+        await using var runLock = new AsyncDisposableHolder();
+        if (acquisitionStore is not null)
+        {
+            runLock.Set(await acquisitionStore.AcquireRunLockAsync(source!.Id, request.ImportId, cancellationToken));
+            var start = await acquisitionStore.StartRunAsync(source.Id, request.ImportId, Guid.NewGuid().ToString("N"), requestFingerprint, identityKeys.Distinct(StringComparer.Ordinal).Count(), cancellationToken);
             run = start.Run;
-            if (start.IsReplay)
-                return await acquisitionStore.GetReplayResponseAsync(run.Id, request.ImportId, cancellationToken)
-                    ?? new FresherBulkImportResponse(request.ImportId, request.Jobs.Count, 0, 0, 0, 0, 0, 0, 0, 0,
-                        request.Jobs.Count, Enumerable.Range(0, request.Jobs.Count).Select(i => new FresherImportItemOutcome(i, "Failed", "BATCH_ALREADY_RUNNING")).ToArray()) { RunId = run.Id };
+            if (start.IsReplay && run.Status == "Completed")
+            {
+                var completed = await acquisitionStore.GetReplayResponseAsync(run.Id, request.ImportId, cancellationToken)
+                    ?? throw new InvalidOperationException("Completed acquisition run has no replay response.");
+                var completedItems = await acquisitionStore.GetReceiptsAsync(run.Id, cancellationToken);
+                return completed with { Items = MapCurrentRequestItems(identityKeys, completedItems) };
+            }
+            if (start.IsReplay) priorReceipts = await acquisitionStore.GetReceiptsAsync(run.Id, cancellationToken);
         }
         var outcomes = new List<FresherImportItemOutcome>(request.Jobs.Count);
         var geoRejected = 0; var experienceRejected = 0; var invalidData = 0; var invalidUrl = 0;
         var created = 0; var updated = 0; var existing = 0; var failed = 0; var accepted = 0; var published = 0;
-        for (var index = 0; index < request.Jobs.Count; index++)
+        var seenInRequest = new HashSet<string>(StringComparer.Ordinal);
+        var chunkSize = acquisitionStore is null ? request.Jobs.Count : Math.Clamp(options?.Value.ChunkSize ?? 50, 1, 200);
+        for (var chunkStart = 0; chunkStart < request.Jobs.Count; chunkStart += chunkSize)
         {
+            await using var chunk = run is not null && acquisitionStore is not null
+                ? await acquisitionStore.BeginChunkAsync(request.Jobs.Skip(chunkStart).Take(chunkSize)
+                    .Where(x => !string.IsNullOrWhiteSpace(x?.ExternalJobId))
+                    .Select(x => $"acquisition-job:{source!.Id:N}:{FresherCandidateIdentity.Normalize(x!.ExternalJobId)}").ToArray(), cancellationToken) : null;
+            var chunkReceipts = new List<FresherReceiptInput>();
+            var publicationQueue = new List<(int Index, string Identity, Guid JobId, JobIngestionOutcome Outcome)>();
+            var chunkEnd = Math.Min(chunkStart + chunkSize, request.Jobs.Count);
+            void RecordReceipt(int index, FresherImportCandidate candidate)
+            {
+                chunkReceipts.Add(new(index, candidate, identityKeys[index], SafeEligibility(candidate), outcomes[^1], now));
+            }
+            for (var index = chunkStart; index < chunkEnd; index++)
+            {
             cancellationToken.ThrowIfCancellationRequested();
             var candidate = request.Jobs[index];
+            var identityKey = identityKeys[index];
+            if (acquisitionStore is not null && !seenInRequest.Add(identityKey))
+            {
+                outcomes.Add(new(index, "Duplicate", "DUPLICATE_IN_REQUEST"));
+                continue;
+            }
+            if (priorReceipts.TryGetValue(identityKey, out var prior))
+            {
+                outcomes.Add(prior.Outcome with { Index = index });
+                if (prior.PublicationStatus is "Pending" or "Failed" && prior.Outcome.JobId is { } retryJobId &&
+                    autoPublish is not null && source?.AutoPublishEnabled == true)
+                    publicationQueue.Add((index, identityKey, retryJobId, JobIngestionOutcome.Unchanged));
+                continue;
+            }
             if (candidate is null)
             {
                 invalidData++;
                 outcomes.Add(new(index, "RejectedInvalidData", "CANDIDATE_REQUIRED"));
+                chunkReceipts.Add(new(index, null, identityKey, "Unknown", outcomes[^1], now));
                 continue;
             }
             var dataError = ValidateCandidate(candidate);
@@ -59,6 +100,7 @@ public sealed partial class FresherBulkImportService(
             {
                 invalidData++;
                 outcomes.Add(new(index, "RejectedInvalidData", dataError));
+                RecordReceipt(index, candidate);
                 continue;
             }
             var decision = FresherAcquisitionEligibilityPolicy.Evaluate(ToPolicyCandidate(candidate));
@@ -66,12 +108,14 @@ public sealed partial class FresherBulkImportService(
             {
                 geoRejected++;
                 outcomes.Add(new(index, "RejectedGeography", decision.GeographyReasonCode));
+                RecordReceipt(index, candidate);
                 continue;
             }
             if (decision.Experience != FresherExperienceDecision.Eligible)
             {
                 experienceRejected++;
                 outcomes.Add(new(index, "RejectedExperience", decision.ExperienceReasonCode));
+                RecordReceipt(index, candidate);
                 continue;
             }
             var selectedUrl = SelectApplyUrl(candidate);
@@ -79,6 +123,7 @@ public sealed partial class FresherBulkImportService(
             {
                 invalidUrl++;
                 outcomes.Add(new(index, "RejectedInvalidUrl", "NO_SAFE_APPLICATION_URL"));
+                RecordReceipt(index, candidate);
                 continue;
             }
             if (string.IsNullOrWhiteSpace(candidate.CompanyName) || string.IsNullOrWhiteSpace(candidate.Title) ||
@@ -86,6 +131,7 @@ public sealed partial class FresherBulkImportService(
             {
                 failed++;
                 outcomes.Add(new(index, "RejectedInvalidData", "REQUIRED_FIELD_MISSING"));
+                RecordReceipt(index, candidate);
                 continue;
             }
 
@@ -94,6 +140,7 @@ public sealed partial class FresherBulkImportService(
             {
                 invalidData++;
                 outcomes.Add(new(index, "RejectedInvalidData", "CATEGORY_RESOLUTION_FAILED"));
+                RecordReceipt(index, candidate);
                 continue;
             }
             if (!categoryId.HasValue && !string.IsNullOrWhiteSpace(candidate.Category))
@@ -104,6 +151,7 @@ public sealed partial class FresherBulkImportService(
                 {
                     invalidData++;
                     outcomes.Add(new(index, "RejectedInvalidData", "CATEGORY_RESOLUTION_FAILED"));
+                    RecordReceipt(index, candidate);
                     continue;
                 }
                 categoryId = matchedCategory.Id;
@@ -124,7 +172,7 @@ public sealed partial class FresherBulkImportService(
                     remoteEligibility = candidate.RemoteEligibility,
                     workplaceType = candidate.WorkplaceType
                 });
-                var result = await ingestion.IngestAsync(new RawExternalJob
+                var raw = new RawExternalJob
                 {
                     Title = candidate.Title,
                     CompanyName = candidate.CompanyName,
@@ -139,7 +187,7 @@ public sealed partial class FresherBulkImportService(
                     // Keep employer ATS identity in its own field; acquisition IDs have a separate Job column.
                     ExternalId = source is null ? candidate.ExternalJobId : null,
                     AcquisitionSourceId = source?.Id,
-                    AcquisitionExternalId = candidate.ExternalJobId,
+                    AcquisitionExternalId = candidate.ExternalJobId is null ? null : FresherCandidateIdentity.Normalize(candidate.ExternalJobId),
                     DiscoveredUrl = SafeUrlOrNull(candidate.DiscoveredUrl),
                     CanonicalJobUrl = SafeUrlOrNull(candidate.CanonicalJobUrl),
                     LastVerifiedAtUtc = candidate.SourceLastSeenAt?.ToUniversalTime(),
@@ -156,28 +204,19 @@ public sealed partial class FresherBulkImportService(
                     CategoryId = categoryId,
                     Skills = candidate.Skills,
                     SourceMetadataJson = metadata
-                }, cancellationToken);
-                JobAutoPublishResult? publication = null;
-                if (result.JobId is { } persistedJobId && source?.AutoPublishEnabled == true && autoPublish is not null &&
-                    result.Outcome is JobIngestionOutcome.Created or JobIngestionOutcome.Updated or JobIngestionOutcome.Unchanged)
-                {
-                    try { publication = await autoPublish.TryPublishAsync(persistedJobId, cancellationToken); }
-                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
-                    catch (Exception exception)
-                    {
-                        ItemImportFailed(logger, request.ImportId, index, exception.GetType().Name);
-                        outcomes.Add(new(index, result.Outcome == JobIngestionOutcome.Created ? "Created" : "Updated", "PUBLICATION_FAILED", persistedJobId));
-                        accepted++;
-                        if (result.Outcome == JobIngestionOutcome.Created) created++; else if (result.Outcome == JobIngestionOutcome.Updated) updated++; else existing++;
-                        continue;
-                    }
-                    if (publication.Outcome == JobAutoPublishOutcome.Published) published++;
-                }
+                };
+                var result = run is not null
+                    ? await ingestion.IngestWithoutSaveAsync(raw, cancellationToken)
+                    : await ingestion.IngestAsync(raw, cancellationToken);
+                var publicationRequested = result.JobId.HasValue && source?.AutoPublishEnabled == true && autoPublish is not null &&
+                    result.Outcome is JobIngestionOutcome.Created or JobIngestionOutcome.Updated or JobIngestionOutcome.Unchanged;
+                if (publicationRequested && result.JobId is { } persistedJobId)
+                    publicationQueue.Add((index, identityKey, persistedJobId, result.Outcome));
                 switch (result.Outcome)
                 {
-                    case JobIngestionOutcome.Created: created++; accepted++; outcomes.Add(new(index, "Created", publication?.Outcome == JobAutoPublishOutcome.Published ? "PUBLISHED" : "CREATED", result.JobId)); break;
-                    case JobIngestionOutcome.Updated: updated++; accepted++; outcomes.Add(new(index, "Updated", publication?.Outcome == JobAutoPublishOutcome.Published ? "PUBLISHED" : "UPDATED", result.JobId)); break;
-                    case JobIngestionOutcome.Unchanged: existing++; accepted++; outcomes.Add(new(index, "Existing", publication?.Outcome == JobAutoPublishOutcome.Published ? "PUBLISHED" : "UNCHANGED", result.JobId)); break;
+                    case JobIngestionOutcome.Created: created++; accepted++; outcomes.Add(new(index, "Created", "CREATED", result.JobId)); break;
+                    case JobIngestionOutcome.Updated: updated++; accepted++; outcomes.Add(new(index, "Updated", "UPDATED", result.JobId)); break;
+                    case JobIngestionOutcome.Unchanged: existing++; accepted++; outcomes.Add(new(index, "Existing", "UNCHANGED", result.JobId)); break;
                     case JobIngestionOutcome.MatchedByUrl:
                     case JobIngestionOutcome.MatchedByFingerprint:
                     case JobIngestionOutcome.MatchedByFuzzy: existing++; accepted++; outcomes.Add(new(index, "Duplicate", result.ReasonCode.ToString(), result.JobId)); break;
@@ -186,13 +225,35 @@ public sealed partial class FresherBulkImportService(
                     default:
                         failed++; outcomes.Add(new(index, "Failed", result.ReasonCode.ToString())); break;
                 }
+                chunkReceipts.Add(new(index, candidate, identityKey, SafeEligibility(candidate), outcomes[^1], now,
+                    publicationRequested));
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
             catch (Exception exception)
             {
-                failed++;
-                outcomes.Add(new(index, "Failed", "ITEM_IMPORT_FAILED"));
                 ItemImportFailed(logger, request.ImportId, index, exception.GetType().Name);
+                throw;
+            }
+            }
+            if (chunk is not null && run is not null)
+                await chunk.CommitAsync(run.Id, chunkReceipts, cancellationToken);
+
+            // Network/publication side effects happen only after the job+receipt commit.
+            foreach (var queued in publicationQueue)
+            {
+                try
+                {
+                    var result = await autoPublish!.TryPublishAsync(queued.JobId, cancellationToken);
+                    var status = result.Outcome == JobAutoPublishOutcome.Published ? "Published" : "NotPublished";
+                    await acquisitionStore!.UpdatePublicationAsync(run!.Id, queued.Identity, status, null, cancellationToken);
+                    if (status == "Published") published++;
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+                catch (Exception exception)
+                {
+                    ItemImportFailed(logger, request.ImportId, queued.Index, exception.GetType().Name);
+                    await acquisitionStore!.UpdatePublicationAsync(run!.Id, queued.Identity, "Failed", exception.GetType().Name, cancellationToken);
+                }
             }
         }
         ImportSummary(logger, request.ImportId, request.Jobs.Count, accepted, geoRejected, experienceRejected, invalidData, invalidUrl, created, updated, existing, failed);
@@ -200,31 +261,33 @@ public sealed partial class FresherBulkImportService(
         { RunId = run?.Id, Published = published };
         if (run is not null && acquisitionStore is not null)
         {
-            var receipts = request.Jobs.Select((candidate, index) => new FresherReceiptInput(index, candidate,
-                IdentityKey(candidate), SafeEligibility(candidate), outcomes[index], now)).ToArray();
-            foreach (var chunk in receipts.Chunk(50))
-                await acquisitionStore.SaveReceiptsAsync(run.Id, chunk, cancellationToken);
             await acquisitionStore.CompleteRunAsync(run.Id, response, cancellationToken);
+            var durable = await acquisitionStore.GetReplayResponseAsync(run.Id, request.ImportId, cancellationToken);
+            if (durable is not null) return durable with { Items = MapCurrentRequestItems(identityKeys,
+                await acquisitionStore.GetReceiptsAsync(run.Id, cancellationToken)) };
         }
         return response;
     }
 
-    private static string SafeEligibility(FresherImportCandidate candidate)
+    private static string SafeEligibility(FresherImportCandidate? candidate)
     {
+        if (candidate is null) return "Unknown";
         var evaluated = FresherAcquisitionEligibilityPolicy.Evaluate(ToPolicyCandidate(candidate));
         return $"{evaluated.Geography}:{evaluated.Experience}";
     }
 
-    private static string IdentityKey(FresherImportCandidate candidate)
+    private static FresherImportItemOutcome[] MapCurrentRequestItems(IReadOnlyList<string> identities,
+        IReadOnlyDictionary<string, FresherImportReceiptSnapshot> receipts)
     {
-        var key = !string.IsNullOrWhiteSpace(candidate.ExternalJobId) ? "external:" + candidate.ExternalJobId.Trim()
-            : !string.IsNullOrWhiteSpace(candidate.CanonicalJobUrl) ? "canonical:" + candidate.CanonicalJobUrl.Trim().ToLowerInvariant()
-            : !string.IsNullOrWhiteSpace(candidate.ApplyUrl) ? "apply:" + candidate.ApplyUrl.Trim().ToLowerInvariant()
-            : "fallback:" + string.Join('|', Normalize(candidate.CompanyName), Normalize(candidate.Title), Normalize(candidate.LocationText ?? candidate.City ?? candidate.Country));
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(key))).ToLowerInvariant();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        return identities.Select((identity, index) =>
+        {
+            if (!seen.Add(identity)) return new FresherImportItemOutcome(index, "Duplicate", "DUPLICATE_IN_REQUEST");
+            return receipts.TryGetValue(identity, out var snapshot)
+                ? snapshot.Outcome with { Index = index }
+                : new FresherImportItemOutcome(index, "Failed", "ITEM_NOT_COMMITTED");
+        }).ToArray();
     }
-
-    private static string Normalize(string? value) => string.Join(' ', (value ?? string.Empty).Split(' ', StringSplitOptions.RemoveEmptyEntries)).Trim().ToUpperInvariant();
 
     private static FresherCandidate ToPolicyCandidate(FresherImportCandidate candidate) => new()
     {

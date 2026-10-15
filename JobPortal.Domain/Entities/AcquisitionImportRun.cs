@@ -7,6 +7,7 @@ public sealed class AcquisitionImportRun : BaseEntity
     public Guid AcquisitionSourceId { get; set; }
     public AcquisitionSource AcquisitionSource { get; set; } = null!;
     public string BatchId { get; set; } = string.Empty;
+    public string RequestFingerprint { get; set; } = string.Empty;
     public string CorrelationId { get; set; } = string.Empty;
     public string Status { get; set; } = "Running";
     public DateTime StartedAtUtc { get; set; }

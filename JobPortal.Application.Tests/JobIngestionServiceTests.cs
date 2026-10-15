@@ -80,6 +80,16 @@ public class JobIngestionServiceTests
         Assert.Equal(1, _unitOfWork.SaveCalls);
     }
 
+    [Fact]
+    public async Task IngestWithoutSaveAsyncStagesJobForCallerOwnedTransaction()
+    {
+        var result = await _service.IngestWithoutSaveAsync(CreateRawJob());
+
+        Assert.Equal(JobIngestionOutcome.Created, result.Outcome);
+        Assert.Single(_jobs.AddedJobs);
+        Assert.Equal(0, _unitOfWork.SaveCalls);
+    }
+
     [Theory]
     [InlineData(-1, JobQualityDecision.Rejected)]
     [InlineData(1, JobQualityDecision.Eligible)]

@@ -25,7 +25,15 @@ public sealed class InternalFresherBulkImportController(IFresherBulkImportServic
         var maximum = Math.Clamp(options.Value.MaximumBatchSize, 1, 1000);
         if (request.Jobs.Count is < 1 || request.Jobs.Count > maximum)
             return StatusCode(StatusCodes.Status413PayloadTooLarge, new { code = "BATCH_SIZE_EXCEEDED", maximumBatchSize = maximum });
-        return Ok(await importer.ImportAsync(request, cancellationToken));
+        try { return Ok(await importer.ImportAsync(request, cancellationToken)); }
+        catch (ImportIdPayloadConflictException)
+        {
+            return Conflict(new { code = "IMPORT_ID_PAYLOAD_CONFLICT" });
+        }
+        catch (ImportAlreadyRunningException)
+        {
+            return Conflict(new { code = "IMPORT_IN_PROGRESS" });
+        }
     }
 }
 

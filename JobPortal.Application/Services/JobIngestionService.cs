@@ -39,6 +39,7 @@ public sealed class JobIngestionService(
     private IExternalJobCreationLockRun? _creationRun;
     private bool _runPrepared;
     private bool _batchMode;
+    private bool _deferSaveChanges;
     private bool _exactBatchPrepared;
     private readonly Dictionary<string, Job> _fingerprintMatches = new(StringComparer.Ordinal);
     private readonly HashSet<Guid> _stagedMetadataRepairs = [];
@@ -50,11 +51,19 @@ public sealed class JobIngestionService(
 
     private async Task PersistAsync(CancellationToken token)
     {
-        if (_batchMode) return;
+        if (_batchMode || _deferSaveChanges) return;
         var start = System.Diagnostics.Stopwatch.GetTimestamp();
         _saveCalls++;
         try { await unitOfWork.SaveChangesAsync(token); checkpoint?.ConfirmSaved(); }
         finally { _saveMilliseconds += System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds; }
+    }
+
+    public async Task<JobIngestionResult> IngestWithoutSaveAsync(RawExternalJob rawJob, CancellationToken cancellationToken = default)
+    {
+        var previous = _deferSaveChanges;
+        _deferSaveChanges = true;
+        try { return await IngestAsync(rawJob, cancellationToken); }
+        finally { _deferSaveChanges = previous; }
     }
 
     public async Task<IReadOnlyList<JobIngestionResult>> IngestBatchAsync(IReadOnlyList<RawExternalJob> rawJobs,

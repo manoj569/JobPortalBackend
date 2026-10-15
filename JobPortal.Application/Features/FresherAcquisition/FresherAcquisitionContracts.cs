@@ -47,6 +47,7 @@ public sealed class FresherAcquisitionOptions
     public const string SectionName = "FresherAcquisition";
     public int MaximumBatchSize { get; set; } = 500;
     public int MaximumRequestBytes { get; set; } = 3_000_000;
+    public int ChunkSize { get; set; } = 50;
 }
 
 public sealed record FresherImportItemOutcome(int Index, string Outcome, string ReasonCode, Guid? JobId = null);

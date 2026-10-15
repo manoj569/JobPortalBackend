@@ -7,6 +7,21 @@ namespace JobPortal.Application.Tests;
 
 public sealed class FresherAcquisitionEligibilityTests
 {
+    [Fact]
+    public void CandidateIdentityAndRequestFingerprintIgnoreArrayOrder()
+    {
+        var source = Guid.NewGuid();
+        static FresherImportCandidate Candidate(string externalId) => new()
+        { ExternalJobId = externalId, CompanyName = "Example", Title = "Graduate Engineer", LocationText = "Pune, India" };
+        var a = FresherCandidateIdentity.Create(source, Candidate(" A-1 "));
+        var b = FresherCandidateIdentity.Create(source, Candidate("B-2"));
+        var c = FresherCandidateIdentity.Create(source, Candidate("C-3"));
+        Assert.Equal(a, FresherCandidateIdentity.Create(source, Candidate("a-1")));
+        Assert.Equal(FresherCandidateIdentity.Fingerprint([a, b, c]), FresherCandidateIdentity.Fingerprint([c, a, b]));
+        Assert.NotEqual(FresherCandidateIdentity.Fingerprint([a, b, c]), FresherCandidateIdentity.Fingerprint([a, b, "different"]));
+        Assert.NotEqual(a, FresherCandidateIdentity.Create(Guid.NewGuid(), Candidate("A-1")));
+    }
+
     [Theory]
     [InlineData("0 years", 0, null)]
     [InlineData("0+ years", 0, null)]

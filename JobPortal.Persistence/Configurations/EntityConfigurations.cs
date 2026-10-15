@@ -296,6 +296,7 @@ public sealed class AcquisitionImportRunConfiguration : IEntityTypeConfiguration
         builder.ToTable("AcquisitionImportRuns");
         builder.ConfigureBaseEntity();
         builder.Property(x => x.BatchId).HasMaxLength(100).IsRequired();
+        builder.Property(x => x.RequestFingerprint).HasMaxLength(64).IsRequired().HasDefaultValue(string.Empty);
         builder.Property(x => x.CorrelationId).HasMaxLength(100).IsRequired();
         builder.Property(x => x.Status).HasMaxLength(24).IsRequired();
         builder.Property(x => x.FailureSummary).HasMaxLength(500);
@@ -311,7 +312,7 @@ public sealed class AcquisitionImportItemConfiguration : IEntityTypeConfiguratio
     {
         builder.ToTable("AcquisitionImportItems");
         builder.ConfigureBaseEntity();
-        builder.Property(x => x.IdentityKey).HasMaxLength(64).IsRequired();
+        builder.Property(x => x.CandidateIdentityKey).HasColumnName("IdentityKey").HasMaxLength(64).IsRequired();
         builder.Property(x => x.ItemIndex).IsRequired();
         builder.Property(x => x.ExternalId).HasMaxLength(255);
         builder.Property(x => x.DiscoveredUrl).HasMaxLength(2048);
@@ -323,9 +324,11 @@ public sealed class AcquisitionImportItemConfiguration : IEntityTypeConfiguratio
         builder.Property(x => x.EligibilityDecision).HasMaxLength(32).IsRequired();
         builder.Property(x => x.ReasonCode).HasMaxLength(80).IsRequired();
         builder.Property(x => x.Outcome).HasMaxLength(32).IsRequired();
+        builder.Property(x => x.PublicationStatus).HasMaxLength(24).HasDefaultValue("NotRequested").IsRequired();
+        builder.Property(x => x.PublicationError).HasMaxLength(120);
         builder.HasOne(x => x.Run).WithMany(x => x.Items).HasForeignKey(x => x.AcquisitionImportRunId).OnDelete(DeleteBehavior.Cascade);
         builder.HasOne(x => x.Job).WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Restrict);
-        builder.HasIndex(x => new { x.AcquisitionImportRunId, x.IdentityKey }).IsUnique().HasFilter("\"IsDeleted\" = FALSE");
+        builder.HasIndex(x => new { x.AcquisitionImportRunId, x.CandidateIdentityKey }).HasDatabaseName("IX_AcquisitionImportItems_AcquisitionImportRunId_IdentityKey").IsUnique().HasFilter("\"IsDeleted\" = FALSE");
         builder.HasIndex(x => x.JobId).HasFilter("\"JobId\" IS NOT NULL");
         builder.HasIndex(x => new { x.AcquisitionSourceId, x.ExternalId, x.LastSeenAtUtc });
     }

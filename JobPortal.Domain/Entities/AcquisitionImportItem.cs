@@ -11,7 +11,7 @@ public sealed class AcquisitionImportItem : BaseEntity
     public int ItemIndex { get; set; }
     public Guid? JobId { get; set; }
     public Job? Job { get; set; }
-    public string IdentityKey { get; set; } = string.Empty;
+    public string CandidateIdentityKey { get; set; } = string.Empty;
     public string? ExternalId { get; set; }
     public string? DiscoveredUrl { get; set; }
     public string? CanonicalUrl { get; set; }
@@ -22,6 +22,8 @@ public sealed class AcquisitionImportItem : BaseEntity
     public string EligibilityDecision { get; set; } = string.Empty;
     public string ReasonCode { get; set; } = string.Empty;
     public string Outcome { get; set; } = string.Empty;
+    public string PublicationStatus { get; set; } = "NotRequested";
+    public string? PublicationError { get; set; }
     public DateTime FirstSeenAtUtc { get; set; }
     public DateTime LastSeenAtUtc { get; set; }
     public DateTime? LastVerifiedAtUtc { get; set; }

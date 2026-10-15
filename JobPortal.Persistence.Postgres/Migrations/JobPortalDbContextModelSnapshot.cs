@@ -1049,6 +1049,12 @@ namespace JobPortal.Persistence.Postgres.Migrations
                         .HasMaxLength(2048)
                         .HasColumnType("character varying(2048)");
 
+                    b.Property<string>("CandidateIdentityKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("IdentityKey");
+
                     b.Property<string>("CanonicalUrl")
                         .HasMaxLength(2048)
                         .HasColumnType("character varying(2048)");
@@ -1080,11 +1086,6 @@ namespace JobPortal.Persistence.Postgres.Migrations
                     b.Property<DateTime>("FirstSeenAtUtc")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<string>("IdentityKey")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
@@ -1110,6 +1111,17 @@ namespace JobPortal.Persistence.Postgres.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
 
+                    b.Property<string>("PublicationError")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<string>("PublicationStatus")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)")
+                        .HasDefaultValue("NotRequested");
+
                     b.Property<string>("ReasonCode")
                         .IsRequired()
                         .HasMaxLength(80)
@@ -1133,8 +1145,9 @@ namespace JobPortal.Persistence.Postgres.Migrations
                     b.HasIndex("JobId")
                         .HasFilter("\"JobId\" IS NOT NULL");
 
-                    b.HasIndex("AcquisitionImportRunId", "IdentityKey")
+                    b.HasIndex("AcquisitionImportRunId", "CandidateIdentityKey")
                         .IsUnique()
+                        .HasDatabaseName("IX_AcquisitionImportItems_AcquisitionImportRunId_IdentityKey")
                         .HasFilter("\"IsDeleted\" = FALSE");
 
                     b.HasIndex("AcquisitionSourceId", "ExternalId", "LastSeenAtUtc");
@@ -1208,6 +1221,13 @@ namespace JobPortal.Persistence.Postgres.Migrations
 
                     b.Property<int>("RejectedInvalidDataCount")
                         .HasColumnType("integer");
+
+                    b.Property<string>("RequestFingerprint")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasDefaultValue("");
 
                     b.Property<DateTime>("StartedAtUtc")
                         .HasColumnType("timestamp with time zone");
