@@ -142,6 +142,8 @@ public sealed partial class FresherBulkImportService(
                 continue;
             }
             var dataError = ValidateCandidate(candidate);
+            if (dataError is null && request.SourceType.Trim().Equals("website-crawler", StringComparison.OrdinalIgnoreCase))
+                dataError = ValidateWebsiteCandidate(candidate, now);
             if (dataError is not null)
             {
                 invalidData++;
@@ -223,16 +225,26 @@ public sealed partial class FresherBulkImportService(
                 var countryCodes = decision.Geography == FresherGeographyDecision.GlobalRemoteEligible
                     ? new[] { "IN" }
                     : string.Equals(candidate.Country, "India", StringComparison.OrdinalIgnoreCase) ? new[] { "IN" } : Array.Empty<string>();
-                var metadata = JsonSerializer.Serialize(new
+                var metadataValues = new Dictionary<string, object?>
                 {
-                    importId = request.ImportId,
-                    sourceType = source?.ProviderKey ?? request.SourceType,
-                    sourceName = source?.Name ?? request.SourceName,
-                    eligibility = new { decision.Geography, decision.GeographyReasonCode, decision.Experience, decision.ExperienceReasonCode },
-                    countryCodes,
-                    remoteEligibility = candidate.RemoteEligibility,
-                    workplaceType = candidate.WorkplaceType
-                });
+                    ["importId"] = request.ImportId,
+                    ["sourceType"] = source?.ProviderKey ?? request.SourceType,
+                    ["sourceName"] = source?.Name ?? request.SourceName,
+                    ["eligibility"] = new { decision.Geography, decision.GeographyReasonCode, decision.Experience, decision.ExperienceReasonCode },
+                    ["countryCodes"] = countryCodes,
+                    ["remoteEligibility"] = candidate.RemoteEligibility,
+                    ["workplaceType"] = candidate.WorkplaceType
+                };
+                if (request.SourceType.Trim().Equals("website-crawler", StringComparison.OrdinalIgnoreCase))
+                    metadataValues["discovery"] = new
+                    {
+                        provider = "website-crawler",
+                        sourceDomain = new Uri(candidate.DiscoveredUrl!).Host.ToLowerInvariant(),
+                        extractionConfidence = MetadataText(candidate, "extractionConfidence"),
+                        applyClassification = MetadataText(candidate, "applyClassification"),
+                        destinationVerified = true
+                    };
+                var metadata = JsonSerializer.Serialize(metadataValues);
                 var raw = new RawExternalJob
                 {
                     Title = candidate.Title,
@@ -373,6 +385,28 @@ public sealed partial class FresherBulkImportService(
     }
 
     private static string? SafeUrlOrNull(string? url) => FresherAcquisitionEligibilityPolicy.IsSafePublicUrl(url) ? url!.Trim() : null;
+
+    private static string? MetadataText(FresherImportCandidate candidate, string key) =>
+        candidate.SourceMetadata is { ValueKind: JsonValueKind.Object } metadata &&
+        metadata.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString() : null;
+
+    private static string? ValidateWebsiteCandidate(FresherImportCandidate candidate, DateTime now)
+    {
+        if (MetadataText(candidate, "provider") != "website-crawler" ||
+            MetadataText(candidate, "extractionConfidence") != "HIGH" ||
+            MetadataText(candidate, "applyClassification") is not ("DIRECT_ATS" or "DIRECT_EMPLOYER" or "VERIFIED_APPLICATION_PORTAL") ||
+            candidate.SourceMetadata is not { ValueKind: JsonValueKind.Object } metadata ||
+            !metadata.TryGetProperty("destinationVerified", out var verified) || verified.ValueKind != JsonValueKind.True)
+            return "WEBSITE_EVIDENCE_REQUIRED";
+        if (!FresherAcquisitionEligibilityPolicy.IsSafePublicUrl(candidate.ApplyUrl) ||
+            !FresherAcquisitionEligibilityPolicy.IsSafePublicUrl(candidate.DiscoveredUrl) ||
+            !FresherAcquisitionEligibilityPolicy.IsSafePublicUrl(candidate.CanonicalJobUrl))
+            return "WEBSITE_SAFE_URLS_REQUIRED";
+        if (!string.Equals(MetadataText(candidate, "sourceDomain"), new Uri(candidate.DiscoveredUrl!).Host, StringComparison.OrdinalIgnoreCase))
+            return "WEBSITE_PROVENANCE_INVALID";
+        return candidate.ExpiresAt?.ToUniversalTime() < now ? "WEBSITE_EXPIRED" : null;
+    }
 
     private static string? ValidateCandidate(FresherImportCandidate candidate)
     {

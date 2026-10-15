@@ -1,0 +1,58 @@
+{
+  "importId": "ch-v1-5496c47512c6cf4c51f7a12368467c51c7c988ef861037e60705339110fc46bb",
+  "sourceType": "website-crawler",
+  "sourceName": "Generic Website Crawler",
+  "jobs": [
+    {
+      "externalJobId": "website-crawler:7833c7da79e95c418bbcd3f3e7804bfe9882ce8042204c191f4dd287fc4be2dd",
+      "companyName": "National Highways Authority of India (NHAI)",
+      "companyWebsiteUrl": null,
+      "title": "NHAI Winter Internship 2026–27 | Government Internship Programme | Apply Online",
+      "description": "NHAI Winter Internship 2026–27 | Government Internship Programme | Apply Online. National Highways Authority of India (NHAI). Multiple project locations across India.",
+      "locationText": "Multiple project locations across India",
+      "country": "India",
+      "workplaceType": null,
+      "remoteEligibility": null,
+      "experienceText": "Internship",
+      "minimumExperienceYears": 0,
+      "maximumExperienceYears": null,
+      "experienceClassification": "Fresher",
+      "employmentType": "Internship",
+      "skills": [],
+      "discoveredUrl": "https://placementkit.in/nhai-winter-internship-202627/",
+      "canonicalJobUrl": "https://internshipsatnhai.digitalindiacorporation.in/",
+      "applyUrl": "https://internshipsatnhai.digitalindiacorporation.in/",
+      "postedAt": null,
+      "sourceLastSeenAt": "2026-10-16T00:00:00Z",
+      "sourceMetadata": {
+        "via": "website-crawler",
+        "firstSeen": "2026-10-16T00:00:00+00:00",
+        "experience": {
+          "status": "eligible",
+          "reason": "FRESHER_SIGNAL",
+          "evidence": [
+            "Internship"
+          ],
+          "minimum": 0,
+          "maximum": null
+        },
+        "geography": {
+          "status": "eligible",
+          "reason": "INDIA_ELIGIBLE",
+          "evidence": [
+            "India"
+          ],
+          "minimum": null,
+          "maximum": null
+        },
+        "provider": "website-crawler",
+        "sourceDomain": "placementkit.in",
+        "extractionConfidence": "HIGH",
+        "applyClassification": "VERIFIED_APPLICATION_PORTAL",
+        "destinationVerified": true,
+        "candidateDeadline": "2026-10-20"
+      },
+      "expiresAt": "2026-10-20T23:59:59.999999+05:30"
+    }
+  ]
+}
