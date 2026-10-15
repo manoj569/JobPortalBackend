@@ -16,6 +16,10 @@ public sealed class FresherImportCandidate
     public string? ExternalJobId { get; init; }
     public string? CompanyName { get; init; }
     public string? CompanyWebsiteUrl { get; init; }
+    // Internal producer attestation of employer-domain evidence, never inferred
+    // from an application URL. False stays omitted from legacy fingerprints.
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public bool CompanyWebsiteVerified { get; init; }
     public string? CompanyLogoUrl { get; init; }
     public string Title { get; init; } = string.Empty;
     public string Description { get; init; } = string.Empty;

@@ -104,7 +104,9 @@ public sealed partial class FresherBulkImportService(
             await using var chunk = run is not null && acquisitionStore is not null
                 ? await acquisitionStore.BeginChunkAsync(request.Jobs.Skip(chunkStart).Take(chunkSize)
                     .Where(x => !string.IsNullOrWhiteSpace(x?.ExternalJobId))
-                    .Select(x => $"acquisition-job:{source!.Id:N}:{FresherCandidateIdentity.Normalize(x!.ExternalJobId)}").ToArray(), cancellationToken) : null;
+                    .Select(x => $"acquisition-job:{source!.Id:N}:{FresherCandidateIdentity.Normalize(x!.ExternalJobId)}")
+                    .Concat(request.Jobs.Skip(chunkStart).Take(chunkSize).Where(x => x is not null)
+                        .SelectMany(x => FresherCompanyIdentity.Locks(x!))).ToArray(), cancellationToken) : null;
             var chunkReceipts = new List<FresherReceiptInput>();
             var publicationQueue = new List<(int Index, string Identity, Guid JobId, JobIngestionOutcome Outcome)>();
             var chunkEnd = Math.Min(chunkStart + chunkSize, request.Jobs.Count);
@@ -204,6 +206,20 @@ public sealed partial class FresherBulkImportService(
 
             try
             {
+                diagnostic.Stage = "CompanyResolution";
+                var companyId = candidate.CompanyId;
+                if (acquisitionStore is not null)
+                {
+                    var company = await acquisitionStore.ResolveCompanyAsync(candidate, cancellationToken);
+                    if (company.CompanyId is null)
+                    {
+                        failed++;
+                        outcomes.Add(new(index, "Failed", company.ReasonCode ?? "COMPANY_NOT_RESOLVED"));
+                        RecordReceipt(index, candidate);
+                        continue;
+                    }
+                    companyId = company.CompanyId;
+                }
                 var countryCodes = decision.Geography == FresherGeographyDecision.GlobalRemoteEligible
                     ? new[] { "IN" }
                     : string.Equals(candidate.Country, "India", StringComparison.OrdinalIgnoreCase) ? new[] { "IN" } : Array.Empty<string>();
@@ -221,7 +237,7 @@ public sealed partial class FresherBulkImportService(
                 {
                     Title = candidate.Title,
                     CompanyName = candidate.CompanyName,
-                    CompanyId = candidate.CompanyId,
+                    CompanyId = companyId,
                     CompanyWebsiteUrl = candidate.CompanyWebsiteUrl,
                     Location = ComposeLocation(candidate),
                     CountryCodes = countryCodes,

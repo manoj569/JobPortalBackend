@@ -8,7 +8,7 @@ using System.Data.Common;
 
 namespace JobPortal.Persistence.Repositories;
 
-public sealed class FresherAcquisitionStore(JobPortalDbContext db) : IFresherAcquisitionStore
+public sealed partial class FresherAcquisitionStore(JobPortalDbContext db) : IFresherAcquisitionStore
 {
     // Durable chunk receipts are the recovery boundary. Run once inside EF's
     // execution-strategy scope so Npgsql permits the explicit chunk transactions;

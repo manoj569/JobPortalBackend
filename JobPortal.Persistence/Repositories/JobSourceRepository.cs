@@ -60,9 +60,19 @@ public sealed class JobSourceRepository(JobPortalDbContext context, IOptions<Job
 
     public void Update(JobSource source)
     {
-        // A failed record can clear the change tracker. Attach only this source,
-        // never its Company graph, and persist only run bookkeeping.
-        var entry = context.Entry(source);
+        // Item recovery can detach the runner's source, then publication can load
+        // another instance. Keep EF's identity map and copy only run bookkeeping;
+        // never overwrite configuration or attach the Company graph.
+        var entry = context.ChangeTracker.Entries<JobSource>()
+            .FirstOrDefault(x => x.Entity.Id == source.Id) ?? context.Entry(source);
+        var tracked = entry.Entity;
+        if (!ReferenceEquals(tracked, source))
+        {
+            tracked.LastRunAtUtc = source.LastRunAtUtc;
+            tracked.LastSuccessfulRunAtUtc = source.LastSuccessfulRunAtUtc;
+            tracked.LastError = source.LastError;
+            tracked.ConsecutiveFailures = source.ConsecutiveFailures;
+        }
         if (entry.State == EntityState.Detached)
             entry.State = EntityState.Unchanged;
 

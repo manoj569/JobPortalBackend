@@ -579,6 +579,83 @@ public sealed class WorkdayBatchIngestionTests(ITestOutputHelper output)
         Assert.Equal(0, (await runner.RunAsync(f.Source.Id)).Published);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RecoveredBatchThenPublicationReloadsSourceBeforeFinalBookkeeping(bool partialDetailFailure)
+    {
+        using var f = Fixture();
+        var original = await f.Repository.GetByIdAsync(f.Source.Id);
+        using var http = new HttpClient(new Handler((request, _) => Task.FromResult(request.Method == HttpMethod.Post
+            ? Json(Listing(3, 0, 3))
+            : partialDetailFailure && request.RequestUri!.AbsolutePath.EndsWith("_2", StringComparison.Ordinal)
+                ? new HttpResponseMessage(HttpStatusCode.NotFound) : Json(Detail(request)))));
+        var unit = new FailFirstItemUnit(f);
+        var enrichment = new RecoveringFixtureEnricher();
+        var runner = Runner(f, Provider(http), publish: true,
+            unitOverride: partialDetailFailure ? unit : null, enrichment: enrichment);
+
+        var result = await runner.RunAsync(f.Source.Id);
+
+        Assert.True(enrichment.FailedPreparation);
+        Assert.Equal(partialDetailFailure, unit.FailedItem);
+        var tracked = Assert.Single(f.Context.JobSources.Local);
+        Assert.NotSame(original, tracked);
+        Assert.Equal(partialDetailFailure ? 1 : 3, result.Created);
+        Assert.Equal(result.Created, result.Published);
+        Assert.Equal(result.Created, await f.Context.Jobs.CountAsync(x => x.Status == JobStatus.Published));
+        Assert.Equal(!partialDetailFailure, result.Succeeded);
+        Assert.Equal(partialDetailFailure ? 1 : 0, result.Failed);
+        Assert.Equal(partialDetailFailure ? 1 : 0, result.Skipped);
+        Assert.NotEqual("UNEXPECTED_INTERNAL_ERROR", result.FailureReasonCode);
+        Assert.Equal(partialDetailFailure ? 1 : 0, tracked.ConsecutiveFailures);
+        Assert.Equal(!partialDetailFailure, tracked.LastSuccessfulRunAtUtc.HasValue);
+        Assert.False(result.ReconciliationSafe);
+        Assert.Contains("WorkdayNonAuthoritative", result.ReconciliationBlockReasons!);
+        Assert.Equal(0, result.Closed);
+        Assert.NotNull(tracked.LastRunAtUtc);
+        var saved = await f.Context.JobSources.AsNoTracking().SingleAsync(x => x.Id == f.Source.Id);
+        Assert.Equal(tracked.LastSuccessfulRunAtUtc, saved.LastSuccessfulRunAtUtc);
+        Assert.Equal(tracked.LastError, saved.LastError);
+        Assert.Equal(tracked.ConsecutiveFailures, saved.ConsecutiveFailures);
+        if (!partialDetailFailure)
+        {
+            Assert.Equal("Complete", result.StopReason);
+            Assert.True((await runner.RunAsync(f.Source.Id)).Succeeded);
+        }
+    }
+
+    private sealed class RecoveringFixtureEnricher : IExternalJobMetadataEnricher
+    {
+        public bool FailedPreparation { get; private set; }
+        public RawExternalJob Enrich(RawExternalJob job)
+        {
+            if (!FailedPreparation)
+            {
+                FailedPreparation = true;
+                throw new InvalidOperationException("Simulated batch preparation failure");
+            }
+            return job with { ExpiresAtUtc = DateTime.UtcNow.AddDays(10), ExperienceLevel = ExperienceLevel.Entry };
+        }
+    }
+
+    private sealed class FailFirstItemUnit(JobSourceFixture fixture)
+        : JobPortal.Application.Abstractions.Persistence.IUnitOfWork
+    {
+        private readonly UnitOfWork inner = new(fixture.Context);
+        public bool FailedItem { get; private set; }
+        public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            if (!FailedItem && fixture.Context.ChangeTracker.Entries<Job>().Any(x => x.State == EntityState.Added))
+            {
+                FailedItem = true;
+                throw new InvalidOperationException("Simulated item persistence failure");
+            }
+            return inner.SaveChangesAsync(cancellationToken);
+        }
+        public void ResetAfterFailure() => inner.ResetAfterFailure();
+    }
+
     // Supplies explicitly known fixture facts to test the unchanged publication
     // pipeline. Production Workday must not invent expiry/experience to pass it.
     private sealed class ExplicitPublicationFixture(WorkdayJobSourceProvider inner) : IBatchedExternalJobProvider

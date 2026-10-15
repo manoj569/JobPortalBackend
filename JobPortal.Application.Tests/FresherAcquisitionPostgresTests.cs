@@ -15,7 +15,7 @@ using Xunit;
 
 namespace JobPortal.Application.Tests;
 
-public sealed class FresherAcquisitionPostgresTests
+public sealed partial class FresherAcquisitionPostgresTests
 {
     private static readonly System.Text.Json.JsonSerializerOptions PayloadJsonOptions = new(System.Text.Json.JsonSerializerDefaults.Web);
     [FresherPostgresFact]
@@ -258,7 +258,7 @@ public sealed class FresherAcquisitionPostgresTests
         var valid = Candidate("valid", company.Name);
         var response = await CreateImporter(db, 50).ImportAsync(Request("rejections", source.ProviderKey,
             [missingCompany, missingCategory, oversized, valid]));
-        Assert.Equal("COMPANY_NOT_RESOLVED", response.Items[0].ReasonCode);
+        Assert.Equal("Created", response.Items[0].Outcome);
         Assert.Equal("CATEGORY_RESOLUTION_FAILED", response.Items[1].ReasonCode);
         Assert.Equal("RejectedInvalidData", response.Items[2].Outcome);
         Assert.Equal("Created", response.Items[3].Outcome);
@@ -419,8 +419,8 @@ public sealed class FresherAcquisitionPostgresTests
 
     private static async Task<(AcquisitionSource Source, Company Company)> CreateSourceAndCompanyAsync(JobPortalDbContext db)
     {
-        var roleId = await db.Roles.Select(x => x.Id).FirstAsync();
-        var owner = new User { Email = $"{Guid.NewGuid():N}@example.test", PasswordHash = "test-only", FirstName = "Test", LastName = "Owner", RoleId = roleId };
+        var roleId = JobPortal.Domain.Common.SystemRoleIds.Administrator;
+        var owner = new User { Email = $"{Guid.NewGuid():N}@example.test", PasswordHash = "test-only", FirstName = "Test", LastName = "Owner", RoleId = roleId, Status = UserStatus.Active };
         owner.NormalizedEmail = owner.Email.ToUpperInvariant();
         var companyName = "Acquisition test " + Guid.NewGuid().ToString("N");
         var company = new Company { Name = companyName, NormalizedName = companyName.ToUpperInvariant(), Slug = companyName.Replace(' ', '-').ToLowerInvariant(), OwnerUserId = owner.Id };

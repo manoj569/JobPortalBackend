@@ -5,6 +5,7 @@ namespace JobPortal.Application.Features.FresherAcquisition;
 public sealed record FresherReceiptInput(int Index, FresherImportCandidate? Candidate, string IdentityKey,
     string EligibilityDecision, FresherImportItemOutcome Outcome, DateTime SeenAtUtc, bool PublicationRequested = false);
 public sealed record FresherImportReceiptSnapshot(FresherImportItemOutcome Outcome, string PublicationStatus, string? PublicationError);
+public sealed record FresherCompanyResolution(Guid? CompanyId, string? ReasonCode = null);
 
 public sealed class ImportIdPayloadConflictException() : Exception("IMPORT_ID_PAYLOAD_CONFLICT");
 public sealed class ImportAlreadyRunningException() : Exception("IMPORT_IN_PROGRESS");
@@ -27,6 +28,7 @@ public interface IFresherAcquisitionChunk : IAsyncDisposable
 
 public interface IFresherAcquisitionStore
 {
+    Task<FresherCompanyResolution> ResolveCompanyAsync(FresherImportCandidate candidate, CancellationToken cancellationToken);
     Task<T> ExecuteImportAsync<T>(Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken) => operation(cancellationToken);
     Task<AcquisitionSource?> GetEnabledSourceAsync(string providerKey, CancellationToken cancellationToken);
     Task<AcquisitionSource?> GetSourceByIdAsync(Guid sourceId, CancellationToken cancellationToken);
