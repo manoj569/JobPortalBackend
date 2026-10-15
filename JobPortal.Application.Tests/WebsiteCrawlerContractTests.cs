@@ -54,6 +54,8 @@ public sealed class WebsiteCrawlerContractTests
         Assert.Equal(request.Jobs[0].DiscoveredUrl, raw.DiscoveredUrl);
         Assert.Equal(request.Jobs[0].ApplyUrl, raw.ApplicationUrl);
         Assert.Equal(store.Source.Id, raw.AcquisitionSourceId);
+        Assert.Equal("Multiple project locations across India", raw.Location);
+        Assert.Contains("IN", raw.CountryCodes!);
         Assert.Equal(JobPortal.Domain.Enums.EmploymentType.Internship, raw.EmploymentType);
         using var metadata = JsonDocument.Parse(raw.SourceMetadataJson!);
         var discovery = metadata.RootElement.GetProperty("discovery");
@@ -65,6 +67,22 @@ public sealed class WebsiteCrawlerContractTests
         Assert.Equal(response.RunId, replay.RunId);
         Assert.Single(ingestion.Jobs);
         Assert.Equal(response.Created, replay.Created);
+    }
+
+    [Theory]
+    [InlineData("Multiple project locations across india", "Multiple project locations across india")]
+    [InlineData("Pune", "Pune, India")]
+    [InlineData("IndiaTech campus", "IndiaTech campus, India")]
+    public async Task WebsiteLocationOmitsOnlyAnAlreadyPresentCountryToken(string location, string expected)
+    {
+        var node = JsonNode.Parse(Payload)!;
+        node["jobs"]![0]!["locationText"] = location;
+        var request = JsonSerializer.Deserialize<FresherBulkImportRequest>(node.ToJsonString(), WebJson)!;
+        var ingestion = new Recorder();
+        var service = new FresherBulkImportService(ingestion, NullLogger<FresherBulkImportService>.Instance,
+            new MemoryStore(), clock: new FixedClock());
+        await service.ImportAsync(request);
+        Assert.Equal(expected, Assert.Single(ingestion.Jobs).Location);
     }
 
     [Theory]

@@ -20,6 +20,46 @@ namespace JobPortal.Application.Tests;
 public sealed class AcquisitionPublicationEligibilityTests
 {
     [Theory]
+    [InlineData("website-crawler", true, false, false)]
+    [InlineData("serpapi-google-jobs", true, true, false)]
+    [InlineData("website-crawler", false, true, false)]
+    [InlineData("website-crawler", true, true, true)]
+    public async Task AutomaticPublicationUsesCurrentSourcePolicyOnEveryAttempt(
+        string provider, bool enabled, bool autoPublish, bool deleted)
+    {
+        using var f = new Fixture();
+        var id = await f.SaveJobAsync("Hyderabad, Telangana, India", "IN");
+        // A prior attempt/receipt cannot grant permission after policy changes.
+        f.Source.AutoPublishEnabled = false;
+        await f.Db.SaveChangesAsync();
+        Assert.Equal(JobAutoPublishOutcome.Disabled, (await f.Automatic.TryPublishAsync(id)).Outcome);
+        f.Source.ProviderKey = provider;
+        f.Source.IsEnabled = enabled;
+        f.Source.AutoPublishEnabled = autoPublish;
+        f.Source.IsDeleted = deleted;
+        await f.Db.SaveChangesAsync();
+        var allowed = enabled && autoPublish && !deleted;
+        Assert.Equal(allowed ? JobAutoPublishOutcome.Published : JobAutoPublishOutcome.Disabled,
+            (await f.Automatic.TryPublishAsync(id)).Outcome);
+        var saved = await f.Db.Jobs.AsNoTracking().SingleAsync();
+        Assert.Equal(allowed ? JobStatus.Published : JobStatus.Draft, saved.Status);
+        Assert.Equal(allowed, saved.PublishedAtUtc.HasValue);
+    }
+
+    [Fact]
+    public async Task ManualPublicationRetainsExistingOverrideWhenAutomaticPublicationIsDisabled()
+    {
+        using var f = new Fixture();
+        f.Source.ProviderKey = "website-crawler";
+        f.Source.AutoPublishEnabled = false;
+        await f.Db.SaveChangesAsync();
+        var id = await f.SaveJobAsync("Hyderabad, Telangana, India", "IN");
+        Assert.Equal(JobAutoPublishOutcome.Disabled, (await f.Automatic.TryPublishAsync(id)).Outcome);
+        await f.Manual.PublishAsync(id);
+        Assert.Equal(JobStatus.Published, (await f.Db.Jobs.AsNoTracking().SingleAsync()).Status);
+    }
+
+    [Theory]
     [InlineData("Hyderabad, Telangana, India", "IN", true)]
     [InlineData("Chennai, Tamil Nadu, India", "IN", true)]
     [InlineData("Bengaluru, Karnataka, India", "IN", true)]
@@ -99,13 +139,13 @@ public sealed class AcquisitionPublicationEligibilityTests
         public JobPortalDbContext Db { get; } = new(new DbContextOptionsBuilder<JobPortalDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
         private readonly Company company = new() { Name = "Acquisition fixture", Slug = "acquisition-fixture" };
-        private readonly AcquisitionSource source = new() { ProviderKey = "fresher-fixture", Name = "Fixture", IsEnabled = true, AutoPublishEnabled = true };
+        public AcquisitionSource Source { get; } = new() { ProviderKey = "fresher-fixture", Name = "Fixture", IsEnabled = true, AutoPublishEnabled = true };
         public JobService Manual { get; }
         public JobAutoPublishService Automatic { get; }
 
         public Fixture()
         {
-            Db.AddRange(company, source);
+            Db.AddRange(company, Source);
             Db.SaveChanges();
             var jobs = new JobRepository(Db);
             var unit = new UnitOfWork(Db);
@@ -118,7 +158,7 @@ public sealed class AcquisitionPublicationEligibilityTests
         public async Task<Guid> SaveJobAsync(string location, string? country, string title = "Software Engineer")
         {
             var id = Guid.NewGuid();
-            var job = new Job { Id = id, CompanyId = company.Id, AcquisitionSourceId = source.Id,
+            var job = new Job { Id = id, CompanyId = company.Id, AcquisitionSourceId = Source.Id,
                 AcquisitionExternalId = id.ToString("N"), SourceOwnsPublication = true, Title = title,
                 ReferenceNumber = id.ToString("N"), Slug = id.ToString("N"), Description = "Build and maintain reliable software.",
                 Location = location, WorkplaceType = location == "Remote" ? WorkplaceType.Remote : WorkplaceType.OnSite,

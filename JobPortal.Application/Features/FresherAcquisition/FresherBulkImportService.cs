@@ -251,7 +251,7 @@ public sealed partial class FresherBulkImportService(
                     CompanyName = candidate.CompanyName,
                     CompanyId = companyId,
                     CompanyWebsiteUrl = candidate.CompanyWebsiteUrl,
-                    Location = ComposeLocation(candidate),
+                    Location = ComposeLocation(candidate, request.SourceType.Trim().Equals("website-crawler", StringComparison.OrdinalIgnoreCase)),
                     CountryCodes = countryCodes,
                     RemoteEligibilityText = candidate.RemoteEligibility ??
                         (decision.Geography == FresherGeographyDecision.GlobalRemoteEligible ? "Remote Worldwide; India eligible" : null),
@@ -431,9 +431,21 @@ public sealed partial class FresherBulkImportService(
         return null;
     }
 
-    private static string? ComposeLocation(FresherImportCandidate candidate) => string.Join(", ",
-        new[] { candidate.LocationText, candidate.City, candidate.State, candidate.Country,
+    private static string? ComposeLocation(FresherImportCandidate candidate, bool websiteCrawler)
+    {
+        var country = candidate.Country;
+        // Website descriptions can already include the country in prose. Preserve
+        // structured country evidence above; only avoid duplicating its display text.
+        if (websiteCrawler && !string.IsNullOrWhiteSpace(country) &&
+            !string.IsNullOrWhiteSpace(candidate.LocationText) &&
+            System.Text.RegularExpressions.Regex.IsMatch(candidate.LocationText,
+                @"(?<!\w)" + System.Text.RegularExpressions.Regex.Escape(country.Trim()) + @"(?!\w)",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant,
+                TimeSpan.FromMilliseconds(100)))
+            country = null;
+        return string.Join(", ", new[] { candidate.LocationText, candidate.City, candidate.State, country,
             candidate.RemoteEligibility, candidate.WorkplaceType }.Where(value => !string.IsNullOrWhiteSpace(value)));
+    }
 
     private static EmploymentType? MapEmployment(string? value) => value?.Trim().ToLowerInvariant() switch
     {
