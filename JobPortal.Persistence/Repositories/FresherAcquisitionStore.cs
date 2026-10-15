@@ -10,6 +10,18 @@ namespace JobPortal.Persistence.Repositories;
 
 public sealed class FresherAcquisitionStore(JobPortalDbContext db) : IFresherAcquisitionStore
 {
+    // Durable chunk receipts are the recovery boundary. Run once inside EF's
+    // execution-strategy scope so Npgsql permits the explicit chunk transactions;
+    // retries remain disabled because the import also has in-memory and publication
+    // side effects. Recovery happens through a fresh request with the same ID.
+    public Task<T> ExecuteImportAsync<T>(Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken) =>
+        new DurableImportExecutionStrategy(db).ExecuteAsync(operation, cancellationToken);
+
+    private sealed class DurableImportExecutionStrategy(DbContext context) : ExecutionStrategy(context, 1, TimeSpan.Zero)
+    {
+        protected override bool ShouldRetryOn(Exception exception) => false;
+    }
+
     public async Task<IAsyncDisposable> AcquireRunLockAsync(Guid sourceId, string importId, CancellationToken cancellationToken)
     {
         await db.Database.OpenConnectionAsync(cancellationToken);
@@ -52,12 +64,20 @@ public sealed class FresherAcquisitionStore(JobPortalDbContext db) : IFresherAcq
 
     public async Task<(AcquisitionImportRun Run, bool IsReplay)> StartRunAsync(Guid sourceId, string batchId,
         string correlationId, string requestFingerprint, int received, CancellationToken cancellationToken)
+        => await StartRunCoreAsync(sourceId, batchId, correlationId, requestFingerprint, null, received, cancellationToken);
+
+    public Task<(AcquisitionImportRun Run, bool IsReplay)> StartPayloadRunAsync(Guid sourceId, string batchId,
+        string correlationId, string payloadFingerprint, string legacyFingerprint, int received, CancellationToken cancellationToken) =>
+        StartRunCoreAsync(sourceId, batchId, correlationId, payloadFingerprint, legacyFingerprint, received, cancellationToken);
+
+    private async Task<(AcquisitionImportRun Run, bool IsReplay)> StartRunCoreAsync(Guid sourceId, string batchId,
+        string correlationId, string requestFingerprint, string? legacyFingerprint, int received, CancellationToken cancellationToken)
     {
         var existing = await db.AcquisitionImportRuns.AsNoTracking()
             .SingleOrDefaultAsync(x => x.AcquisitionSourceId == sourceId && x.BatchId == batchId && !x.IsDeleted, cancellationToken);
         if (existing is not null)
         {
-            if (!string.Equals(existing.RequestFingerprint, requestFingerprint, StringComparison.Ordinal))
+            if (!MatchesFingerprint(existing.RequestFingerprint, requestFingerprint, legacyFingerprint))
                 throw new ImportIdPayloadConflictException();
             return (existing, true);
         }
@@ -71,11 +91,17 @@ public sealed class FresherAcquisitionStore(JobPortalDbContext db) : IFresherAcq
             existing = await db.AcquisitionImportRuns.AsNoTracking()
                 .SingleOrDefaultAsync(x => x.AcquisitionSourceId == sourceId && x.BatchId == batchId && !x.IsDeleted, cancellationToken);
             if (existing is null) throw;
-            if (!string.Equals(existing.RequestFingerprint, requestFingerprint, StringComparison.Ordinal))
+            if (!MatchesFingerprint(existing.RequestFingerprint, requestFingerprint, legacyFingerprint))
                 throw new ImportIdPayloadConflictException();
             return (existing, true);
         }
     }
+
+    // Existing runs only retained identity-set hashes. Preserve their recovery path;
+    // full-content conflict detection is available for runs created by this version.
+    private static bool MatchesFingerprint(string existing, string payload, string? legacy) =>
+        string.Equals(existing, payload, StringComparison.Ordinal) ||
+        (legacy is not null && string.Equals(existing, legacy, StringComparison.Ordinal));
 
     private static bool IsRunUniqueViolation(DbUpdateException exception)
     {
@@ -122,10 +148,10 @@ public sealed class FresherAcquisitionStore(JobPortalDbContext db) : IFresherAcq
                 db.AcquisitionImportItems.Add(new AcquisitionImportItem
                 {
                     AcquisitionImportRunId = runId, AcquisitionSourceId = sourceId, ItemIndex = input.Index,
-                    CandidateIdentityKey = input.IdentityKey, ExternalId = candidate?.ExternalJobId?.Trim(),
+                    CandidateIdentityKey = input.IdentityKey, ExternalId = candidate?.ExternalJobId?.Trim() is { Length: <= 255 } externalId ? externalId : null,
                     DiscoveredUrl = SafeUrl(candidate?.DiscoveredUrl), CanonicalUrl = SafeUrl(candidate?.CanonicalJobUrl),
-                    ApplyUrl = SafeUrl(candidate?.ApplyUrl), CompanyNameNormalized = Normalize(candidate?.CompanyName),
-                    TitleNormalized = Normalize(candidate?.Title), LocationNormalized = Normalize(candidate?.LocationText ?? candidate?.City ?? candidate?.Country),
+                    ApplyUrl = SafeUrl(candidate?.ApplyUrl), CompanyNameNormalized = Normalize(candidate?.CompanyName, 200),
+                    TitleNormalized = Normalize(candidate?.Title, 250), LocationNormalized = Normalize(candidate?.LocationText ?? candidate?.City ?? candidate?.Country, 250),
                     EligibilityDecision = input.EligibilityDecision, ReasonCode = input.Outcome.ReasonCode,
                     Outcome = input.Outcome.Outcome, JobId = input.Outcome.JobId,
                     PublicationStatus = input.PublicationRequested ? "Pending" : "NotRequested",
@@ -187,6 +213,10 @@ public sealed class FresherAcquisitionStore(JobPortalDbContext db) : IFresherAcq
         await db.SaveChangesAsync(cancellationToken);
     }
 
-    private static string Normalize(string? value) => string.Join(' ', (value ?? string.Empty).Split(' ', StringSplitOptions.RemoveEmptyEntries)).Trim().ToUpperInvariant();
+    private static string Normalize(string? value, int maximum)
+    {
+        var normalized = string.Join(' ', (value ?? string.Empty).Split(' ', StringSplitOptions.RemoveEmptyEntries)).Trim().ToUpperInvariant();
+        return normalized[..Math.Min(normalized.Length, maximum)];
+    }
     private static string? SafeUrl(string? value) => FresherAcquisitionEligibilityPolicy.IsSafePublicUrl(value) ? value!.Trim() : null;
 }

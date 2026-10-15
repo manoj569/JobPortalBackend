@@ -81,9 +81,13 @@ public sealed class JobRepository(JobPortalDbContext context) : IJobRepository
         CancellationToken cancellationToken = default)
     {
         if (normalizedNames.Count == 0) return Array.Empty<Skill>();
-        return await context.Skills
+        // Acquisition chunks stage several jobs before SaveChanges. Reuse skills
+        // already staged by an earlier item as well as rows in PostgreSQL.
+        var persisted = await context.Skills
             .Where(x => normalizedNames.Contains(x.NormalizedName))
             .ToArrayAsync(cancellationToken);
+        return context.Skills.Local.Where(x => normalizedNames.Contains(x.NormalizedName))
+            .Concat(persisted).DistinctBy(x => x.NormalizedName, StringComparer.OrdinalIgnoreCase).ToArray();
     }
 
     public async Task AddSkillsAsync(

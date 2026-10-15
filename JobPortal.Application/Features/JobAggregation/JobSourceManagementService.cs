@@ -179,7 +179,9 @@ public sealed class JobSourceManagementService(
     {
         source.CompanyId = company.Id;
         source.Company = company;
-        source.CareerPageUrl = request.CareerPageUrl.Trim();
+        source.CareerPageUrl = request.AtsType == AtsType.Workday
+            ? WorkdaySourceConfiguration.Parse(request.CareerPageUrl).Configuration!.CanonicalCareerPageUrl
+            : request.CareerPageUrl.Trim();
         source.AtsType = request.AtsType;
         source.AtsIdentifier = identifier;
         source.IsActive = request.IsActive;

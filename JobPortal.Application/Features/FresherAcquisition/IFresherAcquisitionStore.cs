@@ -27,10 +27,14 @@ public interface IFresherAcquisitionChunk : IAsyncDisposable
 
 public interface IFresherAcquisitionStore
 {
+    Task<T> ExecuteImportAsync<T>(Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken) => operation(cancellationToken);
     Task<AcquisitionSource?> GetEnabledSourceAsync(string providerKey, CancellationToken cancellationToken);
     Task<AcquisitionSource?> GetSourceByIdAsync(Guid sourceId, CancellationToken cancellationToken);
     Task<(AcquisitionImportRun Run, bool IsReplay)> StartRunAsync(Guid sourceId, string batchId,
         string correlationId, string requestFingerprint, int received, CancellationToken cancellationToken);
+    Task<(AcquisitionImportRun Run, bool IsReplay)> StartPayloadRunAsync(Guid sourceId, string batchId,
+        string correlationId, string payloadFingerprint, string legacyFingerprint, int received, CancellationToken cancellationToken) =>
+        StartRunAsync(sourceId, batchId, correlationId, payloadFingerprint, received, cancellationToken);
     Task CompleteRunAsync(Guid runId, FresherBulkImportResponse response, CancellationToken cancellationToken);
     Task<FresherBulkImportResponse?> GetReplayResponseAsync(Guid runId, string batchId,
         CancellationToken cancellationToken);

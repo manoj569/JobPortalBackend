@@ -44,6 +44,73 @@ public sealed class GenericWorkdayConfigurationTests
     }
 
     [Theory]
+    [InlineData("https://tenant.wd1.myworkdayjobs.com/External", "wd1", null, "External")]
+    [InlineData("https://tenant.wd3.myworkdayjobs.com/en-US/External", "wd3", "en-US", "External")]
+    [InlineData("https://spgi.wd5.myworkdayjobs.com/SPGI_Careers", "wd5", null, "SPGI_Careers")]
+    [InlineData("https://spgi.wd5.myworkdayjobs.com/en-US/SPGI_Careers", "wd5", "en-US", "SPGI_Careers")]
+    [InlineData("https://browserstack.wd3.myworkdayjobs.com/External", "wd3", null, "External")]
+    [InlineData("https://tenant.wd12.myworkdayjobs.com/External_Rockwell_Automation/", "wd12", null, "External_Rockwell_Automation")]
+    [InlineData("https://tenant.wd504.myworkdayjobs.com/en-US/External-Rockwell-Automation-Early-Careers", "wd504", "en-US", "External-Rockwell-Automation-Early-Careers")]
+    [InlineData("https://tenant.wd98765.myworkdayjobs.com/Site123", "wd98765", null, "Site123")]
+    public void ParsesPublicWorkdayRootsAndBuildsCanonicalCxsUrl(string url, string shard, string? locale, string site)
+    {
+        var result = WorkdaySourceConfiguration.Parse(url);
+
+        Assert.True(result.IsValid, result.Message);
+        var configuration = result.Configuration!;
+        Assert.Equal(new Uri(url).Host, configuration.Host);
+        Assert.Equal(shard, configuration.Shard);
+        Assert.Equal(locale, configuration.Locale);
+        Assert.Equal(site, configuration.CareerSite);
+        Assert.Equal("https://" + configuration.Host + "/" + (locale is null ? "" : locale + "/") + site,
+            configuration.CanonicalCareerPageUrl);
+        Assert.Equal($"https://{configuration.Host}/wday/cxs/{configuration.Tenant}/{site}/jobs",
+            configuration.ListingEndpoint.AbsoluteUri);
+    }
+
+    [Theory]
+    [InlineData("http://tenant.wd5.myworkdayjobs.com/Site")]
+    [InlineData("https://tenant.wd5.myworkdayjobs.com.evil.com/Site")]
+    [InlineData("https://evilmyworkdayjobs.com/Site")]
+    [InlineData("https://localhost/Site")]
+    [InlineData("https://127.0.0.1/Site")]
+    [InlineData("https://10.0.0.1/Site")]
+    [InlineData("https://user:password@tenant.wd5.myworkdayjobs.com/Site")]
+    [InlineData("https://tenant.wd5.myworkdayjobs.com:8443/Site")]
+    [InlineData("https://tenant.wd5.myworkdayjobs.com/Site?redirect=https://evil.test")]
+    [InlineData("https://tenant.wd5.myworkdayjobs.com/Site?")]
+    [InlineData("https://tenant.wd5.myworkdayjobs.com/Site#fragment")]
+    [InlineData("https://tenant.wd5.myworkdayjobs.com/Site#")]
+    [InlineData("https://tenant.wd5.myworkdayjobs.com/Site/job/Some-Job/123")]
+    [InlineData("https://tenant.wd5.myworkdayjobs.com/job/Some-Job/123")]
+    [InlineData("https://tenant.wd5.myworkdayjobs.com/search")]
+    [InlineData("https://tenant.wd5.myworkdayjobs.com/")]
+    [InlineData("https://tenant.wd5.myworkdayjobs.com/Site/../Other")]
+    [InlineData("https://tenant.wd5.myworkdayjobs.com/%2e%2e/Site")]
+    [InlineData("https://tenant.wd5.myworkdayjobs.com/Site%2fjob")]
+    [InlineData("https://tenant.wd0.myworkdayjobs.com/Site")]
+    [InlineData("not a url")]
+    public void RejectsNonRootsAndUnsafeWorkdayUrls(string url) =>
+        Assert.False(WorkdaySourceConfiguration.Parse(url).IsValid);
+
+    [Theory]
+    [InlineData("https://spgi.wd5.myworkdayjobs.com/SPGI_Careers", "spgi", "wd5", "SPGI_Careers")]
+    [InlineData("https://spgi.wd5.myworkdayjobs.com/en-US/SPGI_Careers", "spgi", "wd5", "SPGI_Careers")]
+    [InlineData("https://browserstack.wd3.myworkdayjobs.com/External", "browserstack", "wd3", "External")]
+    public void PublicRootCanBeTheIdentifierAndNormalizesToCanonicalCxsIdentity(string url, string tenant, string shard, string site)
+    {
+        var result = WorkdaySourceConfiguration.Validate(url, url);
+
+        Assert.True(result.IsValid, result.Message);
+        Assert.Equal(tenant, result.Configuration!.Tenant);
+        Assert.Equal(shard, result.Configuration.Shard);
+        Assert.Equal(site, result.Configuration.CareerSite);
+        Assert.Equal($"{tenant}/{site}", result.Configuration.Identifier);
+        Assert.Equal($"https://{tenant}.{shard}.myworkdayjobs.com/wday/cxs/{tenant}/{site}/jobs",
+            result.Configuration.ListingEndpoint.AbsoluteUri);
+    }
+
+    [Theory]
     [InlineData(null)]
     [InlineData("")]
     [InlineData("ag")]
@@ -138,6 +205,33 @@ public sealed class GenericWorkdayConfigurationTests
         Assert.Equal("walmart/walmartexternal", updated.AtsIdentifier);
         fixture.Context.ChangeTracker.Clear();
         Assert.Equal(updated.AtsIdentifier, (await fixture.Repository.GetByIdAsync(created.Id))!.AtsIdentifier);
+    }
+
+    [Fact]
+    public async Task AdminAcceptsPublicRootIdentifierAndPersistsCanonicalSiteRoot()
+    {
+        using var fixture = new JobSourceFixture();
+        var url = "https://spgi.wd5.myworkdayjobs.com/en-US/SPGI_Careers/";
+        var created = await fixture.Service.CreateAsync(fixture.Request with
+        {
+            AtsType = AtsType.Workday,
+            CareerPageUrl = url,
+            AtsIdentifier = url
+        });
+
+        Assert.Equal("https://spgi.wd5.myworkdayjobs.com/en-US/SPGI_Careers", created.CareerPageUrl);
+        Assert.Equal("spgi/SPGI_Careers", created.AtsIdentifier);
+        var target = WorkdayJobSourceProvider.ValidateSource(new JobSource
+        {
+            AtsType = created.AtsType,
+            CareerPageUrl = created.CareerPageUrl,
+            AtsIdentifier = created.AtsIdentifier
+        });
+        Assert.Equal("spgi", target.Tenant);
+        Assert.Equal("wd5", WorkdaySourceConfiguration.Parse(created.CareerPageUrl).Configuration!.Shard);
+        Assert.Equal("SPGI_Careers", target.Site);
+        Assert.Equal("https://spgi.wd5.myworkdayjobs.com/wday/cxs/spgi/SPGI_Careers/jobs",
+            WorkdaySourceConfiguration.Parse(created.CareerPageUrl).Configuration!.ListingEndpoint.AbsoluteUri);
     }
 
     [Fact]

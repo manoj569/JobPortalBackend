@@ -19,6 +19,11 @@ public static class FresherCandidateIdentity
     public static string Fingerprint(IEnumerable<string> candidateIdentityKeys) =>
         Hash(string.Join('\n', candidateIdentityKeys.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)));
 
+    public static string PayloadFingerprint(FresherBulkImportRequest request) =>
+        Hash("payload-v2:" + request.SourceType.Trim().ToLowerInvariant() + "\n" + request.SourceName + "\n" +
+            string.Join('\n', request.Jobs.Select(x => System.Text.Json.JsonSerializer.Serialize(x))
+                .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)));
+
     public static string Normalize(string? value) => string.Join(' ',
         (value ?? string.Empty).Split(' ', StringSplitOptions.RemoveEmptyEntries)).Trim().ToUpperInvariant();
 

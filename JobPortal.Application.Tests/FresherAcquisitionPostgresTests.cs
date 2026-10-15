@@ -17,6 +17,7 @@ namespace JobPortal.Application.Tests;
 
 public sealed class FresherAcquisitionPostgresTests
 {
+    private static readonly System.Text.Json.JsonSerializerOptions PayloadJsonOptions = new(System.Text.Json.JsonSerializerDefaults.Web);
     [FresherPostgresFact]
     public async Task JobAndReceiptCommitTogetherAndRollbackLeavesNeither()
     {
@@ -186,6 +187,190 @@ public sealed class FresherAcquisitionPostgresTests
         Assert.Equal("Published", (await db.AcquisitionImportItems.SingleAsync(x => x.AcquisitionImportRunId == first.RunId)).PublicationStatus);
     }
 
+
+    [RetainedPayloadPostgresFact]
+    public async Task RetainedThirtyJobPayloadWithProductionRetryConfiguration()
+    {
+        var payloadPath = Environment.GetEnvironmentVariable("FRESHER_RETAINED_PAYLOAD")!;
+        var bytes = await File.ReadAllBytesAsync(payloadPath);
+        Assert.Equal(83060, bytes.Length);
+        Assert.Equal("05cebf2d5c8f0797a63a8020224efc7e84e1ce7cf86e62fd4157905f2c9ba879",
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)).ToLowerInvariant());
+        var request = System.Text.Json.JsonSerializer.Deserialize<FresherBulkImportRequest>(bytes,
+            PayloadJsonOptions)!;
+        Assert.Equal(30, request.Jobs.Count);
+        Assert.Equal("ch-v1-03d13df0fb5a5b6fbaa601a4ffd391ca1f340524ca87ba63e8bcc02126a745b6", request.ImportId);
+        await using var setup = new JobPortalDbContext(CreateOptions());
+        await setup.Database.MigrateAsync();
+        var source = await setup.AcquisitionSources.SingleAsync(x => x.ProviderKey == request.SourceType && x.IsEnabled);
+        Assert.Equal("SerpApi Google Jobs", source.Name);
+        Assert.All(request.Jobs, item => Assert.Equal(84, item.ExternalJobId!.Length));
+        var priorRun = await setup.AcquisitionImportRuns.SingleOrDefaultAsync(x => x.AcquisitionSourceId == source.Id && x.BatchId == request.ImportId);
+        if (priorRun is null)
+        {
+            // Reproduce the durable legacy run left before the first failed chunk.
+            var identities = request.Jobs.Select(x => FresherCandidateIdentity.Create(source.Id, x));
+            priorRun = (await new FresherAcquisitionStore(setup).StartRunAsync(source.Id, request.ImportId,
+                "pre-fix-attempt", FresherCandidateIdentity.Fingerprint(identities), 30, default)).Run;
+        }
+        var retryOptions = new DbContextOptionsBuilder<JobPortalDbContext>().UseNpgsql(
+            Environment.GetEnvironmentVariable("GENERIC_INDIA_TEST_POSTGRES"), pg => pg.EnableRetryOnFailure(3)).Options;
+        await using var db = new JobPortalDbContext(retryOptions);
+        var importer = CreateImporter(db, 50);
+        var response = await importer.ImportAsync(request);
+        Assert.Equal(priorRun.Id, response.RunId);
+        Assert.Equal(30, response.Received);
+        var replay = await importer.ImportAsync(request);
+        Assert.Equal(response.RunId, replay.RunId);
+        Assert.Equal(30, await db.AcquisitionImportItems.CountAsync(x => x.AcquisitionImportRunId == response.RunId));
+    }
+
+
+    [FresherPostgresFact]
+    public async Task ThirtyExistingCompanyJobsShareStagedSkillsAndReplay()
+    {
+        await using var db = new JobPortalDbContext(CreateOptions());
+        await db.Database.MigrateAsync();
+        var (source, company) = await CreateSourceAndCompanyAsync(db);
+        var skill = "Shared acquisition " + Guid.NewGuid().ToString("N");
+        var candidates = Enumerable.Range(0, 30).Select(i => Candidate("batch-" + i, company.Name, skills: [skill])).ToArray();
+        var request = Request("thirty", source.ProviderKey, candidates);
+        var importer = CreateImporter(db, 50);
+        var response = await importer.ImportAsync(request);
+        Assert.Equal(30, response.Created);
+        Assert.Equal(1, await db.Skills.CountAsync(x => x.Name == skill));
+        Assert.Equal(30, await db.Jobs.CountAsync(x => x.AcquisitionSourceId == source.Id));
+        var replay = await importer.ImportAsync(request);
+        Assert.Equal(response.RunId, replay.RunId);
+        Assert.Equal(30, replay.Created);
+    }
+
+    [FresherPostgresFact]
+    public async Task UnresolvedCompanyCategoryAndOversizedItemHaveDurableReceipts()
+    {
+        await using var db = new JobPortalDbContext(CreateOptions());
+        await db.Database.MigrateAsync();
+        var (source, company) = await CreateSourceAndCompanyAsync(db);
+        var missingCompany = Candidate("missing-company", "Missing " + Guid.NewGuid().ToString("N"));
+        var missingCategory = Candidate("missing-category", company.Name, Guid.NewGuid());
+        var oversized = new FresherImportCandidate { ExternalJobId = new string('x', 400),
+            Title = new string('x', 400), CompanyName = new string('x', 400), Description = "invalid oversized fields" };
+        var valid = Candidate("valid", company.Name);
+        var response = await CreateImporter(db, 50).ImportAsync(Request("rejections", source.ProviderKey,
+            [missingCompany, missingCategory, oversized, valid]));
+        Assert.Equal("COMPANY_NOT_RESOLVED", response.Items[0].ReasonCode);
+        Assert.Equal("CATEGORY_RESOLUTION_FAILED", response.Items[1].ReasonCode);
+        Assert.Equal("RejectedInvalidData", response.Items[2].Outcome);
+        Assert.Equal("Created", response.Items[3].Outcome);
+        Assert.Equal(4, await db.AcquisitionImportItems.CountAsync(x => x.AcquisitionImportRunId == response.RunId));
+    }
+
+    [FresherPostgresFact]
+    public async Task MissingSourceReturnsDeterministicFailureWithoutCreatingRun()
+    {
+        await using var db = new JobPortalDbContext(CreateOptions());
+        await db.Database.MigrateAsync();
+        var response = await CreateImporter(db, 50).ImportAsync(Request("missing-source", "missing-" + Guid.NewGuid().ToString("N"), [Candidate("one")]));
+        Assert.Null(response.RunId);
+        Assert.Equal("ACQUISITION_SOURCE_DISABLED", Assert.Single(response.Items).ReasonCode);
+    }
+
+
+    [FresherPostgresFact]
+    public async Task ProductionRetryStrategyAllowsChunkWhenInsideDurableBoundary()
+    {
+        await using (var setup = new JobPortalDbContext(CreateOptions()))
+            await setup.Database.MigrateAsync();
+        var options = new DbContextOptionsBuilder<JobPortalDbContext>().UseNpgsql(
+            Environment.GetEnvironmentVariable("GENERIC_INDIA_TEST_POSTGRES"), pg => pg.EnableRetryOnFailure(3)).Options;
+        await using var db = new JobPortalDbContext(options);
+        var store = new FresherAcquisitionStore(db);
+        await using (var chunk = await store.BeginChunkAsync(["reproduce-production-retry"], default))
+        {
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                db.Companies.SingleOrDefaultAsync(x => x.Name == "first-item-company-resolution"));
+            Assert.Contains("NpgsqlRetryingExecutionStrategy", exception.Message);
+            Assert.Contains("does not support user-initiated transactions", exception.Message);
+        }
+        var succeeded = await store.ExecuteImportAsync(async token =>
+        {
+            await using var chunk = await store.BeginChunkAsync(["reproduce-production-retry"], token);
+            await db.AcquisitionSources.AnyAsync(token);
+            return true;
+        }, default);
+        Assert.True(succeeded);
+        Assert.True(db.Database.CreateExecutionStrategy().RetriesOnFailure);
+
+        // Exercise the real FresherBulkImport -> IngestWithoutSave -> ResolveCompany
+        // path with retries enabled, rather than only a direct repository query.
+        var (source, company) = await CreateSourceAndCompanyAsync(db);
+        var importer = CreateImporter(db, 50);
+        var request = Request("production-strategy", source.ProviderKey, [Candidate("company-resolution", company.Name)]);
+        var first = await importer.ImportAsync(request);
+        Assert.Equal(1, first.Created);
+        var replay = await importer.ImportAsync(request);
+        Assert.Equal(first.RunId, replay.RunId);
+        Assert.Equal(1, replay.Created);
+        Assert.Equal(1, await db.Jobs.CountAsync(x => x.AcquisitionSourceId == source.Id));
+        Assert.True(db.Database.CreateExecutionStrategy().RetriesOnFailure);
+    }
+
+    [FresherPostgresFact]
+    public async Task NewRunRejectsChangedContentWithSameExternalIdentity()
+    {
+        await using var db = new JobPortalDbContext(CreateOptions());
+        await db.Database.MigrateAsync();
+        var (source, company) = await CreateSourceAndCompanyAsync(db);
+        var importer = CreateImporter(db, 50);
+        var candidate = Candidate("same-id", company.Name);
+        await importer.ImportAsync(Request("content-conflict", source.ProviderKey, [candidate]));
+        await Assert.ThrowsAsync<ImportIdPayloadConflictException>(() => importer.ImportAsync(
+            Request("content-conflict", source.ProviderKey, [Candidate("same-id", company.Name)])));
+    }
+
+
+    [FresherPostgresFact]
+    public async Task InterruptedAfterCommittedChunkResumesWithSameImportId()
+    {
+        await using var setup = new JobPortalDbContext(CreateOptions());
+        await setup.Database.MigrateAsync();
+        var (source, company) = await CreateSourceAndCompanyAsync(setup);
+        source.AutoPublishEnabled = true;
+        await setup.SaveChangesAsync();
+        var candidates = Enumerable.Range(0, 5).Select(i => Candidate("partial-" + i, company.Name)).ToArray();
+        var request = Request("partial", source.ProviderKey, candidates);
+        using var cancellation = new CancellationTokenSource();
+        await using (var firstDb = new JobPortalDbContext(CreateOptions()))
+        {
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                CreateImporter(firstDb, 2, new CancelAfterCommitPublisher(cancellation)).ImportAsync(request, cancellation.Token));
+        }
+        var run = await setup.AcquisitionImportRuns.AsNoTracking().SingleAsync(x => x.AcquisitionSourceId == source.Id && x.BatchId == request.ImportId);
+        Assert.Equal(2, await setup.AcquisitionImportItems.CountAsync(x => x.AcquisitionImportRunId == run.Id));
+        Assert.Equal(2, await setup.Jobs.CountAsync(x => x.AcquisitionSourceId == source.Id));
+        await using var recovery = new JobPortalDbContext(CreateOptions());
+        var response = await CreateImporter(recovery, 2, new SuccessfulPublisher()).ImportAsync(request);
+        Assert.Equal(run.Id, response.RunId);
+        Assert.Equal(5, response.Created);
+        Assert.Equal(5, await recovery.Jobs.CountAsync(x => x.AcquisitionSourceId == source.Id));
+        Assert.Equal(5, await recovery.AcquisitionImportItems.CountAsync(x => x.AcquisitionImportRunId == run.Id));
+    }
+
+    private sealed class SuccessfulPublisher : IJobAutoPublishService
+    {
+        public Task<JobAutoPublishResult> TryPublishAsync(Guid jobId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new JobAutoPublishResult { Outcome = JobAutoPublishOutcome.Published });
+    }
+
+    private sealed class CancelAfterCommitPublisher(CancellationTokenSource cancellation) : IJobAutoPublishService
+    {
+        public Task<JobAutoPublishResult> TryPublishAsync(Guid jobId, CancellationToken cancellationToken = default)
+        {
+            cancellation.Cancel();
+            return Task.FromCanceled<JobAutoPublishResult>(cancellation.Token);
+        }
+    }
+
     private static FresherBulkImportService CreateImporter(JobPortalDbContext db, int chunkSize,
         IJobAutoPublishService? publisher = null)
     {
@@ -268,6 +453,16 @@ public sealed class FresherAcquisitionPostgresTests
         {
             if (Interlocked.Increment(ref _calls) == 1) throw new InvalidOperationException("simulated publish failure");
             return Task.FromResult(new JobAutoPublishResult { Outcome = JobAutoPublishOutcome.Published });
+        }
+    }
+
+    private sealed class RetainedPayloadPostgresFactAttribute : FactAttribute
+    {
+        public RetainedPayloadPostgresFactAttribute()
+        {
+            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("GENERIC_INDIA_TEST_POSTGRES")) ||
+                string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("FRESHER_RETAINED_PAYLOAD")))
+                Skip = "Requires disposable localhost PostgreSQL and explicit retained payload path.";
         }
     }
 

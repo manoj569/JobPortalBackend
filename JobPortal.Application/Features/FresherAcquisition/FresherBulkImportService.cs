@@ -24,6 +24,42 @@ public sealed partial class FresherBulkImportService(
 {
     public async Task<FresherBulkImportResponse> ImportAsync(FresherBulkImportRequest request, CancellationToken cancellationToken = default)
     {
+        var diagnostic = new ImportDiagnostic();
+        using var scope = logger.BeginScope(new Dictionary<string, object?>
+        {
+            ["CorrelationId"] = diagnostic.CorrelationId,
+            ["ImportId"] = request.ImportId, ["SourceType"] = request.SourceType, ["JobCount"] = request.Jobs.Count
+        });
+        try
+        {
+            return acquisitionStore is null
+                ? await ImportCoreAsync(request, diagnostic, cancellationToken)
+                : await acquisitionStore.ExecuteImportAsync(token => ImportCoreAsync(request, diagnostic, token), cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception exception) when (exception is not ImportIdPayloadConflictException and not ImportAlreadyRunningException)
+        {
+            var provider = exception;
+            while (provider.InnerException is not null && provider is not System.Data.Common.DbException)
+                provider = provider.InnerException;
+            // Do not log exception messages, provider Detail, payloads or headers.
+            ImportFailed(logger, diagnostic.CorrelationId, request.ImportId, request.SourceType, request.Jobs.Count,
+                diagnostic.Stage, diagnostic.ExternalId, exception.GetType().Name,
+                (provider as System.Data.Common.DbException)?.SqlState);
+            throw;
+        }
+    }
+
+    private sealed class ImportDiagnostic
+    {
+        public string CorrelationId { get; } = System.Diagnostics.Activity.Current?.TraceId.ToString() ?? Guid.NewGuid().ToString("N");
+        public string Stage { get; set; } = "SourceResolution";
+        public string? ExternalId { get; set; }
+    }
+
+    private async Task<FresherBulkImportResponse> ImportCoreAsync(FresherBulkImportRequest request,
+        ImportDiagnostic diagnostic, CancellationToken cancellationToken)
+    {
         var now = (clock ?? TimeProvider.System).GetUtcNow().UtcDateTime;
         JobPortal.Domain.Entities.AcquisitionSource? source = null;
         JobPortal.Domain.Entities.AcquisitionImportRun? run = null;
@@ -40,8 +76,12 @@ public sealed partial class FresherBulkImportService(
         await using var runLock = new AsyncDisposableHolder();
         if (acquisitionStore is not null)
         {
+            diagnostic.Stage = "RunLock";
             runLock.Set(await acquisitionStore.AcquireRunLockAsync(source!.Id, request.ImportId, cancellationToken));
-            var start = await acquisitionStore.StartRunAsync(source.Id, request.ImportId, Guid.NewGuid().ToString("N"), requestFingerprint, identityKeys.Distinct(StringComparer.Ordinal).Count(), cancellationToken);
+            diagnostic.Stage = "StartRun";
+            var start = await acquisitionStore.StartPayloadRunAsync(source.Id, request.ImportId, diagnostic.CorrelationId,
+                FresherCandidateIdentity.PayloadFingerprint(request), requestFingerprint,
+                identityKeys.Distinct(StringComparer.Ordinal).Count(), cancellationToken);
             run = start.Run;
             if (start.IsReplay && run.Status == "Completed")
             {
@@ -59,6 +99,8 @@ public sealed partial class FresherBulkImportService(
         var chunkSize = acquisitionStore is null ? request.Jobs.Count : Math.Clamp(options?.Value.ChunkSize ?? 50, 1, 200);
         for (var chunkStart = 0; chunkStart < request.Jobs.Count; chunkStart += chunkSize)
         {
+            diagnostic.Stage = "BeginChunk";
+            diagnostic.ExternalId = null;
             await using var chunk = run is not null && acquisitionStore is not null
                 ? await acquisitionStore.BeginChunkAsync(request.Jobs.Skip(chunkStart).Take(chunkSize)
                     .Where(x => !string.IsNullOrWhiteSpace(x?.ExternalJobId))
@@ -74,6 +116,8 @@ public sealed partial class FresherBulkImportService(
             {
             cancellationToken.ThrowIfCancellationRequested();
             var candidate = request.Jobs[index];
+            diagnostic.Stage = "CandidateValidation";
+            diagnostic.ExternalId = candidate?.ExternalJobId;
             var identityKey = identityKeys[index];
             if (acquisitionStore is not null && !seenInRequest.Add(identityKey))
             {
@@ -135,6 +179,7 @@ public sealed partial class FresherBulkImportService(
                 continue;
             }
 
+            diagnostic.Stage = "CategoryResolution";
             Guid? categoryId = candidate.CategoryId;
             if (categoryId.HasValue && (categories is null || await categories.GetByIdAsync(categoryId.Value, cancellationToken) is null))
             {
@@ -205,6 +250,7 @@ public sealed partial class FresherBulkImportService(
                     Skills = candidate.Skills,
                     SourceMetadataJson = metadata
                 };
+                diagnostic.Stage = "JobIngestion";
                 var result = run is not null
                     ? await ingestion.IngestWithoutSaveAsync(raw, cancellationToken)
                     : await ingestion.IngestAsync(raw, cancellationToken);
@@ -235,6 +281,8 @@ public sealed partial class FresherBulkImportService(
                 throw;
             }
             }
+            diagnostic.Stage = "ChunkCommit";
+            diagnostic.ExternalId = null;
             if (chunk is not null && run is not null)
                 await chunk.CommitAsync(run.Id, chunkReceipts, cancellationToken);
 
@@ -243,6 +291,7 @@ public sealed partial class FresherBulkImportService(
             {
                 try
                 {
+                    diagnostic.Stage = "Publication";
                     var result = await autoPublish!.TryPublishAsync(queued.JobId, cancellationToken);
                     var status = result.Outcome == JobAutoPublishOutcome.Published ? "Published" : "NotPublished";
                     await acquisitionStore!.UpdatePublicationAsync(run!.Id, queued.Identity, status, null, cancellationToken);
@@ -261,6 +310,8 @@ public sealed partial class FresherBulkImportService(
         { RunId = run?.Id, Published = published };
         if (run is not null && acquisitionStore is not null)
         {
+            diagnostic.Stage = "CompleteRun";
+            diagnostic.ExternalId = null;
             await acquisitionStore.CompleteRunAsync(run.Id, response, cancellationToken);
             var durable = await acquisitionStore.GetReplayResponseAsync(run.Id, request.ImportId, cancellationToken);
             if (durable is not null) return durable with { Items = MapCurrentRequestItems(identityKeys,
@@ -347,6 +398,11 @@ public sealed partial class FresherBulkImportService(
         "remote" => WorkplaceType.Remote, "hybrid" => WorkplaceType.Hybrid,
         "on-site" or "onsite" => WorkplaceType.OnSite, _ => null
     };
+
+    [LoggerMessage(EventId = 8512, Level = LogLevel.Error,
+        Message = "Bulk import failed CorrelationId={CorrelationId} ImportId={ImportId} SourceType={SourceType} JobCount={JobCount} Stage={Stage} ExternalId={ExternalId} ExceptionType={ExceptionType} SqlState={SqlState}")]
+    private static partial void ImportFailed(ILogger logger, string correlationId, string importId, string sourceType,
+        int jobCount, string stage, string? externalId, string exceptionType, string? sqlState);
 
     [LoggerMessage(EventId = 8510, Level = LogLevel.Error,
         Message = "Fresher acquisition item failed. ImportId={ImportId} ItemIndex={ItemIndex} ErrorType={ErrorType}")]

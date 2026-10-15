@@ -24,6 +24,13 @@ public sealed class GlobalExceptionMiddleware(
         LoggerMessage.Define<int, string, string, string, string>(LogLevel.Warning, new EventId(3003, nameof(ExpectedRequestFailure)),
             "Request failed with {StatusCode} {ErrorCode} for {RequestMethod} {RequestPath}: {ErrorMessage}");
 
+    private static readonly Action<ILogger, string, string, Exception?> SafeBulkImportFailure =
+        LoggerMessage.Define<string, string>(LogLevel.Error, new EventId(3004, "BulkImportFailure"),
+            "Bulk import request failed CorrelationId={CorrelationId} ExceptionType={ExceptionType}");
+
+    private static void BulkImportRequestFailed(ILogger logger, string correlationId, string exceptionType) =>
+        SafeBulkImportFailure(logger, System.Diagnostics.Activity.Current?.TraceId.ToString() ?? correlationId, exceptionType, null);
+
     public async Task InvokeAsync(HttpContext context)
     {
         try
@@ -87,7 +94,9 @@ public sealed class GlobalExceptionMiddleware(
             };
 
             // 3. Log the error
-            if (statusCode >= 500)
+            if (statusCode >= 500 && context.Request.Path.Equals(new PathString("/api/internal/v1/jobs/bulk-import")))
+                BulkImportRequestFailed(logger, context.TraceIdentifier, exception.GetType().Name);
+            else if (statusCode >= 500)
                 UnhandledRequestException(logger, context.Request.Method, context.Request.Path, exception);
             else
                 ExpectedRequestFailure(logger, statusCode, exception switch
