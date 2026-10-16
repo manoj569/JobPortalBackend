@@ -88,11 +88,11 @@ public sealed partial class JobAutoPublishService(
                 return new() { Outcome = JobAutoPublishOutcome.Disabled };
             if (!acquisition.AutoPublishEnabled)
                 return new() { Outcome = JobAutoPublishOutcome.Disabled };
-            if (acquisition.ProviderKey == "website-crawler" && job.Status == JobStatus.Published && !job.IsDeleted && !job.IsHidden && job.SourceOwnsPublication)
+            if ((acquisition.ProviderKey is "website-crawler" or "talentd") && job.Status == JobStatus.Published && !job.IsDeleted && !job.IsHidden && job.SourceOwnsPublication)
                 return new() { Outcome = JobAutoPublishOutcome.AlreadyPublished };
             if (job.IsDeleted || job.IsHidden || job.Status != JobStatus.Draft || !job.SourceOwnsPublication)
                 return new() { Outcome = JobAutoPublishOutcome.NeedsReview, Reasons = [JobQualityReasonCode.PublicationOwnershipUnverified] };
-            if (acquisition.ProviderKey == "website-crawler")
+            if ((acquisition.ProviderKey is "website-crawler" or "talentd"))
             {
                 if (job.IsDeleted || job.IsHidden || job.Status is not (JobStatus.Draft or JobStatus.Published))
                     return new() { Outcome = JobAutoPublishOutcome.NeedsReview, Reasons = [JobQualityReasonCode.PublicationOwnershipUnverified] };

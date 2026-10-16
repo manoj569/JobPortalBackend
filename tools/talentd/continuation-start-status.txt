@@ -1,0 +1,22 @@
+ M JobPortal.API/Controllers/InternalFresherBulkImportController.cs
+ M JobPortal.Application.Tests/FinalWebsitePolicyTests.cs
+ M JobPortal.Application/Features/FresherAcquisition/FresherAcquisitionContracts.cs
+ M JobPortal.Application/Features/FresherAcquisition/FresherBulkImportService.cs
+ M JobPortal.Application/Features/FresherAcquisition/IFresherAcquisitionStore.cs
+ M JobPortal.Application/Features/Jobs/JobService.cs
+ M JobPortal.Application/Services/JobAutoPublishService.cs
+ M JobPortal.Application/Services/JobIngestionService.cs
+ M JobPortal.Persistence/Repositories/FresherAcquisitionStore.Companies.cs
+ M JobPortal.Persistence/Repositories/FresherAcquisitionStore.cs
+ M JobPortal.Persistence/Repositories/JobRepository.cs
+ M JobPortal.Persistence/Repositories/PublicJobRepository.cs
+?? JobPortal.Application.Tests/TalentdBackendTests.cs
+?? JobPortal.Application.Tests/TalentdMigrationTests.cs
+?? JobPortal.Application.Tests/TalentdPostgresTests.cs
+?? JobPortal.Application.Tests/TalentdStatusTests.cs
+?? JobPortal.Application.Tests/TestResults/talentd-focused.trx
+?? JobPortal.Application.Tests/TestResults/talentd-regression.trx
+?? JobPortal.Application/Features/FresherAcquisition/TalentdFields.cs
+?? JobPortal.Persistence.Postgres/Migrations/20261016100020_AddTalentdAcquisitionSource.Designer.cs
+?? JobPortal.Persistence.Postgres/Migrations/20261016100020_AddTalentdAcquisitionSource.cs
+?? tools/talentd/

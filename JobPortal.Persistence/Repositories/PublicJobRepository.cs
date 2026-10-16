@@ -262,7 +262,7 @@ public sealed partial class PublicJobRepository(
                     !job.IsHidden &&
                     !job.IsDeleted &&
                     job.PublishedAtUtc.HasValue &&
-                    (job.AcquisitionSource != null && job.AcquisitionSource.ProviderKey == "website-crawler" || !job.ExpiresAtUtc.HasValue || job.ExpiresAtUtc > utcNow))
+                    (job.AcquisitionSource != null && (job.AcquisitionSource.ProviderKey == "website-crawler" || job.AcquisitionSource.ProviderKey == "talentd") || !job.ExpiresAtUtc.HasValue || job.ExpiresAtUtc > utcNow))
             });
 
         return companies
@@ -314,7 +314,7 @@ public sealed partial class PublicJobRepository(
             !job.IsHidden &&
             !job.IsDeleted &&
             job.PublishedAtUtc.HasValue &&
-            (job.AcquisitionSource != null && job.AcquisitionSource.ProviderKey == "website-crawler" || !job.ExpiresAtUtc.HasValue || job.ExpiresAtUtc > utcNow));
+            (job.AcquisitionSource != null && (job.AcquisitionSource.ProviderKey == "website-crawler" || job.AcquisitionSource.ProviderKey == "talentd") || !job.ExpiresAtUtc.HasValue || job.ExpiresAtUtc > utcNow));
     }
 
 #pragma warning disable CA1304, CA1311, CA1862 // Parameterless casing is translated by EF; comparison overloads are not.

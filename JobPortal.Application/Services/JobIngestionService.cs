@@ -252,9 +252,9 @@ public sealed class JobIngestionService(
         // This is the last boundary before either creation or mutation of Jobs.
         // Publication status cannot substitute for positive hiring-location evidence.
         rawJob = new ExternalJobNormalizer().Normalize(rawJob);
-        var website = rawJob.AcquisitionProviderKey == "website-crawler" && rawJob.AcquisitionSourceId is { } acquisitionId &&
+        var website = (rawJob.AcquisitionProviderKey is "website-crawler" or "talentd") && rawJob.AcquisitionSourceId is { } acquisitionId &&
             acquisitionSources is not null && await acquisitionSources.GetSourceByIdAsync(acquisitionId, cancellationToken) is
-                { ProviderKey: "website-crawler", IsEnabled: true, IsDeleted: false };
+                { ProviderKey: "website-crawler" or "talentd", IsEnabled: true, IsDeleted: false };
         var eligibility = IndiaJobEligibilityPolicy.Evaluate(rawJob);
         if (!website && eligibility.Decision != IndiaJobEligibilityDecision.Accepted)
             return Invalid("Validation:INDIA_ELIGIBILITY_" +
@@ -317,6 +317,14 @@ public sealed class JobIngestionService(
             await jobs.FindByAcquisitionIdentityAsync(rawJob.AcquisitionSourceId.Value, acquisitionExternalId, cancellationToken) is { } acquired)
         {
             var changed = ApplySourceFields(acquired, rawJob, title, company, location, applicationUrl);
+            if (rawJob.AcquisitionProviderKey == "talentd")
+            {
+                var skills = await ResolveSkillsAsync(rawJob, cancellationToken);
+                // Keep missing optional skill evidence from erasing reviewed associations.
+                foreach (var skill in skills.Values)
+                    if (!acquired.JobSkills.Any(x => x.SkillId == skill.Id))
+                    { acquired.JobSkills.Add(new JobSkill { JobId = acquired.Id, SkillId = skill.Id, Skill = skill, IsRequired = true }); changed = true; }
+            }
             acquired.DiscoveredUrl = rawJob.DiscoveredUrl;
             acquired.CanonicalJobUrl = rawJob.CanonicalJobUrl;
             acquired.LastVerifiedAtUtc = rawJob.LastVerifiedAtUtc;
@@ -496,28 +504,7 @@ public sealed class JobIngestionService(
 
         var id = Guid.NewGuid();
 
-        var skillNames = rawJob.Skills.Where(x => !string.IsNullOrWhiteSpace(x))
-            .Select(x => string.Join(' ', x.Split(' ', StringSplitOptions.RemoveEmptyEntries)).Trim())
-            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-        var skillsByName = new Dictionary<string, Skill>(StringComparer.OrdinalIgnoreCase);
-        if (skillNames.Length > 0)
-        {
-            var normalizedSkills = skillNames.Select(x => x.ToUpperInvariant()).ToArray();
-            var existingSkills = await jobs.GetSkillsByNormalizedNamesAsync(normalizedSkills, cancellationToken);
-            skillsByName = existingSkills.ToDictionary(x => x.NormalizedName, StringComparer.OrdinalIgnoreCase);
-            var newSkills = new List<Skill>();
-            foreach (var skillName in skillNames)
-            {
-                var normalized = skillName.ToUpperInvariant();
-                if (!skillsByName.TryGetValue(normalized, out var skill))
-                {
-                    skill = new Skill { Name = skillName, NormalizedName = normalized };
-                    skillsByName.Add(normalized, skill);
-                    newSkills.Add(skill);
-                }
-            }
-            await jobs.AddSkillsAsync(newSkills, cancellationToken);
-        }
+        var skillsByName = await ResolveSkillsAsync(rawJob, cancellationToken);
 
         var job = new Job
         {
@@ -559,7 +546,7 @@ public sealed class JobIngestionService(
             SourcePostedAtUtc = rawJob.SourcePostedAtUtc is { Kind: DateTimeKind.Utc } posted ? posted : null
         };
 
-        foreach (var skillName in skillNames)
+        foreach (var skillName in skillsByName.Keys)
         {
             var matchedSkill = skillsByName[skillName.ToUpperInvariant()];
             job.JobSkills.Add(new JobSkill { JobId = job.Id, SkillId = matchedSkill.Id, Skill = matchedSkill, IsRequired = true });
@@ -582,6 +569,33 @@ public sealed class JobIngestionService(
             Message = "External job created as Draft.",
             ExplicitReasonCode = JobIngestionReasonCode.None
         };
+    }
+
+    private async Task<Dictionary<string, Skill>> ResolveSkillsAsync(RawExternalJob raw, CancellationToken cancellationToken)
+    {
+        var skillNames = raw.Skills.Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => string.Join(' ', x.Split(' ', StringSplitOptions.RemoveEmptyEntries)).Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var skillsByName = new Dictionary<string, Skill>(StringComparer.OrdinalIgnoreCase);
+        if (skillNames.Length > 0)
+        {
+            var normalizedSkills = skillNames.Select(x => x.ToUpperInvariant()).ToArray();
+            var existingSkills = await jobs.GetSkillsByNormalizedNamesAsync(normalizedSkills, cancellationToken);
+            skillsByName = existingSkills.ToDictionary(x => x.NormalizedName, StringComparer.OrdinalIgnoreCase);
+            var newSkills = new List<Skill>();
+            foreach (var skillName in skillNames)
+            {
+                var normalized = skillName.ToUpperInvariant();
+                if (!skillsByName.TryGetValue(normalized, out var skill))
+                {
+                    skill = new Skill { Name = skillName, NormalizedName = normalized };
+                    skillsByName.Add(normalized, skill);
+                    newSkills.Add(skill);
+                }
+            }
+            await jobs.AddSkillsAsync(newSkills, cancellationToken);
+        }
+        return skillsByName;
     }
 
     private bool ApplySourceFields(Job job, RawExternalJob raw, string title, Company company,
@@ -668,7 +682,7 @@ public sealed class JobIngestionService(
 
     private static DeduplicationResult RespectSourceIdentity(RawExternalJob raw, DeduplicationResult match)
     {
-        if (raw.AcquisitionProviderKey == "website-crawler" && raw.AcquisitionSourceId is not null &&
+        if ((raw.AcquisitionProviderKey is "website-crawler" or "talentd") && raw.AcquisitionSourceId is not null &&
             !string.IsNullOrWhiteSpace(raw.AcquisitionExternalId) && match.MatchedJob is { } acquired &&
             (acquired.AcquisitionSourceId != raw.AcquisitionSourceId || acquired.AcquisitionExternalId != raw.AcquisitionExternalId))
             return DeduplicationResult.NoMatch();

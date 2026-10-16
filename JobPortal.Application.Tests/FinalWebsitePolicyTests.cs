@@ -52,6 +52,18 @@ public sealed class FinalWebsitePolicyTests
     }
 
     [Fact]
+    public async Task ExplicitForeignCountryCodeIsPreservedWithoutAnIndiaDefault()
+    {
+        using var f = new Fixture();
+        var candidate = Change(Candidate("London", 5, "FullTime", "LOW"), nameof(FresherImportCandidate.Country), "GB");
+        await f.Import.ImportAsync(Request(candidate));
+        var job = await f.Db.Jobs.SingleAsync();
+        using var metadata = JsonDocument.Parse(job.SourceMetadataJson!);
+        Assert.Equal("GB", Assert.Single(metadata.RootElement.GetProperty("countryCodes").EnumerateArray()).GetString());
+        Assert.Equal(JobStatus.Published, job.Status);
+    }
+
+    [Fact]
     public async Task TwoVacanciesSharingAnArticleAreDistinctAndRefreshInPlace()
     {
         using var f = new Fixture();

@@ -56,6 +56,18 @@ public sealed partial class FresherAcquisitionStore(JobPortalDbContext db) : IFr
             finally { await db.Database.CloseConnectionAsync(); }
         }
     }
+    public async Task<FresherImportStatus?> GetImportStatusAsync(string providerKey, string importId, CancellationToken cancellationToken)
+    {
+        var run = await db.AcquisitionImportRuns.AsNoTracking().SingleOrDefaultAsync(x =>
+            x.AcquisitionSource.ProviderKey == providerKey && x.BatchId == importId && !x.IsDeleted, cancellationToken);
+        if (run is null) return null;
+        var receipt = run.Status == "Completed" ? await GetReplayResponseAsync(run.Id, importId, cancellationToken) : null;
+        return new(run.BatchId, run.BatchId, run.Id,
+            run.Status == "Completed" ? "COMPLETED" : run.Status == "Failed" ? "FAILED" : "IN_PROGRESS",
+            run.ReceivedCount, run.EligibleCount, run.RejectedCount, run.CreatedCount, run.UpdatedCount,
+            run.ExistingCount, run.PublishedCount, run.FailedCount, run.FailureSummary, receipt);
+    }
+
     public Task<AcquisitionSource?> GetEnabledSourceAsync(string providerKey, CancellationToken cancellationToken) =>
         db.AcquisitionSources.AsNoTracking().SingleOrDefaultAsync(x => x.ProviderKey == providerKey && x.IsEnabled && !x.IsDeleted, cancellationToken);
 

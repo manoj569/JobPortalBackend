@@ -28,6 +28,8 @@ public interface IFresherAcquisitionChunk : IAsyncDisposable
 
 public interface IFresherAcquisitionStore
 {
+    Task PopulateMissingLogoAsync(Guid companyId, string url, CancellationToken cancellationToken) => Task.CompletedTask;
+    Task<FresherImportStatus?> GetImportStatusAsync(string providerKey, string importId, CancellationToken cancellationToken) => Task.FromResult<FresherImportStatus?>(null);
     Task<FresherCompanyResolution> ResolveCompanyAsync(FresherImportCandidate candidate, CancellationToken cancellationToken);
     Task<FresherCompanyResolution> ResolveWebsiteCompanyAsync(FresherImportCandidate candidate, CancellationToken cancellationToken) => ResolveCompanyAsync(candidate, cancellationToken);
     Task<T> ExecuteImportAsync<T>(Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken) => operation(cancellationToken);

@@ -10,6 +10,14 @@ namespace JobPortal.Persistence.Repositories;
 
 public sealed partial class FresherAcquisitionStore
 {
+    public async Task PopulateMissingLogoAsync(Guid companyId, string url, CancellationToken cancellationToken)
+    {
+        if (url.Length > 2048 || !FresherAcquisitionEligibilityPolicy.IsSafePublicUrl(url)) return;
+        // Conditional update protects concurrent administrator logo edits as well.
+        await db.Companies.Where(x => x.Id == companyId && (x.LogoUrl == null || x.LogoUrl == ""))
+            .ExecuteUpdateAsync(update => update.SetProperty(x => x.LogoUrl, url), cancellationToken);
+    }
+
     public Task<FresherCompanyResolution> ResolveCompanyAsync(FresherImportCandidate candidate, CancellationToken cancellationToken) => ResolveCompanyCoreAsync(candidate, false, cancellationToken);
     public Task<FresherCompanyResolution> ResolveWebsiteCompanyAsync(FresherImportCandidate candidate, CancellationToken cancellationToken) => ResolveCompanyCoreAsync(candidate, true, cancellationToken);
     private async Task<FresherCompanyResolution> ResolveCompanyCoreAsync(FresherImportCandidate candidate, bool websitePolicy, CancellationToken cancellationToken)

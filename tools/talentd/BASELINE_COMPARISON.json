@@ -1,0 +1,13 @@
+{
+  "baseline_commit": "31419dd7570bf236da57da1b03669941ffb8de6d",
+  "baseline_passed": 178,
+  "baseline_failed": 84,
+  "baseline_skipped": 0,
+  "baseline_duration": "22 seconds",
+  "identical_named_failures_and_messages": 84,
+  "original_failed": 84,
+  "talentd_caused": 0,
+  "environmental": 0,
+  "pre_existing_proven": 84,
+  "unknown": 0
+}

@@ -17,6 +17,16 @@ namespace JobPortal.API.Controllers;
 public sealed class InternalFresherBulkImportController(IFresherBulkImportService importer,
     IOptions<FresherAcquisitionOptions> options) : ControllerBase
 {
+    [HttpGet("status")]
+    public async Task<IActionResult> Status([FromQuery] string sourceType, [FromQuery] string importId,
+        [FromServices] IFresherAcquisitionStore store, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(sourceType) || sourceType.Length > 80 || string.IsNullOrWhiteSpace(importId) || importId.Length > 100)
+            return BadRequest(new { code = "INVALID_IMPORT_IDENTITY" });
+        var status = await store.GetImportStatusAsync(sourceType.Trim().ToLowerInvariant(), importId, cancellationToken);
+        return status is null ? NotFound(new { status = "NOT_FOUND", importId }) : Ok(status);
+    }
+
     [HttpPost]
     [ProducesResponseType(typeof(FresherBulkImportResponse), StatusCodes.Status200OK)]
     public async Task<ActionResult<FresherBulkImportResponse>> Import(

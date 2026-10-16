@@ -65,3 +65,8 @@ public sealed record FresherBulkImportResponse(
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
     public bool PublicationPending { get; init; }
 }
+
+public sealed record FresherImportStatus(string ImportId, string BatchId, Guid RunId, string Status,
+    int ReceivedCount, int EligibleCount, int RejectedCount, int CreatedCount, int UpdatedCount,
+    int ExistingCount, int PublishedCount, int FailedCount, string? FailureSummary,
+    FresherBulkImportResponse? Receipt);

@@ -345,7 +345,7 @@ public sealed class JobService(
 
         var website = job.AcquisitionSourceId is { } acquisitionId && acquisitionSources is not null &&
             await acquisitionSources.GetSourceByIdAsync(acquisitionId, cancellationToken) is
-                { ProviderKey: "website-crawler", IsEnabled: true, IsDeleted: false, AutoPublishEnabled: true };
+                { ProviderKey: "website-crawler" or "talentd", IsEnabled: true, IsDeleted: false, AutoPublishEnabled: true };
         if (website)
         {
             if (!job.SourceOwnsPublication || job.IsHidden || job.IsDeleted ||

@@ -69,7 +69,7 @@ public sealed class JobRepository(JobPortalDbContext context) : IJobRepository
         context.Jobs
             .Where(x => x.Status == JobStatus.Published &&
                 x.ExpiresAtUtc.HasValue && x.ExpiresAtUtc <= utcNow &&
-                (x.AcquisitionSource == null || x.AcquisitionSource.ProviderKey != "website-crawler"))
+                (x.AcquisitionSource == null || x.AcquisitionSource.ProviderKey != "website-crawler" && x.AcquisitionSource.ProviderKey != "talentd"))
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(x => x.Status, JobStatus.Expired)
                 .SetProperty(x => x.IsFeatured, false)
@@ -182,7 +182,7 @@ public sealed class JobRepository(JobPortalDbContext context) : IJobRepository
                 cancellationToken);
 
     public Task<Job?> FindByAcquisitionIdentityAsync(Guid acquisitionSourceId, string externalJobId,
-        CancellationToken cancellationToken = default) => context.Jobs
+        CancellationToken cancellationToken = default) => context.Jobs.Include(x => x.JobSkills)
             .FirstOrDefaultAsync(x => x.AcquisitionSourceId == acquisitionSourceId && x.AcquisitionExternalId == externalJobId && !x.IsDeleted,
                 cancellationToken);
 

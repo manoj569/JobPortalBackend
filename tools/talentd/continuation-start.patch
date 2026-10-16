@@ -1,0 +1,536 @@
+diff --git a/JobPortal.API/Controllers/InternalFresherBulkImportController.cs b/JobPortal.API/Controllers/InternalFresherBulkImportController.cs
+index f5c1162..86131af 100644
+--- a/JobPortal.API/Controllers/InternalFresherBulkImportController.cs
++++ b/JobPortal.API/Controllers/InternalFresherBulkImportController.cs
+@@ -17,6 +17,16 @@ namespace JobPortal.API.Controllers;
+ public sealed class InternalFresherBulkImportController(IFresherBulkImportService importer,
+     IOptions<FresherAcquisitionOptions> options) : ControllerBase
+ {
++    [HttpGet("status")]
++    public async Task<IActionResult> Status([FromQuery] string sourceType, [FromQuery] string importId,
++        [FromServices] IFresherAcquisitionStore store, CancellationToken cancellationToken)
++    {
++        if (string.IsNullOrWhiteSpace(sourceType) || sourceType.Length > 80 || string.IsNullOrWhiteSpace(importId) || importId.Length > 100)
++            return BadRequest(new { code = "INVALID_IMPORT_IDENTITY" });
++        var status = await store.GetImportStatusAsync(sourceType.Trim().ToLowerInvariant(), importId, cancellationToken);
++        return status is null ? NotFound(new { status = "NOT_FOUND", importId }) : Ok(status);
++    }
++
+     [HttpPost]
+     [ProducesResponseType(typeof(FresherBulkImportResponse), StatusCodes.Status200OK)]
+     public async Task<ActionResult<FresherBulkImportResponse>> Import(
+diff --git a/JobPortal.Application.Tests/FinalWebsitePolicyTests.cs b/JobPortal.Application.Tests/FinalWebsitePolicyTests.cs
+index 487208d..179af4f 100644
+--- a/JobPortal.Application.Tests/FinalWebsitePolicyTests.cs
++++ b/JobPortal.Application.Tests/FinalWebsitePolicyTests.cs
+@@ -51,6 +51,18 @@ public sealed class FinalWebsitePolicyTests
+         Assert.True(f.Store.Receipts[0].PublicationRequested);
+     }
+ 
++    [Fact]
++    public async Task ExplicitForeignCountryCodeIsPreservedWithoutAnIndiaDefault()
++    {
++        using var f = new Fixture();
++        var candidate = Change(Candidate("London", 5, "FullTime", "LOW"), nameof(FresherImportCandidate.Country), "GB");
++        await f.Import.ImportAsync(Request(candidate));
++        var job = await f.Db.Jobs.SingleAsync();
++        using var metadata = JsonDocument.Parse(job.SourceMetadataJson!);
++        Assert.Equal("GB", Assert.Single(metadata.RootElement.GetProperty("countryCodes").EnumerateArray()).GetString());
++        Assert.Equal(JobStatus.Published, job.Status);
++    }
++
+     [Fact]
+     public async Task TwoVacanciesSharingAnArticleAreDistinctAndRefreshInPlace()
+     {
+diff --git a/JobPortal.Application/Features/FresherAcquisition/FresherAcquisitionContracts.cs b/JobPortal.Application/Features/FresherAcquisition/FresherAcquisitionContracts.cs
+index 9b8845b..ebeac79 100644
+--- a/JobPortal.Application/Features/FresherAcquisition/FresherAcquisitionContracts.cs
++++ b/JobPortal.Application/Features/FresherAcquisition/FresherAcquisitionContracts.cs
+@@ -65,3 +65,8 @@ public sealed record FresherBulkImportResponse(
+     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+     public bool PublicationPending { get; init; }
+ }
++
++public sealed record FresherImportStatus(string ImportId, string BatchId, Guid RunId, string Status,
++    int ReceivedCount, int EligibleCount, int RejectedCount, int CreatedCount, int UpdatedCount,
++    int ExistingCount, int PublishedCount, int FailedCount, string? FailureSummary,
++    FresherBulkImportResponse? Receipt);
+diff --git a/JobPortal.Application/Features/FresherAcquisition/FresherBulkImportService.cs b/JobPortal.Application/Features/FresherAcquisition/FresherBulkImportService.cs
+index 19e55a7..83e13bf 100644
+--- a/JobPortal.Application/Features/FresherAcquisition/FresherBulkImportService.cs
++++ b/JobPortal.Application/Features/FresherAcquisition/FresherBulkImportService.cs
+@@ -25,6 +25,7 @@ public sealed partial class FresherBulkImportService(
+     public async Task<FresherBulkImportResponse> ImportAsync(FresherBulkImportRequest request, CancellationToken cancellationToken = default)
+     {
+         var diagnostic = new ImportDiagnostic();
++        var elapsed = System.Diagnostics.Stopwatch.StartNew();
+         using var scope = logger.BeginScope(new Dictionary<string, object?>
+         {
+             ["CorrelationId"] = diagnostic.CorrelationId,
+@@ -48,6 +49,13 @@ public sealed partial class FresherBulkImportService(
+                 (provider as System.Data.Common.DbException)?.SqlState);
+             throw;
+         }
++        finally { PhaseDuration(logger, request.ImportId, "BulkImportTotal", elapsed.ElapsedMilliseconds); }
++    }
++
++    private sealed class PhaseTiming(ILogger logger, string importId, string phase) : IDisposable
++    {
++        private readonly System.Diagnostics.Stopwatch elapsed = System.Diagnostics.Stopwatch.StartNew();
++        public void Dispose() => PhaseDuration(logger, importId, phase, elapsed.ElapsedMilliseconds);
+     }
+ 
+     private sealed class ImportDiagnostic
+@@ -70,8 +78,10 @@ public sealed partial class FresherBulkImportService(
+                 return new(request.ImportId, request.Jobs.Count, 0, 0, 0, 0, 0, 0, 0, 0, request.Jobs.Count,
+                     Enumerable.Range(0, request.Jobs.Count).Select(i => new FresherImportItemOutcome(i, "Failed", "ACQUISITION_SOURCE_DISABLED")).ToArray());
+         }
+-        var website = (source?.ProviderKey ?? request.SourceType.Trim()).Equals("website-crawler", StringComparison.OrdinalIgnoreCase);
+-        var requirePublication = website && request.Jobs.Any(candidate => MetadataBoolean(candidate, "autoPublishRequired"));
++        var provider = (source?.ProviderKey ?? request.SourceType.Trim()).ToLowerInvariant();
++        var talentd = provider == "talentd";
++        var website = provider is "website-crawler" or "talentd";
++        var requirePublication = talentd || website && request.Jobs.Any(candidate => MetadataBoolean(candidate, "autoPublishRequired"));
+         if (requirePublication && (source is null || !source.AutoPublishEnabled || autoPublish is null))
+         {
+             var reason = source is not null && !source.AutoPublishEnabled ? "ACQUISITION_AUTOPUBLISH_DISABLED" : "ACQUISITION_PUBLICATION_UNAVAILABLE";
+@@ -101,6 +111,16 @@ public sealed partial class FresherBulkImportService(
+             }
+             if (start.IsReplay) priorReceipts = await acquisitionStore.GetReceiptsAsync(run.Id, cancellationToken);
+         }
++        var categoryCache = new Dictionary<string, JobPortal.Domain.Entities.Category?>(StringComparer.OrdinalIgnoreCase);
++        async Task<JobPortal.Domain.Entities.Category?> FindCategory(string name)
++        {
++            if (!categoryCache.TryGetValue(name, out var category))
++            {
++                category = categories is null ? null : await categories.FindByNameOrSlugAsync(name, SlugGenerator.Generate(name), cancellationToken);
++                categoryCache[name] = category;
++            }
++            return category;
++        }
+         var outcomes = new List<FresherImportItemOutcome>(request.Jobs.Count);
+         var geoRejected = 0; var experienceRejected = 0; var invalidData = 0; var invalidUrl = 0;
+         var created = 0; var updated = 0; var existing = 0; var failed = 0; var accepted = 0; var published = 0;
+@@ -127,12 +147,13 @@ public sealed partial class FresherBulkImportService(
+             var chunkEnd = Math.Min(chunkStart + chunkSize, request.Jobs.Count);
+             void RecordReceipt(int index, FresherImportCandidate candidate)
+             {
+-                chunkReceipts.Add(new(index, candidate, identityKeys[index], SafeEligibility(candidate), outcomes[^1], now));
++                chunkReceipts.Add(new(index, candidate, identityKeys[index], talentd ? "ContentNeutral" : SafeEligibility(candidate), outcomes[^1], now));
+             }
+             for (var index = chunkStart; index < chunkEnd; index++)
+             {
+             cancellationToken.ThrowIfCancellationRequested();
+             var candidate = request.Jobs[index];
++            using var itemTiming = new PhaseTiming(logger, request.ImportId, "BulkImportItem");
+             diagnostic.Stage = "CandidateValidation";
+             diagnostic.ExternalId = candidate?.ExternalJobId;
+             var identityKey = identityKeys[index];
+@@ -156,7 +177,12 @@ public sealed partial class FresherBulkImportService(
+                 chunkReceipts.Add(new(index, null, identityKey, "Unknown", outcomes[^1], now));
+                 continue;
+             }
+-            var dataError = ValidateCandidate(candidate, website);
++            var dataError = ValidateCandidate(candidate, website, talentd);
++            if (dataError is null && talentd && (string.IsNullOrWhiteSpace(candidate.ExternalJobId) || !FresherAcquisitionEligibilityPolicy.IsSafePublicUrl(candidate.DiscoveredUrl)))
++                dataError = "TALENTD_IDENTITY_REQUIRED";
++            if (dataError is null && talentd && new[] { candidate.ApplyUrl, candidate.CanonicalJobUrl }
++                .Any(url => url is not null && !FresherAcquisitionEligibilityPolicy.IsSafePublicUrl(url)))
++                dataError = "TALENTD_UNSAFE_URL";
+             if (dataError is null && request.SourceType.Trim().Equals("website-crawler", StringComparison.OrdinalIgnoreCase))
+                 dataError = ValidateWebsiteCandidate(candidate, now);
+             if (dataError is not null)
+@@ -214,7 +240,7 @@ public sealed partial class FresherBulkImportService(
+             if (!categoryId.HasValue && !string.IsNullOrWhiteSpace(candidate.Category))
+             {
+                 var categoryName = candidate.Category.Trim();
+-                var matchedCategory = categories is null ? null : await categories.FindByNameOrSlugAsync(categoryName, SlugGenerator.Generate(categoryName), cancellationToken);
++                var matchedCategory = await FindCategory(categoryName);
+                 if (matchedCategory is null && !website)
+                 {
+                     invalidData++;
+@@ -229,7 +255,7 @@ public sealed partial class FresherBulkImportService(
+             {
+                 var categoryName = WebsiteCategory(candidate.Title);
+                 if (categoryName is not null)
+-                    categoryId = (await categories.FindByNameOrSlugAsync(categoryName, SlugGenerator.Generate(categoryName), cancellationToken))?.Id;
++                    categoryId = (await FindCategory(categoryName))?.Id;
+             }
+             try
+             {
+@@ -237,6 +263,7 @@ public sealed partial class FresherBulkImportService(
+                 var companyId = candidate.CompanyId;
+                 if (acquisitionStore is not null)
+                 {
++                    using var companyTiming = new PhaseTiming(logger, request.ImportId, "CompanyResolution");
+                     var company = website ? await acquisitionStore.ResolveWebsiteCompanyAsync(candidate, cancellationToken)
+                         : await acquisitionStore.ResolveCompanyAsync(candidate, cancellationToken);
+                     if (company.CompanyId is null)
+@@ -256,8 +283,12 @@ public sealed partial class FresherBulkImportService(
+                         continue;
+                     }
+                     companyId = company.CompanyId;
++                    if (talentd && (candidate.CompanyLogoUrl ?? TalentdFields.Text(candidate, "logo")) is { } logo)
++                        await acquisitionStore.PopulateMissingLogoAsync(companyId.Value, logo, cancellationToken);
+                 }
+-                var countryCodes = !website && decision.Geography == FresherGeographyDecision.GlobalRemoteEligible
++                var countryCodes = website && candidate.Country?.Trim() is { Length: 2 } suppliedCountry && suppliedCountry.All(char.IsAsciiLetter)
++                    ? new[] { suppliedCountry.ToUpperInvariant() }
++                    : !website && decision.Geography == FresherGeographyDecision.GlobalRemoteEligible
+                     ? new[] { "IN" }
+                     : string.Equals(candidate.Country, "India", StringComparison.OrdinalIgnoreCase) ? new[] { "IN" } : Array.Empty<string>();
+                 var metadataValues = new Dictionary<string, object?>
+@@ -280,6 +311,8 @@ public sealed partial class FresherBulkImportService(
+                         destinationVerified = candidate.SourceMetadata is { ValueKind: JsonValueKind.Object } md && md.TryGetProperty("destinationVerified", out var dv) && dv.ValueKind == JsonValueKind.True,
+                         extracted = candidate.SourceMetadata
+                     };
++                if (talentd)
++                    metadataValues["discovery"] = new { provider = "talentd", extracted = candidate.SourceMetadata };
+                 var metadata = JsonSerializer.Serialize(metadataValues);
+                 var raw = new RawExternalJob
+                 {
+@@ -287,11 +320,12 @@ public sealed partial class FresherBulkImportService(
+                     CompanyName = candidate.CompanyName ?? string.Empty,
+                     CompanyId = companyId,
+                     CompanyWebsiteUrl = candidate.CompanyWebsiteUrl,
+-                    Location = ComposeLocation(candidate, request.SourceType.Trim().Equals("website-crawler", StringComparison.OrdinalIgnoreCase)),
++                    Location = ComposeLocation(candidate, website),
+                     CountryCodes = countryCodes,
+                     RemoteEligibilityText = candidate.RemoteEligibility ??
+-                        (decision.Geography == FresherGeographyDecision.GlobalRemoteEligible ? "Remote Worldwide; India eligible" : null),
++                        (!talentd && decision.Geography == FresherGeographyDecision.GlobalRemoteEligible ? "Remote Worldwide; India eligible" : null),
+                     Description = candidate.Description,
++                    DescriptionIsHtml = talentd,
+                     ApplicationUrl = selectedUrl,
+                     // Keep employer ATS identity in its own field; acquisition IDs have a separate Job column.
+                     ExternalId = source is null ? candidate.ExternalJobId : null,
+@@ -310,13 +344,21 @@ public sealed partial class FresherBulkImportService(
+                     ExperienceLevel = website ? ExperienceLevel.Unknown : ExperienceLevel.Entry,
+                     MinimumExperienceYears = website ? candidate.MinimumExperienceYears : candidate.MinimumExperienceYears ?? 0,
+                     MaximumExperienceYears = candidate.MaximumExperienceYears,
+-                    EducationRequirement = website ? null : candidate.ExperienceClassification,
++                    EducationRequirement = talentd ? TalentdFields.Education(candidate) : website ? null : candidate.ExperienceClassification,
+                     ExternalCategory = candidate.Category,
+                     CategoryId = categoryId,
+-                    Skills = candidate.Skills,
++                    Skills = candidate.Skills.Select(x => x.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
++                    Responsibilities = talentd ? TalentdFields.Text(candidate, "responsibilities") : null,
++                    Requirements = talentd ? TalentdFields.Text(candidate, "qualifications") : null,
++                    Benefits = talentd ? TalentdFields.Text(candidate, "benefits") : null,
++                    SalaryMin = talentd ? TalentdFields.Salary(candidate, "minValue") : null,
++                    SalaryMax = talentd ? TalentdFields.Salary(candidate, "maxValue") : null,
++                    CurrencyCode = talentd ? TalentdFields.Currency(candidate) : null,
++                    SalaryPeriod = talentd ? TalentdFields.Period(candidate) : null,
+                     SourceMetadataJson = metadata
+                 };
+                 diagnostic.Stage = "JobIngestion";
++                using var persistenceTiming = new PhaseTiming(logger, request.ImportId, "Ingestion");
+                 var result = run is not null
+                     ? await ingestion.IngestWithoutSaveAsync(raw, cancellationToken)
+                     : await ingestion.IngestAsync(raw, cancellationToken);
+@@ -337,7 +379,7 @@ public sealed partial class FresherBulkImportService(
+                     default:
+                         failed++; outcomes.Add(new(index, "Failed", result.ReasonCode.ToString())); break;
+                 }
+-                chunkReceipts.Add(new(index, candidate, identityKey, SafeEligibility(candidate), outcomes[^1], now,
++                chunkReceipts.Add(new(index, candidate, identityKey, talentd ? "ContentNeutral" : SafeEligibility(candidate), outcomes[^1], now,
+                     publicationRequested));
+             }
+             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+@@ -350,7 +392,10 @@ public sealed partial class FresherBulkImportService(
+             diagnostic.Stage = "ChunkCommit";
+             diagnostic.ExternalId = null;
+             if (chunk is not null && run is not null)
++            {
++                using var commitTiming = new PhaseTiming(logger, request.ImportId, "PersistenceCommit");
+                 await chunk.CommitAsync(run.Id, chunkReceipts, cancellationToken);
++            }
+             committed = chunk is not null;
+ 
+             // Network/publication side effects happen only after the job+receipt commit.
+@@ -358,6 +403,7 @@ public sealed partial class FresherBulkImportService(
+             {
+                 try
+                 {
++                    using var publicationTiming = new PhaseTiming(logger, request.ImportId, "Publication");
+                     diagnostic.Stage = "Publication";
+                     JobAutoPublishResult result;
+                     for (var attempt = 0; ; attempt++)
+@@ -374,7 +420,7 @@ public sealed partial class FresherBulkImportService(
+                         }
+                     }
+                     var status = result.Outcome is JobAutoPublishOutcome.Published or JobAutoPublishOutcome.AlreadyPublished ? "Published" : "NotPublished";
+-                    if (requirePublication && result.Outcome == JobAutoPublishOutcome.Disabled)
++                    if (requirePublication && (result.Outcome == JobAutoPublishOutcome.Disabled || talentd && status != "Published"))
+                     {
+                         status = "Pending";
+                         pendingPublication = true;
+@@ -504,12 +550,12 @@ public sealed partial class FresherBulkImportService(
+         return null;
+     }
+ 
+-    private static string? ValidateCandidate(FresherImportCandidate candidate, bool website = false)
++    private static string? ValidateCandidate(FresherImportCandidate candidate, bool website = false, bool talentd = false)
+     {
+         static bool TooLong(string? value, int max) => value?.Length > max;
+         if (string.IsNullOrWhiteSpace(candidate.Title) || TooLong(candidate.Title, 250) ||
+             (!website && string.IsNullOrWhiteSpace(candidate.CompanyName)) || TooLong(candidate.CompanyName, 200) ||
+-            (!website && string.IsNullOrWhiteSpace(candidate.Description)) || TooLong(candidate.Description, 16_000)) return "REQUIRED_OR_OVERSIZED_FIELD";
++            (!website && string.IsNullOrWhiteSpace(candidate.Description)) || (!talentd && TooLong(candidate.Description, 16_000))) return "REQUIRED_OR_OVERSIZED_FIELD";
+         if (TooLong(candidate.ExternalJobId, 255) || TooLong(candidate.CompanyWebsiteUrl, 2048) ||
+             TooLong(candidate.CompanyLogoUrl, 2048) || TooLong(candidate.LocationText, 250) ||
+             TooLong(candidate.City, 100) || TooLong(candidate.State, 100) || TooLong(candidate.Country, 100) ||
+@@ -559,6 +605,10 @@ public sealed partial class FresherBulkImportService(
+         "on-site" or "onsite" => WorkplaceType.OnSite, _ => null
+     };
+ 
++    [LoggerMessage(EventId = 8581, Level = LogLevel.Information,
++        Message = "BulkImportPhaseDuration ImportId={ImportId} Phase={Phase} DurationMs={DurationMs}")]
++    private static partial void PhaseDuration(ILogger logger, string importId, string phase, long durationMs);
++
+     [LoggerMessage(EventId = 8580, Level = LogLevel.Warning,
+         Message = "Website company resolution deferred ImportId={ImportId} Index={Index} ReasonCode={ReasonCode}.")]
+     private static partial void CompanyResolutionDeferred(ILogger logger, string importId, int index, string reasonCode);
+diff --git a/JobPortal.Application/Features/FresherAcquisition/IFresherAcquisitionStore.cs b/JobPortal.Application/Features/FresherAcquisition/IFresherAcquisitionStore.cs
+index 6630985..0d40c11 100644
+--- a/JobPortal.Application/Features/FresherAcquisition/IFresherAcquisitionStore.cs
++++ b/JobPortal.Application/Features/FresherAcquisition/IFresherAcquisitionStore.cs
+@@ -28,6 +28,8 @@ public interface IFresherAcquisitionChunk : IAsyncDisposable
+ 
+ public interface IFresherAcquisitionStore
+ {
++    Task PopulateMissingLogoAsync(Guid companyId, string url, CancellationToken cancellationToken) => Task.CompletedTask;
++    Task<FresherImportStatus?> GetImportStatusAsync(string providerKey, string importId, CancellationToken cancellationToken) => Task.FromResult<FresherImportStatus?>(null);
+     Task<FresherCompanyResolution> ResolveCompanyAsync(FresherImportCandidate candidate, CancellationToken cancellationToken);
+     Task<FresherCompanyResolution> ResolveWebsiteCompanyAsync(FresherImportCandidate candidate, CancellationToken cancellationToken) => ResolveCompanyAsync(candidate, cancellationToken);
+     Task<T> ExecuteImportAsync<T>(Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken) => operation(cancellationToken);
+diff --git a/JobPortal.Application/Features/Jobs/JobService.cs b/JobPortal.Application/Features/Jobs/JobService.cs
+index c76f9cb..9d6eb3e 100644
+--- a/JobPortal.Application/Features/Jobs/JobService.cs
++++ b/JobPortal.Application/Features/Jobs/JobService.cs
+@@ -345,7 +345,7 @@ public sealed class JobService(
+ 
+         var website = job.AcquisitionSourceId is { } acquisitionId && acquisitionSources is not null &&
+             await acquisitionSources.GetSourceByIdAsync(acquisitionId, cancellationToken) is
+-                { ProviderKey: "website-crawler", IsEnabled: true, IsDeleted: false, AutoPublishEnabled: true };
++                { ProviderKey: "website-crawler" or "talentd", IsEnabled: true, IsDeleted: false, AutoPublishEnabled: true };
+         if (website)
+         {
+             if (!job.SourceOwnsPublication || job.IsHidden || job.IsDeleted ||
+diff --git a/JobPortal.Application/Services/JobAutoPublishService.cs b/JobPortal.Application/Services/JobAutoPublishService.cs
+index 2e5cac2..278e631 100644
+--- a/JobPortal.Application/Services/JobAutoPublishService.cs
++++ b/JobPortal.Application/Services/JobAutoPublishService.cs
+@@ -88,11 +88,11 @@ public sealed partial class JobAutoPublishService(
+                 return new() { Outcome = JobAutoPublishOutcome.Disabled };
+             if (!acquisition.AutoPublishEnabled)
+                 return new() { Outcome = JobAutoPublishOutcome.Disabled };
+-            if (acquisition.ProviderKey == "website-crawler" && job.Status == JobStatus.Published && !job.IsDeleted && !job.IsHidden && job.SourceOwnsPublication)
++            if ((acquisition.ProviderKey is "website-crawler" or "talentd") && job.Status == JobStatus.Published && !job.IsDeleted && !job.IsHidden && job.SourceOwnsPublication)
+                 return new() { Outcome = JobAutoPublishOutcome.AlreadyPublished };
+             if (job.IsDeleted || job.IsHidden || job.Status != JobStatus.Draft || !job.SourceOwnsPublication)
+                 return new() { Outcome = JobAutoPublishOutcome.NeedsReview, Reasons = [JobQualityReasonCode.PublicationOwnershipUnverified] };
+-            if (acquisition.ProviderKey == "website-crawler")
++            if ((acquisition.ProviderKey is "website-crawler" or "talentd"))
+             {
+                 if (job.IsDeleted || job.IsHidden || job.Status is not (JobStatus.Draft or JobStatus.Published))
+                     return new() { Outcome = JobAutoPublishOutcome.NeedsReview, Reasons = [JobQualityReasonCode.PublicationOwnershipUnverified] };
+diff --git a/JobPortal.Application/Services/JobIngestionService.cs b/JobPortal.Application/Services/JobIngestionService.cs
+index 74f7334..5a82e53 100644
+--- a/JobPortal.Application/Services/JobIngestionService.cs
++++ b/JobPortal.Application/Services/JobIngestionService.cs
+@@ -252,9 +252,9 @@ public sealed class JobIngestionService(
+         // This is the last boundary before either creation or mutation of Jobs.
+         // Publication status cannot substitute for positive hiring-location evidence.
+         rawJob = new ExternalJobNormalizer().Normalize(rawJob);
+-        var website = rawJob.AcquisitionProviderKey == "website-crawler" && rawJob.AcquisitionSourceId is { } acquisitionId &&
++        var website = (rawJob.AcquisitionProviderKey is "website-crawler" or "talentd") && rawJob.AcquisitionSourceId is { } acquisitionId &&
+             acquisitionSources is not null && await acquisitionSources.GetSourceByIdAsync(acquisitionId, cancellationToken) is
+-                { ProviderKey: "website-crawler", IsEnabled: true, IsDeleted: false };
++                { ProviderKey: "website-crawler" or "talentd", IsEnabled: true, IsDeleted: false };
+         var eligibility = IndiaJobEligibilityPolicy.Evaluate(rawJob);
+         if (!website && eligibility.Decision != IndiaJobEligibilityDecision.Accepted)
+             return Invalid("Validation:INDIA_ELIGIBILITY_" +
+@@ -317,6 +317,14 @@ public sealed class JobIngestionService(
+             await jobs.FindByAcquisitionIdentityAsync(rawJob.AcquisitionSourceId.Value, acquisitionExternalId, cancellationToken) is { } acquired)
+         {
+             var changed = ApplySourceFields(acquired, rawJob, title, company, location, applicationUrl);
++            if (rawJob.AcquisitionProviderKey == "talentd")
++            {
++                var skills = await ResolveSkillsAsync(rawJob, cancellationToken);
++                // Keep missing optional skill evidence from erasing reviewed associations.
++                foreach (var skill in skills.Values)
++                    if (!acquired.JobSkills.Any(x => x.SkillId == skill.Id))
++                    { acquired.JobSkills.Add(new JobSkill { JobId = acquired.Id, SkillId = skill.Id, Skill = skill, IsRequired = true }); changed = true; }
++            }
+             acquired.DiscoveredUrl = rawJob.DiscoveredUrl;
+             acquired.CanonicalJobUrl = rawJob.CanonicalJobUrl;
+             acquired.LastVerifiedAtUtc = rawJob.LastVerifiedAtUtc;
+@@ -496,28 +504,7 @@ public sealed class JobIngestionService(
+ 
+         var id = Guid.NewGuid();
+ 
+-        var skillNames = rawJob.Skills.Where(x => !string.IsNullOrWhiteSpace(x))
+-            .Select(x => string.Join(' ', x.Split(' ', StringSplitOptions.RemoveEmptyEntries)).Trim())
+-            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+-        var skillsByName = new Dictionary<string, Skill>(StringComparer.OrdinalIgnoreCase);
+-        if (skillNames.Length > 0)
+-        {
+-            var normalizedSkills = skillNames.Select(x => x.ToUpperInvariant()).ToArray();
+-            var existingSkills = await jobs.GetSkillsByNormalizedNamesAsync(normalizedSkills, cancellationToken);
+-            skillsByName = existingSkills.ToDictionary(x => x.NormalizedName, StringComparer.OrdinalIgnoreCase);
+-            var newSkills = new List<Skill>();
+-            foreach (var skillName in skillNames)
+-            {
+-                var normalized = skillName.ToUpperInvariant();
+-                if (!skillsByName.TryGetValue(normalized, out var skill))
+-                {
+-                    skill = new Skill { Name = skillName, NormalizedName = normalized };
+-                    skillsByName.Add(normalized, skill);
+-                    newSkills.Add(skill);
+-                }
+-            }
+-            await jobs.AddSkillsAsync(newSkills, cancellationToken);
+-        }
++        var skillsByName = await ResolveSkillsAsync(rawJob, cancellationToken);
+ 
+         var job = new Job
+         {
+@@ -559,7 +546,7 @@ public sealed class JobIngestionService(
+             SourcePostedAtUtc = rawJob.SourcePostedAtUtc is { Kind: DateTimeKind.Utc } posted ? posted : null
+         };
+ 
+-        foreach (var skillName in skillNames)
++        foreach (var skillName in skillsByName.Keys)
+         {
+             var matchedSkill = skillsByName[skillName.ToUpperInvariant()];
+             job.JobSkills.Add(new JobSkill { JobId = job.Id, SkillId = matchedSkill.Id, Skill = matchedSkill, IsRequired = true });
+@@ -584,6 +571,33 @@ public sealed class JobIngestionService(
+         };
+     }
+ 
++    private async Task<Dictionary<string, Skill>> ResolveSkillsAsync(RawExternalJob raw, CancellationToken cancellationToken)
++    {
++        var skillNames = raw.Skills.Where(x => !string.IsNullOrWhiteSpace(x))
++            .Select(x => string.Join(' ', x.Split(' ', StringSplitOptions.RemoveEmptyEntries)).Trim())
++            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
++        var skillsByName = new Dictionary<string, Skill>(StringComparer.OrdinalIgnoreCase);
++        if (skillNames.Length > 0)
++        {
++            var normalizedSkills = skillNames.Select(x => x.ToUpperInvariant()).ToArray();
++            var existingSkills = await jobs.GetSkillsByNormalizedNamesAsync(normalizedSkills, cancellationToken);
++            skillsByName = existingSkills.ToDictionary(x => x.NormalizedName, StringComparer.OrdinalIgnoreCase);
++            var newSkills = new List<Skill>();
++            foreach (var skillName in skillNames)
++            {
++                var normalized = skillName.ToUpperInvariant();
++                if (!skillsByName.TryGetValue(normalized, out var skill))
++                {
++                    skill = new Skill { Name = skillName, NormalizedName = normalized };
++                    skillsByName.Add(normalized, skill);
++                    newSkills.Add(skill);
++                }
++            }
++            await jobs.AddSkillsAsync(newSkills, cancellationToken);
++        }
++        return skillsByName;
++    }
++
+     private bool ApplySourceFields(Job job, RawExternalJob raw, string title, Company company,
+         string? location, string? applicationUrl)
+     {
+@@ -668,7 +682,7 @@ public sealed class JobIngestionService(
+ 
+     private static DeduplicationResult RespectSourceIdentity(RawExternalJob raw, DeduplicationResult match)
+     {
+-        if (raw.AcquisitionProviderKey == "website-crawler" && raw.AcquisitionSourceId is not null &&
++        if ((raw.AcquisitionProviderKey is "website-crawler" or "talentd") && raw.AcquisitionSourceId is not null &&
+             !string.IsNullOrWhiteSpace(raw.AcquisitionExternalId) && match.MatchedJob is { } acquired &&
+             (acquired.AcquisitionSourceId != raw.AcquisitionSourceId || acquired.AcquisitionExternalId != raw.AcquisitionExternalId))
+             return DeduplicationResult.NoMatch();
+diff --git a/JobPortal.Persistence/Repositories/FresherAcquisitionStore.Companies.cs b/JobPortal.Persistence/Repositories/FresherAcquisitionStore.Companies.cs
+index 4d479ac..01c42a0 100644
+--- a/JobPortal.Persistence/Repositories/FresherAcquisitionStore.Companies.cs
++++ b/JobPortal.Persistence/Repositories/FresherAcquisitionStore.Companies.cs
+@@ -10,6 +10,14 @@ namespace JobPortal.Persistence.Repositories;
+ 
+ public sealed partial class FresherAcquisitionStore
+ {
++    public async Task PopulateMissingLogoAsync(Guid companyId, string url, CancellationToken cancellationToken)
++    {
++        if (url.Length > 2048 || !FresherAcquisitionEligibilityPolicy.IsSafePublicUrl(url)) return;
++        // Conditional update protects concurrent administrator logo edits as well.
++        await db.Companies.Where(x => x.Id == companyId && (x.LogoUrl == null || x.LogoUrl == ""))
++            .ExecuteUpdateAsync(update => update.SetProperty(x => x.LogoUrl, url), cancellationToken);
++    }
++
+     public Task<FresherCompanyResolution> ResolveCompanyAsync(FresherImportCandidate candidate, CancellationToken cancellationToken) => ResolveCompanyCoreAsync(candidate, false, cancellationToken);
+     public Task<FresherCompanyResolution> ResolveWebsiteCompanyAsync(FresherImportCandidate candidate, CancellationToken cancellationToken) => ResolveCompanyCoreAsync(candidate, true, cancellationToken);
+     private async Task<FresherCompanyResolution> ResolveCompanyCoreAsync(FresherImportCandidate candidate, bool websitePolicy, CancellationToken cancellationToken)
+diff --git a/JobPortal.Persistence/Repositories/FresherAcquisitionStore.cs b/JobPortal.Persistence/Repositories/FresherAcquisitionStore.cs
+index a222b66..76c1869 100644
+--- a/JobPortal.Persistence/Repositories/FresherAcquisitionStore.cs
++++ b/JobPortal.Persistence/Repositories/FresherAcquisitionStore.cs
+@@ -56,6 +56,18 @@ public sealed partial class FresherAcquisitionStore(JobPortalDbContext db) : IFr
+             finally { await db.Database.CloseConnectionAsync(); }
+         }
+     }
++    public async Task<FresherImportStatus?> GetImportStatusAsync(string providerKey, string importId, CancellationToken cancellationToken)
++    {
++        var run = await db.AcquisitionImportRuns.AsNoTracking().SingleOrDefaultAsync(x =>
++            x.AcquisitionSource.ProviderKey == providerKey && x.BatchId == importId && !x.IsDeleted, cancellationToken);
++        if (run is null) return null;
++        var receipt = run.Status == "Completed" ? await GetReplayResponseAsync(run.Id, importId, cancellationToken) : null;
++        return new(run.BatchId, run.BatchId, run.Id,
++            run.Status == "Completed" ? "COMPLETED" : run.Status == "Failed" ? "FAILED" : "IN_PROGRESS",
++            run.ReceivedCount, run.EligibleCount, run.RejectedCount, run.CreatedCount, run.UpdatedCount,
++            run.ExistingCount, run.PublishedCount, run.FailedCount, run.FailureSummary, receipt);
++    }
++
+     public Task<AcquisitionSource?> GetEnabledSourceAsync(string providerKey, CancellationToken cancellationToken) =>
+         db.AcquisitionSources.AsNoTracking().SingleOrDefaultAsync(x => x.ProviderKey == providerKey && x.IsEnabled && !x.IsDeleted, cancellationToken);
+ 
+diff --git a/JobPortal.Persistence/Repositories/JobRepository.cs b/JobPortal.Persistence/Repositories/JobRepository.cs
+index 702e24a..8ed7d9a 100644
+--- a/JobPortal.Persistence/Repositories/JobRepository.cs
++++ b/JobPortal.Persistence/Repositories/JobRepository.cs
+@@ -69,7 +69,7 @@ public sealed class JobRepository(JobPortalDbContext context) : IJobRepository
+         context.Jobs
+             .Where(x => x.Status == JobStatus.Published &&
+                 x.ExpiresAtUtc.HasValue && x.ExpiresAtUtc <= utcNow &&
+-                (x.AcquisitionSource == null || x.AcquisitionSource.ProviderKey != "website-crawler"))
++                (x.AcquisitionSource == null || x.AcquisitionSource.ProviderKey != "website-crawler" && x.AcquisitionSource.ProviderKey != "talentd"))
+             .ExecuteUpdateAsync(setters => setters
+                 .SetProperty(x => x.Status, JobStatus.Expired)
+                 .SetProperty(x => x.IsFeatured, false)
+@@ -182,7 +182,7 @@ public sealed class JobRepository(JobPortalDbContext context) : IJobRepository
+                 cancellationToken);
+ 
+     public Task<Job?> FindByAcquisitionIdentityAsync(Guid acquisitionSourceId, string externalJobId,
+-        CancellationToken cancellationToken = default) => context.Jobs
++        CancellationToken cancellationToken = default) => context.Jobs.Include(x => x.JobSkills)
+             .FirstOrDefaultAsync(x => x.AcquisitionSourceId == acquisitionSourceId && x.AcquisitionExternalId == externalJobId && !x.IsDeleted,
+                 cancellationToken);
+ 
+diff --git a/JobPortal.Persistence/Repositories/PublicJobRepository.cs b/JobPortal.Persistence/Repositories/PublicJobRepository.cs
+index 62eb0e7..b0dbd1e 100644
+--- a/JobPortal.Persistence/Repositories/PublicJobRepository.cs
++++ b/JobPortal.Persistence/Repositories/PublicJobRepository.cs
+@@ -262,7 +262,7 @@ public sealed partial class PublicJobRepository(
+                     !job.IsHidden &&
+                     !job.IsDeleted &&
+                     job.PublishedAtUtc.HasValue &&
+-                    (job.AcquisitionSource != null && job.AcquisitionSource.ProviderKey == "website-crawler" || !job.ExpiresAtUtc.HasValue || job.ExpiresAtUtc > utcNow))
++                    (job.AcquisitionSource != null && (job.AcquisitionSource.ProviderKey == "website-crawler" || job.AcquisitionSource.ProviderKey == "talentd") || !job.ExpiresAtUtc.HasValue || job.ExpiresAtUtc > utcNow))
+             });
+ 
+         return companies
+@@ -314,7 +314,7 @@ public sealed partial class PublicJobRepository(
+             !job.IsHidden &&
+             !job.IsDeleted &&
+             job.PublishedAtUtc.HasValue &&
+-            (job.AcquisitionSource != null && job.AcquisitionSource.ProviderKey == "website-crawler" || !job.ExpiresAtUtc.HasValue || job.ExpiresAtUtc > utcNow));
++            (job.AcquisitionSource != null && (job.AcquisitionSource.ProviderKey == "website-crawler" || job.AcquisitionSource.ProviderKey == "talentd") || !job.ExpiresAtUtc.HasValue || job.ExpiresAtUtc > utcNow));
+     }
+ 
+ #pragma warning disable CA1304, CA1311, CA1862 // Parameterless casing is translated by EF; comparison overloads are not.
