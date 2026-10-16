@@ -1,6 +1,10 @@
+using System.Collections.Concurrent;
 using System.Text.Json.Nodes;
 using JobPortal.Application.Abstractions.Jobs;
 using JobPortal.Application.Features.FresherAcquisition;
+using JobPortal.Domain.Common;
+using JobPortal.Domain.Entities;
+using JobPortal.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 
@@ -177,6 +181,189 @@ public sealed partial class TalentdDatabaseValidationTests
         Assert.True(calls >= 2);
     }
 
+    [TalentdPostgresFact]
+    public async Task FailedSameImportIdRecoversOnlyLegacyAmbiguousItemsAndReusesSevenSuccesses()
+    {
+        var fixture = Fixture();
+        var suffix = Guid.NewGuid().ToString("N");
+        var domain = "shared-" + suffix + ".example.test";
+        var targetName = "Recovery target " + suffix;
+        var jobs = Enumerable.Range(0, 10).Select(index =>
+        {
+            var candidate = Change(fixture.Jobs[0], "externalJobId", JsonValue.Create(fixture.Jobs[0].ExternalJobId + ":recovery:" + index));
+            if (index < 7)
+            {
+                candidate = Change(candidate, "companyName", JsonValue.Create("Independent employer " + suffix + " " + index));
+                candidate = Change(candidate, "companyWebsiteUrl", null);
+            }
+            else
+            {
+                candidate = Change(candidate, "companyName", JsonValue.Create(targetName));
+                candidate = Change(candidate, "companyWebsiteUrl", JsonValue.Create("https://" + domain));
+                candidate = Change(candidate, "companyWebsiteVerified", JsonValue.Create(true));
+            }
+            return candidate;
+        }).ToArray();
+        var request = Request(fixture.ImportId, jobs);
+        var publisherCalls = new ConcurrentDictionary<Guid, int>();
+        Guid runId;
+        Guid[] successfulJobIds;
+
+        await using (var db = Database())
+        {
+            await db.Database.MigrateAsync(); await SeedOwner(db);
+            var source = await db.AcquisitionSources.SingleAsync(x => x.ProviderKey == "talentd");
+            var ownerId = await db.Users.Where(x => x.RoleId == SystemRoleIds.Administrator && x.Status == UserStatus.Active)
+                .Select(x => x.Id).FirstAsync();
+            db.Companies.AddRange(
+                new Company { Name = "Existing brand A " + suffix, Slug = "existing-brand-a-" + suffix, WebsiteUrl = "https://" + domain, OwnerUserId = ownerId },
+                new Company { Name = "Existing brand B " + suffix, Slug = "existing-brand-b-" + suffix, WebsiteUrl = "https://www." + domain, OwnerUserId = ownerId });
+            await db.SaveChangesAsync();
+
+            var (importer, queue) = Services(db, new TimingLogger(), inner => new CountingPublisher(inner, publisherCalls));
+            var accepted = await queue.StageAsync(request, default);
+            Assert.Equal("IN_PROGRESS", accepted.Status);
+            await db.AcquisitionImportRuns.Where(x => x.Id == accepted.RunId)
+                .ExecuteUpdateAsync(x => x.SetProperty(r => r.NextAttemptAtUtc, new DateTime(1, 1, 1, 0, 0, 0, DateTimeKind.Utc)));
+            Assert.True(await queue.ProcessNextAsync(importer, default));
+            var partial = (await queue.GetImportStatusAsync("talentd", request.ImportId, default))!;
+            Assert.True(partial.CreatedCount == 7,
+                $"Expected seven initial successes; status={partial.Status}, failure={partial.FailureSummary}, received={partial.ReceivedCount}, failed={partial.FailedCount}, attempts={partial.ProcessingAttempts}.");
+            Assert.Equal(7, partial.PublishedCount);
+            Assert.Equal(0, partial.FailedCount); // New ambiguous items have no immutable terminal receipt.
+            var durableSuccesses = await db.AcquisitionImportItems.AsNoTracking()
+                .Where(x => x.AcquisitionImportRunId == accepted.RunId).OrderBy(x => x.ItemIndex).ToArrayAsync();
+            Assert.Equal(7, durableSuccesses.Length);
+            successfulJobIds = durableSuccesses.Select(x => x.JobId!.Value).ToArray();
+            runId = accepted.RunId;
+
+            // Recreate the pre-fix production representation: the old version wrote
+            // three terminal COMPANY_DOMAIN_AMBIGUOUS receipts before failing the run.
+            await using (var chunk = await queue.BeginChunkAsync([], default))
+            {
+                var legacyReceipts = jobs.Skip(7).Select((candidate, offset) =>
+                {
+                    var index = offset + 7;
+                    return new FresherReceiptInput(index, candidate, FresherCandidateIdentity.Create(source.Id, candidate, true),
+                        "ContentNeutral", new(index, "Failed", "COMPANY_DOMAIN_AMBIGUOUS"), DateTime.UtcNow);
+                }).ToArray();
+                await chunk.CommitAsync(runId, legacyReceipts, default);
+            }
+            await queue.CompleteRunAsync(runId, new(request.ImportId, 10, 7, 0, 0, 0, 0, 7, 0, 0, 3, []), default);
+            Assert.Equal("FAILED", (await queue.GetImportStatusAsync("talentd", request.ImportId, default))!.Status);
+            Assert.Equal(7, publisherCalls.Values.Count(x => x == 1));
+        }
+
+        async Task<FresherImportStatus> RetryFromFreshContext()
+        {
+            await using var db = Database();
+            var (_, queue) = Services(db, new TimingLogger(), inner => new CountingPublisher(inner, publisherCalls));
+            return await queue.StageAsync(request, default);
+        }
+        var concurrentRetries = await Task.WhenAll(RetryFromFreshContext(), RetryFromFreshContext());
+        Assert.All(concurrentRetries, x => { Assert.Equal(runId, x.RunId); Assert.Equal("IN_PROGRESS", x.Status); });
+        await using (var db = Database())
+            await db.AcquisitionImportRuns.Where(x => x.Id == runId)
+                .ExecuteUpdateAsync(x => x.SetProperty(r => r.NextAttemptAtUtc, new DateTime(1, 1, 1, 0, 0, 0, DateTimeKind.Utc)));
+        await using (var db = Database())
+        {
+            var (importer, queue) = Services(db, new TimingLogger(), inner => new CountingPublisher(inner, publisherCalls));
+            Assert.True(await queue.ProcessNextAsync(importer, default));
+        }
+
+        await using (var db = Database())
+        {
+            var (_, queue) = Services(db, new TimingLogger());
+            var stillAmbiguous = (await queue.GetImportStatusAsync("talentd", request.ImportId, default))!;
+            Assert.Equal("IN_PROGRESS", stillAmbiguous.Status);
+            Assert.Equal(7, stillAmbiguous.CreatedCount);
+            Assert.Equal(7, stillAmbiguous.PublishedCount);
+            Assert.Equal(3, stillAmbiguous.FailedCount);
+            Assert.Equal(2, stillAmbiguous.ProcessingAttempts);
+            Assert.Equal(7, await db.Jobs.CountAsync(x => successfulJobIds.Contains(x.Id)));
+
+            var resolvedCompany = await db.Companies.Where(x => x.NormalizedWebsiteDomain == domain).OrderBy(x => x.Name).FirstAsync();
+            resolvedCompany.Name = targetName;
+            await db.SaveChangesAsync();
+            await db.AcquisitionImportRuns.Where(x => x.Id == runId)
+                .ExecuteUpdateAsync(x => x.SetProperty(r => r.NextAttemptAtUtc, new DateTime(1, 1, 1, 0, 0, 0, DateTimeKind.Utc)));
+            var (importer, retryQueue) = Services(db, new TimingLogger(), inner => new CountingPublisher(inner, publisherCalls));
+            Assert.True(await retryQueue.ProcessNextAsync(importer, default));
+        }
+
+        await using (var db = Database())
+        {
+            var (_, queue) = Services(db, new TimingLogger(), inner => new CountingPublisher(inner, publisherCalls));
+            var completed = (await queue.GetImportStatusAsync("talentd", request.ImportId, default))!;
+            Assert.Equal("COMPLETED", completed.Status);
+            Assert.Equal(runId, completed.RunId);
+            Assert.Equal(10, completed.ReceivedCount);
+            Assert.Equal(10, completed.CreatedCount);
+            Assert.Equal(10, completed.PublishedCount);
+            Assert.Equal(0, completed.FailedCount);
+            Assert.Equal(3, completed.ProcessingAttempts);
+            Assert.Equal(10, completed.Receipt!.Items.Count);
+            Assert.Equal(10, completed.Receipt.Items.Select(x => x.JobId).Distinct().Count());
+            var finalReceipts = await db.AcquisitionImportItems.AsNoTracking()
+                .Where(x => x.AcquisitionImportRunId == runId).OrderBy(x => x.ItemIndex).ToArrayAsync();
+            Assert.Equal(10, finalReceipts.Length);
+            Assert.Equal(successfulJobIds, finalReceipts.Take(7).Select(x => x.JobId!.Value).ToArray());
+            Assert.Equal(10, await db.Jobs.CountAsync(x => finalReceipts.Select(r => r.JobId).Contains(x.Id)));
+            Assert.All(finalReceipts, x => { Assert.Equal("Created", x.Outcome); Assert.Equal("Published", x.PublicationStatus); });
+            Assert.Equal(10, publisherCalls.Count);
+            Assert.All(publisherCalls.Values, calls => Assert.Equal(1, calls));
+
+            var stableReplay = await queue.StageAsync(request, default);
+            Assert.Equal("COMPLETED", stableReplay.Status);
+            Assert.Equal(runId, stableReplay.RunId);
+            Assert.All(publisherCalls.Values, calls => Assert.Equal(1, calls));
+            var changed = Change(jobs[0], "title", JsonValue.Create("Changed payload must conflict"));
+            var changedPayload = new[] { changed }.Concat(jobs.Skip(1)).ToArray();
+            await Assert.ThrowsAsync<ImportIdPayloadConflictException>(() => queue.StageAsync(Request(request.ImportId, changedPayload), default));
+        }
+    }
+
+    [TalentdPostgresFact]
+    public async Task RecoveryLeavesMixedTerminalFailureUntouched()
+    {
+        var request = Many(2);
+        await using var db = Database();
+        await db.Database.MigrateAsync(); await SeedOwner(db);
+        var (importer, queue) = Services(db, new TimingLogger());
+        var accepted = await queue.StageAsync(request, default);
+        var sourceId = (await db.AcquisitionImportRuns.SingleAsync(x => x.Id == accepted.RunId)).AcquisitionSourceId;
+        var failures = new[]
+        {
+            new FresherReceiptInput(0, request.Jobs[0], FresherCandidateIdentity.Create(sourceId, request.Jobs[0], true),
+                "ContentNeutral", new(0, "Failed", "COMPANY_DOMAIN_AMBIGUOUS"), DateTime.UtcNow),
+            new FresherReceiptInput(1, request.Jobs[1], FresherCandidateIdentity.Create(sourceId, request.Jobs[1], true),
+                "ContentNeutral", new(1, "Failed", "COMPANY_NOT_RESOLVED"), DateTime.UtcNow)
+        };
+        await using (var chunk = await queue.BeginChunkAsync([], default))
+            await chunk.CommitAsync(accepted.RunId, failures, default);
+        await queue.CompleteRunAsync(accepted.RunId,
+            new(request.ImportId, 2, 0, 0, 0, 0, 0, 0, 0, 0, 2, []), default);
+
+        var reopened = await queue.StageAsync(request, default);
+        Assert.Equal(accepted.RunId, reopened.RunId);
+        Assert.Equal("IN_PROGRESS", reopened.Status);
+        await db.AcquisitionImportRuns.Where(x => x.Id == accepted.RunId)
+            .ExecuteUpdateAsync(x => x.SetProperty(r => r.NextAttemptAtUtc, new DateTime(1, 1, 1, 0, 0, 0, DateTimeKind.Utc)));
+        Assert.True(await queue.ProcessNextAsync(importer, default));
+
+        var status = (await queue.GetImportStatusAsync("talentd", request.ImportId, default))!;
+        Assert.Equal("FAILED", status.Status);
+        Assert.Equal(1, status.CreatedCount);
+        Assert.Equal(1, status.FailedCount);
+        var receipts = await db.AcquisitionImportItems.AsNoTracking()
+            .Where(x => x.AcquisitionImportRunId == accepted.RunId).OrderBy(x => x.ItemIndex).ToArrayAsync();
+        Assert.Equal("Created", receipts[0].Outcome);
+        Assert.Equal("COMPANY_NOT_RESOLVED", receipts[1].ReasonCode);
+        Assert.Equal("Failed", receipts[1].Outcome);
+        Assert.Null(receipts[1].JobId);
+        Assert.Equal("FAILED", (await queue.StageAsync(request, default)).Status);
+    }
+
     private sealed class BrokenImporter : IFresherBulkImportService
     {
         public Task<FresherBulkImportResponse> ImportAsync(FresherBulkImportRequest request, CancellationToken cancellationToken = default) => throw new TimeoutException();
@@ -189,5 +376,14 @@ public sealed partial class TalentdDatabaseValidationTests
             attempt() == 1
                 ? Task.FromResult(new JobAutoPublishResult { Outcome = JobAutoPublishOutcome.NeedsReview })
                 : inner.TryPublishAsync(jobId, cancellationToken);
+    }
+
+    private sealed class CountingPublisher(IJobAutoPublishService inner, ConcurrentDictionary<Guid, int> calls) : IJobAutoPublishService
+    {
+        public Task<JobAutoPublishResult> TryPublishAsync(Guid jobId, CancellationToken cancellationToken = default)
+        {
+            calls.AddOrUpdate(jobId, 1, (_, count) => count + 1);
+            return inner.TryPublishAsync(jobId, cancellationToken);
+        }
     }
 }

@@ -51,6 +51,27 @@ public sealed partial class FresherAcquisitionStore : IDurableFresherImportProce
                     // Existing completed/failed states remain terminal. Hydrate only missing input.
                     if (run.Status is not ("Completed" or "Failed")) run.NextAttemptAtUtc = DateTime.UtcNow;
                 }
+                if (source.ProviderKey == "talentd" && run.Status == "Failed")
+                {
+                    var durableItems = await db.AcquisitionImportItems.AsNoTracking()
+                        .Where(x => x.AcquisitionImportRunId == run.Id && !x.IsDeleted).ToArrayAsync(ct);
+                    var hasRecoverableFailure = durableItems.Any(x => x.Outcome == "Failed" &&
+                        FresherCompanyResolutionFailurePolicy.IsRecoverable(x.ReasonCode));
+                    // A run exhausted retries while some items had no committed
+                    // receipt. Requeue only when the processor recorded the
+                    // incomplete-items terminal reason; exact payload identity was
+                    // verified above and every committed receipt will be replayed.
+                    var hasRetryableIncompleteWork = run.FailureSummary == "INCOMPLETE_ITEMS_OR_PUBLICATION" &&
+                        durableItems.Length < run.ReceivedCount;
+                    if (hasRecoverableFailure || hasRetryableIncompleteWork)
+                    {
+                        run.Status = "Queued";
+                        run.FailureSummary = null;
+                        run.CompletedAtUtc = null;
+                        if (run.ProcessingAttempts >= MaximumAttempts) run.ProcessingAttempts = 0;
+                        run.NextAttemptAtUtc = DateTime.UtcNow;
+                    }
+                }
             }
             await db.SaveChangesAsync(ct);
             await ReconcileRunCountersAsync(run.Id, ct);

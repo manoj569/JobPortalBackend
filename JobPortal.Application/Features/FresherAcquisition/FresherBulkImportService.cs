@@ -8,6 +8,12 @@ using Microsoft.Extensions.Options;
 
 namespace JobPortal.Application.Features.FresherAcquisition;
 
+public static class FresherCompanyResolutionFailurePolicy
+{
+    public static bool IsRecoverable(string? reasonCode) => reasonCode is
+        "COMPANY_OWNER_UNAVAILABLE" or "COMPANY_CREATION_CONFLICT" or "COMPANY_DOMAIN_AMBIGUOUS";
+}
+
 public interface IFresherBulkImportService
 {
     Task<FresherBulkImportResponse> ProcessStagedAsync(FresherBulkImportRequest request, CancellationToken cancellationToken);
@@ -138,7 +144,9 @@ public sealed partial class FresherBulkImportService(
         {
             // A completed website receipt needs no empty transaction or source lookup.
             if (website && priorReceipts.TryGetValue(identityKeys[chunkStart], out var completedReceipt) &&
-                completedReceipt.PublicationStatus is not ("Pending" or "Failed"))
+                completedReceipt.PublicationStatus is not ("Pending" or "Failed") &&
+                !(completedReceipt.Outcome.Outcome == "Failed" &&
+                    FresherCompanyResolutionFailurePolicy.IsRecoverable(completedReceipt.Outcome.ReasonCode)))
             {
                 outcomes.Add(completedReceipt.Outcome with { Index = chunkStart });
                 seenInRequest.Add(identityKeys[chunkStart]);
@@ -177,7 +185,8 @@ public sealed partial class FresherBulkImportService(
                 outcomes.Add(new(index, "Duplicate", "DUPLICATE_IN_REQUEST"));
                 continue;
             }
-            if (priorReceipts.TryGetValue(identityKey, out var prior))
+            if (priorReceipts.TryGetValue(identityKey, out var prior) &&
+                !(prior.Outcome.Outcome == "Failed" && FresherCompanyResolutionFailurePolicy.IsRecoverable(prior.Outcome.ReasonCode)))
             {
                 outcomes.Add(prior.Outcome with { Index = index });
                 if (prior.PublicationStatus is "Pending" or "Failed" && prior.Outcome.JobId is { } retryJobId &&
@@ -283,13 +292,13 @@ public sealed partial class FresherBulkImportService(
                         : await acquisitionStore.ResolveCompanyAsync(candidate, cancellationToken);
                     if (company.CompanyId is null)
                     {
-                        if (website && company.ReasonCode is "COMPANY_OWNER_UNAVAILABLE" or "COMPANY_CREATION_CONFLICT")
+                        if (website && FresherCompanyResolutionFailurePolicy.IsRecoverable(company.ReasonCode))
                         {
                             // Do not freeze a recoverable infrastructure failure
                             // into an immutable terminal candidate receipt.
                             failed++;
                             outcomes.Add(new(index, "Failed", "ITEM_NOT_COMMITTED"));
-                            CompanyResolutionDeferred(logger, request.ImportId, index, company.ReasonCode);
+                            CompanyResolutionDeferred(logger, request.ImportId, index, company.ReasonCode!);
                             continue;
                         }
                         failed++;

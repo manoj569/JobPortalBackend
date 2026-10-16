@@ -15,6 +15,85 @@ namespace JobPortal.Application.Tests;
 
 public sealed partial class FresherAcquisitionPostgresTests
 {
+    [FresherPostgresFact]
+    public async Task UniqueCompanyDomainMatchPreservesExistingResolutionBehavior()
+    {
+        await using var db = new JobPortalDbContext(CreateOptions());
+        await db.Database.MigrateAsync();
+        var (_, company) = await CreateSourceAndCompanyAsync(db);
+        company.WebsiteUrl = $"https://unique-{Guid.NewGuid():N}.example.test";
+        await db.SaveChangesAsync();
+
+        var result = await new FresherAcquisitionStore(db).ResolveCompanyAsync(
+            CompanyCandidate("unique-domain", "A different employer alias", company.WebsiteUrl), default);
+
+        Assert.Equal(company.Id, result.CompanyId);
+        Assert.Null(result.ReasonCode);
+    }
+
+    [FresherPostgresFact]
+    public async Task DuplicateCompanyDomainUsesExactlyOneNormalizedNameMatch()
+    {
+        await using var db = new JobPortalDbContext(CreateOptions());
+        await db.Database.MigrateAsync();
+        var (_, first) = await CreateSourceAndCompanyAsync(db);
+        var domain = $"shared-{Guid.NewGuid():N}.example.test";
+        first.WebsiteUrl = "https://" + domain;
+        var other = new JobPortal.Domain.Entities.Company
+        {
+            Name = "Another brand " + Guid.NewGuid().ToString("N"),
+            Slug = "another-brand-" + Guid.NewGuid().ToString("N"),
+            WebsiteUrl = "https://www." + domain,
+            OwnerUserId = first.OwnerUserId
+        };
+        db.Companies.Add(other);
+        await db.SaveChangesAsync();
+
+        var result = await new FresherAcquisitionStore(db).ResolveCompanyAsync(
+            CompanyCandidate("duplicate-domain-name-match", "  " + first.Name.ToUpperInvariant() + "  ", "https://" + domain), default);
+
+        Assert.Equal(first.Id, result.CompanyId);
+        Assert.Null(result.ReasonCode);
+    }
+
+    [FresherPostgresFact]
+    public async Task DuplicateCompanyDomainWithoutNameMatchRemainsAmbiguous()
+    {
+        await using var db = new JobPortalDbContext(CreateOptions());
+        await db.Database.MigrateAsync();
+        var (_, first) = await CreateSourceAndCompanyAsync(db);
+        var domain = $"shared-{Guid.NewGuid():N}.example.test";
+        first.WebsiteUrl = "https://" + domain;
+        var other = new JobPortal.Domain.Entities.Company
+        {
+            Name = "Other brand " + Guid.NewGuid().ToString("N"),
+            Slug = "other-brand-" + Guid.NewGuid().ToString("N"),
+            WebsiteUrl = "https://www." + domain,
+            OwnerUserId = first.OwnerUserId
+        };
+        db.Companies.Add(other);
+        await db.SaveChangesAsync();
+
+        var result = await new FresherAcquisitionStore(db).ResolveCompanyAsync(
+            CompanyCandidate("duplicate-domain-no-name-match", "Unrelated candidate employer", "https://" + domain), default);
+
+        Assert.Null(result.CompanyId);
+        Assert.Equal("COMPANY_DOMAIN_AMBIGUOUS", result.ReasonCode);
+    }
+
+    [Fact]
+    public void DuplicateDomainAndDuplicateNormalizedNameRemainAmbiguousWithoutChoosingFirst()
+    {
+        var first = Guid.NewGuid();
+        var second = Guid.NewGuid();
+
+        var result = FresherAcquisitionStore.ResolveDomainMatches(
+            [(first, "same employer"), (second, "same employer")], "same employer");
+
+        Assert.Null(result!.CompanyId);
+        Assert.Equal("COMPANY_DOMAIN_AMBIGUOUS", result.ReasonCode);
+    }
+
     private static FresherImportCandidate CompanyCandidate(string id, string name, string? website = null, Guid? companyId = null)
     {
         var job = Candidate(id, name);

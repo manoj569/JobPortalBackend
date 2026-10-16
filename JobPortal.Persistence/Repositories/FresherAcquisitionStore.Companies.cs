@@ -43,9 +43,9 @@ public sealed partial class FresherAcquisitionStore
         if (domain is not null)
         {
             var matches = await db.Companies.Where(x => x.NormalizedWebsiteDomain == domain)
-                .Select(x => x.Id).Take(2).ToArrayAsync(cancellationToken);
-            if (matches.Length > 1) return new(null, "COMPANY_DOMAIN_AMBIGUOUS");
-            if (matches.Length == 1) return new(matches[0]);
+                .Select(x => new { x.Id, x.NormalizedName }).ToArrayAsync(cancellationToken);
+            var resolution = ResolveDomainMatches(matches.Select(x => (x.Id, x.NormalizedName)), normalized);
+            if (resolution is not null) return resolution;
         }
         // A shared unknown-employer bucket must not acquire one vacancy's
         // employer domain; retain that claim on the job's source metadata.
@@ -81,5 +81,19 @@ public sealed partial class FresherAcquisitionStore
         existing = await db.Companies.Where(x => x.NormalizedName == normalized)
             .Select(x => (Guid?)x.Id).SingleOrDefaultAsync(cancellationToken);
         return existing.HasValue ? new(existing) : new(null, "COMPANY_CREATION_CONFLICT");
+    }
+
+    internal static FresherCompanyResolution? ResolveDomainMatches(
+        IEnumerable<(Guid Id, string NormalizedName)> domainMatches, string normalizedName)
+    {
+        var matches = domainMatches.ToArray();
+        if (matches.Length == 1) return new(matches[0].Id);
+        if (matches.Length == 0) return null;
+        var exactNameMatches = matches.Where(x => x.NormalizedName == normalizedName).ToArray();
+        if (exactNameMatches.Length == 1) return new(exactNameMatches[0].Id);
+        // Never choose an arbitrary company when the domain is shared.
+        // NormalizedName is unique for active companies, but keep this ambiguous
+        // if corrupt/legacy data violates that invariant too.
+        return new(null, "COMPANY_DOMAIN_AMBIGUOUS");
     }
 }

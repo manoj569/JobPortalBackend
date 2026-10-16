@@ -160,29 +160,57 @@ public sealed partial class FresherAcquisitionStore(JobPortalDbContext db) : IFr
             var sourceId = await db.AcquisitionImportRuns.Where(x => x.Id == runId).Select(x => x.AcquisitionSourceId).SingleAsync(cancellationToken);
             var keys = receipts.Select(x => x.IdentityKey).Distinct().ToArray();
             var existing = await db.AcquisitionImportItems.Where(x => x.AcquisitionImportRunId == runId && keys.Contains(x.CandidateIdentityKey) && !x.IsDeleted)
-                .Select(x => x.CandidateIdentityKey).ToArrayAsync(cancellationToken);
-            var existingSet = existing.ToHashSet(StringComparer.Ordinal);
-            foreach (var input in receipts.Where(x => !existingSet.Contains(x.IdentityKey)).GroupBy(x => x.IdentityKey).Select(x => x.First()))
+                .ToDictionaryAsync(x => x.CandidateIdentityKey, StringComparer.Ordinal, cancellationToken);
+            foreach (var input in receipts.GroupBy(x => x.IdentityKey, StringComparer.Ordinal).Select(x => x.First()))
             {
-                var candidate = input.Candidate;
-                db.AcquisitionImportItems.Add(new AcquisitionImportItem
+                existing.TryGetValue(input.IdentityKey, out var prior);
+                if (prior is not null)
                 {
-                    AcquisitionImportRunId = runId, AcquisitionSourceId = sourceId, ItemIndex = input.Index,
-                    CandidateIdentityKey = input.IdentityKey, ExternalId = candidate?.ExternalJobId?.Trim() is { Length: <= 255 } externalId ? externalId : null,
-                    DiscoveredUrl = SafeUrl(candidate?.DiscoveredUrl), CanonicalUrl = SafeUrl(candidate?.CanonicalJobUrl),
-                    ApplyUrl = SafeUrl(candidate?.ApplyUrl), CompanyNameNormalized = Normalize(candidate?.CompanyName, 200),
-                    TitleNormalized = Normalize(candidate?.Title, 250), LocationNormalized = Normalize(candidate?.LocationText ?? candidate?.City ?? candidate?.Country, 250),
-                    EligibilityDecision = input.EligibilityDecision, ReasonCode = input.Outcome.ReasonCode,
-                    Outcome = input.Outcome.Outcome, JobId = input.Outcome.JobId,
-                    PublicationStatus = input.PublicationRequested ? "Pending" : "NotRequested",
-                    FirstSeenAtUtc = input.SeenAtUtc, LastSeenAtUtc = input.SeenAtUtc,
-                    LastVerifiedAtUtc = candidate?.SourceLastSeenAt?.ToUniversalTime(), SourceExpiresAtUtc = candidate?.ExpiresAt?.ToUniversalTime()
-                });
+                    // Preserve all successful and terminal receipts. Only the
+                    // explicitly recoverable failed row for this same identity
+                    // and index may be replaced by a retry result.
+                    if (prior.Outcome != "Failed" ||
+                        !FresherCompanyResolutionFailurePolicy.IsRecoverable(prior.ReasonCode)) continue;
+                    if (prior.ItemIndex != input.Index)
+                        throw new ImportIdPayloadConflictException();
+                    SetReceipt(prior, input);
+                    continue;
+                }
+                var candidate = input.Candidate;
+                var receipt = new AcquisitionImportItem
+                {
+                    AcquisitionImportRunId = runId, AcquisitionSourceId = sourceId,
+                    CandidateIdentityKey = input.IdentityKey, FirstSeenAtUtc = input.SeenAtUtc
+                };
+                SetReceipt(receipt, input);
+                db.AcquisitionImportItems.Add(receipt);
             }
             await db.SaveChangesAsync(cancellationToken);
             await reconcileRunCounters(runId, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             _completed = true;
+        }
+
+        private static void SetReceipt(AcquisitionImportItem receipt, FresherReceiptInput input)
+        {
+            var candidate = input.Candidate;
+            receipt.ItemIndex = input.Index;
+            receipt.ExternalId = candidate?.ExternalJobId?.Trim() is { Length: <= 255 } externalId ? externalId : null;
+            receipt.DiscoveredUrl = SafeUrl(candidate?.DiscoveredUrl);
+            receipt.CanonicalUrl = SafeUrl(candidate?.CanonicalJobUrl);
+            receipt.ApplyUrl = SafeUrl(candidate?.ApplyUrl);
+            receipt.CompanyNameNormalized = Normalize(candidate?.CompanyName, 200);
+            receipt.TitleNormalized = Normalize(candidate?.Title, 250);
+            receipt.LocationNormalized = Normalize(candidate?.LocationText ?? candidate?.City ?? candidate?.Country, 250);
+            receipt.EligibilityDecision = input.EligibilityDecision;
+            receipt.ReasonCode = input.Outcome.ReasonCode;
+            receipt.Outcome = input.Outcome.Outcome;
+            receipt.JobId = input.Outcome.JobId;
+            receipt.PublicationStatus = input.PublicationRequested ? "Pending" : "NotRequested";
+            receipt.PublicationError = null;
+            receipt.LastSeenAtUtc = input.SeenAtUtc;
+            receipt.LastVerifiedAtUtc = candidate?.SourceLastSeenAt?.ToUniversalTime();
+            receipt.SourceExpiresAtUtc = candidate?.ExpiresAt?.ToUniversalTime();
         }
 
         public async ValueTask DisposeAsync()

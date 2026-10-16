@@ -98,6 +98,7 @@ public sealed class FinalWebsitePolicyTests
     [Theory]
     [InlineData("COMPANY_OWNER_UNAVAILABLE")]
     [InlineData("COMPANY_CREATION_CONFLICT")]
+    [InlineData("COMPANY_DOMAIN_AMBIGUOUS")]
     public async Task WebsiteCompanyInfrastructureFailureIsUncommittedAndRecoverable(string reason)
     {
         using var f = new Fixture();
@@ -106,6 +107,19 @@ public sealed class FinalWebsitePolicyTests
         Assert.Equal("ITEM_NOT_COMMITTED", Assert.Single(result.Items).ReasonCode);
         Assert.Empty(f.Store.Receipts);
         Assert.False(f.Store.Completed);
+        Assert.Empty(await f.Db.Jobs.ToArrayAsync());
+    }
+
+    [Fact]
+    public async Task GenericCompanyNotResolvedFailureRemainsTerminalAndReceipted()
+    {
+        using var f = new Fixture();
+        f.Store.CompanyFailureReason = "COMPANY_NOT_RESOLVED";
+        var result = await f.Import.ImportAsync(Request(Candidate(null, null, null, "LOW")));
+
+        Assert.Equal("COMPANY_NOT_RESOLVED", Assert.Single(result.Items).ReasonCode);
+        Assert.Single(f.Store.Receipts);
+        Assert.True(f.Store.Completed);
         Assert.Empty(await f.Db.Jobs.ToArrayAsync());
     }
 
