@@ -524,7 +524,8 @@ public sealed class InterviewInsightService(
         if (x.Published > 0) badges.Add("First Insight Shared");
         if (x.Helped >= 10) badges.Add("10 Candidates Helped");
         if (x.Helped >= 50) badges.Add("50 Candidates Helped");
-        return new(x.Published, x.Helped, x.Score, badges, x.Pending, x.NeedsChanges, x.Items);
+        return new(x.Published, x.Helped, x.Score, badges, x.Pending, x.NeedsChanges, x.Items,
+            await repository.GetCareerHarborPointsAsync(candidateId, ct));
     }
 
     public async Task<CompanyInterviewInsightSummaryResponse> CompanySummaryAsync(Guid candidateId, Guid companyId, CancellationToken ct = default)

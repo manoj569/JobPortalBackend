@@ -66,6 +66,7 @@ public sealed class JobPortalDbContext(DbContextOptions<JobPortalDbContext> opti
     public DbSet<InterviewRound> InterviewRounds => Set<InterviewRound>();
     public DbSet<CandidateInterviewSchedule> CandidateInterviewSchedules => Set<CandidateInterviewSchedule>();
     public DbSet<InsightHelpfulnessFeedback> InsightHelpfulnessFeedback => Set<InsightHelpfulnessFeedback>();
+    public DbSet<UserPointTransaction> UserPointTransactions => Set<UserPointTransaction>();
     public DbSet<InsightReport> InsightReports => Set<InsightReport>();
     public DbSet<AIApplyProfile> AIApplyProfiles => Set<AIApplyProfile>();
     public DbSet<AIApplyPreference> AIApplyPreferences => Set<AIApplyPreference>();

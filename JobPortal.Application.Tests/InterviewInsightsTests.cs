@@ -1220,6 +1220,195 @@ public sealed class InterviewInsightsTests
             new(Now);
     }
 
+    [Fact]
+    public async Task HelpfulRewardsAuthorOnlyAndDuplicateDoesNotRewardAgain()
+    {
+        await using var f = await Fixture.CreateAsync();
+        var insight = await f.AddPublishedInsightAsync(f.AuthorId, f.CompanyAId);
+        var schedule = await f.AddPastScheduleAsync(f.ReaderId, f.CompanyAId);
+        await f.Service.AddFeedbackAsync(f.ReaderId, insight.Id, ValidFeedback(schedule.Id));
+        Assert.Equal(10, (await f.Service.ContributionsAsync(f.AuthorId)).CareerHarborPoints);
+        Assert.Equal(0, (await f.Service.ContributionsAsync(f.ReaderId)).CareerHarborPoints);
+        var reward = await f.Db.UserPointTransactions.Include(x => x.Feedback).SingleAsync();
+        Assert.Equal(f.AuthorId, reward.UserId);
+        Assert.Equal(f.ReaderId, reward.Feedback.CandidateId);
+        Assert.Equal(insight.Id, reward.Feedback.InsightId);
+        Assert.Equal("InterviewInsightHelpful", reward.Reason);
+        await Assert.ThrowsAsync<ConflictException>(() => f.Service.AddFeedbackAsync(f.ReaderId, insight.Id, ValidFeedback(schedule.Id)));
+        Assert.Equal(10, (await f.Service.ContributionsAsync(f.AuthorId)).CareerHarborPoints);
+        Assert.Single(f.Db.UserPointTransactions);
+    }
+
+    [Theory]
+    [InlineData(InsightHelpfulness.PartlyHelped)]
+    [InlineData(InsightHelpfulness.DidNotHelp)]
+    public async Task NonHelpfulFeedbackDoesNotReward(InsightHelpfulness helpfulness)
+    {
+        await using var f = await Fixture.CreateAsync();
+        var insight = await f.AddPublishedInsightAsync(f.AuthorId, f.CompanyAId);
+        var schedule = await f.AddPastScheduleAsync(f.ReaderId, f.CompanyAId);
+        await f.Service.AddFeedbackAsync(f.ReaderId, insight.Id, ValidFeedback(schedule.Id) with { Helpfulness = helpfulness });
+        Assert.Empty(f.Db.UserPointTransactions);
+        Assert.Equal(0, (await f.Service.ContributionsAsync(f.AuthorId)).CareerHarborPoints);
+    }
+
+    [Fact]
+    public async Task SameVoterCanRewardTwoIndependentInsights()
+    {
+        await using var f = await Fixture.CreateAsync();
+        var schedule = await f.AddPastScheduleAsync(f.ReaderId, f.CompanyAId);
+        for (var i = 0; i < 2; i++)
+        {
+            var insight = await f.AddPublishedInsightAsync(f.AuthorId, f.CompanyAId);
+            await f.Service.AddFeedbackAsync(f.ReaderId, insight.Id, ValidFeedback(schedule.Id));
+        }
+        Assert.Equal(20, (await f.Service.ContributionsAsync(f.AuthorId)).CareerHarborPoints);
+        Assert.Equal(2, await f.Db.UserPointTransactions.CountAsync());
+    }
+
+    [Fact]
+    public async Task DifferentVotersEachContributeTenPoints()
+    {
+        await using var f = await Fixture.CreateAsync();
+        var third = new User { Email = "third@example.com", NormalizedEmail = "THIRD@EXAMPLE.COM",
+            FirstName = "Third", LastName = "Reader", Status = UserStatus.Active, RoleId = SystemRoleIds.Candidate };
+        f.Db.Users.Add(third);
+        await f.Db.SaveChangesAsync();
+        var insight = await f.AddPublishedInsightAsync(f.AuthorId, f.CompanyAId);
+        foreach (var voter in new[] { f.ReaderId, third.Id })
+        {
+            var schedule = await f.AddPastScheduleAsync(voter, f.CompanyAId);
+            await f.Service.AddFeedbackAsync(voter, insight.Id, ValidFeedback(schedule.Id));
+        }
+        Assert.Equal(20, (await f.Service.ContributionsAsync(f.AuthorId)).CareerHarborPoints);
+        Assert.Equal(2, await f.Db.UserPointTransactions.CountAsync());
+        Assert.Equal(0, (await f.Service.ContributionsAsync(third.Id)).CareerHarborPoints);
+    }
+
+    [Fact]
+    public async Task RemovedFeedbackCannotRetainOrFarmPoints()
+    {
+        await using var f = await Fixture.CreateAsync();
+        var insight = await f.AddPublishedInsightAsync(f.AuthorId, f.CompanyAId);
+        var schedule = await f.AddPastScheduleAsync(f.ReaderId, f.CompanyAId);
+        await f.Service.AddFeedbackAsync(f.ReaderId, insight.Id, ValidFeedback(schedule.Id));
+        var feedback = await f.Db.InsightHelpfulnessFeedback.SingleAsync();
+        feedback.IsDeleted = true;
+        await f.Db.SaveChangesAsync();
+        Assert.Equal(0, (await f.Service.ContributionsAsync(f.AuthorId)).CareerHarborPoints);
+        await f.Service.AddFeedbackAsync(f.ReaderId, insight.Id, ValidFeedback(schedule.Id));
+        Assert.Equal(10, (await f.Service.ContributionsAsync(f.AuthorId)).CareerHarborPoints);
+        Assert.Equal(2, await f.Db.UserPointTransactions.CountAsync());
+    }
+
+    [Theory]
+    [InlineData(InterviewInsightStatus.Hidden)]
+    [InlineData(InterviewInsightStatus.Rejected)]
+    public async Task ModerationSuspendsPointsAndRepublishingRestoresExactlyOnce(InterviewInsightStatus status)
+    {
+        await using var f = await Fixture.CreateAsync();
+        var insight = await f.AddPublishedInsightAsync(f.AuthorId, f.CompanyAId);
+        var schedule = await f.AddPastScheduleAsync(f.ReaderId, f.CompanyAId);
+        await f.Service.AddFeedbackAsync(f.ReaderId, insight.Id, ValidFeedback(schedule.Id));
+        await f.Admin.ModerateAsync(Guid.NewGuid(), insight.Id, new(status, "Invalidated"));
+        Assert.Equal(0, (await f.Service.ContributionsAsync(f.AuthorId)).CareerHarborPoints);
+        await Assert.ThrowsAsync<NotFoundException>(() => f.Service.AddFeedbackAsync(f.ReaderId, insight.Id, ValidFeedback(schedule.Id)));
+        await f.Admin.ModerateAsync(Guid.NewGuid(), insight.Id, new(InterviewInsightStatus.Published, null));
+        Assert.Equal(10, (await f.Service.ContributionsAsync(f.AuthorId)).CareerHarborPoints);
+        Assert.Single(f.Db.UserPointTransactions);
+        await f.Service.DeleteAsync(f.AuthorId, insight.Id);
+        Assert.Equal(0, (await f.Service.ContributionsAsync(f.AuthorId)).CareerHarborPoints);
+    }
+
+    [Fact]
+    public async Task InvalidIdentitySelfMissingAndDeletedInsightsCannotReward()
+    {
+        await using var f = await Fixture.CreateAsync();
+        var insight = await f.AddPublishedInsightAsync(f.AuthorId, f.CompanyAId);
+        var schedule = await f.AddPastScheduleAsync(f.ReaderId, f.CompanyAId);
+        await Assert.ThrowsAnyAsync<AppException>(() => f.Service.AddFeedbackAsync(Guid.Empty, insight.Id, ValidFeedback(schedule.Id)));
+        await Assert.ThrowsAsync<BadRequestException>(() => f.Service.AddFeedbackAsync(f.AuthorId, insight.Id, ValidFeedback(schedule.Id)));
+        await Assert.ThrowsAsync<NotFoundException>(() => f.Service.AddFeedbackAsync(f.ReaderId, Guid.NewGuid(), ValidFeedback(schedule.Id)));
+        await f.Service.DeleteAsync(f.AuthorId, insight.Id);
+        await Assert.ThrowsAsync<NotFoundException>(() => f.Service.AddFeedbackAsync(f.ReaderId, insight.Id, ValidFeedback(schedule.Id)));
+        Assert.Empty(f.Db.UserPointTransactions);
+        Assert.Empty(f.Db.InsightHelpfulnessFeedback);
+    }
+
+    [LocalHelpfulPointsPostgresFact]
+    public async Task PostgresUniqueRewardsConcurrentVotesAndPersistenceFailuresAreAtomic()
+    {
+        var settings = new Npgsql.NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("HELPFUL_POINTS_TEST_POSTGRES"));
+        Assert.True(settings.Host is "localhost" or "127.0.0.1" or "::1");
+        Assert.Equal("interview_points_test", settings.Database);
+        var options = new DbContextOptionsBuilder<JobPortalDbContext>()
+            .UseNpgsql(settings.ConnectionString, pg => pg.MigrationsAssembly("JobPortal.Persistence.Postgres")).Options;
+        await using var f = await Fixture.CreateAsync(options);
+        var insight = await f.AddPublishedInsightAsync(f.AuthorId, f.CompanyAId);
+        var schedule = await f.AddPastScheduleAsync(f.ReaderId, f.CompanyAId);
+        async Task<bool> VoteAsync(Guid candidateId)
+        {
+            await using var context = new JobPortalDbContext(options);
+            var attempt = new Fixture(context);
+            try
+            {
+                await attempt.Service.AddFeedbackAsync(candidateId, insight.Id, ValidFeedback(schedule.Id));
+                return true;
+            }
+            catch (ConflictException) { return false; }
+        }
+        var results = await Task.WhenAll(VoteAsync(f.ReaderId), VoteAsync(f.ReaderId));
+        Assert.Single(results, x => x);
+        Assert.Equal(1, await f.Db.InsightHelpfulnessFeedback.CountAsync(x => x.InsightId == insight.Id));
+        Assert.Equal(10, (await f.Service.ContributionsAsync(f.AuthorId)).CareerHarborPoints);
+        f.Db.ChangeTracker.Clear();
+        Assert.Equal(1, (await f.Db.InterviewInsights.SingleAsync(x => x.Id == insight.Id)).HelpfulConfirmedCount);
+        var reward = await f.Db.UserPointTransactions.AsNoTracking().SingleAsync(x => x.UserId == f.AuthorId);
+        f.Db.UserPointTransactions.Add(new UserPointTransaction
+        {
+            UserId = f.AuthorId, InsightHelpfulnessFeedbackId = reward.InsightHelpfulnessFeedbackId, Points = 10
+        });
+        await Assert.ThrowsAsync<DbUpdateException>(() => f.Db.SaveChangesAsync());
+        f.Db.ChangeTracker.Clear();
+
+        // Fail both sides of the atomic save, using a disposable local database only.
+        foreach (var failReward in new[] { true, false })
+        {
+            await f.Db.Database.ExecuteSqlRawAsync("""
+                CREATE FUNCTION helpful_points_fail() RETURNS trigger LANGUAGE plpgsql AS $$
+                BEGIN RAISE EXCEPTION 'injected persistence failure'; END $$;
+                """);
+            await f.Db.Database.ExecuteSqlRawAsync(failReward
+                ? "CREATE TRIGGER helpful_points_fail BEFORE INSERT ON \"UserPointTransactions\" FOR EACH ROW EXECUTE FUNCTION helpful_points_fail();"
+                : "CREATE TRIGGER helpful_points_fail BEFORE INSERT ON \"InsightHelpfulnessFeedback\" FOR EACH ROW EXECUTE FUNCTION helpful_points_fail();");
+            try
+            {
+                var second = await f.AddPublishedInsightAsync(f.AuthorId, f.CompanyAId);
+                await using var context = new JobPortalDbContext(options);
+                var attempt = new Fixture(context);
+                await Assert.ThrowsAsync<DbUpdateException>(() => attempt.Service.AddFeedbackAsync(f.ReaderId, second.Id, ValidFeedback(schedule.Id)));
+                Assert.False(await f.Db.InsightHelpfulnessFeedback.AnyAsync(x => x.InsightId == second.Id));
+                Assert.Equal(0, await f.Db.InterviewInsights.Where(x => x.Id == second.Id).Select(x => x.HelpfulConfirmedCount).SingleAsync());
+                Assert.Equal(10, (await f.Service.ContributionsAsync(f.AuthorId)).CareerHarborPoints);
+            }
+            finally
+            {
+                await f.Db.Database.ExecuteSqlRawAsync(failReward
+                    ? "DROP TRIGGER helpful_points_fail ON \"UserPointTransactions\"; DROP FUNCTION helpful_points_fail();"
+                    : "DROP TRIGGER helpful_points_fail ON \"InsightHelpfulnessFeedback\"; DROP FUNCTION helpful_points_fail();");
+            }
+        }
+    }
+
+    private sealed class LocalHelpfulPointsPostgresFactAttribute : FactAttribute
+    {
+        public LocalHelpfulPointsPostgresFactAttribute()
+        {
+            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("HELPFUL_POINTS_TEST_POSTGRES")))
+                Skip = "Requires explicit disposable localhost interview_points_test database; never reads application settings.";
+        }
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         public JobPortalDbContext Db { get; }
@@ -1242,7 +1431,7 @@ public sealed class InterviewInsightsTests
 
         private readonly InterviewInsightRepository repository;
 
-        private Fixture(
+        public Fixture(
             JobPortalDbContext db)
         {
             Db = db;
@@ -1281,19 +1470,21 @@ public sealed class InterviewInsightsTests
                     time);
         }
 
-        public static async Task<Fixture> CreateAsync()
+        public static async Task<Fixture> CreateAsync(DbContextOptions<JobPortalDbContext>? options = null)
         {
             var db =
                 new JobPortalDbContext(
-                    new DbContextOptionsBuilder<JobPortalDbContext>()
+                    options ?? new DbContextOptionsBuilder<JobPortalDbContext>()
                         .UseInMemoryDatabase(
                             Guid.NewGuid().ToString())
                         .Options);
 
+            if (db.Database.IsNpgsql()) await db.Database.MigrateAsync();
+
             var f =
                 new Fixture(db);
 
-            var role =
+            var role = await db.Roles.SingleOrDefaultAsync(x => x.Id == SystemRoleIds.Candidate) ??
                 new Role
                 {
                     Id = SystemRoleIds.Candidate,
@@ -1307,8 +1498,8 @@ public sealed class InterviewInsightsTests
                     "owner@example.com",
                     role);
 
+            if (db.Entry(role).State == EntityState.Detached) db.Add(role);
             db.AddRange(
-                role,
                 owner,
                 User(
                     f.AuthorId,

@@ -7043,6 +7043,51 @@ namespace JobPortal.Persistence.Postgres.Migrations
                     b.ToTable("UserJobHistories", (string)null);
                 });
 
+            modelBuilder.Entity("JobPortal.Domain.Entities.UserPointTransaction", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("InsightHelpfulnessFeedbackId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("Points")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("InsightHelpfulnessFeedbackId")
+                        .IsUnique();
+
+                    b.HasIndex("UserId", "CreatedAtUtc");
+
+                    b.ToTable("UserPointTransactions", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_UserPointTransactions_HelpfulReward", "\"Points\" = 10 AND \"Reason\" = 'InterviewInsightHelpful'");
+                        });
+                });
+
             modelBuilder.Entity("JobPortal.Domain.Entities.AIApplyApplication", b =>
                 {
                     b.HasOne("JobPortal.Domain.Entities.Job", null)
@@ -8394,6 +8439,25 @@ namespace JobPortal.Persistence.Postgres.Migrations
                         .IsRequired();
 
                     b.Navigation("Job");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.UserPointTransaction", b =>
+                {
+                    b.HasOne("JobPortal.Domain.Entities.InsightHelpfulnessFeedback", "Feedback")
+                        .WithOne()
+                        .HasForeignKey("JobPortal.Domain.Entities.UserPointTransaction", "InsightHelpfulnessFeedbackId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("JobPortal.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Feedback");
 
                     b.Navigation("User");
                 });
