@@ -27,11 +27,11 @@ using static JobPortal.Application.Features.Jobs.JobSearchQueryValidator;
 
 namespace JobPortal.Application.Tests;
 
-[CollectionDefinition("Talentd local PostgreSQL", DisableParallelization = true)]
+[CollectionDefinition("Talentd local PostgreSQL")]
 public sealed class TalentdLocalPostgresCollection { }
 
 [Collection("Talentd local PostgreSQL")]
-public sealed class TalentdDatabaseValidationTests(ITestOutputHelper output)
+public sealed partial class TalentdDatabaseValidationTests(ITestOutputHelper output)
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static string LocalConnection(string variable)
@@ -67,7 +67,7 @@ public sealed class TalentdDatabaseValidationTests(ITestOutputHelper output)
             FirstName = "Local", LastName = "Fixture", RoleId = SystemRoleIds.Administrator, Status = UserStatus.Active });
         await db.SaveChangesAsync();
     }
-    private static (FresherBulkImportService Importer, FresherAcquisitionStore Store) Services(JobPortalDbContext db, TimingLogger logger)
+    private static (FresherBulkImportService Importer, FresherAcquisitionStore Store) Services(JobPortalDbContext db, TimingLogger logger, Func<IJobAutoPublishService, IJobAutoPublishService>? decorate = null)
     {
         var store = new FresherAcquisitionStore(db); var jobs = new JobRepository(db);
         var companies = new CompanyManagementRepository(db); var categories = new CategoryManagementRepository(db);
@@ -81,7 +81,7 @@ public sealed class TalentdDatabaseValidationTests(ITestOutputHelper output)
             new UpdateRecruiterContactRequestValidator(), new JobSearchQueryValidator(), TimeProvider.System, acquisitionSources: store);
         var publisher = new JobAutoPublishService(jobs, new JobQualityGate(), service, Options.Create(new JobAggregationOptions()),
             TimeProvider.System, new JobSourceRepository(db), publicationLock: locks, acquisitionSources: store);
-        return (new FresherBulkImportService(ingestion, logger, store, publisher, categories: categories), store);
+        return (new FresherBulkImportService(ingestion, logger, store, decorate?.Invoke(publisher) ?? publisher, categories: categories), store);
     }
 
     [TalentdPostgresFact]
@@ -174,6 +174,7 @@ public sealed class TalentdDatabaseValidationTests(ITestOutputHelper output)
     { public Task AppendAsync(AuditEvent auditEvent, CancellationToken cancellationToken = default) => Task.CompletedTask; }
     private sealed class TimingLogger : ILogger<FresherBulkImportService>
     {
+        public Action<string>? OnPhase { get; init; }
         public List<(string Phase, long Duration)> Values { get; } = [];
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
         public bool IsEnabled(LogLevel logLevel) => true;
@@ -182,6 +183,7 @@ public sealed class TalentdDatabaseValidationTests(ITestOutputHelper output)
             if (eventId.Id != 8581 || state is not IEnumerable<KeyValuePair<string, object?>> fields) return;
             var values = fields.ToDictionary(x => x.Key, x => x.Value);
             Values.Add(((string)values["Phase"]!, (long)values["DurationMs"]!));
+            OnPhase?.Invoke((string)values["Phase"]!);
         }
     }
     private sealed class TalentdPostgresFactAttribute : FactAttribute

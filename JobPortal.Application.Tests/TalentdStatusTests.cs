@@ -17,6 +17,28 @@ namespace JobPortal.Application.Tests;
 
 public sealed class TalentdStatusTests
 {
+    [Fact]
+    public async Task TalentdPostReturnsDurableAcceptanceWithoutCallingSynchronousImporter()
+    {
+        var status = new FresherImportStatus("same-id", "same-id", Guid.NewGuid(), "IN_PROGRESS",
+            1, 0, 0, 0, 0, 0, 0, 0, null, null);
+        var processor = new AcceptingProcessor(status);
+        var controller = new InternalFresherBulkImportController(null!,
+            Options.Create(new FresherAcquisitionOptions()), processor);
+        using var requestLifetime = new CancellationTokenSource();
+        var response = await controller.Import(new FresherBulkImportRequest
+        {
+            ImportId = "same-id", SourceType = "talentd", SourceName = "Talentd",
+            Jobs = [new FresherImportCandidate { ExternalJobId = "TALENTD:ID:123", Title = "Example" }]
+        }, requestLifetime.Token);
+        requestLifetime.Cancel();
+        var accepted = Assert.IsType<AcceptedResult>(response);
+        Assert.Same(status, accepted.Value);
+        Assert.Equal(requestLifetime.Token, processor.AcceptanceToken);
+        Assert.Equal("same-id", processor.LastRequest!.ImportId);
+        Assert.Equal(1, processor.AcceptanceCount);
+    }
+
     [Theory]
     [InlineData("Running", "IN_PROGRESS")]
     [InlineData("AwaitingPublication", "IN_PROGRESS")]
@@ -42,7 +64,7 @@ public sealed class TalentdStatusTests
         if (stored == "Completed") Assert.Single(result.Receipt!.Items);
         else Assert.Null(result.Receipt);
         Assert.Empty(db.ChangeTracker.Entries());
-        var controller = new InternalFresherBulkImportController(null!, Options.Create(new FresherAcquisitionOptions()));
+        var controller = new InternalFresherBulkImportController(null!, Options.Create(new FresherAcquisitionOptions()), null!);
         Assert.IsType<NotFoundObjectResult>(await controller.Status("talentd", "missing", store, default));
         Assert.IsType<OkObjectResult>(await controller.Status("talentd", "test", store, default));
         Assert.Empty(db.ChangeTracker.Entries());
@@ -63,5 +85,23 @@ public sealed class TalentdStatusTests
         Assert.Equal(authorized, context.Result is null);
         Assert.Contains(typeof(InternalFresherBulkImportController).GetCustomAttributes(typeof(ServiceFilterAttribute), true),
             attribute => ((ServiceFilterAttribute)attribute).ServiceType == typeof(FresherServiceTokenFilter));
+    }
+
+    private sealed class AcceptingProcessor(FresherImportStatus status) : IDurableFresherImportProcessor
+    {
+        public FresherBulkImportRequest? LastRequest { get; private set; }
+        public CancellationToken AcceptanceToken { get; private set; }
+        public int AcceptanceCount { get; private set; }
+
+        public Task<FresherImportStatus> StageAsync(FresherBulkImportRequest request, CancellationToken cancellationToken)
+        {
+            LastRequest = request;
+            AcceptanceToken = cancellationToken;
+            AcceptanceCount++;
+            return Task.FromResult(status);
+        }
+
+        public Task<bool> ProcessNextAsync(IFresherBulkImportService importer, CancellationToken cancellationToken) =>
+            Task.FromResult(false);
     }
 }

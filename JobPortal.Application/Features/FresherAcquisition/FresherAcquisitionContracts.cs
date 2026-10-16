@@ -69,4 +69,10 @@ public sealed record FresherBulkImportResponse(
 public sealed record FresherImportStatus(string ImportId, string BatchId, Guid RunId, string Status,
     int ReceivedCount, int EligibleCount, int RejectedCount, int CreatedCount, int UpdatedCount,
     int ExistingCount, int PublishedCount, int FailedCount, string? FailureSummary,
-    FresherBulkImportResponse? Receipt);
+    FresherBulkImportResponse? Receipt)
+{
+    public int PendingCount => Math.Max(0, ReceivedCount - EligibleCount - RejectedCount - FailedCount);
+    public DateTime? CompletedAtUtc { get; init; }
+    public DateTime? NextAttemptAtUtc { get; init; }
+    public int ProcessingAttempts { get; init; }
+}

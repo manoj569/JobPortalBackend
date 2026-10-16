@@ -10,6 +10,7 @@ namespace JobPortal.Application.Features.FresherAcquisition;
 
 public interface IFresherBulkImportService
 {
+    Task<FresherBulkImportResponse> ProcessStagedAsync(FresherBulkImportRequest request, CancellationToken cancellationToken);
     Task<FresherBulkImportResponse> ImportAsync(FresherBulkImportRequest request, CancellationToken cancellationToken = default);
 }
 
@@ -23,6 +24,12 @@ public sealed partial class FresherBulkImportService(
     IOptions<FresherAcquisitionOptions>? options = null) : IFresherBulkImportService
 {
     public async Task<FresherBulkImportResponse> ImportAsync(FresherBulkImportRequest request, CancellationToken cancellationToken = default)
+        => await ExecuteAsync(request, false, cancellationToken);
+
+    public Task<FresherBulkImportResponse> ProcessStagedAsync(FresherBulkImportRequest request, CancellationToken cancellationToken)
+        => ExecuteAsync(request, true, cancellationToken);
+
+    private async Task<FresherBulkImportResponse> ExecuteAsync(FresherBulkImportRequest request, bool runLockOwned, CancellationToken cancellationToken)
     {
         var diagnostic = new ImportDiagnostic();
         var elapsed = System.Diagnostics.Stopwatch.StartNew();
@@ -34,8 +41,8 @@ public sealed partial class FresherBulkImportService(
         try
         {
             return acquisitionStore is null
-                ? await ImportCoreAsync(request, diagnostic, cancellationToken)
-                : await acquisitionStore.ExecuteImportAsync(token => ImportCoreAsync(request, diagnostic, token), cancellationToken);
+                ? await ImportCoreAsync(request, diagnostic, runLockOwned, cancellationToken)
+                : await acquisitionStore.ExecuteImportAsync(token => ImportCoreAsync(request, diagnostic, runLockOwned, token), cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception exception) when (exception is not ImportIdPayloadConflictException and not ImportAlreadyRunningException)
@@ -66,7 +73,7 @@ public sealed partial class FresherBulkImportService(
     }
 
     private async Task<FresherBulkImportResponse> ImportCoreAsync(FresherBulkImportRequest request,
-        ImportDiagnostic diagnostic, CancellationToken cancellationToken)
+        ImportDiagnostic diagnostic, bool runLockOwned, CancellationToken cancellationToken)
     {
         var now = (clock ?? TimeProvider.System).GetUtcNow().UtcDateTime;
         JobPortal.Domain.Entities.AcquisitionSource? source = null;
@@ -96,9 +103,9 @@ public sealed partial class FresherBulkImportService(
         if (acquisitionStore is not null)
         {
             diagnostic.Stage = "RunLock";
-            runLock.Set(await acquisitionStore.AcquireRunLockAsync(source!.Id, request.ImportId, cancellationToken));
+            if (!runLockOwned) runLock.Set(await acquisitionStore.AcquireRunLockAsync(source!.Id, request.ImportId, cancellationToken));
             diagnostic.Stage = "StartRun";
-            var start = await acquisitionStore.StartPayloadRunAsync(source.Id, request.ImportId, diagnostic.CorrelationId,
+            var start = await acquisitionStore.StartPayloadRunAsync(source!.Id, request.ImportId, diagnostic.CorrelationId,
                 FresherCandidateIdentity.PayloadFingerprint(request), requestFingerprint,
                 identityKeys.Distinct(StringComparer.Ordinal).Count(), cancellationToken);
             run = start.Run;
@@ -129,6 +136,14 @@ public sealed partial class FresherBulkImportService(
         var chunkSize = website ? 1 : acquisitionStore is null ? request.Jobs.Count : Math.Clamp(options?.Value.ChunkSize ?? 50, 1, 200);
         for (var chunkStart = 0; chunkStart < request.Jobs.Count; chunkStart += chunkSize)
         {
+            // A completed website receipt needs no empty transaction or source lookup.
+            if (website && priorReceipts.TryGetValue(identityKeys[chunkStart], out var completedReceipt) &&
+                completedReceipt.PublicationStatus is not ("Pending" or "Failed"))
+            {
+                outcomes.Add(completedReceipt.Outcome with { Index = chunkStart });
+                seenInRequest.Add(identityKeys[chunkStart]);
+                continue;
+            }
             var committed = false;
             var beforeCount = outcomes.Count;
             var beforeCounts = (geoRejected, experienceRejected, invalidData, invalidUrl, created, updated, existing, failed, accepted, published);

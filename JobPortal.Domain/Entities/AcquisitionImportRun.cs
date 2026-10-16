@@ -24,6 +24,10 @@ public sealed class AcquisitionImportRun : BaseEntity
     public int ExistingCount { get; set; }
     public int PublishedCount { get; set; }
     public int FailedCount { get; set; }
+    // Immutable complete request: pending inputs survive HTTP/process lifetime.
+    public string? StagedRequestJson { get; set; }
+    public int ProcessingAttempts { get; set; }
+    public DateTime? NextAttemptAtUtc { get; set; }
     public string? FailureSummary { get; set; }
     public ICollection<AcquisitionImportItem> Items { get; set; } = new List<AcquisitionImportItem>();
 }

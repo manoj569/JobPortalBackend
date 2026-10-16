@@ -1150,6 +1150,10 @@ namespace JobPortal.Persistence.Postgres.Migrations
                         .HasDatabaseName("IX_AcquisitionImportItems_AcquisitionImportRunId_IdentityKey")
                         .HasFilter("\"IsDeleted\" = FALSE");
 
+                    b.HasIndex("AcquisitionImportRunId", "ItemIndex")
+                        .IsUnique()
+                        .HasFilter("\"IsDeleted\" = FALSE");
+
                     b.HasIndex("AcquisitionSourceId", "ExternalId", "LastSeenAtUtc");
 
                     b.ToTable("AcquisitionImportItems", (string)null);
@@ -1204,6 +1208,12 @@ namespace JobPortal.Persistence.Postgres.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
+                    b.Property<DateTime?>("NextAttemptAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("ProcessingAttempts")
+                        .HasColumnType("integer");
+
                     b.Property<int>("PublishedCount")
                         .HasColumnType("integer");
 
@@ -1229,6 +1239,9 @@ namespace JobPortal.Persistence.Postgres.Migrations
                         .HasColumnType("character varying(64)")
                         .HasDefaultValue("");
 
+                    b.Property<string>("StagedRequestJson")
+                        .HasColumnType("text");
+
                     b.Property<DateTime>("StartedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -1252,6 +1265,9 @@ namespace JobPortal.Persistence.Postgres.Migrations
                         .HasFilter("\"IsDeleted\" = FALSE");
 
                     b.HasIndex("AcquisitionSourceId", "StartedAtUtc");
+
+                    b.HasIndex("NextAttemptAtUtc", "Id")
+                        .HasFilter("\"StagedRequestJson\" IS NOT NULL AND \"Status\" NOT IN ('Completed', 'Failed') AND \"IsDeleted\" = FALSE");
 
                     b.ToTable("AcquisitionImportRuns", (string)null);
                 });

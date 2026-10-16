@@ -61,11 +61,18 @@ public sealed partial class FresherAcquisitionStore(JobPortalDbContext db) : IFr
         var run = await db.AcquisitionImportRuns.AsNoTracking().SingleOrDefaultAsync(x =>
             x.AcquisitionSource.ProviderKey == providerKey && x.BatchId == importId && !x.IsDeleted, cancellationToken);
         if (run is null) return null;
+        // Read-only reconciliation: durable receipts are authoritative during processing too.
+        var items = await db.AcquisitionImportItems.AsNoTracking()
+            .Where(x => x.AcquisitionImportRunId == run.Id && !x.IsDeleted).ToArrayAsync(cancellationToken);
         var receipt = run.Status == "Completed" ? await GetReplayResponseAsync(run.Id, importId, cancellationToken) : null;
         return new(run.BatchId, run.BatchId, run.Id,
             run.Status == "Completed" ? "COMPLETED" : run.Status == "Failed" ? "FAILED" : "IN_PROGRESS",
-            run.ReceivedCount, run.EligibleCount, run.RejectedCount, run.CreatedCount, run.UpdatedCount,
-            run.ExistingCount, run.PublishedCount, run.FailedCount, run.FailureSummary, receipt);
+            run.ReceivedCount, items.Count(x => x.Outcome is "Created" or "Updated" or "Existing" or "Duplicate"),
+            items.Count(x => x.Outcome.StartsWith("Rejected", StringComparison.Ordinal)),
+            items.Count(x => x.Outcome == "Created"), items.Count(x => x.Outcome == "Updated"),
+            items.Count(x => x.Outcome is "Existing" or "Duplicate"), items.Count(x => x.PublicationStatus == "Published"),
+            items.Count(x => x.Outcome == "Failed"), run.FailureSummary, receipt)
+            { CompletedAtUtc = run.CompletedAtUtc, NextAttemptAtUtc = run.NextAttemptAtUtc, ProcessingAttempts = run.ProcessingAttempts };
     }
 
     public Task<AcquisitionSource?> GetEnabledSourceAsync(string providerKey, CancellationToken cancellationToken) =>
@@ -138,12 +145,13 @@ public sealed partial class FresherAcquisitionStore(JobPortalDbContext db) : IFr
         {
             foreach (var identity in externalIdentityLocks.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal))
                 await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({identity}, 0))", cancellationToken);
-            return new FresherAcquisitionChunk(db, transaction);
+            return new FresherAcquisitionChunk(db, transaction, ReconcileRunCountersAsync);
         }
         catch { await transaction.RollbackAsync(cancellationToken); await transaction.DisposeAsync(); throw; }
     }
 
-    private sealed class FresherAcquisitionChunk(JobPortalDbContext db, IDbContextTransaction transaction) : IFresherAcquisitionChunk
+    private sealed class FresherAcquisitionChunk(JobPortalDbContext db, IDbContextTransaction transaction,
+        Func<Guid, CancellationToken, Task> reconcileRunCounters) : IFresherAcquisitionChunk
     {
         private bool _completed;
 
@@ -172,6 +180,7 @@ public sealed partial class FresherAcquisitionStore(JobPortalDbContext db) : IFr
                 });
             }
             await db.SaveChangesAsync(cancellationToken);
+            await reconcileRunCounters(runId, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             _completed = true;
         }
@@ -186,23 +195,33 @@ public sealed partial class FresherAcquisitionStore(JobPortalDbContext db) : IFr
 
     public async Task CompleteRunAsync(Guid runId, FresherBulkImportResponse response, CancellationToken cancellationToken)
     {
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await ReconcileRunCountersAsync(runId, cancellationToken);
         var run = await db.AcquisitionImportRuns.SingleAsync(x => x.Id == runId, cancellationToken);
         var receipts = await db.AcquisitionImportItems.AsNoTracking().Where(x => x.AcquisitionImportRunId == runId && !x.IsDeleted).ToArrayAsync(cancellationToken);
         run.Status = receipts.Any(x => x.PublicationStatus is "Pending" or "Failed") ? "AwaitingPublication" : "Completed";
-        run.CompletedAtUtc = run.Status == "Completed" ? DateTime.UtcNow : null;
-        run.ReceivedCount = receipts.Length;
-        run.EligibleCount = receipts.Count(x => x.Outcome is "Created" or "Updated" or "Existing" or "Duplicate");
+        if (run.StagedRequestJson is not null)
+        {
+            if (receipts.Length != run.ReceivedCount) run.Status = "Queued";
+            else if (!receipts.Any(x => x.PublicationStatus is "Pending" or "Failed") && receipts.Any(x => x.Outcome == "Failed"))
+                run.Status = "Failed";
+        }
+        if (run.Status == "Failed")
+        {
+            var reasonSummary = string.Join(',', receipts.Where(x => x.Outcome == "Failed").Select(x => x.ReasonCode)
+                .Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.Ordinal).Take(5));
+            var summary = "ITEM_FAILURES:" + reasonSummary;
+            run.FailureSummary = summary[..Math.Min(500, summary.Length)];
+        }
+        else if (run.Status == "Completed") run.FailureSummary = null;
+        run.CompletedAtUtc = run.Status is "Completed" or "Failed" ? DateTime.UtcNow : null;
         run.RejectedGeographyCount = receipts.Count(x => x.Outcome == "RejectedGeography");
         run.RejectedExperienceCount = receipts.Count(x => x.Outcome == "RejectedExperience");
         run.RejectedInvalidDataCount = receipts.Count(x => x.Outcome == "RejectedInvalidData");
         run.InvalidUrlCount = receipts.Count(x => x.Outcome == "RejectedInvalidUrl");
         run.RejectedCount = run.RejectedGeographyCount + run.RejectedExperienceCount + run.RejectedInvalidDataCount + run.InvalidUrlCount;
-        run.CreatedCount = receipts.Count(x => x.Outcome == "Created");
-        run.UpdatedCount = receipts.Count(x => x.Outcome == "Updated");
-        run.ExistingCount = receipts.Count(x => x.Outcome is "Existing" or "Duplicate");
-        run.PublishedCount = receipts.Count(x => x.PublicationStatus == "Published");
-        run.FailedCount = receipts.Count(x => x.Outcome == "Failed");
         await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 
     public async Task<FresherBulkImportResponse?> GetReplayResponseAsync(Guid runId, string batchId, CancellationToken cancellationToken)
@@ -217,12 +236,15 @@ public sealed partial class FresherAcquisitionStore(JobPortalDbContext db) : IFr
 
     public async Task UpdatePublicationAsync(Guid runId, string candidateIdentityKey, string status, string? error, CancellationToken cancellationToken)
     {
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var receipt = await db.AcquisitionImportItems.SingleOrDefaultAsync(x => x.AcquisitionImportRunId == runId &&
             x.CandidateIdentityKey == candidateIdentityKey && !x.IsDeleted, cancellationToken);
         if (receipt is null) return;
         receipt.PublicationStatus = status;
         receipt.PublicationError = error is null ? null : error[..Math.Min(error.Length, 120)];
         await db.SaveChangesAsync(cancellationToken);
+        await ReconcileRunCountersAsync(runId, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 
     private static string Normalize(string? value, int maximum)

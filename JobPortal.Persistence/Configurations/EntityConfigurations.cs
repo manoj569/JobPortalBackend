@@ -301,6 +301,8 @@ public sealed class AcquisitionImportRunConfiguration : IEntityTypeConfiguration
         builder.Property(x => x.CorrelationId).HasMaxLength(100).IsRequired();
         builder.Property(x => x.Status).HasMaxLength(24).IsRequired();
         builder.Property(x => x.FailureSummary).HasMaxLength(500);
+        builder.Property(x => x.StagedRequestJson).HasColumnType("text");
+        builder.HasIndex(x => new { x.NextAttemptAtUtc, x.Id }).HasFilter("\"StagedRequestJson\" IS NOT NULL AND \"Status\" NOT IN ('Completed', 'Failed') AND \"IsDeleted\" = FALSE");
         builder.HasOne(x => x.AcquisitionSource).WithMany().HasForeignKey(x => x.AcquisitionSourceId).OnDelete(DeleteBehavior.Restrict);
         builder.HasIndex(x => new { x.AcquisitionSourceId, x.BatchId }).IsUnique().HasFilter("\"IsDeleted\" = FALSE");
         builder.HasIndex(x => new { x.AcquisitionSourceId, x.StartedAtUtc });
@@ -330,6 +332,7 @@ public sealed class AcquisitionImportItemConfiguration : IEntityTypeConfiguratio
         builder.HasOne(x => x.Run).WithMany(x => x.Items).HasForeignKey(x => x.AcquisitionImportRunId).OnDelete(DeleteBehavior.Cascade);
         builder.HasOne(x => x.Job).WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Restrict);
         builder.HasIndex(x => new { x.AcquisitionImportRunId, x.CandidateIdentityKey }).HasDatabaseName("IX_AcquisitionImportItems_AcquisitionImportRunId_IdentityKey").IsUnique().HasFilter("\"IsDeleted\" = FALSE");
+        builder.HasIndex(x => new { x.AcquisitionImportRunId, x.ItemIndex }).IsUnique().HasFilter("\"IsDeleted\" = FALSE");
         builder.HasIndex(x => x.JobId).HasFilter("\"JobId\" IS NOT NULL");
         builder.HasIndex(x => new { x.AcquisitionSourceId, x.ExternalId, x.LastSeenAtUtc });
     }

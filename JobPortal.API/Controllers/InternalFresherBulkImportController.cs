@@ -15,7 +15,7 @@ namespace JobPortal.API.Controllers;
 [ServiceFilter(typeof(FresherRequestLimitFilter))]
 [EnableRateLimiting("FresherBulkImport")]
 public sealed class InternalFresherBulkImportController(IFresherBulkImportService importer,
-    IOptions<FresherAcquisitionOptions> options) : ControllerBase
+    IOptions<FresherAcquisitionOptions> options, IDurableFresherImportProcessor queue) : ControllerBase
 {
     [HttpGet("status")]
     public async Task<IActionResult> Status([FromQuery] string sourceType, [FromQuery] string importId,
@@ -29,13 +29,24 @@ public sealed class InternalFresherBulkImportController(IFresherBulkImportServic
 
     [HttpPost]
     [ProducesResponseType(typeof(FresherBulkImportResponse), StatusCodes.Status200OK)]
-    public async Task<ActionResult<FresherBulkImportResponse>> Import(
+    [ProducesResponseType(typeof(FresherImportStatus), StatusCodes.Status202Accepted)]
+    public async Task<IActionResult> Import(
         [FromBody] FresherBulkImportRequest request, CancellationToken cancellationToken)
     {
         var maximum = Math.Clamp(options.Value.MaximumBatchSize, 1, 1000);
         if (request.Jobs.Count is < 1 || request.Jobs.Count > maximum)
             return StatusCode(StatusCodes.Status413PayloadTooLarge, new { code = "BATCH_SIZE_EXCEEDED", maximumBatchSize = maximum });
-        try { return Ok(await importer.ImportAsync(request, cancellationToken)); }
+        try
+        {
+            if (!request.SourceType.Trim().Equals("talentd", StringComparison.OrdinalIgnoreCase))
+                return Ok(await importer.ImportAsync(request, cancellationToken));
+            if (request.Jobs.Count > 20)
+                return StatusCode(StatusCodes.Status413PayloadTooLarge, new { code = "BATCH_SIZE_EXCEEDED", maximumBatchSize = 20 });
+            var status = await queue.StageAsync(request, cancellationToken);
+            return status.Status == "COMPLETED" ? Ok(status.Receipt) : Accepted(status);
+        }
+        catch (ArgumentException) { return BadRequest(new { code = "INVALID_DURABLE_BATCH" }); }
+        catch (InvalidOperationException) { return StatusCode(503, new { code = "ACQUISITION_SOURCE_UNAVAILABLE" }); }
         catch (ImportIdPayloadConflictException)
         {
             return Conflict(new { code = "IMPORT_ID_PAYLOAD_CONFLICT" });
