@@ -35,6 +35,23 @@ public sealed class PublicPopularCompaniesTests
     }
 
     [Fact]
+    public void CompaniesWithCandidateVisibleJobsQueryTranslatesToPostgresExists()
+    {
+        using var context = new JobPortalDbContext(
+            new DbContextOptionsBuilder<JobPortalDbContext>()
+                .UseNpgsql("Host=localhost;Database=TranslationOnly")
+                .Options);
+        var repository = new PublicJobRepository(context, new FixedTimeProvider(Now));
+
+        var sql = repository.CompaniesWithCandidateVisibleJobsQuery().ToQueryString();
+
+        Assert.Contains("EXISTS", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ORDER BY", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("DISTINCT", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("btrim", sql, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task GetApiJobsCompaniesPopularPreservesVisibilityAndOrdering()
     {
         await using var context = new JobPortalDbContext(

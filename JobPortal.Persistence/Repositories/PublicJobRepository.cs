@@ -90,14 +90,17 @@ public sealed partial class PublicJobRepository(
 
     public async Task<IReadOnlyCollection<PublicCompanyLogoResponse>> GetCompaniesWithCandidateVisibleJobsAsync(
         CancellationToken cancellationToken = default) =>
-        await AvailableJobs()
-            .Where(job => job.Company.LogoUrl != null && job.Company.LogoUrl.Trim() != string.Empty)
-            .Select(job => new PublicCompanyLogoResponse(
-                job.CompanyId, job.Company.Name, job.Company.LogoUrl!))
-            .Distinct()
+        await CompaniesWithCandidateVisibleJobsQuery().ToArrayAsync(cancellationToken);
+
+    internal IQueryable<PublicCompanyLogoResponse> CompaniesWithCandidateVisibleJobsQuery() =>
+        context.Companies.AsNoTracking()
+            .Where(company => !company.IsDeleted &&
+                company.LogoUrl != null && company.LogoUrl.Trim() != string.Empty)
+            .Where(company => AvailableJobs().Any(job => job.CompanyId == company.Id))
             .OrderBy(company => company.Name)
-            .ThenBy(company => company.CompanyId)
-            .ToArrayAsync(cancellationToken);
+            .ThenBy(company => company.Id)
+            .Select(company => new PublicCompanyLogoResponse(
+                company.Id, company.Name, company.LogoUrl!));
 
     public async Task<PublicJobFilterOptionsResponse> GetFilterOptionsAsync(
         PublicJobQuery query,
