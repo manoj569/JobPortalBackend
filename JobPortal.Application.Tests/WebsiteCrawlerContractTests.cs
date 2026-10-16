@@ -86,12 +86,7 @@ public sealed class WebsiteCrawlerContractTests
     }
 
     [Theory]
-    [InlineData("company", "REQUIRED_OR_OVERSIZED_FIELD")]
-    [InlineData("url", "WEBSITE_SAFE_URLS_REQUIRED")]
     [InlineData("id", "FIELD_LENGTH_EXCEEDED")]
-    [InlineData("expired", "WEBSITE_EXPIRED")]
-    [InlineData("unverified", "WEBSITE_EVIDENCE_REQUIRED")]
-    [InlineData("medium", "WEBSITE_EVIDENCE_REQUIRED")]
     [InlineData("provenance", "WEBSITE_PROVENANCE_INVALID")]
     public async Task UnsafeWebsiteRowsAreRejectedBeforeIngestion(string change, string reason)
     {

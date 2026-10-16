@@ -62,4 +62,6 @@ public sealed record FresherBulkImportResponse(
 {
     public Guid? RunId { get; init; }
     public int Published { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public bool PublicationPending { get; init; }
 }

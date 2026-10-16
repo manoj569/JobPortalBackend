@@ -26,7 +26,8 @@ public sealed class JobService(
     ICategoryManagementRepository? categories = null,
     IJobSourceRepository? sources = null,
     IExternalJobCreationLock? creationLock = null,
-    IJobDeduplicationService? deduplication = null) : IJobService
+    IJobDeduplicationService? deduplication = null,
+    JobPortal.Application.Features.FresherAcquisition.IFresherAcquisitionStore? acquisitionSources = null) : IJobService
 {
     private readonly Dictionary<Guid, JobSource> publicationSources = [];
 
@@ -342,16 +343,26 @@ public sealed class JobService(
         if (job.Status == JobStatus.Archived)
             throw new ConflictException("An archived job cannot be published.");
 
-        if (ImportedJobIntegrity.Eligibility(job).ReasonCode == "MissingLocationAccepted")
-            job.Location = IndiaJobEligibilityPolicy.MissingLocationLabel;
-        await updateValidator.ValidateAndThrowAsync(ToUpdateRequest(job), cancellationToken);
+        var website = job.AcquisitionSourceId is { } acquisitionId && acquisitionSources is not null &&
+            await acquisitionSources.GetSourceByIdAsync(acquisitionId, cancellationToken) is
+                { ProviderKey: "website-crawler", IsEnabled: true, IsDeleted: false, AutoPublishEnabled: true };
+        if (website)
+        {
+            if (!job.SourceOwnsPublication || job.IsHidden || job.IsDeleted ||
+                !ImportedJobIntegrity.HasMeaningfulTitle(job.Title) || !ImportedJobIntegrity.IsSafeApplicationUrl(job.ApplicationUrl))
+                throw new BadRequestException("Website job cannot be published.", "invalid_website_job");
+        }
+        else
+        {
+            if (ImportedJobIntegrity.Eligibility(job).ReasonCode == "MissingLocationAccepted")
+                job.Location = IndiaJobEligibilityPolicy.MissingLocationLabel;
+            await updateValidator.ValidateAndThrowAsync(ToUpdateRequest(job), cancellationToken);
+            if (job.ExpiresAtUtc.HasValue && job.ExpiresAtUtc <= UtcNow)
+                throw new BadRequestException("A job must have an expiration date in the future before it can be published.");
+            if (ImportedJobIntegrity.Eligibility(job).Decision != IndiaJobEligibilityDecision.Accepted)
+                throw new BadRequestException("Job location is not eligible for publication.", "job_location_ineligible");
+        }
         await ValidateReferencesAsync(job.CompanyId, job.CategoryId, cancellationToken);
-        if (job.ExpiresAtUtc.HasValue && job.ExpiresAtUtc <= UtcNow)
-            throw new BadRequestException(
-                "A job must have an expiration date in the future before it can be published.");
-
-        if (ImportedJobIntegrity.Eligibility(job).Decision != IndiaJobEligibilityDecision.Accepted)
-            throw new BadRequestException("Job location is not eligible for publication.", "job_location_ineligible");
         await ValidateSourcePublicationAsync(job, cancellationToken);
         job.Status = JobStatus.Published;
         job.PublishedAtUtc = UtcNow;

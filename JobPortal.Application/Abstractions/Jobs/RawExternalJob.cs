@@ -25,6 +25,11 @@ public sealed record RawExternalJob
     // Set by JobSourceRunner only for providers that return a complete snapshot.
     public Guid? JobSourceId { get; init; }
     public Guid? AcquisitionSourceId { get; init; }
+    // Internal mapping hint; ingestion confirms the registered source before applying policy.
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? AcquisitionProviderKey { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? PreviousAcquisitionExternalId { get; init; }
     public string? AcquisitionExternalId { get; init; }
     public string? DiscoveredUrl { get; init; }
     public string? CanonicalJobUrl { get; init; }

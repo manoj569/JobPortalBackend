@@ -150,7 +150,7 @@ public sealed class AcquisitionPublicationEligibilityTests
             var jobs = new JobRepository(Db);
             var unit = new UnitOfWork(Db);
             Manual = new(jobs, unit, new Audit(), new CreateJobRequestValidator(), new UpdateJobRequestValidator(),
-                new UpdateRecruiterContactRequestValidator(), new JobSearchQueryValidator(), TimeProvider.System);
+                new UpdateRecruiterContactRequestValidator(), new JobSearchQueryValidator(), TimeProvider.System, acquisitionSources: new FresherAcquisitionStore(Db));
             Automatic = new(jobs, new JobQualityGate(), Manual, Options.Create(new JobAggregationOptions()), TimeProvider.System,
                 new JobSourceRepository(Db), acquisitionSources: new FresherAcquisitionStore(Db));
         }

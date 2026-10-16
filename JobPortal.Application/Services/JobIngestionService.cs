@@ -19,7 +19,8 @@ public sealed class JobIngestionService(
     IExternalJobCreationLock creationLock,
     IUrlCanonicalizer canonicalizer,
     IJobSourceRunCheckpoint? checkpoint = null, ILogger<JobIngestionService>? classificationLogger = null,
-    IJobClassificationService? classifier = null) : IJobIngestionService, IBulkJobIngestionService, IBatchedJobIngestionService
+    IJobClassificationService? classifier = null,
+    JobPortal.Application.Features.FresherAcquisition.IFresherAcquisitionStore? acquisitionSources = null) : IJobIngestionService, IBulkJobIngestionService, IBatchedJobIngestionService
 {
     private static readonly Action<ILogger, Guid?, string?, Guid, Exception?> ClassificationFailed = LoggerMessage.Define<Guid?, string?, Guid>(LogLevel.Error, new EventId(7410, "ClassificationFailed"), "Classification failed for source {SourceId}, external job {ExternalId}, job {JobId}");
     // JobSourceRunner processes a source sequentially inside one DI scope.
@@ -251,8 +252,11 @@ public sealed class JobIngestionService(
         // This is the last boundary before either creation or mutation of Jobs.
         // Publication status cannot substitute for positive hiring-location evidence.
         rawJob = new ExternalJobNormalizer().Normalize(rawJob);
+        var website = rawJob.AcquisitionProviderKey == "website-crawler" && rawJob.AcquisitionSourceId is { } acquisitionId &&
+            acquisitionSources is not null && await acquisitionSources.GetSourceByIdAsync(acquisitionId, cancellationToken) is
+                { ProviderKey: "website-crawler", IsEnabled: true, IsDeleted: false };
         var eligibility = IndiaJobEligibilityPolicy.Evaluate(rawJob);
-        if (eligibility.Decision != IndiaJobEligibilityDecision.Accepted)
+        if (!website && eligibility.Decision != IndiaJobEligibilityDecision.Accepted)
             return Invalid("Validation:INDIA_ELIGIBILITY_" +
                 (eligibility.Decision == IndiaJobEligibilityDecision.Rejected ? "NON_INDIA" : "UNKNOWN"));
 
@@ -263,7 +267,8 @@ public sealed class JobIngestionService(
         if (rawJob.JobSourceId.HasValue && !ImportedJobIntegrity.IsSafeApplicationUrl(rawJob.ApplicationUrl))
             return Invalid("ApplicationUrl must be an absolute HTTP or HTTPS URL.");
         if (title.Length > 250) return Invalid("Job title cannot exceed 250 characters.");
-        if (companyName is null) return Invalid("Company name is required.");
+        if (companyName is null && !website) return Invalid("Company name is required.");
+        companyName ??= string.Empty;
 
         if (rawJob.SalaryMin < 0 || rawJob.SalaryMax < 0 || rawJob.SalaryMin > rawJob.SalaryMax)
             return Invalid("Salary range is invalid.");
@@ -320,6 +325,22 @@ public sealed class JobIngestionService(
             await PersistAsync(cancellationToken);
             return new JobIngestionResult { Outcome = changed ? JobIngestionOutcome.Updated : JobIngestionOutcome.Unchanged,
                 JobId = acquired.Id, ExplicitReasonCode = JobIngestionReasonCode.None };
+        }
+        if (website && rawJob.AcquisitionSourceId is { } websiteSource && acquisitionExternalId is not null &&
+            rawJob.PreviousAcquisitionExternalId is { Length: <= 255 } legacyIdentity &&
+            await jobs.FindByAcquisitionIdentityAsync(websiteSource,
+                JobPortal.Application.Features.FresherAcquisition.FresherCandidateIdentity.Normalize(legacyIdentity), cancellationToken) is { } legacy &&
+            legacy.CompanyId == company.Id && legacy.Title == title && legacy.Location == location &&
+            legacy.DiscoveredUrl == rawJob.DiscoveredUrl && legacy.ApplicationUrl == applicationUrl)
+        {
+            // Bridge the old URL-derived website identity using exact provenance
+            // and fields only. Existing run/item receipts and worker bytes remain intact.
+            legacy.AcquisitionExternalId = acquisitionExternalId;
+            ApplySourceFields(legacy, rawJob, title, company, location, applicationUrl);
+            legacy.LastSeenAtUtc = now;
+            await PersistAsync(cancellationToken);
+            return new JobIngestionResult { Outcome = JobIngestionOutcome.Updated, JobId = legacy.Id,
+                ExplicitReasonCode = JobIngestionReasonCode.None };
         }
         if (rawJob.JobSourceId.HasValue && sourceExternalId is not null)
         {
@@ -647,6 +668,10 @@ public sealed class JobIngestionService(
 
     private static DeduplicationResult RespectSourceIdentity(RawExternalJob raw, DeduplicationResult match)
     {
+        if (raw.AcquisitionProviderKey == "website-crawler" && raw.AcquisitionSourceId is not null &&
+            !string.IsNullOrWhiteSpace(raw.AcquisitionExternalId) && match.MatchedJob is { } acquired &&
+            (acquired.AcquisitionSourceId != raw.AcquisitionSourceId || acquired.AcquisitionExternalId != raw.AcquisitionExternalId))
+            return DeduplicationResult.NoMatch();
         // Title/company/location similarity is not a requisition identity. A
         // canonical URL remains strong evidence, but two explicit, different
         // requisitions within the SAME source must not collapse on weak evidence.

@@ -10,15 +10,27 @@ namespace JobPortal.Persistence.Repositories;
 
 public sealed partial class FresherAcquisitionStore
 {
-    public async Task<FresherCompanyResolution> ResolveCompanyAsync(FresherImportCandidate candidate, CancellationToken cancellationToken)
+    public Task<FresherCompanyResolution> ResolveCompanyAsync(FresherImportCandidate candidate, CancellationToken cancellationToken) => ResolveCompanyCoreAsync(candidate, false, cancellationToken);
+    public Task<FresherCompanyResolution> ResolveWebsiteCompanyAsync(FresherImportCandidate candidate, CancellationToken cancellationToken) => ResolveCompanyCoreAsync(candidate, true, cancellationToken);
+    private async Task<FresherCompanyResolution> ResolveCompanyCoreAsync(FresherImportCandidate candidate, bool websitePolicy, CancellationToken cancellationToken)
     {
         if (candidate.CompanyId is { } explicitId)
             return await db.Companies.AnyAsync(x => x.Id == explicitId, cancellationToken)
                 ? new(explicitId) : new(null, "COMPANY_ID_NOT_FOUND");
-        var name = FresherCompanyIdentity.ValidName(candidate.CompanyName);
+        var name = websitePolicy ? CompanyNameNormalizer.Display(candidate.CompanyName ?? string.Empty)
+            : FresherCompanyIdentity.ValidName(candidate.CompanyName);
         if (name is null) return new(null, "COMPANY_NAME_INVALID");
-        var normalized = CompanyNameNormalizer.Normalize(name);
-        var website = FresherCompanyIdentity.EmployerWebsite(candidate.CompanyWebsiteUrl);
+        if (websitePolicy && name.Length > 160) name = name[..160];
+        var unknown = websitePolicy && CompanyNameNormalizer.Normalize(name) is
+            "" or "confidential" or "unknown" or "n/a" or "na" or "undisclosed" or "not disclosed" or "company";
+        if (unknown) name = string.Empty;
+        // An empty display name represents unknown employer, not a fabricated company.
+        // Keep the required FK/administrator owner using a source-scoped technical bucket.
+        var normalized = unknown ? "WEBSITE-UNSPECIFIED:" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(new Uri(candidate.DiscoveredUrl!).Host.ToUpperInvariant())))
+            : CompanyNameNormalizer.Normalize(name);
+        var website = websitePolicy && FresherAcquisitionEligibilityPolicy.IsSafePublicUrl(candidate.CompanyWebsiteUrl)
+            ? new Uri(candidate.CompanyWebsiteUrl!).GetLeftPart(UriPartial.Authority)
+            : FresherCompanyIdentity.EmployerWebsite(candidate.CompanyWebsiteUrl);
         var domain = CompanyDomainNormalizer.Normalize(website);
         if (domain is not null)
         {
@@ -27,12 +39,15 @@ public sealed partial class FresherAcquisitionStore
             if (matches.Length > 1) return new(null, "COMPANY_DOMAIN_AMBIGUOUS");
             if (matches.Length == 1) return new(matches[0]);
         }
+        // A shared unknown-employer bucket must not acquire one vacancy's
+        // employer domain; retain that claim on the job's source metadata.
+        if (unknown) { website = null; domain = null; }
         var existing = await db.Companies.Where(x => x.NormalizedName == normalized)
             .Select(x => (Guid?)x.Id).SingleOrDefaultAsync(cancellationToken);
         if (existing.HasValue) return new(existing);
-        // A claimed URL may resolve a previously known employer domain, but it
-        // cannot establish a new employer website without producer verification.
-        if (!candidate.CompanyWebsiteVerified) { website = null; domain = null; }
+        // Website source claims remain unverified company data. Other acquisition
+        // providers retain their existing producer-attestation requirement.
+        if (!websitePolicy && !candidate.CompanyWebsiteVerified) { website = null; domain = null; }
 
         // Match existing candidate-company onboarding: an active administrator is
         // the required owner; never invent a user or weaken the non-null owner FK.

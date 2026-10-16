@@ -88,8 +88,18 @@ public sealed partial class JobAutoPublishService(
                 return new() { Outcome = JobAutoPublishOutcome.Disabled };
             if (!acquisition.AutoPublishEnabled)
                 return new() { Outcome = JobAutoPublishOutcome.Disabled };
+            if (acquisition.ProviderKey == "website-crawler" && job.Status == JobStatus.Published && !job.IsDeleted && !job.IsHidden && job.SourceOwnsPublication)
+                return new() { Outcome = JobAutoPublishOutcome.AlreadyPublished };
             if (job.IsDeleted || job.IsHidden || job.Status != JobStatus.Draft || !job.SourceOwnsPublication)
                 return new() { Outcome = JobAutoPublishOutcome.NeedsReview, Reasons = [JobQualityReasonCode.PublicationOwnershipUnverified] };
+            if (acquisition.ProviderKey == "website-crawler")
+            {
+                if (job.IsDeleted || job.IsHidden || job.Status is not (JobStatus.Draft or JobStatus.Published))
+                    return new() { Outcome = JobAutoPublishOutcome.NeedsReview, Reasons = [JobQualityReasonCode.PublicationOwnershipUnverified] };
+                if (!ImportedJobIntegrity.HasMeaningfulTitle(job.Title) || !ImportedJobIntegrity.IsSafeApplicationUrl(job.ApplicationUrl))
+                    return new() { Outcome = JobAutoPublishOutcome.Rejected };
+                return job.Status == JobStatus.Published ? new() { Outcome = JobAutoPublishOutcome.AlreadyPublished } : null;
+            }
             var acquisitionQuality = qualityGate.Evaluate(job, timeProvider.GetUtcNow().UtcDateTime);
             if (!acquisitionQuality.IsEligible)
                 return new() { Outcome = acquisitionQuality.Decision == JobQualityDecision.Rejected

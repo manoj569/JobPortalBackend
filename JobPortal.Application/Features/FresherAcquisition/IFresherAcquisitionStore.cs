@@ -29,6 +29,7 @@ public interface IFresherAcquisitionChunk : IAsyncDisposable
 public interface IFresherAcquisitionStore
 {
     Task<FresherCompanyResolution> ResolveCompanyAsync(FresherImportCandidate candidate, CancellationToken cancellationToken);
+    Task<FresherCompanyResolution> ResolveWebsiteCompanyAsync(FresherImportCandidate candidate, CancellationToken cancellationToken) => ResolveCompanyAsync(candidate, cancellationToken);
     Task<T> ExecuteImportAsync<T>(Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken) => operation(cancellationToken);
     Task<AcquisitionSource?> GetEnabledSourceAsync(string providerKey, CancellationToken cancellationToken);
     Task<AcquisitionSource?> GetSourceByIdAsync(Guid sourceId, CancellationToken cancellationToken);

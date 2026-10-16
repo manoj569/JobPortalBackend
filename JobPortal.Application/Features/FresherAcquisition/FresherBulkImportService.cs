@@ -70,7 +70,16 @@ public sealed partial class FresherBulkImportService(
                 return new(request.ImportId, request.Jobs.Count, 0, 0, 0, 0, 0, 0, 0, 0, request.Jobs.Count,
                     Enumerable.Range(0, request.Jobs.Count).Select(i => new FresherImportItemOutcome(i, "Failed", "ACQUISITION_SOURCE_DISABLED")).ToArray());
         }
-        var identityKeys = request.Jobs.Select(x => FresherCandidateIdentity.Create(source?.Id ?? Guid.Empty, x)).ToArray();
+        var website = (source?.ProviderKey ?? request.SourceType.Trim()).Equals("website-crawler", StringComparison.OrdinalIgnoreCase);
+        var requirePublication = website && request.Jobs.Any(candidate => MetadataBoolean(candidate, "autoPublishRequired"));
+        if (requirePublication && (source is null || !source.AutoPublishEnabled || autoPublish is null))
+        {
+            var reason = source is not null && !source.AutoPublishEnabled ? "ACQUISITION_AUTOPUBLISH_DISABLED" : "ACQUISITION_PUBLICATION_UNAVAILABLE";
+            return new(request.ImportId, request.Jobs.Count, 0, 0, 0, 0, 0, 0, 0, 0, request.Jobs.Count,
+                Enumerable.Range(0, request.Jobs.Count).Select(i => new FresherImportItemOutcome(i, "Failed", reason)).ToArray());
+        }
+        // Preserve the original request/fingerprint. Website fallback IDs are mapping values only.
+        var identityKeys = request.Jobs.Select(x => FresherCandidateIdentity.Create(source?.Id ?? Guid.Empty, x, website)).ToArray();
         var requestFingerprint = FresherCandidateIdentity.Fingerprint(identityKeys);
         IReadOnlyDictionary<string, FresherImportReceiptSnapshot> priorReceipts = new Dictionary<string, FresherImportReceiptSnapshot>();
         await using var runLock = new AsyncDisposableHolder();
@@ -95,10 +104,16 @@ public sealed partial class FresherBulkImportService(
         var outcomes = new List<FresherImportItemOutcome>(request.Jobs.Count);
         var geoRejected = 0; var experienceRejected = 0; var invalidData = 0; var invalidUrl = 0;
         var created = 0; var updated = 0; var existing = 0; var failed = 0; var accepted = 0; var published = 0;
+        var pendingPublication = false;
         var seenInRequest = new HashSet<string>(StringComparer.Ordinal);
-        var chunkSize = acquisitionStore is null ? request.Jobs.Count : Math.Clamp(options?.Value.ChunkSize ?? 50, 1, 200);
+        var chunkSize = website ? 1 : acquisitionStore is null ? request.Jobs.Count : Math.Clamp(options?.Value.ChunkSize ?? 50, 1, 200);
         for (var chunkStart = 0; chunkStart < request.Jobs.Count; chunkStart += chunkSize)
         {
+            var committed = false;
+            var beforeCount = outcomes.Count;
+            var beforeCounts = (geoRejected, experienceRejected, invalidData, invalidUrl, created, updated, existing, failed, accepted, published);
+            try
+            {
             diagnostic.Stage = "BeginChunk";
             diagnostic.ExternalId = null;
             await using var chunk = run is not null && acquisitionStore is not null
@@ -141,7 +156,7 @@ public sealed partial class FresherBulkImportService(
                 chunkReceipts.Add(new(index, null, identityKey, "Unknown", outcomes[^1], now));
                 continue;
             }
-            var dataError = ValidateCandidate(candidate);
+            var dataError = ValidateCandidate(candidate, website);
             if (dataError is null && request.SourceType.Trim().Equals("website-crawler", StringComparison.OrdinalIgnoreCase))
                 dataError = ValidateWebsiteCandidate(candidate, now);
             if (dataError is not null)
@@ -152,14 +167,14 @@ public sealed partial class FresherBulkImportService(
                 continue;
             }
             var decision = FresherAcquisitionEligibilityPolicy.Evaluate(ToPolicyCandidate(candidate));
-            if (decision.Geography is not (FresherGeographyDecision.IndiaEligible or FresherGeographyDecision.GlobalRemoteEligible))
+            if (!website && decision.Geography is not (FresherGeographyDecision.IndiaEligible or FresherGeographyDecision.GlobalRemoteEligible))
             {
                 geoRejected++;
                 outcomes.Add(new(index, "RejectedGeography", decision.GeographyReasonCode));
                 RecordReceipt(index, candidate);
                 continue;
             }
-            if (decision.Experience != FresherExperienceDecision.Eligible)
+            if (!website && decision.Experience != FresherExperienceDecision.Eligible)
             {
                 experienceRejected++;
                 outcomes.Add(new(index, "RejectedExperience", decision.ExperienceReasonCode));
@@ -174,8 +189,8 @@ public sealed partial class FresherBulkImportService(
                 RecordReceipt(index, candidate);
                 continue;
             }
-            if (string.IsNullOrWhiteSpace(candidate.CompanyName) || string.IsNullOrWhiteSpace(candidate.Title) ||
-                string.IsNullOrWhiteSpace(candidate.Description))
+            if (!website && (string.IsNullOrWhiteSpace(candidate.CompanyName) || string.IsNullOrWhiteSpace(candidate.Title) ||
+                string.IsNullOrWhiteSpace(candidate.Description)))
             {
                 failed++;
                 outcomes.Add(new(index, "RejectedInvalidData", "REQUIRED_FIELD_MISSING"));
@@ -187,34 +202,54 @@ public sealed partial class FresherBulkImportService(
             Guid? categoryId = candidate.CategoryId;
             if (categoryId.HasValue && (categories is null || await categories.GetByIdAsync(categoryId.Value, cancellationToken) is null))
             {
-                invalidData++;
-                outcomes.Add(new(index, "RejectedInvalidData", "CATEGORY_RESOLUTION_FAILED"));
-                RecordReceipt(index, candidate);
-                continue;
-            }
-            if (!categoryId.HasValue && !string.IsNullOrWhiteSpace(candidate.Category))
-            {
-                var categoryName = candidate.Category.Trim();
-                var matchedCategory = categories is null ? null : await categories.FindByNameOrSlugAsync(categoryName, SlugGenerator.Generate(categoryName), cancellationToken);
-                if (matchedCategory is null)
+                if (website) categoryId = null;
+                else
                 {
                     invalidData++;
                     outcomes.Add(new(index, "RejectedInvalidData", "CATEGORY_RESOLUTION_FAILED"));
                     RecordReceipt(index, candidate);
                     continue;
                 }
-                categoryId = matchedCategory.Id;
+            }
+            if (!categoryId.HasValue && !string.IsNullOrWhiteSpace(candidate.Category))
+            {
+                var categoryName = candidate.Category.Trim();
+                var matchedCategory = categories is null ? null : await categories.FindByNameOrSlugAsync(categoryName, SlugGenerator.Generate(categoryName), cancellationToken);
+                if (matchedCategory is null && !website)
+                {
+                    invalidData++;
+                    outcomes.Add(new(index, "RejectedInvalidData", "CATEGORY_RESOLUTION_FAILED"));
+                    RecordReceipt(index, candidate);
+                    continue;
+                }
+                categoryId = matchedCategory?.Id;
             }
 
+            if (website && categoryId is null && categories is not null)
+            {
+                var categoryName = WebsiteCategory(candidate.Title);
+                if (categoryName is not null)
+                    categoryId = (await categories.FindByNameOrSlugAsync(categoryName, SlugGenerator.Generate(categoryName), cancellationToken))?.Id;
+            }
             try
             {
                 diagnostic.Stage = "CompanyResolution";
                 var companyId = candidate.CompanyId;
                 if (acquisitionStore is not null)
                 {
-                    var company = await acquisitionStore.ResolveCompanyAsync(candidate, cancellationToken);
+                    var company = website ? await acquisitionStore.ResolveWebsiteCompanyAsync(candidate, cancellationToken)
+                        : await acquisitionStore.ResolveCompanyAsync(candidate, cancellationToken);
                     if (company.CompanyId is null)
                     {
+                        if (website && company.ReasonCode is "COMPANY_OWNER_UNAVAILABLE" or "COMPANY_CREATION_CONFLICT")
+                        {
+                            // Do not freeze a recoverable infrastructure failure
+                            // into an immutable terminal candidate receipt.
+                            failed++;
+                            outcomes.Add(new(index, "Failed", "ITEM_NOT_COMMITTED"));
+                            CompanyResolutionDeferred(logger, request.ImportId, index, company.ReasonCode);
+                            continue;
+                        }
                         failed++;
                         outcomes.Add(new(index, "Failed", company.ReasonCode ?? "COMPANY_NOT_RESOLVED"));
                         RecordReceipt(index, candidate);
@@ -222,7 +257,7 @@ public sealed partial class FresherBulkImportService(
                     }
                     companyId = company.CompanyId;
                 }
-                var countryCodes = decision.Geography == FresherGeographyDecision.GlobalRemoteEligible
+                var countryCodes = !website && decision.Geography == FresherGeographyDecision.GlobalRemoteEligible
                     ? new[] { "IN" }
                     : string.Equals(candidate.Country, "India", StringComparison.OrdinalIgnoreCase) ? new[] { "IN" } : Array.Empty<string>();
                 var metadataValues = new Dictionary<string, object?>
@@ -242,13 +277,14 @@ public sealed partial class FresherBulkImportService(
                         sourceDomain = new Uri(candidate.DiscoveredUrl!).Host.ToLowerInvariant(),
                         extractionConfidence = MetadataText(candidate, "extractionConfidence"),
                         applyClassification = MetadataText(candidate, "applyClassification"),
-                        destinationVerified = true
+                        destinationVerified = candidate.SourceMetadata is { ValueKind: JsonValueKind.Object } md && md.TryGetProperty("destinationVerified", out var dv) && dv.ValueKind == JsonValueKind.True,
+                        extracted = candidate.SourceMetadata
                     };
                 var metadata = JsonSerializer.Serialize(metadataValues);
                 var raw = new RawExternalJob
                 {
                     Title = candidate.Title,
-                    CompanyName = candidate.CompanyName,
+                    CompanyName = candidate.CompanyName ?? string.Empty,
                     CompanyId = companyId,
                     CompanyWebsiteUrl = candidate.CompanyWebsiteUrl,
                     Location = ComposeLocation(candidate, request.SourceType.Trim().Equals("website-crawler", StringComparison.OrdinalIgnoreCase)),
@@ -260,7 +296,9 @@ public sealed partial class FresherBulkImportService(
                     // Keep employer ATS identity in its own field; acquisition IDs have a separate Job column.
                     ExternalId = source is null ? candidate.ExternalJobId : null,
                     AcquisitionSourceId = source?.Id,
-                    AcquisitionExternalId = candidate.ExternalJobId is null ? null : FresherCandidateIdentity.Normalize(candidate.ExternalJobId),
+                    AcquisitionProviderKey = source?.ProviderKey,
+                    PreviousAcquisitionExternalId = website ? MetadataText(candidate, "legacyExternalId") : null,
+                    AcquisitionExternalId = candidate.ExternalJobId is null ? (website ? FresherCandidateIdentity.WebsiteFallback(candidate) : null) : FresherCandidateIdentity.Normalize(candidate.ExternalJobId),
                     DiscoveredUrl = SafeUrlOrNull(candidate.DiscoveredUrl),
                     CanonicalJobUrl = SafeUrlOrNull(candidate.CanonicalJobUrl),
                     LastVerifiedAtUtc = candidate.SourceLastSeenAt?.ToUniversalTime(),
@@ -269,10 +307,10 @@ public sealed partial class FresherBulkImportService(
                     EmploymentType = MapEmployment(candidate.EmploymentType),
                     WorkplaceType = MapWorkplace(candidate.WorkplaceType),
                     WorkplaceTypeText = candidate.WorkplaceType,
-                    ExperienceLevel = ExperienceLevel.Entry,
-                    MinimumExperienceYears = candidate.MinimumExperienceYears ?? 0,
+                    ExperienceLevel = website ? ExperienceLevel.Unknown : ExperienceLevel.Entry,
+                    MinimumExperienceYears = website ? candidate.MinimumExperienceYears : candidate.MinimumExperienceYears ?? 0,
                     MaximumExperienceYears = candidate.MaximumExperienceYears,
-                    EducationRequirement = candidate.ExperienceClassification,
+                    EducationRequirement = website ? null : candidate.ExperienceClassification,
                     ExternalCategory = candidate.Category,
                     CategoryId = categoryId,
                     Skills = candidate.Skills,
@@ -313,6 +351,7 @@ public sealed partial class FresherBulkImportService(
             diagnostic.ExternalId = null;
             if (chunk is not null && run is not null)
                 await chunk.CommitAsync(run.Id, chunkReceipts, cancellationToken);
+            committed = chunk is not null;
 
             // Network/publication side effects happen only after the job+receipt commit.
             foreach (var queued in publicationQueue)
@@ -320,8 +359,26 @@ public sealed partial class FresherBulkImportService(
                 try
                 {
                     diagnostic.Stage = "Publication";
-                    var result = await autoPublish!.TryPublishAsync(queued.JobId, cancellationToken);
-                    var status = result.Outcome == JobAutoPublishOutcome.Published ? "Published" : "NotPublished";
+                    JobAutoPublishResult result;
+                    for (var attempt = 0; ; attempt++)
+                    {
+                        try
+                        {
+                            result = await autoPublish!.TryPublishAsync(queued.JobId, cancellationToken);
+                            break;
+                        }
+                        catch (Exception) when (website && attempt < 2 && !cancellationToken.IsCancellationRequested)
+                        {
+                            // Retry publication of this committed job, never ingestion.
+                            await Task.Delay(TimeSpan.FromMilliseconds(100 * (1 << attempt)), cancellationToken);
+                        }
+                    }
+                    var status = result.Outcome is JobAutoPublishOutcome.Published or JobAutoPublishOutcome.AlreadyPublished ? "Published" : "NotPublished";
+                    if (requirePublication && result.Outcome == JobAutoPublishOutcome.Disabled)
+                    {
+                        status = "Pending";
+                        pendingPublication = true;
+                    }
                     await acquisitionStore!.UpdatePublicationAsync(run!.Id, queued.Identity, status, null, cancellationToken);
                     if (status == "Published") published++;
                 }
@@ -329,21 +386,47 @@ public sealed partial class FresherBulkImportService(
                 catch (Exception exception)
                 {
                     ItemImportFailed(logger, request.ImportId, queued.Index, exception.GetType().Name);
+                    pendingPublication |= requirePublication;
                     await acquisitionStore!.UpdatePublicationAsync(run!.Id, queued.Identity, "Failed", exception.GetType().Name, cancellationToken);
                 }
+            }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception exception) when (website)
+            {
+                if (committed)
+                {
+                    // The durable job/receipt must not be relabeled uncommitted
+                    // when a later publication-status write fails.
+                    pendingPublication |= requirePublication;
+                    ItemImportFailed(logger, request.ImportId, chunkStart, exception.GetType().Name);
+                    continue;
+                }
+                // Each website item has its own transaction. Rollback/disposal has
+                // cleared tracking; successful earlier items remain committed.
+                (geoRejected, experienceRejected, invalidData, invalidUrl, created, updated, existing, failed, accepted, published) = beforeCounts;
+                outcomes.RemoveRange(beforeCount, outcomes.Count - beforeCount);
+                outcomes.Add(new(chunkStart, "Failed", "ITEM_NOT_COMMITTED"));
+                failed++;
+                seenInRequest.Remove(identityKeys[chunkStart]);
+                ItemImportFailed(logger, request.ImportId, chunkStart, exception.GetType().Name);
             }
         }
         ImportSummary(logger, request.ImportId, request.Jobs.Count, accepted, geoRejected, experienceRejected, invalidData, invalidUrl, created, updated, existing, failed);
         var response = new FresherBulkImportResponse(request.ImportId, request.Jobs.Count, accepted, geoRejected, experienceRejected, invalidData, invalidUrl, created, updated, existing, failed, outcomes)
-        { RunId = run?.Id, Published = published };
-        if (run is not null && acquisitionStore is not null)
+        { RunId = run?.Id, Published = published, PublicationPending = pendingPublication };
+        if (run is not null && acquisitionStore is not null && !outcomes.Any(x => x.ReasonCode == "ITEM_NOT_COMMITTED"))
         {
             diagnostic.Stage = "CompleteRun";
             diagnostic.ExternalId = null;
             await acquisitionStore.CompleteRunAsync(run.Id, response, cancellationToken);
             var durable = await acquisitionStore.GetReplayResponseAsync(run.Id, request.ImportId, cancellationToken);
-            if (durable is not null) return durable with { Items = MapCurrentRequestItems(identityKeys,
-                await acquisitionStore.GetReceiptsAsync(run.Id, cancellationToken)) };
+            if (durable is not null)
+            {
+                var receipts = await acquisitionStore.GetReceiptsAsync(run.Id, cancellationToken);
+                return durable with { Items = MapCurrentRequestItems(identityKeys, receipts),
+                    PublicationPending = requirePublication && receipts.Values.Any(x => x.PublicationStatus is "Pending" or "Failed") };
+            }
         }
         return response;
     }
@@ -386,6 +469,26 @@ public sealed partial class FresherBulkImportService(
 
     private static string? SafeUrlOrNull(string? url) => FresherAcquisitionEligibilityPolicy.IsSafePublicUrl(url) ? url!.Trim() : null;
 
+    private static string? WebsiteCategory(string title)
+    {
+        static bool Has(string title, string pattern) => System.Text.RegularExpressions.Regex.IsMatch(title, pattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        if (Has(title, @"\b(?:data (?:scientist|analyst|engineer)|analytics)\b")) return "Data Science & Analytics";
+        if (Has(title, @"\b(?:machine learning|artificial intelligence)\b")) return "AI & Machine Learning";
+        if (Has(title, @"\b(?:devops|cloud engineer)\b")) return "DevOps & Cloud Engineering";
+        if (Has(title, @"\b(?:software|developer|programmer)\b")) return "Software Engineering";
+        if (Has(title, @"\b(?:accountant|finance|financial)\b")) return "Finance & Accounting";
+        if (Has(title, @"\bmarketing\b")) return "Marketing";
+        if (Has(title, @"\b(?:sales|business development)\b")) return "Sales & Business Development";
+        if (Has(title, @"\b(?:human resources|recruiter)\b")) return "Human Resources & Recruitment";
+        if (Has(title, @"\boperations\b")) return "Operations";
+        if (Has(title, @"\b(?:customer support|customer success)\b")) return "Customer Success & Support";
+        if (Has(title, @"\b(?:ui/ux|user experience|ux designer)\b")) return "UI/UX Design";
+        return null;
+    }
+
+    private static bool MetadataBoolean(FresherImportCandidate? candidate, string key) =>
+        candidate?.SourceMetadata is { ValueKind: JsonValueKind.Object } metadata && metadata.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.True;
+
     private static string? MetadataText(FresherImportCandidate candidate, string key) =>
         candidate.SourceMetadata is { ValueKind: JsonValueKind.Object } metadata &&
         metadata.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.String
@@ -393,27 +496,20 @@ public sealed partial class FresherBulkImportService(
 
     private static string? ValidateWebsiteCandidate(FresherImportCandidate candidate, DateTime now)
     {
-        if (MetadataText(candidate, "provider") != "website-crawler" ||
-            MetadataText(candidate, "extractionConfidence") != "HIGH" ||
-            MetadataText(candidate, "applyClassification") is not ("DIRECT_ATS" or "DIRECT_EMPLOYER" or "VERIFIED_APPLICATION_PORTAL") ||
-            candidate.SourceMetadata is not { ValueKind: JsonValueKind.Object } metadata ||
-            !metadata.TryGetProperty("destinationVerified", out var verified) || verified.ValueKind != JsonValueKind.True)
-            return "WEBSITE_EVIDENCE_REQUIRED";
-        if (!FresherAcquisitionEligibilityPolicy.IsSafePublicUrl(candidate.ApplyUrl) ||
-            !FresherAcquisitionEligibilityPolicy.IsSafePublicUrl(candidate.DiscoveredUrl) ||
-            !FresherAcquisitionEligibilityPolicy.IsSafePublicUrl(candidate.CanonicalJobUrl))
+        _ = now;
+        if (!FresherAcquisitionEligibilityPolicy.IsSafePublicUrl(candidate.DiscoveredUrl))
             return "WEBSITE_SAFE_URLS_REQUIRED";
         if (!string.Equals(MetadataText(candidate, "sourceDomain"), new Uri(candidate.DiscoveredUrl!).Host, StringComparison.OrdinalIgnoreCase))
             return "WEBSITE_PROVENANCE_INVALID";
-        return candidate.ExpiresAt?.ToUniversalTime() < now ? "WEBSITE_EXPIRED" : null;
+        return null;
     }
 
-    private static string? ValidateCandidate(FresherImportCandidate candidate)
+    private static string? ValidateCandidate(FresherImportCandidate candidate, bool website = false)
     {
         static bool TooLong(string? value, int max) => value?.Length > max;
         if (string.IsNullOrWhiteSpace(candidate.Title) || TooLong(candidate.Title, 250) ||
-            string.IsNullOrWhiteSpace(candidate.CompanyName) || TooLong(candidate.CompanyName, 200) ||
-            string.IsNullOrWhiteSpace(candidate.Description) || TooLong(candidate.Description, 16_000)) return "REQUIRED_OR_OVERSIZED_FIELD";
+            (!website && string.IsNullOrWhiteSpace(candidate.CompanyName)) || TooLong(candidate.CompanyName, 200) ||
+            (!website && string.IsNullOrWhiteSpace(candidate.Description)) || TooLong(candidate.Description, 16_000)) return "REQUIRED_OR_OVERSIZED_FIELD";
         if (TooLong(candidate.ExternalJobId, 255) || TooLong(candidate.CompanyWebsiteUrl, 2048) ||
             TooLong(candidate.CompanyLogoUrl, 2048) || TooLong(candidate.LocationText, 250) ||
             TooLong(candidate.City, 100) || TooLong(candidate.State, 100) || TooLong(candidate.Country, 100) ||
@@ -450,9 +546,11 @@ public sealed partial class FresherBulkImportService(
     private static EmploymentType? MapEmployment(string? value) => value?.Trim().ToLowerInvariant() switch
     {
         "intern" or "internship" => EmploymentType.Internship,
-        "full-time" or "full time" => EmploymentType.FullTime,
-        "part-time" or "part time" => EmploymentType.PartTime,
+        "full-time" or "full time" or "fulltime" or "full_time" => EmploymentType.FullTime,
+        "part-time" or "part time" or "parttime" or "part_time" => EmploymentType.PartTime,
         "contract" => EmploymentType.Contract,
+        "temporary" => EmploymentType.Temporary,
+        "freelance" => EmploymentType.Freelance,
         _ => null
     };
     private static WorkplaceType? MapWorkplace(string? value) => value?.Trim().ToLowerInvariant() switch
@@ -460,6 +558,10 @@ public sealed partial class FresherBulkImportService(
         "remote" => WorkplaceType.Remote, "hybrid" => WorkplaceType.Hybrid,
         "on-site" or "onsite" => WorkplaceType.OnSite, _ => null
     };
+
+    [LoggerMessage(EventId = 8580, Level = LogLevel.Warning,
+        Message = "Website company resolution deferred ImportId={ImportId} Index={Index} ReasonCode={ReasonCode}.")]
+    private static partial void CompanyResolutionDeferred(ILogger logger, string importId, int index, string reasonCode);
 
     [LoggerMessage(EventId = 8512, Level = LogLevel.Error,
         Message = "Bulk import failed CorrelationId={CorrelationId} ImportId={ImportId} SourceType={SourceType} JobCount={JobCount} Stage={Stage} ExternalId={ExternalId} ExceptionType={ExceptionType} SqlState={SqlState}")]

@@ -68,7 +68,8 @@ public sealed class JobRepository(JobPortalDbContext context) : IJobRepository
     public Task<int> ExpireOverduePublishedAsync(DateTime utcNow, CancellationToken cancellationToken = default) =>
         context.Jobs
             .Where(x => x.Status == JobStatus.Published &&
-                x.ExpiresAtUtc.HasValue && x.ExpiresAtUtc <= utcNow)
+                x.ExpiresAtUtc.HasValue && x.ExpiresAtUtc <= utcNow &&
+                (x.AcquisitionSource == null || x.AcquisitionSource.ProviderKey != "website-crawler"))
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(x => x.Status, JobStatus.Expired)
                 .SetProperty(x => x.IsFeatured, false)
