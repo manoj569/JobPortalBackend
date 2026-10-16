@@ -81,6 +81,8 @@ public sealed record PopularCompanyResponse(
     Guid Id, string Name, string Slug, string? LogoUrl, string? Industry,
     string? Location, bool IsVerified, int ActiveJobCount);
 
+public sealed record PublicCompanyLogoResponse(Guid CompanyId, string Name, string LogoUrl);
+
 public sealed record PublicJobPage(PagedResponse<PublicJobSummary> Page);
 
 public sealed record PublicJobSearchResponse(

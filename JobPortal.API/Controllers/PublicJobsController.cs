@@ -68,6 +68,13 @@ public sealed class PublicJobsController(IPublicJobService jobService) : Control
         Ok(new ApiResponse<IReadOnlyCollection<PopularCompanyResponse>>(
             await jobService.GetPopularCompaniesAsync(limit, cancellationToken)));
 
+    [HttpGet("companies")]
+    [ProducesResponseType(typeof(ApiResponse<IReadOnlyCollection<PublicCompanyLogoResponse>>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<ApiResponse<IReadOnlyCollection<PublicCompanyLogoResponse>>>> Companies(
+        CancellationToken cancellationToken) =>
+        Ok(new ApiResponse<IReadOnlyCollection<PublicCompanyLogoResponse>>(
+            await jobService.GetCompaniesWithCandidateVisibleJobsAsync(cancellationToken)));
+
     [HttpGet("{slug}/related")]
     [ProducesResponseType(typeof(ApiResponse<IReadOnlyCollection<PublicJobSummary>>), StatusCodes.Status200OK)]
     public async Task<ActionResult<ApiResponse<IReadOnlyCollection<PublicJobSummary>>>> Related(

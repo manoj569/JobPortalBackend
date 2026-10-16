@@ -91,11 +91,69 @@ public sealed class PublicPopularCompaniesTests
             });
     }
 
-    private static Company Company(string name, bool isVerified) =>
+    [Fact]
+    public async Task CompaniesEndpointReturnsAllDistinctLogoCompaniesWithCandidateVisibleJobs()
+    {
+        await using var context = new JobPortalDbContext(
+            new DbContextOptionsBuilder<JobPortalDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options);
+
+        var companies = Enumerable.Range(0, 55)
+            .Select(index => Company($"Company {index:D2}", false, $"https://logos.test/{index}.png"))
+            .ToArray();
+        var noJobs = Company("No jobs", false, "https://logos.test/no-jobs.png");
+        var noLogo = Company("No logo", false, null);
+        var blankLogo = Company("Blank logo", false, "  ");
+        var unpublished = Company("Unpublished", false, "https://logos.test/unpublished.png");
+        var unavailable = Company("Unavailable", false, "https://logos.test/unavailable.png");
+        var deletedCompany = Company("Deleted company", false, "https://logos.test/deleted.png");
+        deletedCompany.IsDeleted = true;
+        context.Companies.AddRange(companies);
+        context.Companies.AddRange(noJobs, noLogo, blankLogo, unpublished, unavailable, deletedCompany);
+
+        for (var index = 0; index < companies.Length; index++)
+        {
+            var company = companies[index];
+            context.Jobs.Add(AvailableJob(company, $"{company.Slug}-one"));
+            if (index > 0)
+                context.Jobs.Add(AvailableJob(company, $"{company.Slug}-two"));
+        }
+        context.Jobs.Add(Job(noLogo, "no-logo-job", JobStatus.Published, false, Now.AddDays(2)));
+        context.Jobs.Add(Job(blankLogo, "blank-logo-job", JobStatus.Published, false, Now.AddDays(2)));
+        context.Jobs.Add(Job(unpublished, "draft-job", JobStatus.Draft, false, Now.AddDays(2)));
+        context.Jobs.Add(Job(unavailable, "hidden-job", JobStatus.Published, true, Now.AddDays(2)));
+        context.Jobs.Add(Job(unavailable, "expired-job", JobStatus.Published, false, Now));
+        context.Jobs.Add(Job(unavailable, "deleted-job", JobStatus.Published, false, Now.AddDays(2), true));
+        context.Jobs.Add(AvailableJob(deletedCompany, "deleted-company-job"));
+        await context.SaveChangesAsync();
+
+        var service = new PublicJobService(
+            new PublicJobRepository(context, new FixedTimeProvider(Now)),
+            new PublicJobQueryValidator());
+        var controller = new PublicJobsController(service);
+
+        var action = await controller.Companies(CancellationToken.None);
+        var response = Assert.IsType<OkObjectResult>(action.Result);
+        var envelope = Assert.IsType<ApiResponse<IReadOnlyCollection<PublicCompanyLogoResponse>>>(response.Value);
+        var result = envelope.Data.ToArray();
+
+        Assert.Equal(55, result.Length);
+        Assert.Equal(55, result.Select(company => company.CompanyId).Distinct().Count());
+        Assert.Equal(companies.Select(company => company.Id).Order().ToArray(),
+            result.Select(company => company.CompanyId).Order().ToArray());
+        Assert.Equal(result.OrderBy(company => company.Name).ThenBy(company => company.CompanyId), result);
+        Assert.All(result, company => Assert.False(string.IsNullOrWhiteSpace(company.LogoUrl)));
+        Assert.Equal(new[] { "CompanyId", "LogoUrl", "Name" },
+            typeof(PublicCompanyLogoResponse).GetProperties().Select(property => property.Name).Order().ToArray());
+    }
+
+    private static Company Company(string name, bool isVerified, string? logoUrl = null) =>
         new()
         {
             Name = name,
             Slug = name.ToLowerInvariant(),
+            LogoUrl = logoUrl,
             IsVerified = isVerified,
             OwnerUserId = Guid.NewGuid()
         };
@@ -124,7 +182,7 @@ public sealed class PublicPopularCompaniesTests
             ExpiresAtUtc = expiresAtUtc,
             CompanyId = company.Id,
             Company = company,
-            CategoryId = Guid.NewGuid()
+            CategoryId = null
         };
 
     private sealed class FixedTimeProvider(DateTime utcNow) : TimeProvider

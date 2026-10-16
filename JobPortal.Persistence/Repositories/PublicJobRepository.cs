@@ -88,6 +88,17 @@ public sealed partial class PublicJobRepository(
         CancellationToken cancellationToken = default) =>
         await PopularCompaniesQuery(limit).ToArrayAsync(cancellationToken);
 
+    public async Task<IReadOnlyCollection<PublicCompanyLogoResponse>> GetCompaniesWithCandidateVisibleJobsAsync(
+        CancellationToken cancellationToken = default) =>
+        await AvailableJobs()
+            .Where(job => job.Company.LogoUrl != null && job.Company.LogoUrl.Trim() != string.Empty)
+            .Select(job => new PublicCompanyLogoResponse(
+                job.CompanyId, job.Company.Name, job.Company.LogoUrl!))
+            .Distinct()
+            .OrderBy(company => company.Name)
+            .ThenBy(company => company.CompanyId)
+            .ToArrayAsync(cancellationToken);
+
     public async Task<PublicJobFilterOptionsResponse> GetFilterOptionsAsync(
         PublicJobQuery query,
         CancellationToken cancellationToken = default)

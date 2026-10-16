@@ -49,6 +49,10 @@ public sealed class PublicJobService(
         return await repository.GetPopularCompaniesAsync(limit, cancellationToken);
     }
 
+    public Task<IReadOnlyCollection<PublicCompanyLogoResponse>> GetCompaniesWithCandidateVisibleJobsAsync(
+        CancellationToken cancellationToken = default) =>
+        repository.GetCompaniesWithCandidateVisibleJobsAsync(cancellationToken);
+
     public async Task<PublicJobFilterOptionsResponse> GetFilterOptionsAsync(
         PublicJobQuery query,
         CancellationToken cancellationToken = default)
