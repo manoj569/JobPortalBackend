@@ -1,4 +1,9 @@
 using System.Text.Json;
+using System.Security.Claims;
+using JobPortal.API.Controllers;
+using JobPortal.Shared.Models;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using JobPortal.Application.Common.Exceptions;
 using JobPortal.Application.Features.InterviewInsights;
 using JobPortal.Application.Features.Notifications;
@@ -1099,6 +1104,104 @@ public sealed class InterviewInsightsTests
             "invalid_query",
             query.Code);
     }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AuthorizedSchedulesAndContributionsReturnOnlyCallerDataRegardlessOfMembership(bool member)
+    {
+        await using var f = await Fixture.CreateAsync();
+        Assert.Empty(f.Db.Memberships);
+        if (member)
+        {
+            var membership = new Membership { UserId = f.ReaderId, PlanCode = "CareerHarborMembership",
+                PlanName = "Job Application Access", Status = MembershipStatus.Active,
+                StartsAtUtc = Now.AddDays(-1), EndsAtUtc = Now.AddDays(29) };
+            f.Db.AddRange(membership, new Payment { UserId = f.ReaderId, MembershipId = membership.Id,
+                Status = PaymentStatus.Paid, Amount = 99m, CurrencyCode = "INR", PaidAtUtc = Now.AddDays(-1) });
+            await f.Db.SaveChangesAsync();
+        }
+        var mine = await f.AddPastScheduleAsync(f.ReaderId, f.CompanyAId);
+        var others = await f.AddPastScheduleAsync(f.AuthorId, f.CompanyBId);
+        var myInsight = await f.AddPublishedInsightAsync(f.ReaderId, f.CompanyAId);
+        var otherInsight = await f.AddPublishedInsightAsync(f.AuthorId, f.CompanyBId);
+        var controller = Controller(f, f.ReaderId);
+        var schedulesHttp = await InterviewInsightsMembershipAuthorizationTests.ExecuteActionAsync("Schedules", f.ReaderId, async http =>
+        {
+            var result = Assert.IsType<OkObjectResult>((await controller.Schedules(default)).Result);
+            http.Response.StatusCode = result.StatusCode!.Value;
+            var payload = Assert.IsType<ApiResponse<IReadOnlyCollection<InterviewScheduleResponse>>>(result.Value);
+            Assert.Equal(mine.Id, Assert.Single(payload.Data).Id);
+            Assert.DoesNotContain(payload.Data, x => x.Id == others.Id);
+        });
+        Assert.Equal(StatusCodes.Status200OK, schedulesHttp.Response.StatusCode);
+        var contributionsHttp = await InterviewInsightsMembershipAuthorizationTests.ExecuteActionAsync("Contributions", f.ReaderId, async http =>
+        {
+            var result = Assert.IsType<OkObjectResult>((await controller.Contributions(default)).Result);
+            http.Response.StatusCode = result.StatusCode!.Value;
+            var payload = Assert.IsType<ApiResponse<MyInterviewContributionsResponse>>(result.Value);
+            Assert.Equal(myInsight.Id, Assert.Single(payload.Data.Items!).Id);
+            Assert.DoesNotContain(payload.Data.Items!, x => x.Id == otherInsight.Id);
+        });
+        Assert.Equal(StatusCodes.Status200OK, contributionsHttp.Response.StatusCode);
+        await Assert.ThrowsAsync<NotFoundException>(() => controller.UpdateSchedule(others.Id,
+            ValidScheduleUpdate(Now.AddDays(2), InterviewScheduleStatus.Cancelled, false, 30), default));
+        await Assert.ThrowsAsync<NotFoundException>(() => controller.Update(otherInsight.Id, ValidUpdate(), default));
+        await Assert.ThrowsAsync<NotFoundException>(() => controller.Delete(otherInsight.Id, default));
+    }
+
+    [Fact]
+    public async Task CandidateWithoutMembershipGetsEmptyPrivateCollections()
+    {
+        await using var f = await Fixture.CreateAsync();
+        var controller = Controller(f, f.ReaderId);
+        await InterviewInsightsMembershipAuthorizationTests.ExecuteActionAsync("Schedules", f.ReaderId, async _ =>
+        {
+            var result = Assert.IsType<OkObjectResult>((await controller.Schedules(default)).Result);
+            Assert.Empty(Assert.IsType<ApiResponse<IReadOnlyCollection<InterviewScheduleResponse>>>(result.Value).Data);
+        });
+        await InterviewInsightsMembershipAuthorizationTests.ExecuteActionAsync("Contributions", f.ReaderId, async _ =>
+        {
+            var result = Assert.IsType<OkObjectResult>((await controller.Contributions(default)).Result);
+            var data = Assert.IsType<ApiResponse<MyInterviewContributionsResponse>>(result.Value).Data;
+            Assert.Empty(data.Items!);
+            Assert.Equal(0, data.CareerHarborPoints);
+        });
+    }
+
+    [Fact]
+    public async Task NonmemberHelpfulFeedbackPassesAuthorizationAndAwardsAuthorExactlyOnce()
+    {
+        await using var f = await Fixture.CreateAsync();
+        Assert.Empty(f.Db.Memberships);
+        var insight = await f.AddPublishedInsightAsync(f.AuthorId, f.CompanyAId);
+        var schedule = await f.AddPastScheduleAsync(f.ReaderId, f.CompanyAId);
+        var controller = Controller(f, f.ReaderId);
+        var http = await InterviewInsightsMembershipAuthorizationTests.ExecuteActionAsync("Feedback", f.ReaderId, async context =>
+        {
+            var result = Assert.IsType<ObjectResult>((await controller.Feedback(insight.Id, ValidFeedback(schedule.Id), default)).Result);
+            context.Response.StatusCode = result.StatusCode!.Value;
+        });
+        Assert.Equal(StatusCodes.Status201Created, http.Response.StatusCode);
+        Assert.Equal(10, (await f.Service.ContributionsAsync(f.AuthorId)).CareerHarborPoints);
+        Assert.Equal(0, (await f.Service.ContributionsAsync(f.ReaderId)).CareerHarborPoints);
+        await Assert.ThrowsAsync<ConflictException>(() => controller.Feedback(insight.Id, ValidFeedback(schedule.Id), default));
+        await Assert.ThrowsAsync<BadRequestException>(() => Controller(f, f.AuthorId).Feedback(insight.Id, ValidFeedback(schedule.Id), default));
+        Assert.Single(f.Db.UserPointTransactions);
+        Assert.Equal(1, (await f.Db.InterviewInsights.SingleAsync(x => x.Id == insight.Id)).HelpfulConfirmedCount);
+    }
+
+    private static CandidateInterviewInsightsController Controller(Fixture fixture, Guid userId) => new(fixture.Service, null!)
+    {
+        ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity(
+                    [new Claim(ClaimTypes.NameIdentifier, userId.ToString()), new Claim(ClaimTypes.Role, "Candidate")], "test"))
+            }
+        }
+    };
 
     private static InterviewInsight Insight(
         Guid author,

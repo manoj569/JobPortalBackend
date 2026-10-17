@@ -9,6 +9,7 @@ using JobPortal.Persistence.Repositories;
 using JobPortal.Shared.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Authorization.Policy;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Routing;
@@ -50,7 +51,7 @@ public sealed class InterviewInsightsMembershipAuthorizationTests
     [InlineData(MembershipStatus.Cancelled, -1, 29)]
     [InlineData(MembershipStatus.Pending, -1, 29)]
     [InlineData(MembershipStatus.Suspended, -1, 29)]
-    public async Task CandidateWithoutActiveAccessGetsExactForbiddenContract(
+    public async Task RetainedMembershipPolicyRejectsMissingExpiredAndInvalidAccess(
         MembershipStatus? status, int? startOffset, int? endOffset)
     {
         var userId = Guid.NewGuid();
@@ -91,19 +92,53 @@ public sealed class InterviewInsightsMembershipAuthorizationTests
         Assert.DoesNotContain(userId.ToString(), json, StringComparison.OrdinalIgnoreCase);
     }
 
+    public static TheoryData<string, bool> InsightActionsWithMembership
+    {
+        get
+        {
+            var data = new TheoryData<string, bool>();
+            foreach (var action in InsightActionNames)
+            {
+                data.Add(action, false);
+                data.Add(action, true);
+            }
+            return data;
+        }
+    }
+
+    public static TheoryData<string> InsightActions
+    {
+        get
+        {
+            var data = new TheoryData<string>();
+            foreach (var action in InsightActionNames) data.Add(action);
+            return data;
+        }
+    }
+
+    private static readonly string[] InsightActionNames =
+    [
+        "Create", "Search", "Companies", "Get", "Update", "Delete", "CreateSchedule",
+        "Schedules", "UpdateSchedule", "Feedback", "Report", "Contributions", "CompanySummary"
+    ];
+
+    [Fact]
+    public void MatrixIncludesEveryCandidateInsightEndpoint()
+    {
+        var actual = typeof(CandidateInterviewInsightsController).GetMethods()
+            .Where(m => m.GetCustomAttributes(typeof(HttpMethodAttribute), true).Length > 0)
+            .Select(m => m.Name).Order().ToArray();
+        Assert.Equal(13, actual.Length);
+        Assert.Equal(InsightActionNames.Order(), actual);
+    }
+
     [Theory]
-    [InlineData("Search", false, true)]
-    [InlineData("Create", false, true)]
-    [InlineData("Companies", false, true)]
-    [InlineData("Get", false, false)]
-    [InlineData("Search", true, true)]
-    [InlineData("Create", true, true)]
-    [InlineData("Get", true, true)]
-    public async Task InsightActionsEnforceMembershipOnlyWhereRequired(string action, bool premium, bool allowed)
+    [MemberData(nameof(InsightActionsWithMembership))]
+    public async Task EveryInsightActionAllowsCandidatesWithOrWithoutMembership(string action, bool member)
     {
         var userId = Guid.NewGuid();
         await using var db = Db();
-        if (premium)
+        if (member)
         {
             var membership = Membership(userId, MembershipStatus.Active, Now.AddDays(-1), Now.AddDays(29));
             db.Add(membership);
@@ -112,45 +147,129 @@ public sealed class InterviewInsightsMembershipAuthorizationTests
             await db.SaveChangesAsync();
         }
         var policy = await ActionPolicy(typeof(CandidateInterviewInsightsController), action);
-        var context = new AuthorizationHandlerContext(policy.Requirements, Candidate(userId), new DefaultHttpContext());
-        await new Microsoft.AspNetCore.Authorization.Infrastructure.PassThroughAuthorizationHandler().HandleAsync(context);
-        await new ActiveInterviewInsightsMembershipHandler(new MembershipRepository(db, new FixedTimeProvider())).HandleAsync(context);
-        Assert.Equal(allowed, context.HasSucceeded);
+        Assert.DoesNotContain(policy.Requirements, r => r is ActiveInterviewInsightsMembershipRequirement);
+        var called = false;
+        var http = await ExecutePolicyAsync(policy, Candidate(userId), db, _ =>
+        {
+            called = true;
+            return Task.CompletedTask;
+        });
+        Assert.True(called);
+        Assert.Equal(StatusCodes.Status200OK, http.Response.StatusCode);
     }
 
     [Theory]
-    [InlineData(typeof(CandidateInterviewInsightsController), "Create")]
-    [InlineData(typeof(CandidateInterviewInsightsController), "Search")]
-    [InlineData(typeof(CandidateCompaniesController), "Search")]
-    [InlineData(typeof(CandidateCompaniesController), "Create")]
-    public async Task FreeActionsStillRequireAuthenticatedCandidate(Type controller, string action)
+    [MemberData(nameof(InsightActions))]
+    public async Task EveryInsightActionStillChallengesAnonymousAndForbidsWrongRoles(string action)
     {
-        var policy = await ActionPolicy(controller, action);
-        Assert.DoesNotContain(policy.Requirements, r => r is ActiveInterviewInsightsMembershipRequirement);
-        foreach (var user in new[] { new ClaimsPrincipal(new ClaimsIdentity()),
-            new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Role, "Employer")], "test")) })
+        await using var db = Db();
+        var policy = await ActionPolicy(typeof(CandidateInterviewInsightsController), action);
+        foreach (var role in new[] { "", "Employer", "Administrator" })
         {
-            var context = new AuthorizationHandlerContext(policy.Requirements, user, null);
-            await new Microsoft.AspNetCore.Authorization.Infrastructure.PassThroughAuthorizationHandler().HandleAsync(context);
-            Assert.False(context.HasSucceeded);
+            var user = role.Length == 0 ? new ClaimsPrincipal(new ClaimsIdentity()) : new ClaimsPrincipal(
+                new ClaimsIdentity([new Claim(ClaimTypes.Role, role), new Claim(ClaimTypes.NameIdentifier, Guid.NewGuid().ToString())], "test"));
+            var http = await ExecutePolicyAsync(policy, user, db, _ => throw new InvalidOperationException("Unauthorized action ran."));
+            Assert.Equal(role.Length == 0 ? StatusCodes.Status401Unauthorized : StatusCodes.Status403Forbidden, http.Response.StatusCode);
+            http.Response.Body.Position = 0;
+            Assert.DoesNotContain("membership_required", await new StreamReader(http.Response.Body).ReadToEndAsync());
         }
     }
 
     [Theory]
-    [InlineData("Get")]
-    [InlineData("Update")]
-    [InlineData("Delete")]
-    [InlineData("CreateSchedule")]
-    [InlineData("Schedules")]
-    [InlineData("UpdateSchedule")]
-    [InlineData("Feedback")]
-    [InlineData("Report")]
-    [InlineData("Contributions")]
-    [InlineData("CompanySummary")]
-    public async Task OtherActionsRetainMembershipRequirement(string action)
+    [InlineData("Search")]
+    [InlineData("Create")]
+    public async Task CandidateCompanyActionsRetainAuthenticatedCandidateAuthorization(string action)
     {
-        var policy = await ActionPolicy(typeof(CandidateInterviewInsightsController), action);
-        Assert.Contains(policy.Requirements, r => r is ActiveInterviewInsightsMembershipRequirement);
+        await using var db = Db();
+        var policy = await ActionPolicy(typeof(CandidateCompaniesController), action);
+        foreach (var role in new[] { "", "Employer", "Administrator", "Candidate" })
+        {
+            var user = role.Length == 0 ? new ClaimsPrincipal(new ClaimsIdentity()) : new ClaimsPrincipal(
+                new ClaimsIdentity([new Claim(ClaimTypes.Role, role), new Claim(ClaimTypes.NameIdentifier, Guid.NewGuid().ToString())], "test"));
+            var called = false;
+            var http = await ExecutePolicyAsync(policy, user, db, _ => { called = true; return Task.CompletedTask; });
+            Assert.Equal(role == "Candidate", called);
+            Assert.Equal(role == "Candidate" ? StatusCodes.Status200OK : role.Length == 0
+                ? StatusCodes.Status401Unauthorized : StatusCodes.Status403Forbidden, http.Response.StatusCode);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RetainedMembershipPolicyStillProtectsAnUnrelatedControlRoute(bool member)
+    {
+        var userId = Guid.NewGuid();
+        await using var db = Db();
+        if (member)
+        {
+            var membership = Membership(userId, MembershipStatus.Active, Now.AddDays(-1), Now.AddDays(29));
+            db.Add(membership);
+            db.Add(new Payment { UserId = userId, MembershipId = membership.Id, Status = PaymentStatus.Paid,
+                Amount = 99m, CurrencyCode = "INR", PaidAtUtc = Now.AddDays(-1) });
+            await db.SaveChangesAsync();
+        }
+        // A test-only route outside Insights exercises the unchanged registered requirement/result handler.
+        // Real job application access uses its existing free/paid quotas, not this error contract.
+        var policy = new AuthorizationPolicyBuilder().RequireAuthenticatedUser().RequireRole("Candidate")
+            .AddRequirements(new ActiveInterviewInsightsMembershipRequirement()).Build();
+        var called = false;
+        var http = await ExecutePolicyAsync(policy, Candidate(userId), db, _ =>
+        {
+            called = true;
+            return Task.CompletedTask;
+        }, "/api/auth-test/job-application-access");
+        Assert.Equal(member, called);
+        Assert.Equal(member ? StatusCodes.Status200OK : StatusCodes.Status403Forbidden, http.Response.StatusCode);
+        if (!member)
+        {
+            http.Response.Body.Position = 0;
+            var error = await JsonSerializer.DeserializeAsync<ApiError>(http.Response.Body, WebJson);
+            Assert.Equal("membership_required", error?.Code);
+        }
+    }
+
+    internal static async Task<DefaultHttpContext> ExecuteActionAsync(string action, Guid userId, RequestDelegate next)
+    {
+        await using var db = Db();
+        return await ExecutePolicyAsync(await ActionPolicy(typeof(CandidateInterviewInsightsController), action), Candidate(userId), db, next);
+    }
+
+    private static async Task<DefaultHttpContext> ExecutePolicyAsync(AuthorizationPolicy policy, ClaimsPrincipal user,
+        JobPortalDbContext db, RequestDelegate next, string path = "/api/candidate/interview-insights")
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddAuthorization();
+        services.AddSingleton<JobPortal.Application.Abstractions.Persistence.IMembershipRepository>(new MembershipRepository(db, new FixedTimeProvider()));
+        services.AddSingleton<IAuthorizationHandler, ActiveInterviewInsightsMembershipHandler>();
+        services.AddSingleton<IAuthenticationService, StatusAuthenticationService>();
+        using var provider = services.BuildServiceProvider();
+        var http = new DefaultHttpContext { User = user, RequestServices = provider };
+        http.Request.Path = path;
+        http.Response.Body = new MemoryStream();
+        var authorization = await provider.GetRequiredService<IAuthorizationService>().AuthorizeAsync(user, http, policy);
+        var result = authorization.Succeeded ? PolicyAuthorizationResult.Success() : user.Identity?.IsAuthenticated == true
+            ? PolicyAuthorizationResult.Forbid(authorization.Failure!) : PolicyAuthorizationResult.Challenge();
+        await new InterviewInsightsAuthorizationResultHandler().HandleAsync(next, http, policy, result);
+        return http;
+    }
+
+    private sealed class StatusAuthenticationService : IAuthenticationService
+    {
+        public Task<AuthenticateResult> AuthenticateAsync(HttpContext context, string? scheme) => Task.FromResult(AuthenticateResult.NoResult());
+        public Task ChallengeAsync(HttpContext context, string? scheme, AuthenticationProperties? properties)
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return Task.CompletedTask;
+        }
+        public Task ForbidAsync(HttpContext context, string? scheme, AuthenticationProperties? properties)
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            return Task.CompletedTask;
+        }
+        public Task SignInAsync(HttpContext context, string? scheme, ClaimsPrincipal principal, AuthenticationProperties? properties) => throw new NotSupportedException();
+        public Task SignOutAsync(HttpContext context, string? scheme, AuthenticationProperties? properties) => throw new NotSupportedException();
     }
 
     private static async Task<AuthorizationPolicy> ActionPolicy(Type controller, string action)
