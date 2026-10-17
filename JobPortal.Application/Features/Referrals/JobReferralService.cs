@@ -3,6 +3,7 @@ using JobPortal.Application.Abstractions.Jobs;
 using JobPortal.Application.Abstractions.Persistence;
 using JobPortal.Application.Abstractions.Referrals;
 using JobPortal.Application.Common.Exceptions;
+using JobPortal.Application.Features.Points;
 using JobPortal.Domain.Entities;
 using JobPortal.Domain.Enums;
 using JobPortal.Shared.Models;
@@ -20,7 +21,8 @@ public sealed class JobReferralService(
     JobPortal.Application.Features.Notifications.NotificationOutbox outbox,
     IDashboardRepository? dashboard = null,
     ReferralMarketplaceService? marketplace = null,
-    Microsoft.Extensions.Options.IOptions<ReferralNotificationOptions>? notificationOptions = null) : IJobReferralService
+    Microsoft.Extensions.Options.IOptions<ReferralNotificationOptions>? notificationOptions = null,
+    ICareerHarborPointsService? points = null) : IJobReferralService
 {
     private const string ReferralContactPlanCode = "ReferralContactAccess";
 
@@ -171,6 +173,9 @@ public sealed class JobReferralService(
         {
             job.Status = JobStatus.Published;
             job.PublishedAtUtc = UtcNow;
+
+            if (points is not null)
+                await points.AwardReferralOpportunitySharedAsync(referral, cancellationToken);
 
             jobs.Update(job);
 

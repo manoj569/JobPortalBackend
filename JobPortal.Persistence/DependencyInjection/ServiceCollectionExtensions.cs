@@ -73,6 +73,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<InterviewInsightRepository>();
         services.AddScoped<IInterviewInsightRepository>(provider => provider.GetRequiredService<InterviewInsightRepository>());
         services.AddScoped<IInterviewScheduleNotificationProcessor>(provider => provider.GetRequiredService<InterviewInsightRepository>());
+        services.AddScoped<JobPortal.Application.Features.Points.ICareerHarborPointsRepository, CareerHarborPointsRepository>();
         services.AddScoped<ICandidatePortfolioRepository, CandidatePortfolioRepository>();
         services.AddScoped<ICompanyManagementRepository, CompanyManagementRepository>();
         services.AddScoped<ICategoryManagementRepository, CategoryManagementRepository>();

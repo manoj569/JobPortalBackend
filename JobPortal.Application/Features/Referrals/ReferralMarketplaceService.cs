@@ -3,6 +3,7 @@ using JobPortal.Application.Abstractions.Candidates;
 using JobPortal.Application.Common.Exceptions;
 using JobPortal.Application.Features.Candidates;
 using JobPortal.Application.Features.Notifications;
+using JobPortal.Application.Features.Points;
 using JobPortal.Domain.Entities;
 using JobPortal.Domain.Enums;
 using JobPortal.Shared.Models;
@@ -10,7 +11,7 @@ using JobPortal.Shared.Models;
 namespace JobPortal.Application.Features.Referrals;
 
 public sealed class ReferralMarketplaceService(IReferralMarketplaceRepository repository, NotificationOutbox outbox,
-    IAuditWriter audit, IResumeStorage resumes, TimeProvider clock)
+    IAuditWriter audit, IResumeStorage resumes, TimeProvider clock, ICareerHarborPointsService points)
 {
     public const int ConnectionLimit = 10;
     private DateTime Now => clock.GetUtcNow().UtcDateTime;
@@ -105,7 +106,8 @@ public sealed class ReferralMarketplaceService(IReferralMarketplaceRepository re
             NotificationSource.ReferralSubmitted, "submitted", ct);
     }
     public Task<ReferralRequestResponse> ConfirmAsync(Guid candidateId, Guid id, CancellationToken ct) =>
-        CandidateMutation(candidateId, id, row => row.Confirm(Now), NotificationSource.ReferralConfirmed, "confirmed", ct);
+        CandidateMutation(candidateId, id, row => row.Confirm(Now), NotificationSource.ReferralConfirmed,
+            "confirmed", ct, (row, token) => points.AwardReferralCandidateConfirmedAsync(row, token));
     public Task<ReferralRequestResponse> NotReceivedAsync(Guid candidateId, Guid id, CancellationToken ct) =>
         CandidateMutation(candidateId, id, row => row.ReportNotReceived(Now), NotificationSource.ReferralNotReceived, "not-received", ct);
 
@@ -157,7 +159,8 @@ public sealed class ReferralMarketplaceService(IReferralMarketplaceRepository re
         }, ct);
     }
     private async Task<ReferralRequestResponse> CandidateMutation(Guid actor, Guid id, Func<ReferralRequest, bool> transition,
-        NotificationSource source, string eventName, CancellationToken ct)
+        NotificationSource source, string eventName, CancellationToken ct,
+        Func<ReferralRequest, CancellationToken, Task>? afterTransition = null)
     {
         await Candidate(actor, ct);
         var identity = await repository.RequestAsync(id, actor, null, ct) ?? throw Missing();
@@ -168,7 +171,11 @@ public sealed class ReferralMarketplaceService(IReferralMarketplaceRepository re
             bool changed;
             try { changed = transition(row); }
             catch (ReferralTransitionException ex) { throw new ConflictException("Referral transition is not permitted.", ex.Code); }
-            if (changed) await Event(row, source, row.ReferrerUserId, eventName, ct);
+            if (changed)
+            {
+                if (afterTransition is not null) await afterTransition(row, ct);
+                await Event(row, source, row.ReferrerUserId, eventName, ct);
+            }
             return Map(row, await repository.MembershipAsync(actor, Now, ct) is not null);
         }, ct);
     }

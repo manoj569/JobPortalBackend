@@ -151,8 +151,63 @@ public sealed class ReferralMarketplacePostgresTests
             Assert.Equal(PostgresErrorCodes.UniqueViolation, Assert.IsType<PostgresException>(ex.InnerException).SqlState);
         });
     }
+
+    [LocalReferralPostgresFact]
+    public async Task ConcurrentCandidateConfirmationAwardsThreeHundredExactlyOnce()
+    {
+        await Isolated(async (f, options) =>
+        {
+            var row = await f.Request();
+            await f.Service.AcceptAsync(f.ReferrerId, row.Id, default);
+            await f.Service.SubmitAsync(f.ReferrerId, row.Id, new("employer-reference"), default);
+            await using var first = new JobPortalDbContext(options);
+            await using var second = new JobPortalDbContext(options);
+            await Task.WhenAll(Service(first, f).ConfirmAsync(f.CandidateId, row.Id, default),
+                Service(second, f).ConfirmAsync(f.CandidateId, row.Id, default));
+
+            Assert.Equal(ReferralRequestStatus.CandidateConfirmed,
+                (await f.Db.ReferralRequests.AsNoTracking().SingleAsync(x => x.Id == row.Id)).Status);
+            var reward = await f.Db.UserPointTransactions.AsNoTracking()
+                .SingleAsync(x => x.ReferralRequestId == row.Id);
+            Assert.Equal(f.ReferrerId, reward.UserId);
+            Assert.Equal(UserPointTransaction.ReferralCandidateConfirmedPoints, reward.Points);
+            Assert.Equal(UserPointTransaction.ReferralCandidateConfirmedReason, reward.Reason);
+            var balance = await new JobPortal.Application.Features.Points.CareerHarborPointsService(
+                new CareerHarborPointsRepository(f.Db)).BalanceAsync(f.ReferrerId);
+            Assert.Equal(300, balance.TotalPoints);
+
+            f.Db.UserPointTransactions.Add(new UserPointTransaction
+            {
+                UserId = f.ReferrerId, ReferralRequestId = row.Id,
+                Points = UserPointTransaction.ReferralCandidateConfirmedPoints,
+                Reason = UserPointTransaction.ReferralCandidateConfirmedReason
+            });
+            var duplicate = await Assert.ThrowsAsync<DbUpdateException>(() => f.Db.SaveChangesAsync());
+            Assert.Equal(PostgresErrorCodes.UniqueViolation,
+                Assert.IsType<PostgresException>(duplicate.InnerException).SqlState);
+            f.Db.ChangeTracker.Clear();
+            var sharedReward = new UserPointTransaction
+            {
+                UserId = f.ReferrerId, JobReferralId = f.ReferralId,
+                Points = UserPointTransaction.ReferralOpportunitySharedPoints,
+                Reason = UserPointTransaction.ReferralOpportunitySharedReason
+            };
+            f.Db.UserPointTransactions.Add(sharedReward);
+            await f.Db.SaveChangesAsync();
+            f.Db.UserPointTransactions.Add(new UserPointTransaction
+            {
+                UserId = f.ReferrerId, JobReferralId = f.ReferralId,
+                Points = UserPointTransaction.ReferralOpportunitySharedPoints,
+                Reason = UserPointTransaction.ReferralOpportunitySharedReason
+            });
+            var duplicateShare = await Assert.ThrowsAsync<DbUpdateException>(() => f.Db.SaveChangesAsync());
+            Assert.Equal(PostgresErrorCodes.UniqueViolation,
+                Assert.IsType<PostgresException>(duplicateShare.InnerException).SqlState);
+        });
+    }
     private static ReferralMarketplaceService Service(JobPortalDbContext db, ReferralFixture f) => new(new ReferralMarketplaceRepository(db),
-        new NotificationOutbox(new NotificationOutboxRepository(db), f.Clock), new AuditWriterTestDouble(), f.Storage, f.Clock);
+        new NotificationOutbox(new NotificationOutboxRepository(db), f.Clock), new AuditWriterTestDouble(), f.Storage, f.Clock,
+        new JobPortal.Application.Features.Points.CareerHarborPointsService(new CareerHarborPointsRepository(db)));
     private static async Task<string> Attempt(Func<Task> action)
     { try { await action(); return "accepted"; } catch (ConflictException ex) { return ex.Code; } }
     private static async Task Isolated(Func<ReferralFixture, DbContextOptions<JobPortalDbContext>, Task> test)

@@ -7,6 +7,8 @@ using JobPortal.Application.Abstractions.Candidates;
 using JobPortal.Application.Common.Exceptions;
 using JobPortal.Application.Features.Auditing;
 using JobPortal.Application.Features.CareerGuidance;
+using JobPortal.Application.Features.Points;
+using JobPortal.Domain.Common;
 using JobPortal.Domain.Entities;
 using JobPortal.Domain.Enums;
 using JobPortal.Persistence.Context;
@@ -19,6 +21,22 @@ namespace JobPortal.Application.Tests;
 
 public sealed class CareerGuidanceTests
 {
+    [Fact]
+    public async Task LegacyConsultantApplicationRequiresThreeThousandPointsAndDoesNotChangeRole()
+    {
+        using var f = new Fixture();
+        var originalRoleId = f.Owner.RoleId;
+        f.Points.TotalPoints = CareerHarborPointsService.MentorEligibilityThreshold - 1;
+        var blocked = await Assert.ThrowsAsync<AppException>(() => f.Apply());
+        Assert.Equal("mentor_points_required", blocked.Code);
+        Assert.Empty(await f.Db.CareerConsultants.ToArrayAsync());
+
+        f.Points.TotalPoints = CareerHarborPointsService.MentorEligibilityThreshold;
+        var application = await f.Apply();
+        Assert.Equal(ConsultantVerificationStatus.Pending, application.VerificationStatus);
+        Assert.Equal(originalRoleId, (await f.Db.Users.SingleAsync(x => x.Id == f.Owner.Id)).RoleId);
+    }
+
     [Fact]
     public void MigrationOnlyCreatesCareerGuidanceTablesAndIndexes()
     {
@@ -471,6 +489,7 @@ public sealed class CareerGuidanceTests
         public User Admin { get; } = new() { FirstName = "Admin", Status = UserStatus.Active };
         public Company Company { get; } = new() { Name = "Example", Slug = "example" };
         public CareerGuidanceService Service { get; }
+        public CareerHarborPointsServiceTestDouble Points { get; } = new();
         public TestProfilePhotoStorage Photos { get; } = new();
         public ConsultantProfileRequest Request => new("Professional", "Experienced professional", "Independent advice",
             Company.Id, Company.Name, "Engineer", 8, CareerProfessionalType.CurrentEmployee, "https://www.linkedin.com/in/example",
@@ -490,7 +509,8 @@ public sealed class CareerGuidanceTests
             Service = new(new CareerGuidanceRepository(Db), new UserRepository(Db), new CompanyManagementRepository(Db),
                 new UnitOfWork(Db), new AuditWriter(new AuditLogRepository(Db), new ActorContext(Admin.Id)), TimeProvider.System,
                 new ConsultantProfileRequestValidator(), new ConsultantServiceRequestValidator(), new ConsultantSearchQueryValidator(),
-                new ConsultantReviewRequestValidator(), new ConsultantAdminQueryValidator(), Photos);
+                new ConsultantReviewRequestValidator(), new ConsultantAdminQueryValidator(), Photos,
+                Points);
         }
         public Task<ConsultantPrivateResponse> Apply() => Service.ApplyAsync(Owner.Id, Request, default);
         public Task<ConsultantPrivateResponse> Review(ConsultantPrivateResponse p, ConsultantReviewAction action) =>

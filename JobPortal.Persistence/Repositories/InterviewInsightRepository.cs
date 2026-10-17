@@ -117,22 +117,11 @@ public sealed class InterviewInsightRepository(JobPortalDbContext db) : IIntervi
             .Select(x => x.AuthorCandidateId).SingleAsync(ct);
         if (authorId == feedback.CandidateId)
             throw new JobPortal.Application.Common.Exceptions.BadRequestException("You cannot provide feedback on your own insight.", "self_feedback");
-        await db.UserPointTransactions.AddAsync(new UserPointTransaction
-        {
-            UserId = authorId,
-            Feedback = feedback,
-            InsightHelpfulnessFeedbackId = feedback.Id,
-            Points = UserPointTransaction.InterviewInsightHelpfulPoints
-        }, ct);
+        await db.UserPointTransactions.AddAsync(
+            UserPointTransaction.ForInterviewInsightHelpful(authorId, feedback), ct);
         // SaveAsync persists vote, counters, notification and reward in one EF transaction.
     }
 
-    public Task<int> GetCareerHarborPointsAsync(Guid candidateId, CancellationToken ct) =>
-        db.UserPointTransactions.AsNoTracking()
-            .Where(x => x.UserId == candidateId && !x.Feedback.IsDeleted &&
-                x.Feedback.Helpfulness == InsightHelpfulness.Helped &&
-                !x.Feedback.Insight.IsDeleted && x.Feedback.Insight.Status == InterviewInsightStatus.Published)
-            .SumAsync(x => x.Points, ct);
     public Task<bool> ReportExistsAsync(Guid candidateId, Guid insightId, CancellationToken ct) =>
         db.InsightReports.AsNoTracking().AnyAsync(x => x.ReporterCandidateId == candidateId && x.InsightId == insightId, ct);
     public Task AddReportAsync(InsightReport report, CancellationToken ct) => db.InsightReports.AddAsync(report, ct).AsTask();

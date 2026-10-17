@@ -7055,11 +7055,17 @@ namespace JobPortal.Persistence.Postgres.Migrations
                     b.Property<DateTime?>("DeletedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<Guid>("InsightHelpfulnessFeedbackId")
+                    b.Property<Guid?>("InsightHelpfulnessFeedbackId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("InterviewInsightId")
                         .HasColumnType("uuid");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
+
+                    b.Property<Guid?>("JobReferralId")
+                        .HasColumnType("uuid");
 
                     b.Property<int>("Points")
                         .HasColumnType("integer");
@@ -7068,6 +7074,9 @@ namespace JobPortal.Persistence.Postgres.Migrations
                         .IsRequired()
                         .HasMaxLength(80)
                         .HasColumnType("character varying(80)");
+
+                    b.Property<Guid?>("ReferralRequestId")
+                        .HasColumnType("uuid");
 
                     b.Property<DateTime?>("UpdatedAtUtc")
                         .HasColumnType("timestamp with time zone");
@@ -7080,11 +7089,23 @@ namespace JobPortal.Persistence.Postgres.Migrations
                     b.HasIndex("InsightHelpfulnessFeedbackId")
                         .IsUnique();
 
+                    b.HasIndex("InterviewInsightId")
+                        .IsUnique()
+                        .HasFilter("\"InterviewInsightId\" IS NOT NULL");
+
+                    b.HasIndex("JobReferralId")
+                        .IsUnique()
+                        .HasFilter("\"JobReferralId\" IS NOT NULL");
+
+                    b.HasIndex("ReferralRequestId")
+                        .IsUnique()
+                        .HasFilter("\"ReferralRequestId\" IS NOT NULL");
+
                     b.HasIndex("UserId", "CreatedAtUtc");
 
                     b.ToTable("UserPointTransactions", null, t =>
                         {
-                            t.HasCheckConstraint("CK_UserPointTransactions_HelpfulReward", "\"Points\" = 10 AND \"Reason\" = 'InterviewInsightHelpful'");
+                            t.HasCheckConstraint("CK_UserPointTransactions_ValidReward", "(\"Reason\" = 'InterviewInsightHelpful' AND \"Points\" = 10 AND \"InsightHelpfulnessFeedbackId\" IS NOT NULL AND \"InterviewInsightId\" IS NULL AND \"JobReferralId\" IS NULL AND \"ReferralRequestId\" IS NULL) OR (\"Reason\" = 'InterviewInsightPublished' AND \"Points\" = 5 AND \"InsightHelpfulnessFeedbackId\" IS NULL AND \"InterviewInsightId\" IS NOT NULL AND \"JobReferralId\" IS NULL AND \"ReferralRequestId\" IS NULL) OR (\"Reason\" = 'ReferralOpportunityShared' AND \"Points\" = 5 AND \"InsightHelpfulnessFeedbackId\" IS NULL AND \"InterviewInsightId\" IS NULL AND \"JobReferralId\" IS NOT NULL AND \"ReferralRequestId\" IS NULL) OR (\"Reason\" = 'ReferralCandidateConfirmed' AND \"Points\" = 300 AND \"InsightHelpfulnessFeedbackId\" IS NULL AND \"InterviewInsightId\" IS NULL AND \"JobReferralId\" IS NULL AND \"ReferralRequestId\" IS NOT NULL)");
                         });
                 });
 
@@ -8448,8 +8469,22 @@ namespace JobPortal.Persistence.Postgres.Migrations
                     b.HasOne("JobPortal.Domain.Entities.InsightHelpfulnessFeedback", "Feedback")
                         .WithOne()
                         .HasForeignKey("JobPortal.Domain.Entities.UserPointTransaction", "InsightHelpfulnessFeedbackId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.HasOne("JobPortal.Domain.Entities.InterviewInsight", "InterviewInsight")
+                        .WithMany()
+                        .HasForeignKey("InterviewInsightId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("JobPortal.Domain.Entities.JobReferral", "JobReferral")
+                        .WithMany()
+                        .HasForeignKey("JobReferralId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("JobPortal.Domain.Entities.ReferralRequest", "ReferralRequest")
+                        .WithMany()
+                        .HasForeignKey("ReferralRequestId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("JobPortal.Domain.Entities.User", "User")
                         .WithMany()
@@ -8458,6 +8493,12 @@ namespace JobPortal.Persistence.Postgres.Migrations
                         .IsRequired();
 
                     b.Navigation("Feedback");
+
+                    b.Navigation("InterviewInsight");
+
+                    b.Navigation("JobReferral");
+
+                    b.Navigation("ReferralRequest");
 
                     b.Navigation("User");
                 });

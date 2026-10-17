@@ -50,7 +50,6 @@ public interface IInterviewInsightRepository
     Task<IReadOnlyCollection<CandidateInterviewSchedule>> GetSchedulesAsync(Guid candidateId, CancellationToken ct);
     Task<bool> FeedbackExistsAsync(Guid candidateId, Guid insightId, CancellationToken ct);
     Task AddFeedbackAsync(InsightHelpfulnessFeedback feedback, CancellationToken ct);
-    Task<int> GetCareerHarborPointsAsync(Guid candidateId, CancellationToken ct);
     Task<bool> ReportExistsAsync(Guid candidateId, Guid insightId, CancellationToken ct);
     Task AddReportAsync(InsightReport report, CancellationToken ct);
     Task<(int Published, int Pending, int NeedsChanges, int Helped, int Score, IReadOnlyCollection<MyInterviewContributionCardResponse> Items)> ContributionsAsync(Guid candidateId, CancellationToken ct);

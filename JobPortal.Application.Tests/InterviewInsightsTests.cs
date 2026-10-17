@@ -12,6 +12,7 @@ using JobPortal.Domain.Entities;
 using JobPortal.Domain.Enums;
 using JobPortal.Persistence.Context;
 using JobPortal.Persistence.Repositories;
+using JobPortal.Application.Features.Points;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 using FluentValidation;
@@ -1317,6 +1318,55 @@ public sealed class InterviewInsightsTests
             reminderOffsetMinutes,
             "UTC");
 
+    [Fact]
+    public async Task FirstPublicationAwardsFiveOnceAcrossModerationAndRepublishing()
+    {
+        await using var f = await Fixture.CreateAsync();
+        var insight = new InterviewInsight
+        {
+            AuthorCandidateId = f.AuthorId,
+            CompanyId = f.CompanyAId,
+            RoleTitle = "Engineer",
+            InterviewDateMonth = new DateOnly(2026, 9, 1),
+            ProcessSummary = "Technical rounds",
+            PreparationTips = "Review fundamentals",
+            Status = InterviewInsightStatus.PendingReview
+        };
+        f.Db.InterviewInsights.Add(insight);
+        await f.Db.SaveChangesAsync();
+
+        Assert.Equal(0, (await f.Service.ContributionsAsync(f.AuthorId)).CareerHarborPoints);
+        await f.Admin.ModerateAsync(Guid.NewGuid(), insight.Id, new(InterviewInsightStatus.Published, null));
+        Assert.Equal(5, (await f.Service.ContributionsAsync(f.AuthorId)).CareerHarborPoints);
+        await f.Admin.ModerateAsync(Guid.NewGuid(), insight.Id, new(InterviewInsightStatus.Hidden, "Review"));
+        await f.Admin.ModerateAsync(Guid.NewGuid(), insight.Id, new(InterviewInsightStatus.Published, null));
+
+        var balance = (await f.Service.ContributionsAsync(f.AuthorId)).PointsBalance;
+        Assert.NotNull(balance);
+        Assert.Equal(5, balance.TotalPoints);
+        Assert.Equal(5, balance.InterviewInsightPublishedPoints);
+        Assert.Single(f.Db.UserPointTransactions);
+
+        var secondInsight = new InterviewInsight
+        {
+            AuthorCandidateId = f.AuthorId,
+            CompanyId = f.CompanyAId,
+            RoleTitle = "Designer",
+            InterviewDateMonth = new DateOnly(2026, 9, 1),
+            ProcessSummary = "Portfolio review",
+            PreparationTips = "Practice case studies",
+            Status = InterviewInsightStatus.PendingReview
+        };
+        f.Db.InterviewInsights.Add(secondInsight);
+        await f.Db.SaveChangesAsync();
+        await f.Admin.ModerateAsync(Guid.NewGuid(), secondInsight.Id, new(InterviewInsightStatus.Published, null));
+        balance = (await f.Service.ContributionsAsync(f.AuthorId)).PointsBalance;
+        Assert.NotNull(balance);
+        Assert.Equal(10, balance.TotalPoints);
+        Assert.Equal(10, balance.InterviewInsightPublishedPoints);
+        Assert.Equal(2, f.Db.UserPointTransactions.Count());
+    }
+
     private sealed class FixedTimeProvider : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() =>
@@ -1334,6 +1384,7 @@ public sealed class InterviewInsightsTests
         Assert.Equal(0, (await f.Service.ContributionsAsync(f.ReaderId)).CareerHarborPoints);
         var reward = await f.Db.UserPointTransactions.Include(x => x.Feedback).SingleAsync();
         Assert.Equal(f.AuthorId, reward.UserId);
+        Assert.NotNull(reward.Feedback);
         Assert.Equal(f.ReaderId, reward.Feedback.CandidateId);
         Assert.Equal(insight.Id, reward.Feedback.InsightId);
         Assert.Equal("InterviewInsightHelpful", reward.Reason);
@@ -1407,7 +1458,7 @@ public sealed class InterviewInsightsTests
     [Theory]
     [InlineData(InterviewInsightStatus.Hidden)]
     [InlineData(InterviewInsightStatus.Rejected)]
-    public async Task ModerationSuspendsPointsAndRepublishingRestoresExactlyOnce(InterviewInsightStatus status)
+    public async Task ModerationSuspendsHelpfulPointsWhilePublicationRewardRemainsHistorical(InterviewInsightStatus status)
     {
         await using var f = await Fixture.CreateAsync();
         var insight = await f.AddPublishedInsightAsync(f.AuthorId, f.CompanyAId);
@@ -1417,10 +1468,12 @@ public sealed class InterviewInsightsTests
         Assert.Equal(0, (await f.Service.ContributionsAsync(f.AuthorId)).CareerHarborPoints);
         await Assert.ThrowsAsync<NotFoundException>(() => f.Service.AddFeedbackAsync(f.ReaderId, insight.Id, ValidFeedback(schedule.Id)));
         await f.Admin.ModerateAsync(Guid.NewGuid(), insight.Id, new(InterviewInsightStatus.Published, null));
-        Assert.Equal(10, (await f.Service.ContributionsAsync(f.AuthorId)).CareerHarborPoints);
-        Assert.Single(f.Db.UserPointTransactions);
+        Assert.Equal(15, (await f.Service.ContributionsAsync(f.AuthorId)).CareerHarborPoints);
+        Assert.Equal(2, f.Db.UserPointTransactions.Count());
+        Assert.Contains(f.Db.UserPointTransactions, x => x.Reason == UserPointTransaction.InterviewInsightHelpfulReason);
+        Assert.Contains(f.Db.UserPointTransactions, x => x.Reason == UserPointTransaction.InterviewInsightPublishedReason);
         await f.Service.DeleteAsync(f.AuthorId, insight.Id);
-        Assert.Equal(0, (await f.Service.ContributionsAsync(f.AuthorId)).CareerHarborPoints);
+        Assert.Equal(5, (await f.Service.ContributionsAsync(f.AuthorId)).CareerHarborPoints);
     }
 
     [Fact]
@@ -1503,6 +1556,28 @@ public sealed class InterviewInsightsTests
         }
     }
 
+    [LocalHelpfulPointsPostgresFact]
+    public async Task PostgresDatabaseEnforcesOnePublicationRewardPerInsight()
+    {
+        var settings = new Npgsql.NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("HELPFUL_POINTS_TEST_POSTGRES"));
+        Assert.True(settings.Host is "localhost" or "127.0.0.1" or "::1");
+        Assert.Equal("interview_points_test", settings.Database);
+        var options = new DbContextOptionsBuilder<JobPortalDbContext>()
+            .UseNpgsql(settings.ConnectionString, pg => pg.MigrationsAssembly("JobPortal.Persistence.Postgres")).Options;
+        await using var f = await Fixture.CreateAsync(options);
+        var insight = await f.AddPublishedInsightAsync(f.AuthorId, f.CompanyAId);
+        var transaction = UserPointTransaction.ForInterviewInsightPublished(insight);
+        f.Db.UserPointTransactions.Add(transaction);
+        await f.Db.SaveChangesAsync();
+
+        f.Db.UserPointTransactions.Add(UserPointTransaction.ForInterviewInsightPublished(insight));
+        var exception = await Assert.ThrowsAsync<DbUpdateException>(() => f.Db.SaveChangesAsync());
+        Assert.Equal(Npgsql.PostgresErrorCodes.UniqueViolation,
+            Assert.IsType<Npgsql.PostgresException>(exception.InnerException).SqlState);
+        f.Db.ChangeTracker.Clear();
+        Assert.Equal(1, await f.Db.UserPointTransactions.CountAsync(x => x.InterviewInsightId == insight.Id));
+    }
+
     private sealed class LocalHelpfulPointsPostgresFactAttribute : FactAttribute
     {
         public LocalHelpfulPointsPostgresFactAttribute()
@@ -1564,13 +1639,15 @@ public sealed class InterviewInsightsTests
                     new CreateInsightFeedbackRequestValidator(),
                     new CreateInsightReportRequestValidator(),
                     notificationOutbox,
-                    time);
+                    time,
+                    new CareerHarborPointsService(new CareerHarborPointsRepository(db)));
 
             Admin =
                 new AdminInterviewInsightService(
                     repository,
                     new AuditWriterTestDouble(),
-                    time);
+                    time,
+                    new CareerHarborPointsService(new CareerHarborPointsRepository(db)));
         }
 
         public static async Task<Fixture> CreateAsync(DbContextOptions<JobPortalDbContext>? options = null)

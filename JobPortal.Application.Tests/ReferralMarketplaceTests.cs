@@ -72,6 +72,8 @@ public sealed class ReferralMarketplaceTests
         await f.Service.RejectAsync(f.ReferrerId, row.Id, new("Internal note"), default);
         await f.Service.RejectAsync(f.ReferrerId, row.Id, new("Retry"), default);
         Assert.Equal(0, (await f.Service.QuotaAsync(f.CandidateId, default)).AcceptedConnections);
+        Assert.Equal(0, (await new JobPortal.Application.Features.Points.CareerHarborPointsService(
+            new CareerHarborPointsRepository(f.Db)).BalanceAsync(f.ReferrerId)).TotalPoints);
         await Error("INVALID_REFERRAL_STATUS", () => f.Service.AcceptAsync(f.ReferrerId, row.Id, default));
         var candidate = await f.Service.CandidateDetailAsync(f.CandidateId, row.Id, default);
         Assert.DoesNotContain("Internal note", JsonSerializer.Serialize(candidate));
@@ -89,6 +91,8 @@ public sealed class ReferralMarketplaceTests
         await Error("REFERRAL_REQUEST_EXPIRED", () => f.Service.AcceptAsync(f.ReferrerId, row.Id, default));
         await Error("REFERRAL_REQUEST_EXPIRED", () => f.Service.RejectAsync(f.ReferrerId, row.Id, new(null), default));
         Assert.Equal(0, (await f.Service.QuotaAsync(f.CandidateId, default)).AcceptedConnections);
+        Assert.Equal(0, (await new JobPortal.Application.Features.Points.CareerHarborPointsService(
+            new CareerHarborPointsRepository(f.Db)).BalanceAsync(f.ReferrerId)).TotalPoints);
     }
     [Fact]
     public async Task CapacityBlocksFurtherRequestsAndAcceptances()
@@ -192,21 +196,54 @@ public sealed class ReferralMarketplaceTests
     public async Task SubmissionConfirmationAndInvestigationAreIdempotentAndMetricsUseRecords()
     {
         await using var f = await ReferralFixture.CreateAsync(); var row = await f.Request();
+        Assert.Equal(0, (await new JobPortal.Application.Features.Points.CareerHarborPointsService(
+            new CareerHarborPointsRepository(f.Db)).BalanceAsync(f.ReferrerId)).TotalPoints);
         await Error("INVALID_REFERRAL_STATUS", () => f.Service.SubmitAsync(f.ReferrerId, row.Id, new(null), default));
         await f.Service.AcceptAsync(f.ReferrerId, row.Id, default);
+        Assert.Equal(0, (await new JobPortal.Application.Features.Points.CareerHarborPointsService(
+            new CareerHarborPointsRepository(f.Db)).BalanceAsync(f.ReferrerId)).TotalPoints);
         await Error("INVALID_REFERRAL_STATUS", () => f.Service.ConfirmAsync(f.CandidateId, row.Id, default));
         await f.Service.SubmitAsync(f.ReferrerId, row.Id, new("application-id"), default);
         await f.Service.SubmitAsync(f.ReferrerId, row.Id, new("retry"), default);
+        Assert.Equal(0, (await new JobPortal.Application.Features.Points.CareerHarborPointsService(
+            new CareerHarborPointsRepository(f.Db)).BalanceAsync(f.ReferrerId)).TotalPoints);
         var issue = await f.Service.NotReceivedAsync(f.CandidateId, row.Id, default);
         await f.Service.NotReceivedAsync(f.CandidateId, row.Id, default);
         Assert.Equal(ReferralRequestStatus.ReferralSubmitted, issue.Status); Assert.NotNull(issue.NotReceivedAtUtc);
         Assert.Single((await f.Service.AdminListAsync(true, null, 1, 20, default)).Items);
         await f.Service.ConfirmAsync(f.CandidateId, row.Id, default); await f.Service.ConfirmAsync(f.CandidateId, row.Id, default);
+        var points = await new JobPortal.Application.Features.Points.CareerHarborPointsService(
+            new CareerHarborPointsRepository(f.Db)).BalanceAsync(f.ReferrerId);
+        Assert.Equal(300, points.TotalPoints);
+        Assert.Equal(300, points.ReferralCandidateConfirmedPoints);
         var metrics = await f.Service.MetricsAsync(f.ReferrerId, default);
         Assert.Equal(new ReferralMetricsResponse(1, 1, 1, 1, 1, 1m), metrics);
         await Error("INVALID_REFERRAL_STATUS", () => f.Service.RejectAsync(f.ReferrerId, row.Id, new(null), default));
         Assert.Equal(10, await f.Db.NotificationDeliveries.CountAsync());
         Assert.Equal("application-id", (await f.Service.ReferrerDetailAsync(f.ReferrerId, row.Id, default)).ReferralSubmissionReference);
+    }
+
+    [Fact]
+    public async Task ReferralOpportunityRewardIsPaidOnlyWhenAdminPublishesItAndOnlyOnce()
+    {
+        await using var f = await ReferralFixture.CreateAsync();
+        var job = await f.Db.Jobs.SingleAsync(x => x.Id == f.JobId);
+        job.Status = JobStatus.Draft;
+        var opportunity = await f.Db.JobReferrals.SingleAsync(x => x.Id == f.ReferralId);
+        opportunity.ApprovalStatus = JobReferralApprovalStatus.Pending;
+        await f.Db.SaveChangesAsync();
+
+        Assert.Equal(0, (await new JobPortal.Application.Features.Points.CareerHarborPointsService(
+            new CareerHarborPointsRepository(f.Db)).BalanceAsync(f.ReferrerId)).TotalPoints);
+        await f.Public.ReviewAsync(opportunity.Id, Guid.NewGuid(),
+            new ReviewJobReferralRequest(JobReferralApprovalStatus.Approved, null));
+        await Error("conflict", () => f.Public.ReviewAsync(opportunity.Id, Guid.NewGuid(),
+            new ReviewJobReferralRequest(JobReferralApprovalStatus.Approved, "Approved again")));
+        var balance = await new JobPortal.Application.Features.Points.CareerHarborPointsService(
+            new CareerHarborPointsRepository(f.Db)).BalanceAsync(f.ReferrerId);
+        Assert.Equal(5, balance.TotalPoints);
+        Assert.Equal(5, balance.ReferralOpportunitySharedPoints);
+        Assert.Single(f.Db.UserPointTransactions);
     }
     [Fact]
     public async Task PublicSerializedApiEnvelopeContainsNoReferrerIdentityFieldsOrValues()
@@ -328,9 +365,10 @@ internal sealed class ReferralFixture : IAsyncDisposable
     {
         Db = db;
         var outbox = new NotificationOutbox(new NotificationOutboxRepository(db), Clock);
-        Service = new(new ReferralMarketplaceRepository(db), outbox, new AuditWriterTestDouble(), Storage, Clock);
+        var points = new JobPortal.Application.Features.Points.CareerHarborPointsService(new CareerHarborPointsRepository(db));
+        Service = new(new ReferralMarketplaceRepository(db), outbox, new AuditWriterTestDouble(), Storage, Clock, points);
         Public = new(new JobReferralRepository(db), new JobRepository(db), null!, new MembershipRepository(db, Clock),
-            new AuditWriterTestDouble(), new UnitOfWork(db), Clock, outbox, marketplace: Service);
+            new AuditWriterTestDouble(), new UnitOfWork(db), Clock, outbox, marketplace: Service, points: points);
     }
     internal static async Task<ReferralFixture> CreateAsync(int slots = 5, string? plan = "ReferralContactAccess", JobPortalDbContext? db = null)
     {

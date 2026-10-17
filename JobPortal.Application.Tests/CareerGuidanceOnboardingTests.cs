@@ -3,6 +3,8 @@ using JobPortal.Application.Abstractions.Candidates;
 using JobPortal.Application.Common.Exceptions;
 using JobPortal.Application.Features.Auditing;
 using JobPortal.Application.Features.CareerGuidance;
+using JobPortal.Application.Features.Points;
+using JobPortal.Domain.Common;
 using JobPortal.Domain.Entities;
 using JobPortal.Domain.Enums;
 using JobPortal.Persistence.Context;
@@ -292,6 +294,7 @@ public sealed class CareerGuidanceOnboardingTests
     public async Task CompleteOnboardingCanBeSubmittedAndBecomesPending()
     {
         using var f = new Fixture();
+        var originalRoleId = f.Owner.RoleId;
 
         // 1. Start draft
         var draft = await f.Service.StartOnboardingAsync(
@@ -438,6 +441,15 @@ public sealed class CareerGuidanceOnboardingTests
             "UsableAvailability",
             draft.MissingRequirements);
 
+        // Draft work remains available below threshold; final mentor submission does not.
+        f.Points.TotalPoints = 0;
+        var blocked = await Assert.ThrowsAsync<AppException>(() => f.Service.SubmitOnboardingAsync(
+            f.Owner.Id, new(draft.Revision, CareerGuidanceService.PolicyVersion, true, true), default));
+        Assert.Equal("mentor_points_required", blocked.Code);
+        Assert.Equal(ConsultantVerificationStatus.Draft,
+            (await f.Db.CareerConsultants.SingleAsync()).VerificationStatus);
+        f.Points.TotalPoints = CareerHarborPointsService.MentorEligibilityThreshold;
+
         // 7. Submit
         var submitted =
             await f.Service.SubmitOnboardingAsync(
@@ -453,6 +465,7 @@ public sealed class CareerGuidanceOnboardingTests
         Assert.Equal(
             ConsultantVerificationStatus.Pending,
             submitted.Status);
+        Assert.Equal(originalRoleId, (await f.Db.Users.SingleAsync(x => x.Id == f.Owner.Id)).RoleId);
 
         Assert.NotNull(submitted.SubmittedAtUtc);
         Assert.NotNull(submitted.TermsAcceptedAtUtc);
@@ -996,6 +1009,7 @@ public sealed class CareerGuidanceOnboardingTests
         };
 
         public CareerGuidanceService Service { get; }
+        public CareerHarborPointsServiceTestDouble Points { get; } = new();
 
         public Fixture()
         {
@@ -1050,7 +1064,8 @@ public sealed class CareerGuidanceOnboardingTests
                 new ConsultantSearchQueryValidator(),
                 new ConsultantReviewRequestValidator(),
                 new ConsultantAdminQueryValidator(),
-                new TestProfilePhotoStorage());
+                new TestProfilePhotoStorage(),
+                Points);
         }
 
         public void Dispose()

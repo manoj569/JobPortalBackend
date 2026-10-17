@@ -137,6 +137,7 @@ public sealed partial class CareerGuidanceService
             throw new BadRequestException("Accept the current policy and explicitly consent to the public profile.");
         var missing = Missing(p, await profiles.OnboardingWindowsAsync(p.Id, ct), acceptingConsent: true);
         if (missing.Count > 0) throw new BadRequestException("Complete these requirements: " + string.Join(", ", missing));
+        await RequireMentorEligibilityAsync(actor, ct);
         var now = clock.GetUtcNow().UtcDateTime;
         p.TermsAcceptedAtUtc = now; p.PolicyVersion = PolicyVersion; p.PublicProfileConsentAtUtc = now;
         p.SubmittedAtUtc ??= now; // First actual submission; resubmission does not create another application.

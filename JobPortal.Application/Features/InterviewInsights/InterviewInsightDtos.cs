@@ -91,7 +91,8 @@ public sealed record InsightReportResponse(Guid Id, InsightReportStatus Status, 
 public sealed record MyInterviewContributionsResponse(int InsightsPublished, int CandidatesHelped,
     int ContributionScore, IReadOnlyCollection<string> Badges, int PendingReview = 0,
     int NeedsChanges = 0, IReadOnlyCollection<MyInterviewContributionCardResponse>? Items = null,
-    int CareerHarborPoints = 0);
+    int CareerHarborPoints = 0,
+    JobPortal.Application.Features.Points.CareerHarborPointsBalance? PointsBalance = null);
 public sealed record MyInterviewContributionCardResponse(Guid Id, string CompanyName, string RoleTitle,
     int InterviewMonth, int InterviewYear, InterviewInsightStatus ModerationStatus,
     int HelpfulConfirmedCount, int ContributionPoints, DateTime UpdatedAt,

@@ -390,7 +390,8 @@ public sealed class CareerTrustTests
         await f.Db.SaveChangesAsync();
         var service = new CareerGuidanceService(new CareerGuidanceRepository(f.Db), new UserRepository(f.Db), new CompanyManagementRepository(f.Db),
             new UnitOfWork(f.Db), new AuditWriterTestDouble(), f.Clock, new ConsultantProfileRequestValidator(), new ConsultantServiceRequestValidator(),
-            new ConsultantSearchQueryValidator(), new ConsultantReviewRequestValidator(), new ConsultantAdminQueryValidator(), new TestProfilePhotoStorage());
+            new ConsultantSearchQueryValidator(), new ConsultantReviewRequestValidator(), new ConsultantAdminQueryValidator(), new TestProfilePhotoStorage(),
+            new JobPortal.Application.Features.Points.CareerHarborPointsService(new CareerHarborPointsRepository(f.Db)));
         var detail = await service.GetAsync(profile.Id, default);
         var discovery = Assert.Single((await service.SearchAsync(new(), default)).Items);
         Assert.Equal(4.33m, detail.AverageRating); Assert.Equal(3, detail.ReviewCount);

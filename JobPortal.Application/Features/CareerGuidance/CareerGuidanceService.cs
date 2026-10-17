@@ -3,6 +3,7 @@ using JobPortal.Application.Abstractions.Auditing;
 using JobPortal.Application.Abstractions.Candidates;
 using JobPortal.Application.Abstractions.Persistence;
 using JobPortal.Application.Common.Exceptions;
+using JobPortal.Application.Features.Points;
 using JobPortal.Domain.Entities;
 using JobPortal.Domain.Enums;
 using JobPortal.Shared.Models;
@@ -13,7 +14,8 @@ public sealed partial class CareerGuidanceService(ICareerGuidanceRepository prof
     ICompanyManagementRepository companies, IUnitOfWork unitOfWork, IAuditWriter audit, TimeProvider clock,
     IValidator<ConsultantProfileRequest> profileValidator, IValidator<ConsultantServiceRequest> serviceValidator,
     IValidator<ConsultantSearchQuery> searchValidator, IValidator<ConsultantReviewRequest> reviewValidator,
-    IValidator<ConsultantAdminQuery> adminValidator, IProfilePhotoStorage profilePhotoStorage) : ICareerGuidanceService
+    IValidator<ConsultantAdminQuery> adminValidator, IProfilePhotoStorage profilePhotoStorage,
+    ICareerHarborPointsService points) : ICareerGuidanceService
 {
     public const string PolicyVersion = "career-guidance-v1";
     public const string Disclaimer = "Independent career guidance, not employer representation. No guaranteed job, interview or referral. Do not disclose employer-confidential information; comply with your employer's outside-work policies.";
@@ -59,6 +61,7 @@ public sealed partial class CareerGuidanceService(ICareerGuidanceRepository prof
     public async Task<ConsultantPrivateResponse> ApplyAsync(Guid actor, ConsultantProfileRequest request, CancellationToken ct)
     {
         await RequireActor(actor, false, ct);
+        await RequireMentorEligibilityAsync(actor, ct);
         await profileValidator.ValidateAndThrowAsync(request, ct);
         if (await profiles.FindByUserAsync(actor, ct) is not null) throw new ConflictException("A consultant profile already exists.");
         var profile = new CareerConsultant { UserId = actor, SubmittedAtUtc = clock.GetUtcNow().UtcDateTime };
@@ -226,6 +229,14 @@ public sealed partial class CareerGuidanceService(ICareerGuidanceRepository prof
         await RequireActor(actor, false, ct);
         var profile = await profiles.FindByUserAsync(actor, ct);
         return profile is { IsDeleted: false } ? profile : throw new NotFoundException("Consultant profile not found.");
+    }
+
+    private async Task RequireMentorEligibilityAsync(Guid actor, CancellationToken ct)
+    {
+        var balance = await points.BalanceAsync(actor, ct);
+        if (!balance.IsEligibleForMentorOnboarding)
+            throw new AppException("Reach 3,000 CareerHarbor Points before submitting a mentor application.",
+                403, "mentor_points_required");
     }
 
     private async Task RequireActor(Guid actor, bool admin, CancellationToken ct)

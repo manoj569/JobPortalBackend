@@ -3,6 +3,7 @@ using JobPortal.Application.Abstractions.Auditing;
 using JobPortal.Application.Abstractions.InterviewInsights;
 using JobPortal.Application.Common.Exceptions;
 using JobPortal.Application.Features.Notifications;
+using JobPortal.Application.Features.Points;
 using JobPortal.Domain.Entities;
 using JobPortal.Domain.Enums;
 using JobPortal.Shared.Models;
@@ -19,7 +20,8 @@ public sealed class InterviewInsightService(
     IValidator<CreateInsightFeedbackRequest> feedbackValidator,
     IValidator<CreateInsightReportRequest> reportValidator,
     NotificationOutbox notificationOutbox,
-    TimeProvider timeProvider) : IInterviewInsightService
+    TimeProvider timeProvider,
+    ICareerHarborPointsService points) : IInterviewInsightService
 {
     private DateTime Now => timeProvider.GetUtcNow().UtcDateTime;
 
@@ -520,12 +522,13 @@ public sealed class InterviewInsightService(
     {
         await RequireCandidateAsync(candidateId, ct);
         var x = await repository.ContributionsAsync(candidateId, ct);
+        var pointsBalance = await points.BalanceAsync(candidateId, ct);
         var badges = new List<string>();
         if (x.Published > 0) badges.Add("First Insight Shared");
         if (x.Helped >= 10) badges.Add("10 Candidates Helped");
         if (x.Helped >= 50) badges.Add("50 Candidates Helped");
         return new(x.Published, x.Helped, x.Score, badges, x.Pending, x.NeedsChanges, x.Items,
-            await repository.GetCareerHarborPointsAsync(candidateId, ct));
+            pointsBalance.TotalPoints, pointsBalance);
     }
 
     public async Task<CompanyInterviewInsightSummaryResponse> CompanySummaryAsync(Guid candidateId, Guid companyId, CancellationToken ct = default)
@@ -728,7 +731,8 @@ public sealed class InterviewInsightService(
     }
 }
 
-public sealed class AdminInterviewInsightService(IInterviewInsightRepository repository, IAuditWriter audit, TimeProvider timeProvider) : IAdminInterviewInsightService
+public sealed class AdminInterviewInsightService(IInterviewInsightRepository repository, IAuditWriter audit,
+    TimeProvider timeProvider, ICareerHarborPointsService points) : IAdminInterviewInsightService
 {
     public async Task<PagedResponse<InterviewInsightResponse>> SearchAsync(AdminInterviewInsightQuery query, CancellationToken ct = default)
     {
@@ -747,6 +751,8 @@ public sealed class AdminInterviewInsightService(IInterviewInsightRepository rep
         item.Status = request.Status;
         item.ModerationReason = string.IsNullOrWhiteSpace(request.Reason) ? null : request.Reason.Trim();
         item.PublishedAtUtc = request.Status == InterviewInsightStatus.Published ? timeProvider.GetUtcNow().UtcDateTime : null;
+        if (request.Status == InterviewInsightStatus.Published)
+            await points.AwardInterviewInsightPublishedAsync(item, ct);
         await audit.AppendAsync(new(AuditAction.Update, "InterviewInsight", id.ToString(),
             new Dictionary<string, string?> { ["moderationStatus"] = request.Status.ToString() }, new(administratorId, "Administrator")), ct);
         await repository.SaveAsync(ct);
