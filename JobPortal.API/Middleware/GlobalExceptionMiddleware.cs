@@ -12,9 +12,9 @@ public sealed class GlobalExceptionMiddleware(
     RequestDelegate next,
     ILogger<GlobalExceptionMiddleware> logger)
 {
-    private static readonly Action<ILogger, string, Exception?> RequestCancelled =
-        LoggerMessage.Define<string>(LogLevel.Information, new EventId(3001, nameof(RequestCancelled)),
-            "Request cancelled by client for {RequestPath}");
+    private static readonly Action<ILogger, string, string, Exception?> RequestCancelled =
+        LoggerMessage.Define<string, string>(LogLevel.Information, new EventId(3001, nameof(RequestCancelled)),
+            "Request cancelled by client for {RequestPath}. TraceId={TraceId}.");
 
     private static readonly Action<ILogger, string, string, Exception?> UnhandledRequestException =
         LoggerMessage.Define<string, string>(LogLevel.Error, new EventId(3002, nameof(UnhandledRequestException)),
@@ -44,7 +44,7 @@ public sealed class GlobalExceptionMiddleware(
             {
                 if (!context.Response.HasStarted)
                     context.Response.StatusCode = StatusCodes.Status499ClientClosedRequest;
-                RequestCancelled(logger, context.Request.Path, null);
+                RequestCancelled(logger, context.Request.Path, TraceId(context), null);
                 return;
             }
 
@@ -79,7 +79,10 @@ public sealed class GlobalExceptionMiddleware(
                         .ToDictionary(x => x.Key, x => x.Select(e => e.ErrorMessage).ToArray()))),
 
                 BadHttpRequestException => (StatusCodes.Status400BadRequest, (object)new ApiError("invalid_request", "The request is invalid.")),
-
+                OperationCanceledException => (StatusCodes.Status503ServiceUnavailable,
+                    (object)new ApiError("dependency_timeout", "A required service did not respond in time.")),
+                TimeoutException => (StatusCodes.Status503ServiceUnavailable,
+                    (object)new ApiError("dependency_timeout", "A required service did not respond in time.")),
                 // Fixed: Concurrency & Constraint handling
                 DbUpdateConcurrencyException => (StatusCodes.Status409Conflict, (object)new ApiError("concurrency_conflict", "The resource was modified by another request.")),
                 DbUpdateException { InnerException: Npgsql.PostgresException { SqlState: "23505", ConstraintName:
@@ -88,6 +91,16 @@ public sealed class GlobalExceptionMiddleware(
                 UniqueConstraintException => (StatusCodes.Status409Conflict, (object)new ApiError("data_conflict", "A resource with the same unique value already exists.")),
                 DbUpdateException { InnerException: SqlException { Number: 2601 or 2627 } } =>
                     (StatusCodes.Status409Conflict, (object)new ApiError("data_conflict", "A resource with the same unique value already exists.")),
+                DbUpdateException { InnerException: Npgsql.PostgresException { SqlState: "57014" } } =>
+                    (StatusCodes.Status503ServiceUnavailable,
+                        (object)new ApiError("dependency_timeout", "A required service did not respond in time.")),
+                Npgsql.PostgresException { SqlState: "57014" } => (StatusCodes.Status503ServiceUnavailable,
+                    (object)new ApiError("dependency_timeout", "A required service did not respond in time.")),
+                DbUpdateException { InnerException: Npgsql.NpgsqlException } =>
+                    (StatusCodes.Status503ServiceUnavailable,
+                        (object)new ApiError("dependency_unavailable", "A required service is temporarily unavailable.")),
+                Npgsql.NpgsqlException => (StatusCodes.Status503ServiceUnavailable,
+                    (object)new ApiError("dependency_unavailable", "A required service is temporarily unavailable.")),
 
                 // 500 Internal Server Error fallback
                 _ => (StatusCodes.Status500InternalServerError, (object)ApiError.InternalServerError())
@@ -117,10 +130,13 @@ public sealed class GlobalExceptionMiddleware(
             catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
             {
                 if (!context.Response.HasStarted) context.Response.StatusCode = StatusCodes.Status499ClientClosedRequest;
-                RequestCancelled(logger, context.Request.Path, null);
+                RequestCancelled(logger, context.Request.Path, TraceId(context), null);
             }
         }
     }
+
+    private static string TraceId(HttpContext context) =>
+        System.Diagnostics.Activity.Current?.TraceId.ToString() ?? context.TraceIdentifier;
 }
 
 public sealed record PendingMembershipCheckoutErrorResponse(

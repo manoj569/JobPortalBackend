@@ -1,0 +1,279 @@
+{
+  "database": {
+    "host": "127.0.0.1",
+    "port": 54769,
+    "postgres_version": "17.11",
+    "container": "279d7704dd57d6241d0f4d866d65deae5157a1f9cc03a05eb25fba91867d1594",
+    "production": false,
+    "databases": [
+      "careerharbor_generic_india_test",
+      "careerharbor_talentd_migration_test",
+      "careerharbor_website_talentd_test"
+    ],
+    "final_container_state": "stopped; databases retained"
+  },
+  "original_failure_attribution": {
+    "baseline_commit": "31419dd7570bf236da57da1b03669941ffb8de6d",
+    "baseline_passed": 178,
+    "baseline_failed": 84,
+    "baseline_skipped": 0,
+    "baseline_duration": "22 seconds",
+    "identical_named_failures_and_messages": 84,
+    "original_failed": 84,
+    "talentd_caused": 0,
+    "environmental": 0,
+    "pre_existing_proven": 84,
+    "unknown": 0
+  },
+  "runs": {
+    "pre_talentd_baseline": {
+      "path": "tools/talentd/pre-Talentd-baseline.trx",
+      "counters": {
+        "total": "262",
+        "executed": "262",
+        "passed": "178",
+        "failed": "84",
+        "error": "0",
+        "timeout": "0",
+        "aborted": "0",
+        "inconclusive": "0",
+        "passedButRunAborted": "0",
+        "notRunnable": "0",
+        "notExecuted": "0",
+        "disconnected": "0",
+        "warning": "0",
+        "completed": "0",
+        "inProgress": "0",
+        "pending": "0"
+      },
+      "times": {
+        "creation": "2026-10-16T17:09:22.1154612+05:30",
+        "queuing": "2026-10-16T17:09:22.1154618+05:30",
+        "start": "2026-10-16T17:09:16.5057063+05:30",
+        "finish": "2026-10-16T17:09:44.2314911+05:30"
+      }
+    },
+    "focused_first": {
+      "path": "JobPortal.Application.Tests/TestResults/talentd-continuation-focused.trx",
+      "counters": {
+        "total": "108",
+        "executed": "108",
+        "passed": "108",
+        "failed": "0",
+        "error": "0",
+        "timeout": "0",
+        "aborted": "0",
+        "inconclusive": "0",
+        "passedButRunAborted": "0",
+        "notRunnable": "0",
+        "notExecuted": "0",
+        "disconnected": "0",
+        "warning": "0",
+        "completed": "0",
+        "inProgress": "0",
+        "pending": "0"
+      },
+      "times": {
+        "creation": "2026-10-16T17:13:31.1502352+05:30",
+        "queuing": "2026-10-16T17:13:31.1502357+05:30",
+        "start": "2026-10-16T17:13:24.7832448+05:30",
+        "finish": "2026-10-16T17:14:18.8293526+05:30"
+      }
+    },
+    "broad_first_aborted": {
+      "path": "JobPortal.Application.Tests/TestResults/talentd-continuation-broad.trx",
+      "counters": {
+        "total": "3053",
+        "executed": "3018",
+        "passed": "2933",
+        "failed": "85",
+        "error": "0",
+        "timeout": "0",
+        "aborted": "0",
+        "inconclusive": "0",
+        "passedButRunAborted": "0",
+        "notRunnable": "0",
+        "notExecuted": "0",
+        "disconnected": "0",
+        "warning": "0",
+        "completed": "0",
+        "inProgress": "0",
+        "pending": "0"
+      },
+      "times": {
+        "creation": "2026-10-16T17:15:40.0837273+05:30",
+        "queuing": "2026-10-16T17:15:40.0837280+05:30",
+        "start": "2026-10-16T17:15:37.7971542+05:30",
+        "finish": "2026-10-16T17:25:07.1842283+05:30"
+      }
+    },
+    "current_spacing": {
+      "path": "JobPortal.Application.Tests/TestResults/talentd-current-spacing.trx",
+      "counters": {
+        "total": "1",
+        "executed": "1",
+        "passed": "1",
+        "failed": "0",
+        "error": "0",
+        "timeout": "0",
+        "aborted": "0",
+        "inconclusive": "0",
+        "passedButRunAborted": "0",
+        "notRunnable": "0",
+        "notExecuted": "0",
+        "disconnected": "0",
+        "warning": "0",
+        "completed": "0",
+        "inProgress": "0",
+        "pending": "0"
+      },
+      "times": {
+        "creation": "2026-10-16T17:22:20.7682768+05:30",
+        "queuing": "2026-10-16T17:22:20.7682773+05:30",
+        "start": "2026-10-16T17:22:15.7338383+05:30",
+        "finish": "2026-10-16T17:22:20.7963351+05:30"
+      }
+    },
+    "baseline_spacing": {
+      "path": "../talentd-validation-head-31419dd/JobPortal.Application.Tests/TestResults/talentd-baseline-spacing.trx",
+      "counters": {
+        "total": "1",
+        "executed": "1",
+        "passed": "1",
+        "failed": "0",
+        "error": "0",
+        "timeout": "0",
+        "aborted": "0",
+        "inconclusive": "0",
+        "passedButRunAborted": "0",
+        "notRunnable": "0",
+        "notExecuted": "0",
+        "disconnected": "0",
+        "warning": "0",
+        "completed": "0",
+        "inProgress": "0",
+        "pending": "0"
+      },
+      "times": {
+        "creation": "2026-10-16T17:22:20.8119470+05:30",
+        "queuing": "2026-10-16T17:22:20.8119475+05:30",
+        "start": "2026-10-16T17:22:12.4917898+05:30",
+        "finish": "2026-10-16T17:22:20.8327690+05:30"
+      }
+    },
+    "focused_final": {
+      "path": "JobPortal.Application.Tests/TestResults/talentd-continuation-focused-final.trx",
+      "counters": {
+        "total": "108",
+        "executed": "108",
+        "passed": "108",
+        "failed": "0",
+        "error": "0",
+        "timeout": "0",
+        "aborted": "0",
+        "inconclusive": "0",
+        "passedButRunAborted": "0",
+        "notRunnable": "0",
+        "notExecuted": "0",
+        "disconnected": "0",
+        "warning": "0",
+        "completed": "0",
+        "inProgress": "0",
+        "pending": "0"
+      },
+      "times": {
+        "creation": "2026-10-16T17:29:57.2054282+05:30",
+        "queuing": "2026-10-16T17:29:57.2054288+05:30",
+        "start": "2026-10-16T17:29:50.0238294+05:30",
+        "finish": "2026-10-16T17:30:24.0214849+05:30"
+      },
+      "test_cpu_count": 2
+    },
+    "broad_final": {
+      "path": "JobPortal.Application.Tests\\TestResults\\talentd-continuation-broad-final.trx",
+      "counters": {
+        "total": "3056",
+        "executed": "3021",
+        "passed": "2937",
+        "failed": "84",
+        "error": "0",
+        "timeout": "0",
+        "aborted": "0",
+        "inconclusive": "0",
+        "passedButRunAborted": "0",
+        "notRunnable": "0",
+        "notExecuted": "0",
+        "disconnected": "0",
+        "warning": "0",
+        "completed": "0",
+        "inProgress": "0",
+        "pending": "0"
+      },
+      "times": {
+        "creation": "2026-10-16T17:31:12.4692559+05:30",
+        "queuing": "2026-10-16T17:31:12.4692566+05:30",
+        "start": "2026-10-16T17:31:07.9267270+05:30",
+        "finish": "2026-10-16T17:43:44.7548073+05:30"
+      },
+      "test_cpu_count": 2,
+      "completed_naturally": true,
+      "same_original_84_names_and_errors": true
+    }
+  },
+  "latest_focused_timing": "LOCAL NON-PRODUCTION: TotalMs=2757.266; AverageItemMs=275.727\r\nCompanyResolution: count=10; sumMs=66\r\nIngestion: count=10; sumMs=706\r\nBulkImportItem: count=10; sumMs=787\r\nPersistenceCommit: count=10; sumMs=396\r\nPublication: count=10; sumMs=1392\r\nBulkImportTotal: count=1; sumMs=2757",
+  "final_groups": {
+    "Talentd": {
+      "Passed": 31
+    },
+    "FresherAcquisitionPostgresTests": {
+      "Passed": 24,
+      "NotExecuted": 2
+    },
+    "FresherAcquisitionEligibilityTests": {
+      "Passed": 35
+    },
+    "AcquisitionPublicationEligibilityTests": {
+      "Passed": 22
+    },
+    "FinalWebsitePolicyTests": {
+      "Passed": 20
+    },
+    "FinalWebsitePostgresTests": {
+      "Passed": 1
+    },
+    "JobAutoPublish": {
+      "Passed": 7
+    },
+    "Greenhouse": {
+      "Passed": 97
+    },
+    "Lever": {
+      "Passed": 44
+    },
+    "Ashby": {
+      "Passed": 41
+    },
+    "Workday": {
+      "Passed": 241,
+      "NotExecuted": 17
+    },
+    "SuccessFactors": {
+      "Passed": 102
+    },
+    "SerpApi": {
+      "Passed": 1
+    },
+    "Referral": {
+      "Passed": 139,
+      "NotExecuted": 6
+    },
+    "CandidateJob": {
+      "NotExecuted": 1
+    },
+    "AdminJob": {
+      "Passed": 8
+    }
+  },
+  "broad_timing": "LOCAL NON-PRODUCTION: TotalMs=5959.200; AverageItemMs=595.920\r\nCompanyResolution: count=10; sumMs=94\r\nIngestion: count=10; sumMs=3215\r\nBulkImportItem: count=10; sumMs=3316\r\nPersistenceCommit: count=10; sumMs=483\r\nPublication: count=10; sumMs=1242\r\nBulkImportTotal: count=1; sumMs=5957",
+  "readiness": "FIVE_JOB_PRODUCTION_READY_AFTER_DEPLOYMENT"
+}

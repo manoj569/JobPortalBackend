@@ -42,7 +42,7 @@ public interface IInterviewInsightRepository
     Task<int> CountFeedbackSinceAsync(Guid candidateId, DateTime since, CancellationToken ct);
     Task AddInsightAsync(InterviewInsight insight, CancellationToken ct);
     Task<InterviewInsight?> GetInsightAsync(Guid id, bool tracking, CancellationToken ct);
-    Task<(IReadOnlyCollection<InterviewInsightCardResponse> Items, int Total)> SearchPublishedAsync(Guid candidateId, InterviewInsightQuery query, DateOnly? fromMonth, CancellationToken ct);
+    Task<(IReadOnlyCollection<InterviewInsightCardResponse> Items, int Total)> SearchPublishedAsync(Guid candidateId, InterviewInsightQuery query, DateOnly? fromMonth, bool hasPremiumAccess, CancellationToken ct);
     Task<IReadOnlyCollection<InterviewInsightCompanyResponse>> SearchCompaniesAsync(string query, int limit, CancellationToken ct);
     Task<(IReadOnlyCollection<InterviewInsight> Items, int Total)> SearchAdminAsync(AdminInterviewInsightQuery query, CancellationToken ct);
     Task AddScheduleAsync(CandidateInterviewSchedule schedule, CancellationToken ct);

@@ -36,7 +36,7 @@ public sealed class InterviewInsightRepository(JobPortalDbContext db) : IIntervi
             .Include(x => x.Rounds.OrderBy(r => r.Sequence)).Where(x => x.Id == id);
         return await (tracking ? q : q.AsNoTracking()).SingleOrDefaultAsync(ct);
     }
-    public async Task<(IReadOnlyCollection<InterviewInsightCardResponse>, int)> SearchPublishedAsync(Guid candidateId, InterviewInsightQuery query, DateOnly? fromMonth, CancellationToken ct)
+    public async Task<(IReadOnlyCollection<InterviewInsightCardResponse>, int)> SearchPublishedAsync(Guid candidateId, InterviewInsightQuery query, DateOnly? fromMonth, bool hasPremiumAccess, CancellationToken ct)
     {
         var q = db.InterviewInsights.AsNoTracking().Where(x => x.Status == InterviewInsightStatus.Published &&
             !x.Reports.Any(r => r.Status == InsightReportStatus.Actioned));
@@ -70,7 +70,7 @@ public sealed class InterviewInsightRepository(JobPortalDbContext db) : IIntervi
                     .Select(r => r.RoundTitle!).Distinct().Take(6).ToArray(),
                 x.ProcessSummary.Length <= 240 ? x.ProcessSummary : x.ProcessSummary.Substring(0, 240),
                 x.HelpfulConfirmedCount,
-                db.JobApplications.Any(a => a.UserId == candidateId && a.Job.CompanyId == x.CompanyId) ||
+                hasPremiumAccess || db.JobApplications.Any(a => a.UserId == candidateId && a.Job.CompanyId == x.CompanyId) ||
                     db.CandidateInterviewSchedules.Any(s => s.CandidateId == candidateId && s.CompanyId == x.CompanyId && s.Status != InterviewScheduleStatus.Cancelled),
                 x.AuthorCandidateId != candidateId && (db.JobApplications.Any(a => a.UserId == candidateId && a.Job.CompanyId == x.CompanyId) ||
                     db.CandidateInterviewSchedules.Any(s => s.CandidateId == candidateId && s.CompanyId == x.CompanyId && s.Status != InterviewScheduleStatus.Cancelled)),

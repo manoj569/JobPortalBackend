@@ -248,6 +248,34 @@ public sealed class AuthenticationTests
     }
 
     [Fact]
+    public async Task LoginPropagatesRequestCancellationBeforeIssuingTokens()
+    {
+        var fixture = CreateFixture();
+        fixture.Users.Items.Add(NewUser());
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            fixture.Service.LoginAsync(new("user@example.com", "abc123"), null, cancellation.Token));
+
+        Assert.Empty(fixture.RefreshTokens.Added);
+    }
+
+    [Fact]
+    public async Task LoginPropagatesTokenPersistenceFailureWithoutReturningCredentials()
+    {
+        var fixture = CreateFixture();
+        fixture.Users.Items.Add(NewUser());
+        fixture.UnitOfWork.ExceptionToThrow = new InvalidOperationException("dependency unavailable");
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            fixture.Service.LoginAsync(new("user@example.com", "abc123"), null));
+
+        Assert.Equal("dependency unavailable", error.Message);
+        Assert.Single(fixture.RefreshTokens.Added);
+    }
+
+    [Fact]
     public async Task RegistrationRaceConflictRechecksIdentityAndReturnsSpecificConflict()
     {
         var fixture = CreateFixture();

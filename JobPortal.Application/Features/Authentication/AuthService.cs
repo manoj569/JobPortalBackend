@@ -54,6 +54,10 @@ public sealed class AuthService(
         LoggerMessage.Define<string, double>(LogLevel.Information,
             new EventId(1202, nameof(RegistrationTiming)),
             "Registration stage {Operation} completed in {DurationMilliseconds:F1} ms.");
+    private static readonly Action<ILogger, string, double, string, Exception?> LoginTiming =
+        LoggerMessage.Define<string, double, string>(LogLevel.Information,
+            new EventId(1203, "LoginTiming"),
+            "Login stage {Operation} completed in {DurationMilliseconds:F1} ms. TraceId={TraceId}.");
     private const string RegistrationSuccessMessage = "Registration successful. Please log in.";
     private const string PasswordChangedMessage = "Password changed successfully. Please log in.";
     private const string PasswordResetRequestedMessage =
@@ -206,34 +210,54 @@ public sealed class AuthService(
         string? ipAddress,
         CancellationToken cancellationToken = default)
     {
-        request = request with { Identifier = request.Identifier?.Trim() ?? string.Empty };
-        await loginValidator.ValidateAndThrowAsync(request, cancellationToken);
-        User? user;
-        if (request.Identifier.Contains('@', StringComparison.Ordinal))
+        var totalStarted = Stopwatch.GetTimestamp();
+        try
         {
-            user = await users.GetByNormalizedEmailAsync(NormalizeEmail(request.Identifier), cancellationToken);
+            request = request with { Identifier = request.Identifier?.Trim() ?? string.Empty };
+            var stageStarted = Stopwatch.GetTimestamp();
+            await loginValidator.ValidateAndThrowAsync(request, cancellationToken);
+            LogLoginTiming("validation", stageStarted);
+            User? user;
+            stageStarted = Stopwatch.GetTimestamp();
+            if (request.Identifier.Contains('@', StringComparison.Ordinal))
+            {
+                user = await users.GetByNormalizedEmailAsync(NormalizeEmail(request.Identifier), cancellationToken);
+            }
+            else
+            {
+                _ = IndianMobileNumber.TryNormalize(request.Identifier, out var normalizedPhoneNumber);
+                user = await users.GetByNormalizedPhoneAsync(normalizedPhoneNumber, cancellationToken);
+            }
+            LogLoginTiming("user_lookup_with_role", stageStarted);
+
+            if (user is null || user.Status != UserStatus.Active ||
+                string.IsNullOrWhiteSpace(user.PasswordHash))
+                throw InvalidCredentials();
+            stageStarted = Stopwatch.GetTimestamp();
+            var passwordValid = passwordHasher.Verify(request.Password, user.PasswordHash);
+            LogLoginTiming("password_verification", stageStarted);
+            if (!passwordValid)
+                throw InvalidCredentials();
+
+            if (!user.EmailConfirmed)
+                throw new AuthenticationFlowException(
+                    "Verify your email before signing in.", 403,
+                    "email_verification_required");
+
+            user.LastLoginAtUtc = UtcNow;
+            users.Update(user);
+            stageStarted = Stopwatch.GetTimestamp();
+            var response = await IssueTokensAsync(user, ipAddress, cancellationToken);
+            LogLoginTiming("token_generation", stageStarted);
+            stageStarted = Stopwatch.GetTimestamp();
+            await unitOfWork.SaveChangesAsync(cancellationToken);
+            LogLoginTiming("refresh_token_persistence", stageStarted);
+            return response;
         }
-        else
+        finally
         {
-            _ = IndianMobileNumber.TryNormalize(request.Identifier, out var normalizedPhoneNumber);
-            user = await users.GetByNormalizedPhoneAsync(normalizedPhoneNumber, cancellationToken);
+            LogLoginTiming("total", totalStarted);
         }
-
-        if (user is null || user.Status != UserStatus.Active ||
-            string.IsNullOrWhiteSpace(user.PasswordHash) ||
-            !passwordHasher.Verify(request.Password, user.PasswordHash))
-            throw InvalidCredentials();
-
-        if (!user.EmailConfirmed)
-            throw new AuthenticationFlowException(
-                "Verify your email before signing in.", 403,
-                "email_verification_required");
-
-        user.LastLoginAtUtc = UtcNow;
-        users.Update(user);
-        var response = await IssueTokensAsync(user, ipAddress, cancellationToken);
-        await unitOfWork.SaveChangesAsync(cancellationToken);
-        return response;
     }
 
     public async Task<MessageResponse> RequestPasswordResetAsync(
@@ -416,6 +440,10 @@ public sealed class AuthService(
     private void LogRegistrationTiming(string operation, long startedTimestamp) =>
         RegistrationTiming(logger, operation,
             Stopwatch.GetElapsedTime(startedTimestamp).TotalMilliseconds, null);
+
+    private void LogLoginTiming(string operation, long startedTimestamp) =>
+        LoginTiming(logger, operation, Stopwatch.GetElapsedTime(startedTimestamp).TotalMilliseconds,
+            System.Diagnostics.Activity.Current?.TraceId.ToString() ?? "unavailable", null);
 
     private static bool VerifyPasswordResetToken(
         string rawToken,

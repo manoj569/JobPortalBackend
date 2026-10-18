@@ -1,0 +1,7 @@
+LOCAL NON-PRODUCTION: TotalMs=2757.266; AverageItemMs=275.727
+CompanyResolution: count=10; sumMs=66
+Ingestion: count=10; sumMs=706
+BulkImportItem: count=10; sumMs=787
+PersistenceCommit: count=10; sumMs=396
+Publication: count=10; sumMs=1392
+BulkImportTotal: count=1; sumMs=2757

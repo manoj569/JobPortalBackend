@@ -1,6 +1,7 @@
 using FluentValidation;
 using JobPortal.Application.Abstractions.Auditing;
 using JobPortal.Application.Abstractions.InterviewInsights;
+using JobPortal.Application.Abstractions.Persistence;
 using JobPortal.Application.Common.Exceptions;
 using JobPortal.Application.Features.Notifications;
 using JobPortal.Application.Features.Points;
@@ -21,7 +22,8 @@ public sealed class InterviewInsightService(
     IValidator<CreateInsightReportRequest> reportValidator,
     NotificationOutbox notificationOutbox,
     TimeProvider timeProvider,
-    ICareerHarborPointsService points) : IInterviewInsightService
+    ICareerHarborPointsService points,
+    IMembershipRepository memberships) : IInterviewInsightService
 {
     private DateTime Now => timeProvider.GetUtcNow().UtcDateTime;
 
@@ -134,12 +136,8 @@ public sealed class InterviewInsightService(
             ExperienceLevel = Clean(query.ExperienceLevel)
         };
 
-        var result =
-            await repository.SearchPublishedAsync(
-                candidateId,
-                cleaned,
-                fromMonth,
-                ct);
+        var premium = await HasActivePremiumAsync(candidateId, ct);
+        var result = await repository.SearchPublishedAsync(candidateId, cleaned, fromMonth, premium, ct);
 
         return new(
             result.Items,
@@ -164,7 +162,8 @@ public sealed class InterviewInsightService(
         var item = await repository.GetInsightAsync(id, false, ct) ?? throw new NotFoundException("Interview insight was not found.");
         var owner = item.AuthorCandidateId == candidateId;
         if (!owner && item.Status != InterviewInsightStatus.Published) throw new NotFoundException("Interview insight was not found.");
-        return Map(item, owner || await EligibleForCompanyAsync(candidateId, item.CompanyId, ct), owner);
+        var canReadFull = await HasFullInsightAccessAsync(candidateId, item.CompanyId, owner, ct);
+        return Map(item, canReadFull, owner);
     }
 
     public async Task<InterviewInsightResponse> UpdateAsync(Guid candidateId, Guid id, UpdateInterviewInsightRequest request, CancellationToken ct = default)
@@ -536,7 +535,8 @@ public sealed class InterviewInsightService(
         await RequireCandidateAsync(candidateId, ct);
         var x = await repository.CompanySummaryAsync(companyId, ct);
         if (string.IsNullOrEmpty(x.Name)) throw new NotFoundException("Company was not found.");
-        return new(companyId, x.Name, x.Published, x.Helped, await EligibleForCompanyAsync(candidateId, companyId, ct));
+        return new(companyId, x.Name, x.Published, x.Helped,
+            await HasFullInsightAccessAsync(candidateId, companyId, false, ct));
     }
 
     private async Task RequireCandidateAsync(Guid id, CancellationToken ct)
@@ -546,6 +546,12 @@ public sealed class InterviewInsightService(
 
     private async Task<bool> EligibleForCompanyAsync(Guid id, Guid companyId, CancellationToken ct) =>
         await repository.HasApplicationAtCompanyAsync(id, companyId, ct) || await repository.HasScheduleAtCompanyAsync(id, companyId, ct);
+
+    private async Task<bool> HasActivePremiumAsync(Guid candidateId, CancellationToken ct) =>
+        await memberships.GetActiveForUserAsync(candidateId, "CareerHarborMembership", ct) is not null;
+
+    private async Task<bool> HasFullInsightAccessAsync(Guid candidateId, Guid companyId, bool owner, CancellationToken ct) =>
+        owner || await HasActivePremiumAsync(candidateId, ct) || await EligibleForCompanyAsync(candidateId, companyId, ct);
 
     private async Task<bool> EligibleToAuthorAsync(Guid id, Guid companyId, CancellationToken ct) =>
         await repository.HasApplicationAtCompanyAsync(id, companyId, ct) || await repository.HasPastScheduleAtCompanyAsync(id, companyId, Now, ct);

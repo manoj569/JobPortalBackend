@@ -118,17 +118,6 @@ public sealed class JobPortalDbContext(DbContextOptions<JobPortalDbContext> opti
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(JobPortalDbContext).Assembly);
         if (Database.IsNpgsql()) modelBuilder.HasPostgresExtension("btree_gist");
 
-        // ✅ Configure Notifications table
-        modelBuilder.Entity<Notification>()
-            .HasOne<User>()
-            .WithMany()
-            .HasForeignKey(n => n.UserId)
-            .OnDelete(DeleteBehavior.Restrict); // Prevents cascade delete
-
-        // ✅ High-performance Index for fetching user notifications
-        modelBuilder.Entity<Notification>()
-            .HasIndex(n => new { n.UserId, n.IsRead });
-
         base.OnModelCreating(modelBuilder);
     }
 

@@ -5240,22 +5240,17 @@ namespace JobPortal.Persistence.Postgres.Migrations
                     b.Property<Guid>("UserId")
                         .HasColumnType("uuid");
 
-                    b.Property<Guid?>("UserId1")
-                        .HasColumnType("uuid");
-
                     b.HasKey("Id");
 
                     b.HasIndex("IsDeleted");
-
-                    b.HasIndex("UserId1");
 
                     b.HasIndex("UserId", "BusinessKey")
                         .IsUnique()
                         .HasFilter("\"BusinessKey\" IS NOT NULL");
 
-                    b.HasIndex("UserId", "IsRead");
-
                     b.HasIndex("UserId", "IsRead", "CreatedAtUtc");
+
+                    b.HasIndex("UserId", "IsRead");
 
                     b.HasIndex("UserId", "Type", "ReferralId")
                         .IsUnique()
@@ -8148,15 +8143,11 @@ namespace JobPortal.Persistence.Postgres.Migrations
 
             modelBuilder.Entity("JobPortal.Domain.Entities.Notification", b =>
                 {
-                    b.HasOne("JobPortal.Domain.Entities.User", null)
-                        .WithMany()
+                    b.HasOne("JobPortal.Domain.Entities.User", "User")
+                        .WithMany("Notifications")
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
-
-                    b.HasOne("JobPortal.Domain.Entities.User", "User")
-                        .WithMany("Notifications")
-                        .HasForeignKey("UserId1");
 
                     b.Navigation("User");
                 });

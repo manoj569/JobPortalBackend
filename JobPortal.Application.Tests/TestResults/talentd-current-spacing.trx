@@ -1,0 +1,34 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="60f8ef32-2188-496a-a753-41d562c52db6" name="Ashish@LAPTOP-SH2NN93A 2026-10-16 17:22:20" runUser="LAPTOP-SH2NN93A\Ashish" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Times creation="2026-10-16T17:22:20.7682768+05:30" queuing="2026-10-16T17:22:20.7682773+05:30" start="2026-10-16T17:22:15.7338383+05:30" finish="2026-10-16T17:22:20.7963351+05:30" />
+  <TestSettings name="default" id="0dffb6eb-fe8f-47b7-a87c-cccf2a798862">
+    <Deployment runDeploymentRoot="Ashish_LAPTOP-SH2NN93A_2026-10-16_17_22_20" />
+  </TestSettings>
+  <Results>
+    <UnitTestResult executionId="907548d8-7300-42ee-bafc-cf990c060a29" testId="86fbcf34-7ac3-7de5-9fb6-363d60858ad4" testName="JobPortal.Application.Tests.SuccessFactorsJobSourceProviderTests.DetailConcurrencyAndRequestSpacingRemainBounded" computerName="LAPTOP-SH2NN93A" duration="00:00:01.4347829" startTime="2026-10-16T17:22:20.3949290+05:30" endTime="2026-10-16T17:22:20.3949757+05:30" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="907548d8-7300-42ee-bafc-cf990c060a29" />
+  </Results>
+  <TestDefinitions>
+    <UnitTest name="JobPortal.Application.Tests.SuccessFactorsJobSourceProviderTests.DetailConcurrencyAndRequestSpacingRemainBounded" storage="c:\users\ashish\documents\codex\2026-07-27\you-are-a-principal-net-9\jobportal.application.tests\bin\debug\net9.0\jobportal.application.tests.dll" id="86fbcf34-7ac3-7de5-9fb6-363d60858ad4">
+      <Execution id="907548d8-7300-42ee-bafc-cf990c060a29" />
+      <TestMethod codeBase="C:\Users\Ashish\Documents\Codex\2026-07-27\you-are-a-principal-net-9\JobPortal.Application.Tests\bin\Debug\net9.0\JobPortal.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="JobPortal.Application.Tests.SuccessFactorsJobSourceProviderTests" name="DetailConcurrencyAndRequestSpacingRemainBounded" />
+    </UnitTest>
+  </TestDefinitions>
+  <TestEntries>
+    <TestEntry testId="86fbcf34-7ac3-7de5-9fb6-363d60858ad4" executionId="907548d8-7300-42ee-bafc-cf990c060a29" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+  </TestEntries>
+  <TestLists>
+    <TestList name="Results Not in a List" id="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestList name="All Loaded Results" id="19431567-8539-422a-85d7-44ee4e166bda" />
+  </TestLists>
+  <ResultSummary outcome="Completed">
+    <Counters total="1" executed="1" passed="1" failed="0" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notRunnable="0" notExecuted="0" disconnected="0" warning="0" completed="0" inProgress="0" pending="0" />
+    <Output>
+      <StdOut>[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v2.8.2+699d445a1a (64-bit .NET 9.0.7)&#xD;
+[xUnit.net 00:00:00.90]   Discovering: JobPortal.Application.Tests&#xD;
+[xUnit.net 00:00:01.74]   Discovered:  JobPortal.Application.Tests&#xD;
+[xUnit.net 00:00:01.76]   Starting:    JobPortal.Application.Tests&#xD;
+[xUnit.net 00:00:03.38]   Finished:    JobPortal.Application.Tests&#xD;
+</StdOut>
+    </Output>
+  </ResultSummary>
+</TestRun>

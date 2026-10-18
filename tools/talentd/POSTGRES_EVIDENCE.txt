@@ -1,0 +1,3 @@
+PostgreSQL 17.11 on x86_64-pc-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit|careerharbor_generic_india_test
+7fb8c010-f683-481b-b98f-71e45717f987|talentd|t|t|f|1
+10|10|10|0|Completed

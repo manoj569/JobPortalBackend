@@ -109,6 +109,118 @@ public sealed class InterviewInsightsTests
     }
 
     [Fact]
+    public async Task ActivePremiumUnlocksInsightFromAnotherCompanyAndMarksCardsReadable()
+    {
+        await using var f = await Fixture.CreateAsync();
+        var insight = await f.AddPublishedInsightAsync(f.AuthorId, f.CompanyAId);
+        f.Db.Memberships.Add(new Membership
+        {
+            UserId = f.ReaderId, PlanCode = "CareerHarborMembership", PlanName = "Job Application Access",
+            Status = MembershipStatus.Active, StartsAtUtc = Now.AddDays(-1), EndsAtUtc = Now.AddDays(1)
+        });
+        await f.Db.SaveChangesAsync();
+
+        var full = await f.Service.GetAsync(f.ReaderId, insight.Id);
+        Assert.True(full.CanReadFull);
+        Assert.Single(full.Rounds);
+        Assert.Equal("Prepare core concepts.", full.PreparationTips);
+        Assert.True(Assert.Single((await f.Service.SearchAsync(f.ReaderId, new())).Items).CanReadFull);
+    }
+
+    [Fact]
+    public async Task AnotherCandidatesPremiumMembershipCannotUnlockInsight()
+    {
+        await using var f = await Fixture.CreateAsync();
+        var insight = await f.AddPublishedInsightAsync(f.AuthorId, f.CompanyAId);
+        f.Db.Memberships.Add(new Membership
+        {
+            UserId = f.AuthorId, PlanCode = "CareerHarborMembership", PlanName = "Job Application Access",
+            Status = MembershipStatus.Active, StartsAtUtc = Now.AddDays(-1), EndsAtUtc = Now.AddDays(1)
+        });
+        await f.Db.SaveChangesAsync();
+
+        var response = await f.Service.GetAsync(f.ReaderId, insight.Id);
+        Assert.False(response.CanReadFull);
+        Assert.Empty(response.Rounds);
+        Assert.Null(response.PreparationTips);
+    }
+
+    [Fact]
+    public async Task FreeCandidateWithExistingQualifyingApplicationStillGetsFullInsight()
+    {
+        await using var f = await Fixture.CreateAsync();
+        var insight = await f.AddPublishedInsightAsync(f.AuthorId, f.CompanyAId);
+        var job = new Job { CompanyId = f.CompanyAId, ReferenceNumber = "INSIGHT-ACCESS-1", Title = "Engineer", Slug = "insight-access-1" };
+        f.Db.Jobs.Add(job);
+        await f.Db.SaveChangesAsync();
+        f.Db.JobApplications.Add(new JobApplication
+        {
+            UserId = f.ReaderId, JobId = job.Id, Status = JobApplicationStatus.Submitted,
+            SubmittedAtUtc = Now.AddDays(-1)
+        });
+        await f.Db.SaveChangesAsync();
+
+        var response = await f.Service.GetAsync(f.ReaderId, insight.Id);
+        Assert.True(response.CanReadFull);
+        Assert.Single(response.Rounds);
+        Assert.NotNull(response.PreparationTips);
+    }
+
+    [Theory]
+    [InlineData(MembershipStatus.Active, -2, 0)]
+    [InlineData(MembershipStatus.Cancelled, -1, 10)]
+    [InlineData(MembershipStatus.Expired, -10, -1)]
+    [InlineData(MembershipStatus.Suspended, -1, 10)]
+    public async Task NonActiveOrExpiredPremiumStillUsesExistingCompanyUnlocks(
+        MembershipStatus status, int startsOffset, int endsOffset)
+    {
+        await using var f = await Fixture.CreateAsync();
+        var insight = await f.AddPublishedInsightAsync(f.AuthorId, f.CompanyAId);
+        f.Db.Memberships.Add(new Membership
+        {
+            UserId = f.ReaderId, PlanCode = "CareerHarborMembership", PlanName = "Job Application Access",
+            Status = status, StartsAtUtc = Now.AddDays(startsOffset), EndsAtUtc = Now.AddDays(endsOffset)
+        });
+        await f.Db.SaveChangesAsync();
+
+        var locked = await f.Service.GetAsync(f.ReaderId, insight.Id);
+        Assert.False(locked.CanReadFull);
+        Assert.Empty(locked.Rounds);
+        Assert.Null(locked.PreparationTips);
+
+        await f.AddScheduleAsync(f.ReaderId, f.CompanyAId, Now.AddDays(1));
+        Assert.True((await f.Service.GetAsync(f.ReaderId, insight.Id)).CanReadFull);
+    }
+
+    [Fact]
+    public async Task PremiumDoesNotBypassInsightPublicationOrDeletionRestrictions()
+    {
+        await using var f = await Fixture.CreateAsync();
+        f.Db.Memberships.Add(new Membership
+        {
+            UserId = f.ReaderId, PlanCode = "CareerHarborMembership", PlanName = "Job Application Access",
+            Status = MembershipStatus.Active, StartsAtUtc = Now.AddDays(-1), EndsAtUtc = Now.AddDays(1)
+        });
+        var pending = new InterviewInsight
+        {
+            AuthorCandidateId = f.AuthorId, CompanyId = f.CompanyAId, RoleTitle = "Engineer",
+            InterviewDateMonth = new DateOnly(2026, 7, 1), ProcessSummary = "Pending",
+            Status = InterviewInsightStatus.PendingReview
+        };
+        var deleted = new InterviewInsight
+        {
+            AuthorCandidateId = f.AuthorId, CompanyId = f.CompanyAId, RoleTitle = "Engineer",
+            InterviewDateMonth = new DateOnly(2026, 7, 1), ProcessSummary = "Deleted",
+            Status = InterviewInsightStatus.Published, IsDeleted = true
+        };
+        f.Db.InterviewInsights.AddRange(pending, deleted);
+        await f.Db.SaveChangesAsync();
+
+        await Assert.ThrowsAsync<NotFoundException>(() => f.Service.GetAsync(f.ReaderId, pending.Id));
+        await Assert.ThrowsAsync<NotFoundException>(() => f.Service.GetAsync(f.ReaderId, deleted.Id));
+    }
+
+    [Fact]
     public async Task FeedbackBeforeInterviewDifferentCompanyAndSelfFeedbackAreRejected()
     {
         await using var f = await Fixture.CreateAsync();
@@ -1640,7 +1752,8 @@ public sealed class InterviewInsightsTests
                     new CreateInsightReportRequestValidator(),
                     notificationOutbox,
                     time,
-                    new CareerHarborPointsService(new CareerHarborPointsRepository(db)));
+                    new CareerHarborPointsService(new CareerHarborPointsRepository(db)),
+                    new MembershipRepository(db, time));
 
             Admin =
                 new AdminInterviewInsightService(

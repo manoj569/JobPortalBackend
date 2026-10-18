@@ -1,0 +1,4 @@
+ .../TalentdDatabaseValidationTests.cs              |   2 +-
+ tools/talentd/FAILURE_MATRIX.csv                   | 168 ++++++++++-----------
+ tools/talentd/IMPLEMENTATION_REPORT.md             | 105 +++++++------
+ 3 files changed, 143 insertions(+), 132 deletions(-)

@@ -677,6 +677,7 @@ public sealed class NotificationConfiguration : IEntityTypeConfiguration<Notific
     {
         builder.Property(x => x.BusinessKey).HasMaxLength(220);
         builder.HasIndex(x => new { x.UserId, x.BusinessKey }).IsUnique().HasFilter("\"BusinessKey\" IS NOT NULL");
+        builder.HasIndex(x => new { x.UserId, x.IsRead });
         builder.ToTable("Notifications");
         builder.ConfigureBaseEntity();
         builder.Property(x => x.Title).HasMaxLength(250).IsRequired();

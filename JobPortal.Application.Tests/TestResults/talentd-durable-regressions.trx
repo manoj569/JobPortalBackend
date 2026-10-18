@@ -1,0 +1,167 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="42ab9818-d98e-496b-9189-b8b12848384f" name="Ashish@LAPTOP-SH2NN93A 2026-10-16 19:56:53" runUser="LAPTOP-SH2NN93A\Ashish" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Times creation="2026-10-16T19:56:53.6361881+05:30" queuing="2026-10-16T19:56:53.6361891+05:30" start="2026-10-16T19:56:46.4270171+05:30" finish="2026-10-16T19:57:15.0036939+05:30" />
+  <TestSettings name="default" id="eb943dcc-0429-4526-ae1e-62e437ef2a30">
+    <Deployment runDeploymentRoot="Ashish_LAPTOP-SH2NN93A_2026-10-16_19_56_53" />
+  </TestSettings>
+  <Results>
+    <UnitTestResult executionId="86b7212a-e8e8-403d-90ac-57834ad7c43c" testId="368f8263-606a-978e-a099-a7b7b07cee31" testName="JobPortal.Application.Tests.TalentdStatusTests.DurableStatusIsReadOnlyAndSourceScoped(stored: &quot;AwaitingPublication&quot;, expected: &quot;IN_PROGRESS&quot;)" computerName="LAPTOP-SH2NN93A" duration="00:00:00.0033710" startTime="2026-10-16T19:56:53.6696778+05:30" endTime="2026-10-16T19:56:53.6696780+05:30" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="86b7212a-e8e8-403d-90ac-57834ad7c43c" />
+    <UnitTestResult executionId="f9636d03-8aa3-4d9e-8243-499ab9c8b943" testId="24851bc9-8fb3-c211-f207-34e7fa02d0e4" testName="JobPortal.Application.Tests.TalentdStatusTests.StatusUsesBulkImportServiceToken(token: null, authorized: False)" computerName="LAPTOP-SH2NN93A" duration="00:00:00.0016405" startTime="2026-10-16T19:56:53.7235282+05:30" endTime="2026-10-16T19:56:53.7235290+05:30" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="f9636d03-8aa3-4d9e-8243-499ab9c8b943" />
+    <UnitTestResult executionId="696e96b0-5730-4ded-b857-6642db44abb8" testId="0b82e10e-2c44-a76a-d828-8105a8b33f95" testName="JobPortal.Application.Tests.TalentdStatusTests.DurableStatusIsReadOnlyAndSourceScoped(stored: &quot;Running&quot;, expected: &quot;IN_PROGRESS&quot;)" computerName="LAPTOP-SH2NN93A" duration="00:00:00.0221199" startTime="2026-10-16T19:56:53.6660909+05:30" endTime="2026-10-16T19:56:53.6660913+05:30" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="696e96b0-5730-4ded-b857-6642db44abb8" />
+    <UnitTestResult executionId="dfd52b7c-3351-468a-8172-b4bf0045cf96" testId="4c07d773-1790-4f55-de94-9ee2b24fcb92" testName="JobPortal.Application.Tests.TalentdDatabaseValidationTests.CrashAfterFirstPublicationRestartsFromReceiptAndStatusIsReadOnly" computerName="LAPTOP-SH2NN93A" duration="00:00:01.4544581" startTime="2026-10-16T19:57:12.0734634+05:30" endTime="2026-10-16T19:57:12.0734643+05:30" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="dfd52b7c-3351-468a-8172-b4bf0045cf96" />
+    <UnitTestResult executionId="2b7e9653-1257-4244-b10a-5758a6939f22" testId="642c527e-3e99-bd37-6134-edd26eacf0b8" testName="JobPortal.Application.Tests.TalentdStatusTests.StatusUsesBulkImportServiceToken(token: &quot;aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&quot;, authorized: True)" computerName="LAPTOP-SH2NN93A" duration="00:00:00.0514312" startTime="2026-10-16T19:56:53.7217396+05:30" endTime="2026-10-16T19:56:53.7217400+05:30" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="2b7e9653-1257-4244-b10a-5758a6939f22" />
+    <UnitTestResult executionId="63065381-8907-417c-96a7-a3a166a67763" testId="df145a66-9aab-1efb-28f5-db8dc00b7b27" testName="JobPortal.Application.Tests.TalentdDatabaseValidationTests.PublicationPendingDoesNotDuplicateJobAndIsRetriedToCompletion" computerName="LAPTOP-SH2NN93A" duration="00:00:00.8921933" startTime="2026-10-16T19:57:12.9870869+05:30" endTime="2026-10-16T19:57:12.9870871+05:30" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Failed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="63065381-8907-417c-96a7-a3a166a67763">
+      <Output>
+        <ErrorInfo>
+          <Message>Assert.Equal() Failure: Values differ&#xD;
+Expected: 1&#xD;
+Actual:   124</Message>
+          <StackTrace>   at JobPortal.Application.Tests.TalentdDatabaseValidationTests.PublicationPendingDoesNotDuplicateJobAndIsRetriedToCompletion() in C:\Users\Ashish\Documents\Codex\2026-07-27\you-are-a-principal-net-9\JobPortal.Application.Tests\TalentdDurabilityTests.cs:line 175&#xD;
+   at JobPortal.Application.Tests.TalentdDatabaseValidationTests.PublicationPendingDoesNotDuplicateJobAndIsRetriedToCompletion() in C:\Users\Ashish\Documents\Codex\2026-07-27\you-are-a-principal-net-9\JobPortal.Application.Tests\TalentdDurabilityTests.cs:line 177&#xD;
+--- End of stack trace from previous location ---</StackTrace>
+        </ErrorInfo>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="f4f9d615-96e9-4759-a5f4-793e875a5f34" testId="977f6837-dc66-6fcd-4f07-2c2613c3ea07" testName="JobPortal.Application.Tests.TalentdDatabaseValidationTests.DurableRetriesAreBoundedAndFailedStatusHasDiagnostic" computerName="LAPTOP-SH2NN93A" duration="00:00:00.9292144" startTime="2026-10-16T19:57:06.2510546+05:30" endTime="2026-10-16T19:57:06.2510551+05:30" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="f4f9d615-96e9-4759-a5f4-793e875a5f34" />
+    <UnitTestResult executionId="c3e19540-e2a8-4e66-9a39-43f14689386e" testId="9b63e7c4-a74f-b749-8335-dfa5681efd43" testName="JobPortal.Application.Tests.TalentdStatusTests.StatusUsesBulkImportServiceToken(token: &quot;wrong&quot;, authorized: False)" computerName="LAPTOP-SH2NN93A" duration="00:00:00.0002465" startTime="2026-10-16T19:56:53.7239106+05:30" endTime="2026-10-16T19:56:53.7239109+05:30" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="c3e19540-e2a8-4e66-9a39-43f14689386e" />
+    <UnitTestResult executionId="c35d6fac-a0fb-4a75-8b7c-b500068c99b7" testId="2eae0fea-bb01-c12c-0d64-cf506e76c9aa" testName="JobPortal.Application.Tests.TalentdDatabaseValidationTests.TenDeterministicJobsHaveDurablePublicationAndPhaseTimings" computerName="LAPTOP-SH2NN93A" duration="00:00:02.5618237" startTime="2026-10-16T19:57:10.6177364+05:30" endTime="2026-10-16T19:57:10.6177368+05:30" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="c35d6fac-a0fb-4a75-8b7c-b500068c99b7">
+      <Output>
+        <StdOut>LOCAL NON-PRODUCTION: TotalMs=2038.476; AverageItemMs=203.848&#xD;
+CompanyResolution: count=10; sumMs=49&#xD;
+Ingestion: count=10; sumMs=450&#xD;
+BulkImportItem: count=10; sumMs=507&#xD;
+PersistenceCommit: count=10; sumMs=396&#xD;
+Publication: count=10; sumMs=991&#xD;
+BulkImportTotal: count=1; sumMs=2038</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="f81ec5b1-1bd0-4b15-8372-b97c8310384f" testId="d18c0e54-cd4a-f818-8bc1-c91b27853ba8" testName="JobPortal.Application.Tests.TalentdDatabaseValidationTests.ApprovedWorkerContractPersistsPublishesUpsertsAndReconcilesOnPostgres" computerName="LAPTOP-SH2NN93A" duration="00:00:01.7480763" startTime="2026-10-16T19:57:05.3202242+05:30" endTime="2026-10-16T19:57:05.3202247+05:30" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="f81ec5b1-1bd0-4b15-8372-b97c8310384f" />
+    <UnitTestResult executionId="8602144e-d88f-4ccb-bb33-c3bd2e4cd42b" testId="26fd6c4a-72d7-8e0f-2004-0abaecd7ec20" testName="JobPortal.Application.Tests.TalentdDatabaseValidationTests.SourceMigrationAppliesRollsBackReappliesAndRepeatedSeedCreatesOneSource" computerName="LAPTOP-SH2NN93A" duration="00:00:01.1561957" startTime="2026-10-16T19:57:14.8522744+05:30" endTime="2026-10-16T19:57:14.8522749+05:30" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="8602144e-d88f-4ccb-bb33-c3bd2e4cd42b" />
+    <UnitTestResult executionId="c79d922b-45bf-438d-a291-1182fd458fd0" testId="ef66fffa-57bd-e723-645f-2766d014e03f" testName="JobPortal.Application.Tests.TalentdStatusTests.TalentdPostReturnsDurableAcceptanceWithoutCallingSynchronousImporter" computerName="LAPTOP-SH2NN93A" duration="00:00:00.0072906" startTime="2026-10-16T19:56:53.7313832+05:30" endTime="2026-10-16T19:56:53.7313836+05:30" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="c79d922b-45bf-438d-a291-1182fd458fd0" />
+    <UnitTestResult executionId="ddb570fb-e075-471c-a172-83ad4dbdbb7f" testId="1de09abc-1c15-1ea4-c6c9-ad44ae75ef2e" testName="JobPortal.Application.Tests.TalentdStatusTests.DurableStatusIsReadOnlyAndSourceScoped(stored: &quot;Completed&quot;, expected: &quot;COMPLETED&quot;)" computerName="LAPTOP-SH2NN93A" duration="00:00:03.0495098" startTime="2026-10-16T19:56:53.5895130+05:30" endTime="2026-10-16T19:56:53.5896431+05:30" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="ddb570fb-e075-471c-a172-83ad4dbdbb7f" />
+    <UnitTestResult executionId="09478ecc-ee50-4c6a-a5ad-b5a5b07db278" testId="06750647-aa38-51da-74d1-18113ce788bc" testName="JobPortal.Application.Tests.TalentdDatabaseValidationTests.SessionOwnershipExcludesAnotherProcessorAndRecoversOnSessionClose" computerName="LAPTOP-SH2NN93A" duration="00:00:00.6925523" startTime="2026-10-16T19:57:13.6748611+05:30" endTime="2026-10-16T19:57:13.6748616+05:30" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="09478ecc-ee50-4c6a-a5ad-b5a5b07db278" />
+    <UnitTestResult executionId="0aa99350-3b43-4192-bdb5-542154fd3c0a" testId="c1f103fb-2264-f36c-17b9-af4dccbd2a92" testName="JobPortal.Application.Tests.TalentdDatabaseValidationTests.LegacyFiveWithOnePublishedHydratesSameRunAndNeverDuplicatesFirstJob" computerName="LAPTOP-SH2NN93A" duration="00:00:01.8013205" startTime="2026-10-16T19:57:08.0542548+05:30" endTime="2026-10-16T19:57:08.0542554+05:30" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="0aa99350-3b43-4192-bdb5-542154fd3c0a" />
+    <UnitTestResult executionId="e11760d0-2d10-4e25-abf5-2a5a77afcdca" testId="73412b8f-dc28-fd23-abad-59e007eebbdf" testName="JobPortal.Application.Tests.TalentdStatusTests.DurableStatusIsReadOnlyAndSourceScoped(stored: &quot;Failed&quot;, expected: &quot;FAILED&quot;)" computerName="LAPTOP-SH2NN93A" duration="00:00:00.0557960" startTime="2026-10-16T19:56:53.6439228+05:30" endTime="2026-10-16T19:56:53.6439229+05:30" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="e11760d0-2d10-4e25-abf5-2a5a77afcdca" />
+    <UnitTestResult executionId="ea9fc8c6-5ca9-4e15-bb95-777a83b6ff21" testId="5075152e-bbe8-1d91-80b1-54bf5c36ab74" testName="JobPortal.Application.Tests.TalentdDatabaseValidationTests.DurableAcceptanceSurvivesDisconnectedRequestAndFreshProcessorWithTwentyItems" computerName="LAPTOP-SH2NN93A" duration="00:00:12.4752615" startTime="2026-10-16T19:57:03.5694785+05:30" endTime="2026-10-16T19:57:03.5694790+05:30" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="ea9fc8c6-5ca9-4e15-bb95-777a83b6ff21">
+      <Output>
+        <StdOut>DurableAcceptance20Ms=415.980</StdOut>
+      </Output>
+    </UnitTestResult>
+  </Results>
+  <TestDefinitions>
+    <UnitTest name="JobPortal.Application.Tests.TalentdDatabaseValidationTests.TenDeterministicJobsHaveDurablePublicationAndPhaseTimings" storage="c:\users\ashish\documents\codex\2026-07-27\you-are-a-principal-net-9\jobportal.application.tests\bin\debug\net9.0\jobportal.application.tests.dll" id="2eae0fea-bb01-c12c-0d64-cf506e76c9aa">
+      <Execution id="c35d6fac-a0fb-4a75-8b7c-b500068c99b7" />
+      <TestMethod codeBase="C:\Users\Ashish\Documents\Codex\2026-07-27\you-are-a-principal-net-9\JobPortal.Application.Tests\bin\Debug\net9.0\JobPortal.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="JobPortal.Application.Tests.TalentdDatabaseValidationTests" name="TenDeterministicJobsHaveDurablePublicationAndPhaseTimings" />
+    </UnitTest>
+    <UnitTest name="JobPortal.Application.Tests.TalentdDatabaseValidationTests.PublicationPendingDoesNotDuplicateJobAndIsRetriedToCompletion" storage="c:\users\ashish\documents\codex\2026-07-27\you-are-a-principal-net-9\jobportal.application.tests\bin\debug\net9.0\jobportal.application.tests.dll" id="df145a66-9aab-1efb-28f5-db8dc00b7b27">
+      <Execution id="63065381-8907-417c-96a7-a3a166a67763" />
+      <TestMethod codeBase="C:\Users\Ashish\Documents\Codex\2026-07-27\you-are-a-principal-net-9\JobPortal.Application.Tests\bin\Debug\net9.0\JobPortal.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="JobPortal.Application.Tests.TalentdDatabaseValidationTests" name="PublicationPendingDoesNotDuplicateJobAndIsRetriedToCompletion" />
+    </UnitTest>
+    <UnitTest name="JobPortal.Application.Tests.TalentdDatabaseValidationTests.DurableRetriesAreBoundedAndFailedStatusHasDiagnostic" storage="c:\users\ashish\documents\codex\2026-07-27\you-are-a-principal-net-9\jobportal.application.tests\bin\debug\net9.0\jobportal.application.tests.dll" id="977f6837-dc66-6fcd-4f07-2c2613c3ea07">
+      <Execution id="f4f9d615-96e9-4759-a5f4-793e875a5f34" />
+      <TestMethod codeBase="C:\Users\Ashish\Documents\Codex\2026-07-27\you-are-a-principal-net-9\JobPortal.Application.Tests\bin\Debug\net9.0\JobPortal.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="JobPortal.Application.Tests.TalentdDatabaseValidationTests" name="DurableRetriesAreBoundedAndFailedStatusHasDiagnostic" />
+    </UnitTest>
+    <UnitTest name="JobPortal.Application.Tests.TalentdDatabaseValidationTests.DurableAcceptanceSurvivesDisconnectedRequestAndFreshProcessorWithTwentyItems" storage="c:\users\ashish\documents\codex\2026-07-27\you-are-a-principal-net-9\jobportal.application.tests\bin\debug\net9.0\jobportal.application.tests.dll" id="5075152e-bbe8-1d91-80b1-54bf5c36ab74">
+      <Execution id="ea9fc8c6-5ca9-4e15-bb95-777a83b6ff21" />
+      <TestMethod codeBase="C:\Users\Ashish\Documents\Codex\2026-07-27\you-are-a-principal-net-9\JobPortal.Application.Tests\bin\Debug\net9.0\JobPortal.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="JobPortal.Application.Tests.TalentdDatabaseValidationTests" name="DurableAcceptanceSurvivesDisconnectedRequestAndFreshProcessorWithTwentyItems" />
+    </UnitTest>
+    <UnitTest name="JobPortal.Application.Tests.TalentdStatusTests.DurableStatusIsReadOnlyAndSourceScoped(stored: &quot;AwaitingPublication&quot;, expected: &quot;IN_PROGRESS&quot;)" storage="c:\users\ashish\documents\codex\2026-07-27\you-are-a-principal-net-9\jobportal.application.tests\bin\debug\net9.0\jobportal.application.tests.dll" id="368f8263-606a-978e-a099-a7b7b07cee31">
+      <Execution id="86b7212a-e8e8-403d-90ac-57834ad7c43c" />
+      <TestMethod codeBase="C:\Users\Ashish\Documents\Codex\2026-07-27\you-are-a-principal-net-9\JobPortal.Application.Tests\bin\Debug\net9.0\JobPortal.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="JobPortal.Application.Tests.TalentdStatusTests" name="DurableStatusIsReadOnlyAndSourceScoped" />
+    </UnitTest>
+    <UnitTest name="JobPortal.Application.Tests.TalentdDatabaseValidationTests.ApprovedWorkerContractPersistsPublishesUpsertsAndReconcilesOnPostgres" storage="c:\users\ashish\documents\codex\2026-07-27\you-are-a-principal-net-9\jobportal.application.tests\bin\debug\net9.0\jobportal.application.tests.dll" id="d18c0e54-cd4a-f818-8bc1-c91b27853ba8">
+      <Execution id="f81ec5b1-1bd0-4b15-8372-b97c8310384f" />
+      <TestMethod codeBase="C:\Users\Ashish\Documents\Codex\2026-07-27\you-are-a-principal-net-9\JobPortal.Application.Tests\bin\Debug\net9.0\JobPortal.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="JobPortal.Application.Tests.TalentdDatabaseValidationTests" name="ApprovedWorkerContractPersistsPublishesUpsertsAndReconcilesOnPostgres" />
+    </UnitTest>
+    <UnitTest name="JobPortal.Application.Tests.TalentdStatusTests.StatusUsesBulkImportServiceToken(token: &quot;aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&quot;, authorized: True)" storage="c:\users\ashish\documents\codex\2026-07-27\you-are-a-principal-net-9\jobportal.application.tests\bin\debug\net9.0\jobportal.application.tests.dll" id="642c527e-3e99-bd37-6134-edd26eacf0b8">
+      <Execution id="2b7e9653-1257-4244-b10a-5758a6939f22" />
+      <TestMethod codeBase="C:\Users\Ashish\Documents\Codex\2026-07-27\you-are-a-principal-net-9\JobPortal.Application.Tests\bin\Debug\net9.0\JobPortal.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="JobPortal.Application.Tests.TalentdStatusTests" name="StatusUsesBulkImportServiceToken" />
+    </UnitTest>
+    <UnitTest name="JobPortal.Application.Tests.TalentdStatusTests.DurableStatusIsReadOnlyAndSourceScoped(stored: &quot;Completed&quot;, expected: &quot;COMPLETED&quot;)" storage="c:\users\ashish\documents\codex\2026-07-27\you-are-a-principal-net-9\jobportal.application.tests\bin\debug\net9.0\jobportal.application.tests.dll" id="1de09abc-1c15-1ea4-c6c9-ad44ae75ef2e">
+      <Execution id="ddb570fb-e075-471c-a172-83ad4dbdbb7f" />
+      <TestMethod codeBase="C:\Users\Ashish\Documents\Codex\2026-07-27\you-are-a-principal-net-9\JobPortal.Application.Tests\bin\Debug\net9.0\JobPortal.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="JobPortal.Application.Tests.TalentdStatusTests" name="DurableStatusIsReadOnlyAndSourceScoped" />
+    </UnitTest>
+    <UnitTest name="JobPortal.Application.Tests.TalentdDatabaseValidationTests.CrashAfterFirstPublicationRestartsFromReceiptAndStatusIsReadOnly" storage="c:\users\ashish\documents\codex\2026-07-27\you-are-a-principal-net-9\jobportal.application.tests\bin\debug\net9.0\jobportal.application.tests.dll" id="4c07d773-1790-4f55-de94-9ee2b24fcb92">
+      <Execution id="dfd52b7c-3351-468a-8172-b4bf0045cf96" />
+      <TestMethod codeBase="C:\Users\Ashish\Documents\Codex\2026-07-27\you-are-a-principal-net-9\JobPortal.Application.Tests\bin\Debug\net9.0\JobPortal.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="JobPortal.Application.Tests.TalentdDatabaseValidationTests" name="CrashAfterFirstPublicationRestartsFromReceiptAndStatusIsReadOnly" />
+    </UnitTest>
+    <UnitTest name="JobPortal.Application.Tests.TalentdStatusTests.StatusUsesBulkImportServiceToken(token: &quot;wrong&quot;, authorized: False)" storage="c:\users\ashish\documents\codex\2026-07-27\you-are-a-principal-net-9\jobportal.application.tests\bin\debug\net9.0\jobportal.application.tests.dll" id="9b63e7c4-a74f-b749-8335-dfa5681efd43">
+      <Execution id="c3e19540-e2a8-4e66-9a39-43f14689386e" />
+      <TestMethod codeBase="C:\Users\Ashish\Documents\Codex\2026-07-27\you-are-a-principal-net-9\JobPortal.Application.Tests\bin\Debug\net9.0\JobPortal.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="JobPortal.Application.Tests.TalentdStatusTests" name="StatusUsesBulkImportServiceToken" />
+    </UnitTest>
+    <UnitTest name="JobPortal.Application.Tests.TalentdStatusTests.StatusUsesBulkImportServiceToken(token: null, authorized: False)" storage="c:\users\ashish\documents\codex\2026-07-27\you-are-a-principal-net-9\jobportal.application.tests\bin\debug\net9.0\jobportal.application.tests.dll" id="24851bc9-8fb3-c211-f207-34e7fa02d0e4">
+      <Execution id="f9636d03-8aa3-4d9e-8243-499ab9c8b943" />
+      <TestMethod codeBase="C:\Users\Ashish\Documents\Codex\2026-07-27\you-are-a-principal-net-9\JobPortal.Application.Tests\bin\Debug\net9.0\JobPortal.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="JobPortal.Application.Tests.TalentdStatusTests" name="StatusUsesBulkImportServiceToken" />
+    </UnitTest>
+    <UnitTest name="JobPortal.Application.Tests.TalentdStatusTests.TalentdPostReturnsDurableAcceptanceWithoutCallingSynchronousImporter" storage="c:\users\ashish\documents\codex\2026-07-27\you-are-a-principal-net-9\jobportal.application.tests\bin\debug\net9.0\jobportal.application.tests.dll" id="ef66fffa-57bd-e723-645f-2766d014e03f">
+      <Execution id="c79d922b-45bf-438d-a291-1182fd458fd0" />
+      <TestMethod codeBase="C:\Users\Ashish\Documents\Codex\2026-07-27\you-are-a-principal-net-9\JobPortal.Application.Tests\bin\Debug\net9.0\JobPortal.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="JobPortal.Application.Tests.TalentdStatusTests" name="TalentdPostReturnsDurableAcceptanceWithoutCallingSynchronousImporter" />
+    </UnitTest>
+    <UnitTest name="JobPortal.Application.Tests.TalentdStatusTests.DurableStatusIsReadOnlyAndSourceScoped(stored: &quot;Failed&quot;, expected: &quot;FAILED&quot;)" storage="c:\users\ashish\documents\codex\2026-07-27\you-are-a-principal-net-9\jobportal.application.tests\bin\debug\net9.0\jobportal.application.tests.dll" id="73412b8f-dc28-fd23-abad-59e007eebbdf">
+      <Execution id="e11760d0-2d10-4e25-abf5-2a5a77afcdca" />
+      <TestMethod codeBase="C:\Users\Ashish\Documents\Codex\2026-07-27\you-are-a-principal-net-9\JobPortal.Application.Tests\bin\Debug\net9.0\JobPortal.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="JobPortal.Application.Tests.TalentdStatusTests" name="DurableStatusIsReadOnlyAndSourceScoped" />
+    </UnitTest>
+    <UnitTest name="JobPortal.Application.Tests.TalentdDatabaseValidationTests.LegacyFiveWithOnePublishedHydratesSameRunAndNeverDuplicatesFirstJob" storage="c:\users\ashish\documents\codex\2026-07-27\you-are-a-principal-net-9\jobportal.application.tests\bin\debug\net9.0\jobportal.application.tests.dll" id="c1f103fb-2264-f36c-17b9-af4dccbd2a92">
+      <Execution id="0aa99350-3b43-4192-bdb5-542154fd3c0a" />
+      <TestMethod codeBase="C:\Users\Ashish\Documents\Codex\2026-07-27\you-are-a-principal-net-9\JobPortal.Application.Tests\bin\Debug\net9.0\JobPortal.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="JobPortal.Application.Tests.TalentdDatabaseValidationTests" name="LegacyFiveWithOnePublishedHydratesSameRunAndNeverDuplicatesFirstJob" />
+    </UnitTest>
+    <UnitTest name="JobPortal.Application.Tests.TalentdStatusTests.DurableStatusIsReadOnlyAndSourceScoped(stored: &quot;Running&quot;, expected: &quot;IN_PROGRESS&quot;)" storage="c:\users\ashish\documents\codex\2026-07-27\you-are-a-principal-net-9\jobportal.application.tests\bin\debug\net9.0\jobportal.application.tests.dll" id="0b82e10e-2c44-a76a-d828-8105a8b33f95">
+      <Execution id="696e96b0-5730-4ded-b857-6642db44abb8" />
+      <TestMethod codeBase="C:\Users\Ashish\Documents\Codex\2026-07-27\you-are-a-principal-net-9\JobPortal.Application.Tests\bin\Debug\net9.0\JobPortal.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="JobPortal.Application.Tests.TalentdStatusTests" name="DurableStatusIsReadOnlyAndSourceScoped" />
+    </UnitTest>
+    <UnitTest name="JobPortal.Application.Tests.TalentdDatabaseValidationTests.SessionOwnershipExcludesAnotherProcessorAndRecoversOnSessionClose" storage="c:\users\ashish\documents\codex\2026-07-27\you-are-a-principal-net-9\jobportal.application.tests\bin\debug\net9.0\jobportal.application.tests.dll" id="06750647-aa38-51da-74d1-18113ce788bc">
+      <Execution id="09478ecc-ee50-4c6a-a5ad-b5a5b07db278" />
+      <TestMethod codeBase="C:\Users\Ashish\Documents\Codex\2026-07-27\you-are-a-principal-net-9\JobPortal.Application.Tests\bin\Debug\net9.0\JobPortal.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="JobPortal.Application.Tests.TalentdDatabaseValidationTests" name="SessionOwnershipExcludesAnotherProcessorAndRecoversOnSessionClose" />
+    </UnitTest>
+    <UnitTest name="JobPortal.Application.Tests.TalentdDatabaseValidationTests.SourceMigrationAppliesRollsBackReappliesAndRepeatedSeedCreatesOneSource" storage="c:\users\ashish\documents\codex\2026-07-27\you-are-a-principal-net-9\jobportal.application.tests\bin\debug\net9.0\jobportal.application.tests.dll" id="26fd6c4a-72d7-8e0f-2004-0abaecd7ec20">
+      <Execution id="8602144e-d88f-4ccb-bb33-c3bd2e4cd42b" />
+      <TestMethod codeBase="C:\Users\Ashish\Documents\Codex\2026-07-27\you-are-a-principal-net-9\JobPortal.Application.Tests\bin\Debug\net9.0\JobPortal.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="JobPortal.Application.Tests.TalentdDatabaseValidationTests" name="SourceMigrationAppliesRollsBackReappliesAndRepeatedSeedCreatesOneSource" />
+    </UnitTest>
+  </TestDefinitions>
+  <TestEntries>
+    <TestEntry testId="368f8263-606a-978e-a099-a7b7b07cee31" executionId="86b7212a-e8e8-403d-90ac-57834ad7c43c" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="24851bc9-8fb3-c211-f207-34e7fa02d0e4" executionId="f9636d03-8aa3-4d9e-8243-499ab9c8b943" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="0b82e10e-2c44-a76a-d828-8105a8b33f95" executionId="696e96b0-5730-4ded-b857-6642db44abb8" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="4c07d773-1790-4f55-de94-9ee2b24fcb92" executionId="dfd52b7c-3351-468a-8172-b4bf0045cf96" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="642c527e-3e99-bd37-6134-edd26eacf0b8" executionId="2b7e9653-1257-4244-b10a-5758a6939f22" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="df145a66-9aab-1efb-28f5-db8dc00b7b27" executionId="63065381-8907-417c-96a7-a3a166a67763" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="977f6837-dc66-6fcd-4f07-2c2613c3ea07" executionId="f4f9d615-96e9-4759-a5f4-793e875a5f34" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="9b63e7c4-a74f-b749-8335-dfa5681efd43" executionId="c3e19540-e2a8-4e66-9a39-43f14689386e" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="2eae0fea-bb01-c12c-0d64-cf506e76c9aa" executionId="c35d6fac-a0fb-4a75-8b7c-b500068c99b7" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="d18c0e54-cd4a-f818-8bc1-c91b27853ba8" executionId="f81ec5b1-1bd0-4b15-8372-b97c8310384f" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="26fd6c4a-72d7-8e0f-2004-0abaecd7ec20" executionId="8602144e-d88f-4ccb-bb33-c3bd2e4cd42b" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="ef66fffa-57bd-e723-645f-2766d014e03f" executionId="c79d922b-45bf-438d-a291-1182fd458fd0" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="1de09abc-1c15-1ea4-c6c9-ad44ae75ef2e" executionId="ddb570fb-e075-471c-a172-83ad4dbdbb7f" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="06750647-aa38-51da-74d1-18113ce788bc" executionId="09478ecc-ee50-4c6a-a5ad-b5a5b07db278" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="c1f103fb-2264-f36c-17b9-af4dccbd2a92" executionId="0aa99350-3b43-4192-bdb5-542154fd3c0a" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="73412b8f-dc28-fd23-abad-59e007eebbdf" executionId="e11760d0-2d10-4e25-abf5-2a5a77afcdca" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="5075152e-bbe8-1d91-80b1-54bf5c36ab74" executionId="ea9fc8c6-5ca9-4e15-bb95-777a83b6ff21" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+  </TestEntries>
+  <TestLists>
+    <TestList name="Results Not in a List" id="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestList name="All Loaded Results" id="19431567-8539-422a-85d7-44ee4e166bda" />
+  </TestLists>
+  <ResultSummary outcome="Failed">
+    <Counters total="17" executed="17" passed="16" failed="1" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notRunnable="0" notExecuted="0" disconnected="0" warning="0" completed="0" inProgress="0" pending="0" />
+    <Output>
+      <StdOut>[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v2.8.2+699d445a1a (64-bit .NET 9.0.7)&#xD;
+[xUnit.net 00:00:02.79]   Discovering: JobPortal.Application.Tests&#xD;
+[xUnit.net 00:00:03.33]   Discovered:  JobPortal.Application.Tests&#xD;
+[xUnit.net 00:00:03.34]   Starting:    JobPortal.Application.Tests&#xD;
+[xUnit.net 00:00:25.85]       Assert.Equal() Failure: Values differ&#xD;
+[xUnit.net 00:00:25.85]       Expected: 1&#xD;
+[xUnit.net 00:00:25.85]       Actual:   124&#xD;
+[xUnit.net 00:00:25.85]       Stack Trace:&#xD;
+[xUnit.net 00:00:25.85]         C:\Users\Ashish\Documents\Codex\2026-07-27\you-are-a-principal-net-9\JobPortal.Application.Tests\TalentdDurabilityTests.cs(175,0): at JobPortal.Application.Tests.TalentdDatabaseValidationTests.PublicationPendingDoesNotDuplicateJobAndIsRetriedToCompletion()&#xD;
+[xUnit.net 00:00:25.85]         C:\Users\Ashish\Documents\Codex\2026-07-27\you-are-a-principal-net-9\JobPortal.Application.Tests\TalentdDurabilityTests.cs(177,0): at JobPortal.Application.Tests.TalentdDatabaseValidationTests.PublicationPendingDoesNotDuplicateJobAndIsRetriedToCompletion()&#xD;
+[xUnit.net 00:00:25.85]         --- End of stack trace from previous location ---&#xD;
+[xUnit.net 00:00:27.72]   Finished:    JobPortal.Application.Tests&#xD;
+</StdOut>
+    </Output>
+    <RunInfos>
+      <RunInfo computerName="LAPTOP-SH2NN93A" outcome="Error" timestamp="2026-10-16T19:57:12.9843212+05:30">
+        <Text>[xUnit.net 00:00:25.85]     JobPortal.Application.Tests.TalentdDatabaseValidationTests.PublicationPendingDoesNotDuplicateJobAndIsRetriedToCompletion [FAIL]</Text>
+      </RunInfo>
+    </RunInfos>
+  </ResultSummary>
+</TestRun>
