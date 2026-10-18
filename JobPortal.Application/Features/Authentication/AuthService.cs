@@ -31,7 +31,6 @@ public sealed class AuthService(
     IValidator<RefreshTokenRequest> refreshValidator,
     IValidator<ChangePasswordRequest> changePasswordValidator,
     IValidator<VerifyEmailRequest> verifyEmailValidator,
-    IRegistrationEmailOutbox registrationEmails,
     TimeProvider timeProvider,
     ILogger<AuthService> logger) : IAuthService
 {
@@ -98,7 +97,6 @@ public sealed class AuthService(
         stageStarted = Stopwatch.GetTimestamp();
         var passwordHash = passwordHasher.Hash(request.Password);
         LogRegistrationTiming("password_hash", stageStarted);
-        var verificationToken = GenerateEmailVerificationToken();
         var user = new User
         {
             Id = Guid.NewGuid(), // <--- VERY IMPORTANT: We need to generate an ID!
@@ -113,9 +111,9 @@ public sealed class AuthService(
             TermsAndPrivacyAcceptedAtUtc = UtcNow,
             TermsAndPrivacyVersion = LegalDocumentCatalog.CurrentVersion,
             Status = UserStatus.Active,
-            EmailConfirmed = false,
-            EmailVerificationTokenHash = HashEmailVerificationToken(verificationToken),
-            EmailVerificationTokenExpiresAtUtc = UtcNow.Add(EmailVerificationTokenLifetime),
+            EmailConfirmed = true,
+            EmailVerificationTokenHash = null,
+            EmailVerificationTokenExpiresAtUtc = null,
             EmailVerificationSentAtUtc = null,
             RoleId = SystemRoleIds.Candidate,
             Role = new Role
@@ -127,14 +125,6 @@ public sealed class AuthService(
         };
 
         await users.AddAsync(user, cancellationToken);
-        await registrationEmails.EnqueueAsync(new RegistrationEmailRequest
-        {
-            UserId = user.Id,
-            User = user,
-            VerificationToken = verificationToken,
-            ExpiresAtUtc = user.EmailVerificationTokenExpiresAtUtc.Value,
-            NextAttemptAtUtc = UtcNow
-        }, cancellationToken);
         await auditWriter.AppendAsync(new(
             AuditAction.Create,
             "User",

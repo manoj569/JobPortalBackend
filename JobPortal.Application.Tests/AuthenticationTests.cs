@@ -66,11 +66,10 @@ public sealed class AuthenticationTests
         Assert.Equal("+919876543210", user.NormalizedPhoneNumber);
         Assert.Equal(UserStatus.Active, user.Status);
         Assert.True(user.PhoneConfirmed);
-        Assert.False(user.EmailConfirmed);
-        Assert.NotNull(user.EmailVerificationTokenHash);
-        var verification = Assert.Single(fixture.RegistrationEmails.Items);
-        Assert.Equal(user.Id, verification.UserId);
-        Assert.NotEqual(verification.VerificationToken, user.EmailVerificationTokenHash);
+        Assert.True(user.EmailConfirmed);
+        Assert.Null(user.EmailVerificationTokenHash);
+        Assert.Null(user.EmailVerificationTokenExpiresAtUtc);
+        Assert.Empty(fixture.RegistrationEmails.Items);
         Assert.Equal(SystemRoleIds.Candidate, user.RoleId);
         Assert.NotEqual("abc123", user.PasswordHash);
         Assert.DoesNotContain("abc123", user.PasswordHash, StringComparison.Ordinal);
@@ -248,6 +247,24 @@ public sealed class AuthenticationTests
     }
 
     [Fact]
+    public async Task NewRegistrationCanLoginImmediatelyWithoutEmailVerification()
+    {
+        var fixture = CreateFixture();
+        await fixture.Service.RegisterAsync(ValidRegistration());
+        var user = Assert.Single(fixture.Users.Items);
+
+        var login = await fixture.Service.LoginAsync(new(user.Email, "abc123"), "127.0.0.1");
+
+        Assert.Equal(user.Id, login.User.Id);
+        Assert.NotEmpty(login.AccessToken);
+        Assert.NotEmpty(login.RefreshToken);
+        Assert.Equal(Now, user.LastLoginAtUtc);
+        Assert.True(user.EmailConfirmed);
+        Assert.Empty(fixture.RegistrationEmails.Items);
+        Assert.Equal(0, fixture.Email.RegistrationSendCount);
+    }
+
+    [Fact]
     public async Task LoginPropagatesRequestCancellationBeforeIssuingTokens()
     {
         var fixture = CreateFixture();
@@ -316,6 +333,19 @@ public sealed class AuthenticationTests
     }
 
     [Fact]
+    public async Task SuspendedUserCannotLogin()
+    {
+        var fixture = CreateFixture();
+        var user = NewUser();
+        user.Status = UserStatus.Suspended;
+        fixture.Users.Items.Add(user);
+
+        await Assert.ThrowsAsync<UnauthorizedException>(() =>
+            fixture.Service.LoginAsync(new("user@example.com", "abc123"), null));
+        Assert.Empty(fixture.RefreshTokens.Added);
+    }
+
+    [Fact]
     public async Task CorrectPasswordForUnverifiedAccountReturnsVerificationRequiredOutcome()
     {
         var fixture = CreateFixture();
@@ -342,17 +372,41 @@ public sealed class AuthenticationTests
 
         Assert.True(Stopwatch.GetElapsedTime(started) < TimeSpan.FromSeconds(1));
         Assert.Equal(0, fixture.Email.SendCount);
-        Assert.Single(fixture.RegistrationEmails.Items);
+        Assert.Empty(fixture.RegistrationEmails.Items);
         Assert.Contains(fixture.Logger.Messages, message =>
             message.Contains("Registration stage", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ForgotPasswordStillEmailsNewlyRegisteredUser()
+    {
+        var fixture = CreateFixture();
+        await fixture.Service.RegisterAsync(ValidRegistration());
+        var user = Assert.Single(fixture.Users.Items);
+
+        await fixture.Service.RequestPasswordResetAsync(new(user.Email));
+
+        Assert.Empty(fixture.RegistrationEmails.Items);
+        Assert.Equal(1, fixture.Email.SendCount);
+        Assert.Same(user, fixture.Email.User);
+        Assert.NotNull(fixture.Email.LastRawToken);
+        Assert.NotNull(user.PasswordResetTokenHash);
+
+        await fixture.Service.CompletePasswordResetAsync(new(fixture.Email.LastRawToken!, "newpass"));
+        Assert.True(fixture.Passwords.Verify("newpass", user.PasswordHash!));
+        Assert.Equal(user.Id, (await fixture.Service.LoginAsync(new(user.Email, "newpass"), null)).User.Id);
     }
 
     [Fact]
     public async Task VerificationTokenIsSingleUseAndMarksEmailConfirmed()
     {
         var fixture = CreateFixture();
-        await fixture.Service.RegisterAsync(ValidRegistration());
-        var token = Assert.Single(fixture.RegistrationEmails.Items).VerificationToken;
+        var user = NewUser();
+        user.EmailConfirmed = false;
+        const string token = "historical-verification-token";
+        user.EmailVerificationTokenHash = Sha256(token);
+        user.EmailVerificationTokenExpiresAtUtc = Now.AddHours(1);
+        fixture.Users.Items.Add(user);
 
         var response = await fixture.Service.VerifyEmailAsync(new(token));
 
@@ -366,7 +420,14 @@ public sealed class AuthenticationTests
     public async Task FailedBackgroundVerificationEmailRemainsQueuedForRetry()
     {
         var fixture = CreateFixture();
-        await fixture.Service.RegisterAsync(ValidRegistration());
+        var user = NewUser();
+        user.EmailConfirmed = false;
+        fixture.Users.Items.Add(user);
+        await fixture.RegistrationEmails.EnqueueAsync(new RegistrationEmailRequest
+        {
+            UserId = user.Id, User = user, VerificationToken = "historical-token",
+            ExpiresAtUtc = Now.AddHours(1), NextAttemptAtUtc = Now
+        });
         fixture.Email.RegistrationResult = EmailDeliveryResult.Failed;
         var dispatcher = new RegistrationEmailDispatcher(
             fixture.RegistrationEmails, fixture.Email, fixture.Time,
@@ -760,7 +821,6 @@ public sealed class AuthenticationTests
             new RefreshTokenRequestValidator(),
             new ChangePasswordRequestValidator(),
             new VerifyEmailRequestValidator(),
-            registrationEmails,
             time,
             logger);
         return new(
