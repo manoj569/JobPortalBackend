@@ -42,6 +42,9 @@ public sealed class JobReferralService(
                 "validation_error");
         }
 
+        var contact = ReferralContactValues.Validate(request.ShowLinkedIn, request.ShowEmail, request.ShowPhone,
+            request.LinkedInUrl, request.ContactEmail, request.ContactPhone);
+
         // Reuses the existing compose flow (create-or-link Company/Category) so the referrer
         // never needs Administrator rights just to post — the job is created in Draft status
         // and only becomes visible once an admin approves the referral below.
@@ -56,6 +59,9 @@ public sealed class JobReferralService(
             ReferralSlots = request.ReferralSlots,
             ReferrerUserId = referrerUserId,
             SourceUrl = request.SourceUrl,
+            LinkedInUrl = contact.LinkedInUrl,
+            ContactEmail = contact.ContactEmail,
+            ContactPhone = contact.ContactPhone,
             ShowLinkedIn = request.ShowLinkedIn,
             ShowEmail = request.ShowEmail,
             ShowPhone = request.ShowPhone,
@@ -93,6 +99,24 @@ public sealed class JobReferralService(
         var saved = await referrals.GetByIdAsync(referral.Id, cancellationToken) ?? referral;
 
         return await ToResponseAsync(saved, job, cancellationToken);
+    }
+
+    public async Task<JobReferralResponse> UpdateContactAsync(Guid referrerUserId, Guid id,
+        UpdateReferralContactRequest request, CancellationToken cancellationToken = default)
+    {
+        var referral = await referrals.GetByIdAsync(id, cancellationToken);
+        if (referral is null || referral.IsDeleted || referral.ReferrerUserId != referrerUserId)
+            throw new NotFoundException("Referral was not found.");
+        var contact = ReferralContactValues.Validate(request.ShowLinkedIn, request.ShowEmail, request.ShowPhone,
+            request.LinkedInUrl, request.ContactEmail, request.ContactPhone);
+        referral.ShowLinkedIn = request.ShowLinkedIn;
+        referral.ShowEmail = request.ShowEmail;
+        referral.ShowPhone = request.ShowPhone;
+        referral.LinkedInUrl = contact.LinkedInUrl;
+        referral.ContactEmail = contact.ContactEmail;
+        referral.ContactPhone = contact.ContactPhone;
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+        return await ToResponseAsync(referral, referral.Job, cancellationToken);
     }
 
     public async Task<PagedResponse<JobReferralResponse>> GetPendingForAdminAsync(
@@ -417,6 +441,11 @@ public sealed class JobReferralService(
                 referral.ReviewedAtUtc,
                 referral.ApprovalStatus == JobReferralApprovalStatus.Approved
                     ? referral.ReviewedAtUtc
-                    : null) { ReferralSlots = referral.ReferralSlots });
+                    : null) {
+                        ReferralSlots = referral.ReferralSlots,
+                        LinkedInUrl = referral.ShowLinkedIn ? referral.LinkedInUrl : null,
+                        ContactEmail = referral.ShowEmail ? referral.ContactEmail : null,
+                        ContactPhone = referral.ShowPhone ? referral.ContactPhone : null
+                    });
     }
 }

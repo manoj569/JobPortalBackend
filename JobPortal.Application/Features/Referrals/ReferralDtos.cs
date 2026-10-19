@@ -11,7 +11,14 @@ public sealed record SubmitJobReferralRequest(
     bool ShowLinkedIn,
     bool ShowEmail,
     bool ShowPhone,
-    int ReferralSlots = 1);
+    int ReferralSlots = 1,
+    string? LinkedInUrl = null,
+    string? ContactEmail = null,
+    string? ContactPhone = null);
+
+public sealed record UpdateReferralContactRequest(
+    bool ShowLinkedIn, bool ShowEmail, bool ShowPhone,
+    string? LinkedInUrl = null, string? ContactEmail = null, string? ContactPhone = null);
 
 public sealed record JobReferralResponse(
     Guid Id,
@@ -31,6 +38,9 @@ public sealed record JobReferralResponse(
     DateTime? ReviewedAtUtc,
     DateTime? ApprovedAtUtc = null)
 {
+    public string? LinkedInUrl { get; init; }
+    public string? ContactEmail { get; init; }
+    public string? ContactPhone { get; init; }
     public int ReferralSlots { get; init; }
     public int AcceptedReferralCount { get; init; }
     public int RemainingReferralSlots => Math.Max(0, ReferralSlots - AcceptedReferralCount);

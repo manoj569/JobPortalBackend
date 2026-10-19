@@ -16,6 +16,9 @@ public interface IJobReferralService
         SubmitJobReferralRequest request,
         CancellationToken cancellationToken = default);
 
+    Task<JobReferralResponse> UpdateContactAsync(Guid referrerUserId, Guid id,
+        UpdateReferralContactRequest request, CancellationToken cancellationToken = default);
+
     Task<PagedResponse<JobReferralResponse>> GetPendingForAdminAsync(
         int pageNumber,
         int pageSize,
@@ -53,7 +56,7 @@ public interface IJobReferralService
 
     /// <summary>
     /// Returns protected referrer contact details only when the seeker has
-    /// the required ReferralContactAccess membership.
+    /// required ReferralContactAccess membership and their specific request is accepted.
     /// </summary>
     Task<ReferralUnlockResponse> UnlockContactAsync(
         Guid? seekerUserId,

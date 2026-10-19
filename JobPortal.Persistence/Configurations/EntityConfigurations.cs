@@ -396,6 +396,9 @@ public sealed class JobReferralConfiguration : IEntityTypeConfiguration<JobRefer
         builder.Property(x => x.ApprovalStatus).IsConcurrencyToken();
         builder.ToTable("JobReferrals", table => table.HasCheckConstraint("CK_JobReferrals_Slots", "\"ReferralSlots\" > 0"));
         builder.Property(x => x.ReferralSlots).HasDefaultValue(1);
+        builder.Property(x => x.LinkedInUrl).HasMaxLength(2048);
+        builder.Property(x => x.ContactEmail).HasMaxLength(254);
+        builder.Property(x => x.ContactPhone).HasMaxLength(40);
         builder.ConfigureBaseEntity();
 
         builder.Property(x => x.SourceUrl)

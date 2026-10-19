@@ -5,7 +5,7 @@ namespace JobPortal.Domain.Entities;
 
 /// <summary>
 /// Referral metadata attached to a job that a user (the referrer) submitted for free.
-/// Holds which of the referrer's own contact fields (email/phone/LinkedIn) they've
+/// Holds private, offer-specific contact values and which methods the referrer has
 /// chosen to expose for THIS job, and the admin approval workflow state.
 /// </summary>
 public sealed class JobReferral : BaseEntity
@@ -21,6 +21,12 @@ public sealed class JobReferral : BaseEntity
 
     /// <summary>The job URL the referrer originally pasted in, if any (used for AI auto-extraction).</summary>
     public string? SourceUrl { get; set; }
+
+    public string? LinkedInUrl { get; set; }
+
+    public string? ContactEmail { get; set; }
+
+    public string? ContactPhone { get; set; }
 
     public bool ShowLinkedIn { get; set; }
 

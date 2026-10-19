@@ -118,9 +118,9 @@ public sealed class ReferralMarketplaceService(IReferralMarketplaceRepository re
         if (!row.IsSuccessful || row.ReferrerUserId != row.JobReferral.ReferrerUserId)
             throw new AppException("Acceptance is required before contact access.", 403, "REFERRAL_CONTACT_NOT_AVAILABLE");
         await Access(candidateId, ct); RequireOpportunity(row.JobReferral);
-        var opportunity = row.JobReferral; var user = opportunity.ReferrerUser;
-        return new("Employee Referrer", opportunity.ShowLinkedIn ? user.LinkedInUrl : null,
-            opportunity.ShowEmail ? user.Email : null, opportunity.ShowPhone ? user.PhoneNumber : null);
+        var opportunity = row.JobReferral;
+        return new("Employee Referrer", opportunity.ShowLinkedIn ? opportunity.LinkedInUrl : null,
+            opportunity.ShowEmail ? opportunity.ContactEmail : null, opportunity.ShowPhone ? opportunity.ContactPhone : null);
     }
     public async Task<ReferrerContactDetailsResponse?> ContactForOpportunityAsync(Guid candidateId, Guid referralId, CancellationToken ct)
     {
