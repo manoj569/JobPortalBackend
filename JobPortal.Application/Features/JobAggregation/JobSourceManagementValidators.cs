@@ -14,6 +14,7 @@ public sealed class SaveJobSourceRequestValidator : AbstractValidator<SaveJobSou
             .WithMessage("CareerPageUrl must be an absolute HTTP or HTTPS URL without credentials.");
         RuleFor(x => x.AtsType).IsInEnum();
         RuleFor(x => x.AtsIdentifier).MaximumLength(255);
+        RuleFor(x => x.MissingCompleteSnapshotThreshold).InclusiveBetween(2, 100);
         RuleFor(x => x.ScanIntervalMinutes).InclusiveBetween(1, 10080);
         RuleFor(x => x).Custom((request, context) =>
         {

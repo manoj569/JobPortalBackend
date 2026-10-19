@@ -172,7 +172,7 @@ public sealed class JobSourceManagementService(
     private static string? SourceIdentifier(SaveJobSourceRequest request) =>
         request.AtsType == AtsType.OracleRecruitingCloud
             ? OracleRecruitingCloudConfiguration.Parse(request.AtsIdentifier)!.SourceIdentifier
-            : request.AtsType == AtsType.Custom ? TextNormalizer.TrimOrNull(request.AtsIdentifier)
+            : request.AtsType == AtsType.Custom ? TextNormalizer.TrimOrNull(request.AtsIdentifier) ?? "employer-direct:auto-v1"
             : JobSourceConfiguration.Require(request.AtsType, request.CareerPageUrl, request.AtsIdentifier).Identifier;
 
     private static void Apply(JobSource source, SaveJobSourceRequest request, Company company, string? identifier)
@@ -188,6 +188,7 @@ public sealed class JobSourceManagementService(
         // New sources retain the existing explicit-opt-in default. Omitted updates
         // from older clients preserve the persisted decision rather than disabling it.
         source.AutoPublishEnabled = request.AutoPublishEnabled ?? source.AutoPublishEnabled;
+        source.MissingCompleteSnapshotThreshold = request.MissingCompleteSnapshotThreshold;
         source.ScanIntervalMinutes = request.ScanIntervalMinutes;
     }
 
@@ -203,6 +204,9 @@ public sealed class JobSourceManagementService(
             source.LastError is null ? null : "External job source run failed.",
             source.ConsecutiveFailures, category?.Id, category?.Name, source.CreatedAtUtc, source.UpdatedAtUtc)
         {
+            MissingCompleteSnapshotThreshold = source.MissingCompleteSnapshotThreshold,
+            EmployerStrategyJson = source.EmployerStrategyJson,
+            EmployerDiagnosticsJson = source.EmployerDiagnosticsJson,
             AutoPublishEnabled = source.AutoPublishEnabled,
             OracleRecruitingCloud = oracle ? new(oracleConfig?.OracleHost, oracleConfig?.CareerSiteId, source.AtsIdentifier) : null
         };

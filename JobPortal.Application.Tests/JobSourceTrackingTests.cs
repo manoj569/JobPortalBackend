@@ -42,7 +42,7 @@ public sealed class JobSourceTrackingTests
 
         var entry = Assert.Single(f.Context.ChangeTracker.Entries<JobSource>());
         Assert.Same(reloaded ?? source, entry.Entity);
-        Assert.Equal(new[] { "ConsecutiveFailures", "LastError", "LastRunAtUtc", "LastSuccessfulRunAtUtc" },
+        Assert.Equal(new[] { "ConsecutiveFailures", "EmployerDiagnosticsJson", "EmployerStrategyJson", "LastError", "LastInventoryAtUtc", "LastInventoryDigest", "LastInventoryVersion", "LastObservedAtUtc", "LastObservedSnapshotId", "LastRunAtUtc", "LastSuccessfulRunAtUtc" },
             entry.Properties.Where(x => x.IsModified).Select(x => x.Metadata.Name).OrderBy(x => x).ToArray());
         Assert.Same(f.Company, Assert.Single(f.Context.Companies.Local));
         await f.Context.SaveChangesAsync();

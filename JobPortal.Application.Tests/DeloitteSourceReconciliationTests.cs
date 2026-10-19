@@ -95,8 +95,16 @@ public sealed class DeloitteSourceReconciliationTests
         Assert.Equal(JobStatus.Draft, imported.Status);
 
         provider.Snapshot = new ExternalJobSourceSnapshot([], 0, true);
-        var complete = await runner.RunAsync(f.Source.Id);
-        Assert.Equal(1, complete.Closed);
+        var firstComplete = await runner.RunAsync(f.Source.Id);
+        Assert.Equal(0, firstComplete.Closed);
+        Assert.Equal(1, (await f.Context.Set<JobSourceVacancy>().AsNoTracking().SingleAsync()).MissingCompleteSnapshots);
+        imported = await f.Context.Jobs.AsNoTracking().SingleAsync(x => x.Id == imported.Id);
+        Assert.Equal(JobStatus.Draft, imported.Status);
+
+        await Task.Delay(10); // Ensure the second authoritative scan has a strictly newer timestamp.
+        var secondComplete = await runner.RunAsync(f.Source.Id);
+        Assert.Equal(1, secondComplete.Closed);
+        Assert.Equal(2, (await f.Context.Set<JobSourceVacancy>().AsNoTracking().SingleAsync()).MissingCompleteSnapshots);
         imported = await f.Context.Jobs.AsNoTracking().SingleAsync(x => x.Id == imported.Id);
         Assert.Equal(JobStatus.Closed, imported.Status);
         Assert.Equal(JobStatus.Published, manual.Status);
@@ -107,12 +115,13 @@ public sealed class DeloitteSourceReconciliationTests
     {
         var repo = new JobRepository(f.Context);
         var unit = new UnitOfWork(f.Context);
+        var clock = new TestClock();
         var fingerprints = new JobFingerprintService();
         var canonicalizer = new UrlCanonicalizer();
         var ingestion = new JobIngestionService(repo, new CompanyManagementRepository(f.Context), new CategoryManagementRepository(f.Context),
             new JobDeduplicationService(repo, fingerprints, canonicalizer), fingerprints, unit,
-            new TestClock(), f.Locks, canonicalizer);
-        var runner = new JobSourceRunner(f.Repository, [provider], ingestion, unit, new TestClock(), f.Resolver,
+            clock, f.Locks, canonicalizer);
+        var runner = new JobSourceRunner(f.Repository, [provider], ingestion, unit, clock, f.Resolver,
             new ExternalJobNormalizer(), jobRepository: repo);
         return (runner, repo);
     }
@@ -136,6 +145,12 @@ public sealed class DeloitteSourceReconciliationTests
 
     private sealed class TestClock : TimeProvider
     {
-        public override DateTimeOffset GetUtcNow() => new(JobSourceFixture.Now);
+        private DateTimeOffset current = new(JobSourceFixture.Now);
+        public override DateTimeOffset GetUtcNow()
+        {
+            var result = current;
+            current = current.AddSeconds(1);
+            return result;
+        }
     }
 }

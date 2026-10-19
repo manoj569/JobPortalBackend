@@ -4314,6 +4314,9 @@ namespace JobPortal.Persistence.Postgres.Migrations
                         .HasMaxLength(270)
                         .HasColumnType("character varying(270)");
 
+                    b.Property<Guid?>("SourceClosedBySnapshotId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("SourceMetadataJson")
                         .HasColumnType("jsonb");
 
@@ -4864,21 +4867,56 @@ namespace JobPortal.Persistence.Postgres.Migrations
                     b.Property<DateTime?>("DeletedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("EmployerDiagnosticsJson")
+                        .HasColumnType("text");
+
+                    b.Property<string>("EmployerStrategyJson")
+                        .HasColumnType("text");
+
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
+                    b.Property<int?>("LastCompleteSnapshotCount")
+                        .HasColumnType("integer");
+
                     b.Property<string>("LastError")
                         .HasMaxLength(2048)
                         .HasColumnType("character varying(2048)");
+
+                    b.Property<DateTime?>("LastInventoryAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LastInventoryDigest")
+                        .HasColumnType("text");
+
+                    b.Property<string>("LastInventoryVersion")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("LastObservedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("LastObservedSnapshotId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("LastReconciledSnapshotAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("LastReconciledSnapshotId")
+                        .HasColumnType("uuid");
 
                     b.Property<DateTime?>("LastRunAtUtc")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime?>("LastSuccessfulRunAtUtc")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("MissingCompleteSnapshotThreshold")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(2);
 
                     b.Property<int>("ScanIntervalMinutes")
                         .HasColumnType("integer");
@@ -5079,6 +5117,37 @@ namespace JobPortal.Persistence.Postgres.Migrations
                         });
                 });
 
+            modelBuilder.Entity("JobPortal.Domain.Entities.JobSourceVacancy", b =>
+                {
+                    b.Property<Guid>("JobSourceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ExternalJobId")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<bool>("IsCurrent")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("JobId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("LastSeenAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("LastSnapshotId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("MissingCompleteSnapshots")
+                        .HasColumnType("integer");
+
+                    b.HasKey("JobSourceId", "ExternalJobId");
+
+                    b.HasIndex("JobId");
+
+                    b.ToTable("JobSourceVacancies", (string)null);
+                });
+
             modelBuilder.Entity("JobPortal.Domain.Entities.Membership", b =>
                 {
                     b.Property<Guid>("Id")
@@ -5248,9 +5317,9 @@ namespace JobPortal.Persistence.Postgres.Migrations
                         .IsUnique()
                         .HasFilter("\"BusinessKey\" IS NOT NULL");
 
-                    b.HasIndex("UserId", "IsRead", "CreatedAtUtc");
-
                     b.HasIndex("UserId", "IsRead");
+
+                    b.HasIndex("UserId", "IsRead", "CreatedAtUtc");
 
                     b.HasIndex("UserId", "Type", "ReferralId")
                         .IsUnique()
@@ -8107,6 +8176,21 @@ namespace JobPortal.Persistence.Postgres.Migrations
                     b.HasOne("JobPortal.Domain.Entities.JobSourceRun", null)
                         .WithMany()
                         .HasForeignKey("RunId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.JobSourceVacancy", b =>
+                {
+                    b.HasOne("JobPortal.Domain.Entities.Job", null)
+                        .WithMany()
+                        .HasForeignKey("JobId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JobPortal.Domain.Entities.JobSource", null)
+                        .WithMany()
+                        .HasForeignKey("JobSourceId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

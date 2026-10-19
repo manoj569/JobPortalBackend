@@ -11,7 +11,10 @@ public sealed record SaveJobSourceRequest(
     Guid CompanyId, string CareerPageUrl, AtsType AtsType, string? AtsIdentifier,
     bool IsActive = true, int ScanIntervalMinutes = 720,
     OracleRecruitingCloudSourceRequest? OracleRecruitingCloud = null,
-    bool? AutoPublishEnabled = null);
+    bool? AutoPublishEnabled = null)
+{
+    public int MissingCompleteSnapshotThreshold { get; init; } = 2;
+}
 
 // Missing/null must never be interpreted as a request to disable publication.
 public sealed record UpdateJobSourceAutoPublicationRequest(bool? AutoPublishEnabled = null);
@@ -23,6 +26,9 @@ public sealed record JobSourceResponse(
     int ConsecutiveFailures, Guid? CategoryId, string? CategoryName,
     DateTime CreatedAtUtc, DateTime? UpdatedAtUtc)
 {
+    public int MissingCompleteSnapshotThreshold { get; init; } = 2;
+    public string? EmployerStrategyJson { get; init; }
+    public string? EmployerDiagnosticsJson { get; init; }
     public bool AutoPublishEnabled { get; init; }
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public OracleRecruitingCloudSourceStatus? OracleRecruitingCloud { get; init; }

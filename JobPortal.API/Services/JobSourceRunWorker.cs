@@ -104,10 +104,10 @@ public sealed partial class JobSourceRunWorker(IServiceScopeFactory scopes, JobS
             if (run.DiagnosticsJson is not null)
                 progress.Report(new("Resuming", run.Processed,
                     System.Text.Json.JsonSerializer.Deserialize<JobSourceRunResult>(run.DiagnosticsJson) ?? new()));
-            if (checkpoint is not null && source?.AtsType == AtsType.Workday)
+            if (checkpoint is not null)
             {
                 await checkpoint.BindAsync(run, execution.Token);
-                checkpoint.Enable(source);
+                if (source?.AtsType == AtsType.Workday) checkpoint.Enable(source);
             }
             if (source is null || !source.IsActive)
             {

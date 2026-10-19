@@ -28,6 +28,8 @@ public sealed class JobSourceRunProgress : IJobSourceRunProgress
 public interface IJobSourceRunStore
 {
     Task<JobSourceRun> EnqueueAsync(Guid sourceId, Guid? requestedBy, DateTime now, CancellationToken ct);
+    Task<JobSourceRun> EnqueueSnapshotAsync(Guid sourceId, Guid snapshotId, Guid? requestedBy, DateTime now, string payload, CancellationToken ct) =>
+        throw new NotSupportedException("Employer snapshot queue is not implemented by this store.");
     Task<JobSourceRun?> GetAsync(Guid sourceId, Guid runId, CancellationToken ct);
     Task<bool> HasActiveAsync(Guid sourceId, CancellationToken ct);
     Task<IReadOnlyList<JobSourceRun>> CandidatesAsync(DateTime now, CancellationToken ct);

@@ -130,6 +130,7 @@ public sealed class LargeSourceIngestionTests(ITestOutputHelper output)
         Assert.Equal(previousSuccess, (await f.Repository.GetByIdAsync(f.Source.Id))!.LastSuccessfulRunAtUtc);
         Assert.Equal(0, await f.Context.Jobs.CountAsync(x => x.Status == JobStatus.Closed));
         feed.Complete = true;
+        Assert.Equal(0, (await runner.RunAsync(f.Source.Id)).Closed);
         Assert.Equal(20, (await runner.RunAsync(f.Source.Id)).Closed);
     }
 
@@ -272,7 +273,7 @@ public sealed class LargeSourceIngestionTests(ITestOutputHelper output)
             ArgumentNullException.ThrowIfNull(targetMethod);
             Calls[targetMethod.Name] = Calls.GetValueOrDefault(targetMethod.Name) + 1;
             var result = targetMethod.Invoke(Inner, args);
-            if (targetMethod.Name == nameof(IJobRepository.CloseSourceJobsMissingFromSnapshotAsync) &&
+            if (targetMethod.Name == nameof(IJobRepository.ReconcileSourceSnapshotAsync) &&
                 AfterReconciliation is { } callback && result is Task<int> task)
                 return AfterAsync(task, callback);
             return result;

@@ -13,8 +13,19 @@ namespace JobPortal.API.Controllers;
 [Route("api/admin/job-sources")]
 [Produces("application/json")]
 public sealed class AdminJobSourcesController(IJobSourceManagementService sources, JobSourceRunService? runs = null,
-    IJobSourceConnectionTester? connectionTester = null) : ControllerBase
+    IJobSourceConnectionTester? connectionTester = null, EmployerDirectSnapshotService? employerSnapshots = null) : ControllerBase
 {
+    [HttpPost("{id:guid}/employer-snapshots/{snapshotId:guid}")]
+    [RequestSizeLimit(3_000_000)]
+    public async Task<ActionResult<ApiResponse<JobSourceRunResponse>>> SubmitEmployerSnapshot(Guid id, Guid snapshotId,
+        [FromBody] EmployerDirectSnapshotRequest request, CancellationToken cancellationToken)
+    {
+        var userId = Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var parsed) ? parsed : (Guid?)null;
+        var result = await (employerSnapshots ?? throw new InvalidOperationException("Employer snapshot integration is not registered."))
+            .SubmitAsync(id, snapshotId, request, userId, cancellationToken);
+        return Accepted(result.StatusUrl, new ApiResponse<JobSourceRunResponse>(result));
+    }
+
     [HttpGet]
     public async Task<ActionResult<ApiResponse<PagedResponse<JobSourceResponse>>>> Search(
         [FromQuery] JobSourceSearchQuery query, CancellationToken cancellationToken) =>

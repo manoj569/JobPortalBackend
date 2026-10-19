@@ -54,7 +54,12 @@ public sealed class JobSourceReconciliationSafetyTests
         Assert.Equal(0, result.Skipped);
         Assert.Equal(0, result.Failed);
         Assert.Equal(0, result.Published);
-        Assert.Equal(ats == AtsType.Workday ? 0 : 1, result.Closed);
+        Assert.Equal(0, result.Closed);
+        if (ats != AtsType.Workday)
+        {
+            var confirmedMissing = await runner.RunAsync(f.Source.Id);
+            Assert.Equal(1, confirmedMissing.Closed);
+        }
         var inventory = await f.Context.Jobs.ToArrayAsync();
         Assert.Equal(46, inventory.Length);
         Assert.All(inventory.Where(job => originalIds.ContainsKey(job.ExternalJobId!)), job => Assert.Equal(originalIds[job.ExternalJobId!], job.Id));

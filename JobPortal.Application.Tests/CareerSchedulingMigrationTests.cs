@@ -39,7 +39,7 @@ public sealed class CareerSchedulingMigrationTests
             .UseNpgsql("Host=localhost;Database=model_only").Options);
         var booking = db.Model.FindEntityType(typeof(CareerGuidanceBooking))!;
         Assert.True(booking.FindProperty(nameof(CareerGuidanceBooking.Revision))!.IsConcurrencyToken);
-        Assert.Equal(4, booking.GetForeignKeys().Count());
+        Assert.Equal(5, booking.GetForeignKeys().Count());
         Assert.All(booking.GetForeignKeys(), fk => Assert.Equal(DeleteBehavior.Restrict, fk.DeleteBehavior));
         Assert.DoesNotContain(booking.GetProperties(), p => p.IsShadowProperty());
         Assert.Equal(18, booking.FindProperty(nameof(CareerGuidanceBooking.PriceSnapshot))!.GetPrecision());

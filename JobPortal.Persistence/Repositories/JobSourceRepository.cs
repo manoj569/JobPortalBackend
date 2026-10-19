@@ -22,6 +22,9 @@ public sealed class JobSourceRepository(JobPortalDbContext context, IOptions<Job
         return context.JobSources.AsNoTracking()
             .Where(JobSourceSchedule.DuePredicate(nowUtc,
                 options?.Value.Scheduler.InterruptedRunCooldownMinutes ?? 60))
+            // Payload-only sources require explicit submissions. Configured inventory-v1
+            // sources execute through this existing scheduler and durable run worker.
+            .Where(x => x.AtsType != AtsType.Custom || (x.AtsIdentifier == EmployerDirectInventoryContract.Identifier || x.AtsIdentifier == "employer-direct:auto-v1"))
             .Where(x => !context.JobSourceRuns.Where(JobSourceRunStore.ActivePredicate).Any(r => r.JobSourceId == x.Id))
             .OrderBy(x => x.LastRunAtUtc.HasValue)
             .ThenBy(x => x.LastRunAtUtc).ThenBy(x => x.Id)
@@ -68,6 +71,13 @@ public sealed class JobSourceRepository(JobPortalDbContext context, IOptions<Job
         var tracked = entry.Entity;
         if (!ReferenceEquals(tracked, source))
         {
+            tracked.EmployerStrategyJson = source.EmployerStrategyJson;
+            tracked.EmployerDiagnosticsJson = source.EmployerDiagnosticsJson;
+            tracked.LastInventoryAtUtc = source.LastInventoryAtUtc;
+            tracked.LastInventoryVersion = source.LastInventoryVersion;
+            tracked.LastInventoryDigest = source.LastInventoryDigest;
+            tracked.LastObservedSnapshotId = source.LastObservedSnapshotId;
+            tracked.LastObservedAtUtc = source.LastObservedAtUtc;
             tracked.LastRunAtUtc = source.LastRunAtUtc;
             tracked.LastSuccessfulRunAtUtc = source.LastSuccessfulRunAtUtc;
             tracked.LastError = source.LastError;
@@ -76,6 +86,13 @@ public sealed class JobSourceRepository(JobPortalDbContext context, IOptions<Job
         if (entry.State == EntityState.Detached)
             entry.State = EntityState.Unchanged;
 
+        entry.Property(x => x.EmployerStrategyJson).IsModified = true;
+        entry.Property(x => x.EmployerDiagnosticsJson).IsModified = true;
+        entry.Property(x => x.LastInventoryAtUtc).IsModified = true;
+        entry.Property(x => x.LastInventoryVersion).IsModified = true;
+        entry.Property(x => x.LastInventoryDigest).IsModified = true;
+        entry.Property(x => x.LastObservedSnapshotId).IsModified = true;
+        entry.Property(x => x.LastObservedAtUtc).IsModified = true;
         entry.Property(x => x.LastRunAtUtc).IsModified = true;
         entry.Property(x => x.LastSuccessfulRunAtUtc).IsModified = true;
         entry.Property(x => x.LastError).IsModified = true;

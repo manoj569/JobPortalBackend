@@ -39,6 +39,24 @@ public sealed class JobSourceRunStore(JobPortalDbContext db) : IJobSourceRunStor
         throw new ConflictException("Please retry the run request.", "job_source_queue_busy");
     }
 
+    public async Task<JobSourceRun> EnqueueSnapshotAsync(Guid sourceId, Guid snapshotId, Guid? requestedBy, DateTime now, string payload, CancellationToken ct)
+    {
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO "JobSourceRuns" ("Id", "JobSourceId", "RequestedByUserId", "Status", "QueuedAtUtc", "NextAttemptAtUtc",
+              "AttemptCount", "Phase", "Processed", "TotalReceived", "Created", "Updated", "Unchanged", "Closed", "Matched",
+              "Skipped", "Failed", "Published", "NeedsReview", "QualityRejected", "PublishFailed", "AutoPublishDisabled", "CheckpointJson")
+            SELECT {snapshotId}, {sourceId}, {requestedBy}::uuid, 0, {now}, {now}, 0, 'Queued', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {payload}::jsonb
+            FROM "JobSources" WHERE "Id" = {sourceId} AND NOT "IsDeleted" AND "IsActive" AND "AtsType" = 0 AND "AtsIdentifier" = 'employer-direct'
+            ON CONFLICT DO NOTHING
+            """, ct);
+        var saved = await GetAsync(sourceId, snapshotId, ct);
+        if (saved is null) throw new ConflictException("Source has another active run or is unavailable.", "job_source_queue_busy");
+        var incoming = JsonSerializer.Deserialize<EmployerDirectSnapshotEnvelope>(payload, EmployerDirectSnapshotService.JsonOptions);
+        var retained = saved.CheckpointJson is null ? null : JsonSerializer.Deserialize<EmployerDirectSnapshotEnvelope>(saved.CheckpointJson, EmployerDirectSnapshotService.JsonOptions);
+        if (retained?.Fingerprint != incoming?.Fingerprint) throw new ConflictException("SnapshotId payload conflict.", "snapshot_payload_conflict");
+        return saved;
+    }
+
     public Task<JobSourceRun?> GetAsync(Guid sourceId, Guid runId, CancellationToken ct) => db.JobSourceRuns.AsNoTracking()
         .SingleOrDefaultAsync(x => x.Id == runId && x.JobSourceId == sourceId, ct);
 

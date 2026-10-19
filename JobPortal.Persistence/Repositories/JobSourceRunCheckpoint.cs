@@ -28,7 +28,9 @@ public sealed class JobSourceRunCheckpoint(JobPortalDbContext db, TimeProvider c
     public async Task BindAsync(JobSourceRun run, CancellationToken ct)
     {
         this.run = run;
-        State = run.CheckpointJson is null ? null : JsonSerializer.Deserialize<WorkdayRunCheckpoint>(run.CheckpointJson);
+        using var input = run.CheckpointJson is null ? null : JsonDocument.Parse(run.CheckpointJson);
+        var employerInput = input is not null && input.RootElement.TryGetProperty("kind", out var kind) && kind.GetString() == "employer-direct-v1";
+        State = run.CheckpointJson is null || employerInput ? null : JsonSerializer.Deserialize<WorkdayRunCheckpoint>(run.CheckpointJson);
         if (State is { Version: not (1 or 2 or 3 or 4) } ||
             State is { Version: 3 } && (State.ListingDiagnostics is not { IngestionSafe: true } || State.RebaseCount < 1 || State.ArchivedCounters is null) ||
             State is { Version: 2 } && State.ListingDiagnostics is not { IngestionSafe: true, ReconciliationSafe: false } ||

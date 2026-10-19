@@ -244,6 +244,8 @@ public sealed partial class JobSourceRunner(
             publicationPolicy?.ApplyLicensedLogo(source);
             ExternalJobSourceSnapshot? snapshot = null;
             var providerSnapshotComplete = false;
+            var observationId = checkpoint?.RunId ?? Guid.NewGuid();
+            DateTime? observationAt = null;
             var reconciliationSafe = false;
             IReadOnlyList<string> reconciliationBlockReasons = [];
             var rawJobs = new List<RawExternalJob>();
@@ -330,6 +332,28 @@ public sealed partial class JobSourceRunner(
             execution.Stage = "ProviderFetch";
             await foreach (var batch in FetchBatchesAsync(provider, source, cancellationToken))
             {
+                execution.Stage = "ObservationFence";
+                observationAt ??= batch.ObservedAtUtc ?? timeProvider.GetUtcNow().UtcDateTime;
+                if (source.AtsType == AtsType.Custom && source.LastObservedSnapshotId != observationId && source.LastObservedAtUtc >= observationAt)
+                    throw new JobSourceSnapshotUnsafeException("StaleSourceObservation");
+                if (source.AtsType == AtsType.Custom && source.LastObservedSnapshotId != observationId)
+                {
+                    if (batch.InventoryAtUtc is { } inventoryAt)
+                    {
+                        if (source.LastInventoryAtUtc > inventoryAt ||
+                            source.LastInventoryAtUtc == inventoryAt && source.LastInventoryVersion != batch.InventoryVersion ||
+                            source.LastInventoryVersion == batch.InventoryVersion && source.LastInventoryDigest is not null &&
+                            batch.InventoryDigest is not null && source.LastInventoryDigest != batch.InventoryDigest)
+                            throw new JobSourceSnapshotUnsafeException("StaleOrConflictingInventoryVersion");
+                        if (source.LastInventoryVersion != batch.InventoryVersion) source.LastInventoryDigest = null;
+                        source.LastInventoryAtUtc = inventoryAt; source.LastInventoryVersion = batch.InventoryVersion;
+                        source.LastInventoryDigest = batch.InventoryDigest ?? source.LastInventoryDigest;
+                    }
+                    source.LastObservedSnapshotId = observationId;
+                    source.LastObservedAtUtc = observationAt;
+                    sources.Update(source);
+                    await unitOfWork.SaveChangesAsync(cancellationToken);
+                }
                 execution.Stage = "BatchIngestionOrPublication";
                 reportedListingTotal = batch.ReportedListingTotal ?? reportedListingTotal;
                 foreach (var (reason, count) in batch.ProviderReasonCounts ?? new Dictionary<string,int>())
@@ -354,6 +378,10 @@ public sealed partial class JobSourceRunner(
                 {
                     SourceMetadataJson = job.SourceMetadataJson ?? System.Text.Json.JsonSerializer.Serialize(job with { SourceMetadataJson = null })
                 }));
+                if (_jobRepository is not null)
+                    await _jobRepository.ObserveSourceInventoryAsync(source.Id,
+                        batch.Jobs.Select(x => x.ExternalId).Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x!).ToArray(),
+                        observationAt.Value, cancellationToken);
                 continuationPending = batch.ContinuationPending;
                 var providerSkipped = (snapshot?.Skipped ?? 0) + batch.Skipped;
                 providerSnapshotComplete = provider is ICompleteExternalJobProvider && batch.IsComplete;
@@ -455,6 +483,7 @@ public sealed partial class JobSourceRunner(
                     { /* Count already committed outcomes below, then propagate cancellation. */ }
                     catch { /* Existing per-item publication handling isolates failures. */ }
                 }
+                var observedVacancies = new List<(string ExternalId, Guid JobId)>();
                 var batchIndex = 0;
                 foreach (var rawJob in newJobs)
                 {
@@ -488,6 +517,9 @@ public sealed partial class JobSourceRunner(
                             committedBatch is not null ? committedBatch[batchIndex] : await ingestionService.IngestAsync(preparedJob, cancellationToken); }
                         finally { ingestionMilliseconds += System.Diagnostics.Stopwatch.GetElapsedTime(ingestionStart).TotalMilliseconds; }
 
+                        if (result.JobId.HasValue && rawJob.ExternalId is { Length: > 0 } sourceExternalId &&
+                            result.Outcome is JobIngestionOutcome.Created or JobIngestionOutcome.Updated or JobIngestionOutcome.Unchanged or JobIngestionOutcome.MatchedByUrl or JobIngestionOutcome.MatchedByFingerprint or JobIngestionOutcome.MatchedByFuzzy)
+                            observedVacancies.Add((sourceExternalId, result.JobId.Value));
                         durableResult = result;
                         switch (result.Outcome)
                         {
@@ -608,6 +640,8 @@ public sealed partial class JobSourceRunner(
                             Progress(_logger, source.Id, "Enrichment and ingestion progress", processed, processingTimer.Elapsed.TotalMilliseconds, null);
                     }
                 }
+                if (_jobRepository is not null && observedVacancies.Count > 0)
+                    await _jobRepository.ObserveSourceVacanciesAsync(source.Id, observedVacancies, observationAt.Value, cancellationToken);
                 if (durable && batch.CheckpointCursor is { } cursor)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -655,10 +689,11 @@ public sealed partial class JobSourceRunner(
             var reconciliationTimer = System.Diagnostics.Stopwatch.StartNew();
             if (provider is ICompleteExternalJobProvider && canReconcile && _jobRepository is not null)
             {
-                closed = await _jobRepository.CloseSourceJobsMissingFromSnapshotAsync(
-                    source.Id, externalIdsForReconciliation, timeProvider.GetUtcNow().UtcDateTime, cancellationToken);
+                closed = await _jobRepository.ReconcileSourceSnapshotAsync(
+                    source.Id, externalIdsForReconciliation, observationId,
+                    observationAt ?? timeProvider.GetUtcNow().UtcDateTime, source.MissingCompleteSnapshotThreshold, cancellationToken);
             }
-            // CloseSourceJobsMissingFromSnapshotAsync only stages tracked changes.
+            // ReconcileSourceSnapshotAsync only stages negative lifecycle changes.
             // The final Save below commits closures and success bookkeeping together.
             // Cancellation before that save discards both, not already committed jobs.
             cancellationToken.ThrowIfCancellationRequested();

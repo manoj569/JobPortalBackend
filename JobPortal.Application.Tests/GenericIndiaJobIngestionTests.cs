@@ -181,7 +181,7 @@ public sealed class GenericIndiaJobIngestionTests
     }
 
     [Fact]
-    public async Task ExistingSourceOwnedDraftIsPublishedAndResetInventoryRecreatesRows()
+    public async Task ExistingSourceOwnedDraftIsPublishedAndDeletedIdentityIsNotRecreated()
     {
         using var f = new JobSourceFixture();
         var provider = new SnapshotProvider(f.Source.AtsType, [Vacancy(1)]);
@@ -196,7 +196,8 @@ public sealed class GenericIndiaJobIngestionTests
         var removed = await f.Context.Jobs.SingleAsync(x => x.Id == saved.Id);
         f.Context.Jobs.Remove(removed); await f.Context.SaveChangesAsync();
         var reset = await runner.RunAsync(f.Source.Id);
-        Assert.Equal(1, reset.Created); Assert.Equal(0, reset.Existing); Assert.Equal(1, reset.Published);
+        Assert.Equal(0, reset.Created); Assert.Equal(1, reset.Existing); Assert.Equal(0, reset.Published);
+        Assert.True((await f.Context.Jobs.IgnoreQueryFilters().SingleAsync(x => x.Id == saved.Id)).IsDeleted);
     }
 
     [Fact]

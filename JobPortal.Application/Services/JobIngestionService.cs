@@ -357,6 +357,7 @@ public sealed class JobIngestionService(
                 owned = await jobs.FindBySourceIdentityAsync(rawJob.JobSourceId.Value, sourceExternalId, cancellationToken);
             if (owned is not null)
             {
+                if (owned.IsDeleted) return new() { Outcome = JobIngestionOutcome.Unchanged, JobId = owned.Id, Message = "Deleted source identity remains suppressed." };
                 owned = jobs.TrackAggregationJob(owned);
                 var oldUrl = owned.ApplicationUrl;
                 var changed = ApplySourceFields(owned, rawJob, title, company, location, applicationUrl);
@@ -421,6 +422,7 @@ public sealed class JobIngestionService(
                 await jobs.FindBySourceIdentityAsync(rawJob.JobSourceId.Value, sourceExternalId, cancellationToken) is { } concurrentOwned)
             {
                 var oldUrl = concurrentOwned.ApplicationUrl;
+                if (concurrentOwned.IsDeleted) return new() { Outcome = JobIngestionOutcome.Unchanged, JobId = concurrentOwned.Id, Message = "Deleted source identity remains suppressed." };
                 var changed = ApplySourceFields(concurrentOwned, rawJob, title, company, location, applicationUrl);
                 concurrentOwned.LastSeenAtUtc = timeProvider.GetUtcNow().UtcDateTime;
                 concurrentOwned.FirstSeenAtUtc ??= concurrentOwned.LastSeenAtUtc;
@@ -622,6 +624,9 @@ public sealed class JobIngestionService(
             job.EducationRequirement != education || (raw.CategoryId.HasValue && raw.CategoryId.Value != Guid.Empty && job.CategoryId != raw.CategoryId.Value) ||
             job.SourcePostedAtUtc != sourcePosted || job.CompanyId != company.Id;
 
+        if (job.SourceClosedBySnapshotId.HasValue && job.Status == JobStatus.Closed &&
+            job.SourceOwnsPublication && !job.IsHidden && !job.IsDeleted)
+        { job.Status = JobStatus.Draft; job.SourceClosedBySnapshotId = null; changed = true; }
         job.Title = title;
         job.Slug = slug;
         job.Description = description;

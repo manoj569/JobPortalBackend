@@ -72,6 +72,16 @@ public interface IJobRepository
         CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyCollection<Job>?>(null);
     void ReleaseSavedAggregationTracking() { }
 
+    Task ObserveSourceInventoryAsync(Guid sourceId, IReadOnlyCollection<string> externalIds, DateTime seenAtUtc,
+        CancellationToken cancellationToken = default) => Task.CompletedTask;
+    Task ObserveSourceVacancyAsync(Guid sourceId, string externalId, Guid jobId, DateTime seenAtUtc,
+        CancellationToken cancellationToken = default) => Task.CompletedTask;
+    Task ObserveSourceVacanciesAsync(Guid sourceId, IReadOnlyCollection<(string ExternalId, Guid JobId)> vacancies,
+        DateTime seenAtUtc, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    Task<int> ReconcileSourceSnapshotAsync(Guid sourceId, IReadOnlyCollection<string> externalIds,
+        Guid snapshotId, DateTime observedAtUtc, int missingThreshold,
+        CancellationToken cancellationToken = default) => Task.FromResult(0);
+
     Task<int> CloseSourceJobsMissingFromSnapshotAsync(Guid jobSourceId, IReadOnlyCollection<string> activeExternalJobIds,
         DateTime closedAtUtc, CancellationToken cancellationToken = default) => Task.FromResult(0);
 }

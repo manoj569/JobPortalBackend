@@ -24,12 +24,13 @@ public sealed class JobAggregationDependencyInjectionTests
     [InlineData(AtsType.Greenhouse, typeof(GreenhouseExternalJobProvider))]
     [InlineData(AtsType.Lever, typeof(LeverExternalJobProvider))]
     [InlineData(AtsType.Ashby, typeof(AshbyExternalJobProvider))]
-    [InlineData(AtsType.Custom, null)]
+    [InlineData(AtsType.Custom, typeof(JobPortal.Application.Features.JobAggregation.EmployerDirectSnapshotProvider))]
     public void SourceAtsTypeResolvesOnlyItsRegisteredProvider(AtsType atsType, Type? expectedProviderType)
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection().Build();
         var services = new ServiceCollection();
         services.AddSingleton<IConfiguration>(configuration);
+        services.AddSingleton(TimeProvider.System);
         services.AddLogging();
         services.AddInfrastructure(configuration);
         using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
@@ -48,6 +49,7 @@ public sealed class JobAggregationDependencyInjectionTests
             Assert.Single(providers, x => x.AtsType == source.AtsType);
             Assert.IsType(expectedProviderType, resolved);
         }
+        Assert.Contains(providers, x => x is JobPortal.Application.Features.JobAggregation.EmployerDirectSnapshotProvider);
         Assert.Equal(4, (int)AtsType.SuccessFactors);
         Assert.Equal(5, (int)AtsType.Workday);
     }
@@ -120,7 +122,7 @@ public sealed class JobAggregationDependencyInjectionTests
             .GetServices<IExternalJobProvider>()
             .ToArray();
 
-        Assert.Equal(6, providers.Length);
+        Assert.Equal(7, providers.Length);
 
         Assert.Contains(
             providers,
@@ -142,9 +144,7 @@ public sealed class JobAggregationDependencyInjectionTests
             providers,
             x => x is WorkdayJobSourceProvider);
 
-        Assert.DoesNotContain(
-            providers,
-            x => x.AtsType == AtsType.Custom);
+        Assert.Single(providers, x => x.AtsType == AtsType.Custom);
 
         var clients = scope.ServiceProvider
             .GetRequiredService<IHttpClientFactory>();

@@ -8,6 +8,10 @@ public sealed record ExternalJobSourceSnapshot(
     int Skipped,
     bool IsComplete)
 {
+    public DateTime? InventoryAtUtc { get; init; }
+    public string? InventoryVersion { get; init; }
+    public string? InventoryDigest { get; init; }
+    public DateTime? ObservedAtUtc { get; init; }
     public int? CheckpointCursor { get; init; }
     public bool ContinuationPending { get; init; }
     public WorkdayListingDiagnostics? ListingDiagnostics { get; init; }

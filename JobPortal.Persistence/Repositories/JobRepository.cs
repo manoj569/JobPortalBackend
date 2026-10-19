@@ -178,7 +178,7 @@ public sealed class JobRepository(JobPortalDbContext context) : IJobRepository
 
     public Task<Job?> FindBySourceIdentityAsync(Guid jobSourceId, string externalJobId,
         CancellationToken cancellationToken = default) => context.Jobs
-            .FirstOrDefaultAsync(x => x.JobSourceId == jobSourceId && x.ExternalJobId == externalJobId && !x.IsDeleted,
+            .IgnoreQueryFilters().FirstOrDefaultAsync(x => x.JobSourceId == jobSourceId && x.ExternalJobId == externalJobId,
                 cancellationToken);
 
     public Task<Job?> FindByAcquisitionIdentityAsync(Guid acquisitionSourceId, string externalJobId,
@@ -192,7 +192,7 @@ public sealed class JobRepository(JobPortalDbContext context) : IJobRepository
         var results = new List<Job>();
         foreach (var batch in externalIds.Distinct(StringComparer.Ordinal).Chunk(500))
             results.AddRange(await context.Jobs.AsNoTracking()
-                .Where(x => x.JobSourceId == sourceId && batch.Contains(x.ExternalJobId!) && !x.IsDeleted)
+                .IgnoreQueryFilters().Where(x => x.JobSourceId == sourceId && batch.Contains(x.ExternalJobId!))
                 .ToArrayAsync(cancellationToken));
         return results;
     }
@@ -211,6 +211,117 @@ public sealed class JobRepository(JobPortalDbContext context) : IJobRepository
         // Do not Clear(): source bookkeeping, audit, publication and pending metadata remain tracked.
         foreach (var entry in context.ChangeTracker.Entries<Job>().Where(x => x.State == EntityState.Unchanged).ToArray())
             entry.State = EntityState.Detached;
+    }
+
+    public async Task ObserveSourceInventoryAsync(Guid sourceId, IReadOnlyCollection<string> externalIds,
+        DateTime seenAtUtc, CancellationToken cancellationToken = default)
+    {
+        // Positive presence precedes geography selection, even for partial scans.
+        var ids = externalIds.Distinct(StringComparer.Ordinal).ToArray();
+        var existing = await context.Set<JobSourceVacancy>()
+            .Where(x => x.JobSourceId == sourceId && ids.Contains(x.ExternalJobId)).ToListAsync(cancellationToken);
+        foreach (var member in existing)
+        {
+            if (seenAtUtc < member.LastSeenAtUtc) continue;
+            member.LastSeenAtUtc = seenAtUtc; member.MissingCompleteSnapshots = 0; member.IsCurrent = true;
+        }
+        await context.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task ObserveSourceVacancyAsync(Guid sourceId, string externalId, Guid jobId,
+        DateTime seenAtUtc, CancellationToken cancellationToken = default)
+    {
+        var row = context.Set<JobSourceVacancy>().Local.FirstOrDefault(x => x.JobSourceId == sourceId && x.ExternalJobId == externalId)
+            ?? await context.Set<JobSourceVacancy>().SingleOrDefaultAsync(x => x.JobSourceId == sourceId && x.ExternalJobId == externalId, cancellationToken);
+        if (row is null)
+        {
+            row = new() { JobSourceId = sourceId, ExternalJobId = externalId, JobId = jobId };
+            context.Set<JobSourceVacancy>().Add(row);
+        }
+        if (row.JobId != jobId) throw new InvalidOperationException("Source vacancy identity changed jobs.");
+        if (seenAtUtc < row.LastSeenAtUtc) return;
+        row.LastSeenAtUtc = seenAtUtc; row.MissingCompleteSnapshots = 0; row.IsCurrent = true;
+        await context.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task ObserveSourceVacanciesAsync(Guid sourceId,
+        IReadOnlyCollection<(string ExternalId, Guid JobId)> vacancies, DateTime seenAtUtc,
+        CancellationToken cancellationToken = default)
+    {
+        var unique = new Dictionary<string, Guid>(StringComparer.Ordinal);
+        foreach (var (externalId, jobId) in vacancies)
+        {
+            if (string.IsNullOrWhiteSpace(externalId) || jobId == Guid.Empty) continue;
+            if (unique.TryGetValue(externalId, out var existingJobId) && existingJobId != jobId)
+                throw new InvalidOperationException("Source vacancy identity changed jobs within one observation batch.");
+            unique[externalId] = jobId;
+        }
+        if (unique.Count == 0) return;
+        var ids = unique.Keys.ToArray();
+        var members = await context.Set<JobSourceVacancy>()
+            .Where(x => x.JobSourceId == sourceId && ids.Contains(x.ExternalJobId))
+            .ToDictionaryAsync(x => x.ExternalJobId, StringComparer.Ordinal, cancellationToken);
+        foreach (var (externalId, jobId) in unique)
+        {
+            if (!members.TryGetValue(externalId, out var member))
+            {
+                context.Set<JobSourceVacancy>().Add(new JobSourceVacancy
+                {
+                    JobSourceId = sourceId, ExternalJobId = externalId, JobId = jobId,
+                    LastSeenAtUtc = seenAtUtc, MissingCompleteSnapshots = 0, IsCurrent = true
+                });
+                continue;
+            }
+            if (member.JobId != jobId)
+                throw new InvalidOperationException("Source vacancy identity changed jobs.");
+            if (seenAtUtc < member.LastSeenAtUtc) continue;
+            member.LastSeenAtUtc = seenAtUtc;
+            member.MissingCompleteSnapshots = 0;
+            member.IsCurrent = true;
+        }
+        await context.SaveChangesAsync(cancellationToken);
+    }
+    public async Task<int> ReconcileSourceSnapshotAsync(Guid sourceId, IReadOnlyCollection<string> externalIds,
+        Guid snapshotId, DateTime observedAtUtc, int missingThreshold, CancellationToken cancellationToken = default)
+    {
+        if (missingThreshold < 2 || snapshotId == Guid.Empty) throw new ArgumentException("Invalid snapshot policy.");
+        var source = await context.JobSources.SingleAsync(x => x.Id == sourceId, cancellationToken);
+        if (source.LastReconciledSnapshotId == snapshotId || source.LastReconciledSnapshotAtUtc >= observedAtUtc) return 0;
+        var active = externalIds.ToHashSet(StringComparer.Ordinal);
+        if (active.Count != externalIds.Count) throw new InvalidOperationException("Duplicate census identities.");
+        if (source.LastCompleteSnapshotCount is >= 5 && active.Count < source.LastCompleteSnapshotCount.Value * 0.5)
+            throw new InvalidOperationException("Suspicious source inventory drop.");
+        // Bootstrap source-owned legacy rows without inferring additional ownership.
+        var owned = await context.Jobs.Where(x => x.JobSourceId == sourceId && !x.IsDeleted && x.ExternalJobId != null).ToArrayAsync(cancellationToken);
+        var members = await context.Set<JobSourceVacancy>().Where(x => x.JobSourceId == sourceId).ToListAsync(cancellationToken);
+        foreach (var job in owned)
+            if (!members.Any(x => x.ExternalJobId == job.ExternalJobId))
+            {
+                var member = new JobSourceVacancy { JobSourceId = sourceId, ExternalJobId = job.ExternalJobId!, JobId = job.Id,
+                    LastSeenAtUtc = job.LastSeenAtUtc ?? observedAtUtc };
+                members.Add(member); context.Set<JobSourceVacancy>().Add(member);
+            }
+        var closed = 0;
+        foreach (var member in members)
+        {
+            if (member.LastSeenAtUtc > observedAtUtc) continue;
+            member.LastSnapshotId = snapshotId;
+            if (active.Contains(member.ExternalJobId))
+            { member.LastSeenAtUtc = observedAtUtc; member.MissingCompleteSnapshots = 0; member.IsCurrent = true; continue; }
+            member.MissingCompleteSnapshots++;
+            member.IsCurrent = member.MissingCompleteSnapshots < missingThreshold;
+            if (member.IsCurrent) continue;
+            var anotherCurrent = await context.Set<JobSourceVacancy>().AnyAsync(x => x.JobId == member.JobId && x.JobSourceId != sourceId && x.IsCurrent && context.JobSources.Any(s => s.Id == x.JobSourceId && s.IsActive && !s.IsDeleted), cancellationToken);
+            if (anotherCurrent) continue;
+            var job = owned.FirstOrDefault(x => x.Id == member.JobId) ?? await context.Jobs.SingleOrDefaultAsync(x => x.Id == member.JobId, cancellationToken);
+            if (job is null || job.IsDeleted || job.IsHidden || !job.SourceOwnsPublication || job.Status is not (JobStatus.Published or JobStatus.Draft)) continue;
+            // Only the owning source may close a shared job; secondary evidence only protects it.
+            if (job.JobSourceId != sourceId) continue;
+            job.Status = JobStatus.Closed; job.IsFeatured = false; job.SourceClosedBySnapshotId = snapshotId;
+            job.UpdatedAtUtc = observedAtUtc; closed++;
+        }
+        source.LastReconciledSnapshotId = snapshotId; source.LastReconciledSnapshotAtUtc = observedAtUtc; source.LastCompleteSnapshotCount = active.Count;
+        return closed; // Existing runner's final Save commits counters and closures together.
     }
 
     public Task<int> CloseSourceJobsMissingFromSnapshotAsync(Guid jobSourceId,

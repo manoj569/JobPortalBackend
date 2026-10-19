@@ -64,6 +64,7 @@ public sealed class Job : BaseEntity
     public string? AcquisitionExternalId { get; set; }
     // Set only on new provider-owned imports. Editorial suppression revokes it.
     // False for legacy rows whose publication ownership cannot be inferred safely.
+    public Guid? SourceClosedBySnapshotId { get; set; }
     public bool SourceOwnsPublication { get; set; }
     public string? ExternalJobId { get; set; }
     public DateTime? SourcePostedAtUtc { get; set; }

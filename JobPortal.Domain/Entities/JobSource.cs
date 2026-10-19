@@ -37,6 +37,17 @@ public sealed class JobSource : BaseEntity
     /// <summary>
     /// Interval in minutes between aggregation runs for this source.
     /// </summary>
+    public int MissingCompleteSnapshotThreshold { get; set; } = 2;
+    public string? EmployerStrategyJson { get; set; }
+    public string? EmployerDiagnosticsJson { get; set; }
+    public DateTime? LastInventoryAtUtc { get; set; }
+    public string? LastInventoryVersion { get; set; }
+    public string? LastInventoryDigest { get; set; }
+    public Guid? LastObservedSnapshotId { get; set; }
+    public DateTime? LastObservedAtUtc { get; set; }
+    public Guid? LastReconciledSnapshotId { get; set; }
+    public DateTime? LastReconciledSnapshotAtUtc { get; set; }
+    public int? LastCompleteSnapshotCount { get; set; }
     public int ScanIntervalMinutes { get; set; } = 720; // Default: 12 hours
 
     /// <summary>

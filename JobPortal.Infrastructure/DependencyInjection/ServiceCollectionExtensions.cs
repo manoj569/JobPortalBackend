@@ -90,6 +90,17 @@ public static class ServiceCollectionExtensions
             client.Timeout = Timeout.InfiniteTimeSpan;
         }).ConfigurePrimaryHttpMessageHandler(SuccessFactorsHttpTransport.CreateHandler)
             .AddHttpMessageHandler<AggregationHttpRetryHandler>();
+        services.AddHttpClient(EmployerDirectInventoryScanner.HttpClientName, client =>
+        {
+            client.Timeout = Timeout.InfiniteTimeSpan;
+        }).ConfigurePrimaryHttpMessageHandler(CompanyLogoHttpTransport.CreateHandler);
+        services.Configure<EmployerAcquisitionOptions>(configuration.GetSection("EmployerAcquisition"));
+        services.AddHttpClient(GenericEmployerScanner.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(300))
+            .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler { AllowAutoRedirect = false, UseProxy = false, UseCookies = false });
+        services.AddScoped<EmployerDirectInventoryScanner>();
+        services.AddScoped<JobPortal.Application.Features.JobAggregation.IEmployerDirectInventoryScanner, GenericEmployerScanner>();
+        services.AddScoped<JobPortal.Application.Features.JobAggregation.EmployerDirectSnapshotService>();
+        services.AddScoped<IExternalJobProvider, JobPortal.Application.Features.JobAggregation.EmployerDirectSnapshotProvider>();
         services.AddScoped<IExternalJobProvider, GreenhouseExternalJobProvider>();
         services.AddHttpClient(LeverExternalJobProvider.HttpClientName, client =>
         {
