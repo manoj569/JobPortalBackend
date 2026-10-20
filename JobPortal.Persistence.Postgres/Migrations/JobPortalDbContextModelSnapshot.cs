@@ -4170,8 +4170,7 @@ namespace JobPortal.Persistence.Postgres.Migrations
                         .HasColumnType("character varying(2048)");
 
                     b.Property<string>("Benefits")
-                        .HasMaxLength(4000)
-                        .HasColumnType("character varying(4000)");
+                        .HasColumnType("text");
 
                     b.Property<string>("CanonicalApplicationUrlHash")
                         .HasMaxLength(64)
@@ -4295,12 +4294,10 @@ namespace JobPortal.Persistence.Postgres.Migrations
                         .HasColumnType("character varying(50)");
 
                     b.Property<string>("Requirements")
-                        .HasMaxLength(8000)
-                        .HasColumnType("character varying(8000)");
+                        .HasColumnType("text");
 
                     b.Property<string>("Responsibilities")
-                        .HasMaxLength(8000)
-                        .HasColumnType("character varying(8000)");
+                        .HasColumnType("text");
 
                     b.Property<string>("RoleCategory")
                         .HasMaxLength(150)
