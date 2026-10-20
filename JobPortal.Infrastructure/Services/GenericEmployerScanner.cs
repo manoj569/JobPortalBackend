@@ -23,15 +23,15 @@ public sealed class GenericEmployerScanner(IHttpClientFactory clients, IOptions<
     IJobSourceRunCheckpoint? checkpoint = null, EmployerDirectInventoryScanner? inventory = null,
     IServiceProvider? services = null) : IEmployerDirectInventoryScanner
 {
-    public const string Identifier = "employer-direct:auto-v1";
+    public const string Identifier = GenericEmployerContract.Identifier;
     public const string HttpClientName = "EmployerAcquisitionWorker";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public async Task<ExternalJobSourceSnapshot> ScanAsync(JobSource source, CancellationToken cancellationToken)
     {
-        if (source.AtsIdentifier == EmployerDirectInventoryContract.Identifier)
+        if (source.AtsType == AtsType.Custom && source.AtsIdentifier == EmployerDirectInventoryContract.Identifier)
             return await (inventory ?? throw new InvalidOperationException("Inventory scanner is not registered.")).ScanAsync(source, cancellationToken);
-        if (source.AtsIdentifier != Identifier || checkpoint?.RunId is not { } runId)
+        if (source.AtsType != AtsType.Custom || !GenericEmployerContract.IsGeneric(source.AtsIdentifier) || checkpoint?.RunId is not { } runId)
             throw new InvalidOperationException("Generic acquisition requires a configured source and durable run.");
         var settings = options.Value;
         if (!Uri.TryCreate(settings.Endpoint, UriKind.Absolute, out var endpoint) ||
