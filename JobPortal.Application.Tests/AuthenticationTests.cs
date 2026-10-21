@@ -77,10 +77,12 @@ public sealed class AuthenticationTests
         Assert.Equal(Now, user.TermsAndPrivacyAcceptedAtUtc);
         var audit = Assert.Single(fixture.Audit.Events);
         Assert.Equal(AuditAction.Create, audit.Action);
-        Assert.DoesNotContain(
-            "AccessToken",
-            JsonSerializer.Serialize(response),
-            StringComparison.Ordinal);
+        Assert.True(user.CareerSnapshotRequired);
+        Assert.NotNull(response.Authentication);
+        Assert.True(response.Authentication.User.CareerSnapshotRequired);
+        Assert.Equal(user.Id, response.Authentication.User.Id);
+        Assert.NotEmpty(response.Authentication.AccessToken);
+        Assert.NotEqual(response.Authentication.RefreshToken, Assert.Single(fixture.RefreshTokens.Added).Token);
     }
 
     [Theory]
@@ -784,6 +786,39 @@ public sealed class AuthenticationTests
         Assert.Equal("ACCOUNT_EXISTS_GOOGLE", error.Code);
         Assert.Same(winner, Assert.Single(f.Users.Items));
         Assert.Single(winner.ExternalLogins);
+    }
+
+    [Fact]
+    public async Task CareerSnapshotRequirementSurvivesLoginRefreshAndCompletion()
+    {
+        var fixture = CreateFixture();
+        var registration = await fixture.Service.RegisterAsync(ValidRegistration());
+        var user = Assert.Single(fixture.Users.Items);
+        var login = await fixture.Service.LoginAsync(new(user.Email, "abc123"), null);
+        Assert.True(login.User.CareerSnapshotRequired);
+        var refreshed = await fixture.Service.RefreshAsync(new(registration.Authentication!.RefreshToken), null);
+        Assert.True(refreshed.User.CareerSnapshotRequired);
+        user.CareerSnapshotRequired = false;
+        await fixture.Service.LogoutAsync(user.Id, new(login.RefreshToken), null);
+        var completedLogin = await fixture.Service.LoginAsync(new(user.Email, "abc123"), null);
+        Assert.False(completedLogin.User.CareerSnapshotRequired);
+        Assert.False((await fixture.Service.RefreshAsync(new(refreshed.RefreshToken), null)).User.CareerSnapshotRequired);
+    }
+
+    [Theory]
+    [InlineData("Candidate")]
+    [InlineData("Administrator")]
+    [InlineData("Employer")]
+    public async Task ExistingAccountsAreNotRequiredToCompleteSnapshot(string role)
+    {
+        var fixture = CreateFixture();
+        var user = NewUser();
+        user.RoleId = role == "Candidate" ? SystemRoleIds.Candidate
+            : role == "Administrator" ? SystemRoleIds.Administrator : SystemRoleIds.Employer;
+        user.Role = new Role { Id = user.RoleId, Name = role };
+        fixture.Users.Items.Add(user);
+        Assert.False(user.CareerSnapshotRequired);
+        Assert.False((await fixture.Service.LoginAsync(new(user.Email, "abc123"), null)).User.CareerSnapshotRequired);
     }
 
     private static UserExternalLogin AddGoogleLink(User user)

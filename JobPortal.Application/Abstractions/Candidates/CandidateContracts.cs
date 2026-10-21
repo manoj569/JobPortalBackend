@@ -6,6 +6,7 @@ namespace JobPortal.Application.Abstractions.Candidates;
 
 public interface ICandidateService
 {
+    Task<CandidateProfileResponse> UpdateCareerSnapshotAsync(Guid userId, UpdateCareerSnapshotRequest request, CancellationToken cancellationToken = default);
     Task<CandidateProfileResponse> GetProfileAsync(Guid userId, CancellationToken cancellationToken = default);
     Task<CandidateProfileResponse> UpdateProfileAsync(Guid userId, UpdateCandidateProfileRequest request, CancellationToken cancellationToken = default);
     Task<CandidateAboutResponse> UpdateAboutAsync(Guid userId, UpdateCandidateAboutRequest request, CancellationToken cancellationToken = default);

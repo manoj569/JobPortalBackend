@@ -115,6 +115,7 @@ public sealed class AuthService(
             EmailVerificationTokenHash = null,
             EmailVerificationTokenExpiresAtUtc = null,
             EmailVerificationSentAtUtc = null,
+            CareerSnapshotRequired = true,
             RoleId = SystemRoleIds.Candidate,
             Role = new Role
             {
@@ -132,6 +133,7 @@ public sealed class AuthService(
             new Dictionary<string, string?> { ["source"] = "passwordRegistration" },
             new(user.Id, "Candidate")), cancellationToken);
 
+        var authentication = await IssueTokensAsync(user, null, cancellationToken);
         try
         {
             stageStarted = Stopwatch.GetTimestamp();
@@ -167,7 +169,7 @@ public sealed class AuthService(
 
         LogAuthenticationEvent("registration_completed", "created");
         LogRegistrationTiming("total", totalStarted);
-        return new(RegistrationSuccessMessage);
+        return new(RegistrationSuccessMessage, authentication);
     }
 
     public async Task<MessageResponse> VerifyEmailAsync(
@@ -406,7 +408,8 @@ public sealed class AuthService(
             accessToken.ExpiresAtUtc,
             rawRefreshToken,
             refreshToken.ExpiresAtUtc,
-            new(user.Id, user.Email, user.FirstName, user.LastName, user.Role.Name));
+            new(user.Id, user.Email, user.FirstName, user.LastName, user.Role.Name,
+                user.RoleId == SystemRoleIds.Candidate && user.CareerSnapshotRequired));
     }
 
     private static UnauthorizedException InvalidCredentials() => new("Invalid identifier or password.");

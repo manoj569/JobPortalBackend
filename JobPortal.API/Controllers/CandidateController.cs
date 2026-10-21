@@ -25,6 +25,12 @@ public sealed class CandidateController(ICandidateService candidates) : Controll
         Ok(new ApiResponse<CandidateProfileResponse>(
             await candidates.UpdateProfileAsync(User.GetRequiredUserId(), request, cancellationToken)));
 
+    [HttpPut("profile/career-snapshot")]
+    public async Task<ActionResult<ApiResponse<CandidateProfileResponse>>> UpdateCareerSnapshot(
+        UpdateCareerSnapshotRequest request, CancellationToken cancellationToken) =>
+        Ok(new ApiResponse<CandidateProfileResponse>(await candidates.UpdateCareerSnapshotAsync(
+            User.GetRequiredUserId(), request, cancellationToken)));
+
     [HttpPut("profile/about")]
     public async Task<ActionResult<ApiResponse<CandidateAboutResponse>>> UpdateAbout(
         UpdateCandidateAboutRequest request, CancellationToken cancellationToken) =>

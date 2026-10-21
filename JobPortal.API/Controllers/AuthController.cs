@@ -20,8 +20,8 @@ public sealed class AuthController(
 {
     [HttpPost("register")]
     [AllowAnonymous]
-    [ProducesResponseType(typeof(RegistrationChallengeResponse), StatusCodes.Status200OK)]
-    public async Task<ActionResult<RegistrationChallengeResponse>> Register(
+    [ProducesResponseType(typeof(RegistrationResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<RegistrationResponse>> Register(
         RegisterRequest request,
         CancellationToken cancellationToken)
     {

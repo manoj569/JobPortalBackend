@@ -175,6 +175,7 @@ public sealed class GoogleAuthenticationService(
             TermsAndPrivacyVersion = LegalDocumentCatalog.CurrentVersion,
             Status = UserStatus.Active,
             LastLoginAtUtc = UtcNow,
+            CareerSnapshotRequired = true,
             RoleId = SystemRoleIds.Candidate,
             Role = CandidateRole()
         };
@@ -313,7 +314,8 @@ public sealed class GoogleAuthenticationService(
         await refreshTokens.AddAsync(refreshToken, cancellationToken);
         return new(accessToken.Token, accessToken.ExpiresAtUtc, rawRefreshToken,
             refreshToken.ExpiresAtUtc,
-            new(user.Id, user.Email, user.FirstName, user.LastName, user.Role.Name));
+            new(user.Id, user.Email, user.FirstName, user.LastName, user.Role.Name,
+                user.RoleId == SystemRoleIds.Candidate && user.CareerSnapshotRequired));
     }
 
     private static void ValidateIdentity(ValidatedGoogleIdentity identity)

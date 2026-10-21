@@ -6692,6 +6692,11 @@ namespace JobPortal.Persistence.Postgres.Migrations
                         .HasColumnType("text")
                         .HasDefaultValue("[]");
 
+                    b.Property<bool>("CareerSnapshotRequired")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<int?>("CareerStage")
                         .HasColumnType("integer");
 
