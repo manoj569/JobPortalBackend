@@ -8,6 +8,7 @@ using JobPortal.Domain.Entities;
 using JobPortal.Domain.Enums;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Logging;
 
 namespace JobPortal.Infrastructure.Services;
 
@@ -19,10 +20,13 @@ public sealed class EmployerAcquisitionOptions
 
 // Transport to the fixed, operator-configured acquisition worker, not an arbitrary
 // admin URL. Public employer requests are vetted/pinned by the worker's SafeWeb.
-public sealed class GenericEmployerScanner(IHttpClientFactory clients, IOptions<EmployerAcquisitionOptions> options,
+public sealed partial class GenericEmployerScanner(IHttpClientFactory clients, IOptions<EmployerAcquisitionOptions> options,
     IJobSourceRunCheckpoint? checkpoint = null, EmployerDirectInventoryScanner? inventory = null,
-    IServiceProvider? services = null) : IEmployerDirectInventoryScanner
+    IServiceProvider? services = null, ILogger<GenericEmployerScanner>? logger = null) : IEmployerDirectInventoryScanner
 {
+    [LoggerMessage(EventId = 4398, Level = LogLevel.Warning, Message = "Rebuilding corrupt generic acquisition strategy for source {SourceId}")]
+    private static partial void StrategyRecovery(ILogger logger, Guid sourceId);
+
     public const string Identifier = GenericEmployerContract.Identifier;
     public const string HttpClientName = "EmployerAcquisitionWorker";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -41,7 +45,22 @@ public sealed class GenericEmployerScanner(IHttpClientFactory clients, IOptions<
         using var client = clients.CreateClient(HttpClientName);
         using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(endpoint, "/employer/scan"));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.Token);
-        JsonElement? strategy = string.IsNullOrEmpty(source.EmployerStrategyJson) ? null : JsonSerializer.Deserialize<JsonElement>(source.EmployerStrategyJson);
+        JsonElement? strategy = null;
+        var recoveringStrategy = false;
+        try
+        {
+            strategy = string.IsNullOrEmpty(source.EmployerStrategyJson) ? null : JsonSerializer.Deserialize<JsonElement>(source.EmployerStrategyJson);
+            if (strategy is { ValueKind: not (JsonValueKind.Object or JsonValueKind.Null) })
+                throw new JsonException("Invalid acquisition memory shape.");
+        }
+        catch (JsonException)
+        {
+            // Only provider-owned acquisition memory is reset, never source config.
+            // Do not log the corrupt value, which might contain sensitive text.
+            recoveringStrategy = true;
+            strategy = null;
+            if (logger is not null) StrategyRecovery(logger, source.Id);
+        }
         request.Content = JsonContent.Create(new { runId, source = new { source.Id, source.CompanyId,
             CompanyName = source.Company?.Name, source.CareerPageUrl, source.AutoPublishEnabled, source.ScanIntervalMinutes, strategy } });
         using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
@@ -55,6 +74,15 @@ public sealed class GenericEmployerScanner(IHttpClientFactory clients, IOptions<
             observed.CareerPageUrl != source.CareerPageUrl || observed.ObservedAtUtc.Offset != TimeSpan.Zero ||
             observed.Jobs is null || observed.Jobs.Count > 5000)
             throw new InvalidOperationException("Acquisition response source binding failed.");
+        if (observed.ObservedExternalIds is not null)
+        {
+            if (!observed.IsComplete || observed.CompletionReason != ExternalJobInventoryCensus.CompletionReason || observed.ProviderRoutes.Count != 0 ||
+                observed.Errors.ValueKind != JsonValueKind.Array || observed.Errors.GetArrayLength() != 0)
+                throw new InvalidOperationException("Unproven identity census.");
+            ExternalJobInventoryCensus.Validate(observed.ObservedExternalIds, observed.InventoryEvidence, observed.Jobs);
+        }
+        else if (observed.InventoryEvidence is not null)
+            throw new InvalidOperationException("Missing census identities.");
         var metadata = JsonSerializer.Serialize(new { observed.Strategy, observed.Metrics, observed.Errors,
             observed.CompletionReason, observed.IsComplete, observed.Status }, JsonOptions);
         if (metadata.Length > 128_000) throw new InvalidOperationException("Acquisition strategy evidence too large.");
@@ -86,16 +114,29 @@ public sealed class GenericEmployerScanner(IHttpClientFactory clients, IOptions<
             return new(jobs, 0, authoritative) { ObservedAtUtc = observed.ObservedAtUtc.UtcDateTime,
                 ProviderReasonCounts = new Dictionary<string, int> { ["GenericAtsHandoff"] = 1 } };
         }
-        if (observed.IsComplete && observed.CompletionReason != "AUTHORITATIVE_API_CENSUS")
+        if (observed.IsComplete && observed.CompletionReason != "AUTHORITATIVE_API_CENSUS" &&
+            !(observed.ObservedExternalIds is not null && observed.CompletionReason == ExternalJobInventoryCensus.CompletionReason))
             throw new InvalidOperationException("Unrecognized generic enumeration contract.");
-        return new(observed.Jobs, 0, observed.IsComplete) { ObservedAtUtc = observed.ObservedAtUtc.UtcDateTime,
-            ProviderReasonCounts = new Dictionary<string, int> { [observed.CompletionReason] = 1 } };
+        var generation = observed.InventoryEvidence?.Generation.ToString("D");
+        var repeatedGeneration = generation is not null && source.LastInventoryVersion == generation && source.LastObservedSnapshotId != runId;
+        var reason = recoveringStrategy ? "AcquisitionStrategyRecovery" : repeatedGeneration ? "CensusGenerationAlreadyObserved" : observed.CompletionReason;
+        return new(observed.Jobs, 0, observed.IsComplete && !recoveringStrategy && !repeatedGeneration)
+        {
+            ObservedAtUtc = observed.ObservedAtUtc.UtcDateTime,
+            ObservedExternalIds = observed.ObservedExternalIds,
+            InventoryEvidence = observed.InventoryEvidence,
+            InventoryVersion = generation,
+            InventoryDigest = observed.InventoryEvidence?.Digest,
+            InventoryAtUtc = generation is null ? null : observed.ObservedAtUtc.UtcDateTime,
+            ProviderReasonCounts = new Dictionary<string, int> { [reason] = 1 }
+        };
     }
 
     private sealed record WorkerObservation(Guid RunId, Guid SourceId, Guid CompanyId, string CareerPageUrl,
         DateTimeOffset ObservedAtUtc, bool IsComplete, string CompletionReason, string Status,
         IReadOnlyCollection<RawExternalJob> Jobs, IReadOnlyList<WorkerRoute> ProviderRoutes,
-        JsonElement Strategy, JsonElement Metrics, JsonElement Errors);
+        JsonElement Strategy, JsonElement Metrics, JsonElement Errors,
+        IReadOnlyCollection<string>? ObservedExternalIds = null, ExternalJobInventoryEvidence? InventoryEvidence = null);
 
     private sealed record WorkerRoute(string Provider, [property: JsonPropertyName("ats_identifier")] string AtsIdentifier,
         [property: JsonPropertyName("provider_career_url")] string ProviderCareerUrl,

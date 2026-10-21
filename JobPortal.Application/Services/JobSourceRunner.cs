@@ -255,6 +255,7 @@ public sealed partial class JobSourceRunner(
                 snapshot = selectionPolicy.Select(source, new(observedJobs, restored.ProviderSkipped, false));
                 rawJobs.AddRange(snapshot.Jobs); // Earlier eligible items are already durably acknowledged.
             }
+            string[]? reconciliationCensus = null;
             var continuationPending = false;
             var traversalRebaseCount = durable ? checkpoint!.State?.RebaseCount ?? 0 : 0;
             var processingTimer = System.Diagnostics.Stopwatch.StartNew();
@@ -307,7 +308,7 @@ public sealed partial class JobSourceRunner(
                     CheckpointCursor = durable ? checkpoint!.State?.Cursor ?? 0 : 0,
                     LastCheckpointAtUtc = durable ? checkpoint!.State?.CommittedAtUtc : null,
                     RemainingWork = durable && checkpoint!.State is { } state ? state.ListingTotal - state.Cursor : null,
-                    ObservedIdentities = observedJobs.Select(x => x.ExternalId).Distinct(StringComparer.Ordinal).Count(),
+                    ObservedIdentities = reconciliationCensus?.Length ?? observedJobs.Select(x => x.ExternalId).Distinct(StringComparer.Ordinal).Count(),
                     DetailAttempted = observedJobs.Count + (snapshot?.Skipped ?? 0), DetailSucceeded = observedJobs.Count,
                     DetailFailed = snapshot?.Skipped ?? 0, DurationMilliseconds = runTimer.Elapsed.TotalMilliseconds,
                     TotalReceived = observedJobs.Count + (snapshot?.Skipped ?? 0),
@@ -332,11 +333,23 @@ public sealed partial class JobSourceRunner(
             execution.Stage = "ProviderFetch";
             await foreach (var batch in FetchBatchesAsync(provider, source, cancellationToken))
             {
+                var repeatedCensusGeneration = false;
+                if (batch.ObservedExternalIds is not null)
+                {
+                    ExternalJobInventoryCensus.Validate(batch.ObservedExternalIds, batch.InventoryEvidence, batch.Jobs);
+                    if (batch.InventoryVersion != batch.InventoryEvidence!.Generation.ToString("D") ||
+                        batch.InventoryDigest != batch.InventoryEvidence.Digest || batch.InventoryAtUtc is null)
+                        throw new InvalidOperationException("Missing census generation fence.");
+                    repeatedCensusGeneration = source.LastInventoryVersion == batch.InventoryVersion && source.LastObservedSnapshotId != observationId;
+                    if (reconciliationCensus is not null)
+                        throw new InvalidOperationException("Multiple complete presence censuses in one run.");
+                    reconciliationCensus = batch.ObservedExternalIds.ToArray();
+                }
                 execution.Stage = "ObservationFence";
                 observationAt ??= batch.ObservedAtUtc ?? timeProvider.GetUtcNow().UtcDateTime;
-                if (source.AtsType == AtsType.Custom && source.LastObservedSnapshotId != observationId && source.LastObservedAtUtc >= observationAt)
+                if ((source.AtsType == AtsType.Custom || batch.ObservedExternalIds is not null) && source.LastObservedSnapshotId != observationId && source.LastObservedAtUtc >= observationAt)
                     throw new JobSourceSnapshotUnsafeException("StaleSourceObservation");
-                if (source.AtsType == AtsType.Custom && source.LastObservedSnapshotId != observationId)
+                if ((source.AtsType == AtsType.Custom || batch.ObservedExternalIds is not null) && source.LastObservedSnapshotId != observationId)
                 {
                     if (batch.InventoryAtUtc is { } inventoryAt)
                     {
@@ -380,12 +393,13 @@ public sealed partial class JobSourceRunner(
                 }));
                 if (_jobRepository is not null)
                     await _jobRepository.ObserveSourceInventoryAsync(source.Id,
-                        batch.Jobs.Select(x => x.ExternalId).Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x!).ToArray(),
+                        batch.ObservedExternalIds ?? batch.Jobs.Select(x => x.ExternalId).Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x!).ToArray(),
                         observationAt.Value, cancellationToken);
                 continuationPending = batch.ContinuationPending;
                 var providerSkipped = (snapshot?.Skipped ?? 0) + batch.Skipped;
-                providerSnapshotComplete = provider is ICompleteExternalJobProvider && batch.IsComplete;
-                snapshot = new(observedJobs, providerSkipped, providerSnapshotComplete);
+                providerSnapshotComplete = provider is ICompleteExternalJobProvider && batch.IsComplete && !repeatedCensusGeneration;
+                snapshot = new(observedJobs, providerSkipped, providerSnapshotComplete)
+                { ObservedExternalIds = reconciliationCensus, InventoryEvidence = batch.InventoryEvidence };
                 // Apply the policy cumulatively: the configured cap spans the full
                 // census, while only positively India-eligible jobs reach ingestion.
                 var selected = selectionPolicy.Select(source, snapshot);
@@ -662,12 +676,17 @@ public sealed partial class JobSourceRunner(
             execution.Stage = "Reconciliation";
             cancellationToken.ThrowIfCancellationRequested();
             var closed = 0;
-            var externalIdsForReconciliation = observedJobs.Select(x => x.ExternalId)
+            var legacyReconciliationIds = observedJobs.Select(x => x.ExternalId)
                 .Where(x => !string.IsNullOrWhiteSpace(x))
                 .Select(x => x!.Trim())
                 .ToArray();
-            var hasCompleteIdentities = externalIdsForReconciliation.Length == observedJobs.Count &&
-                externalIdsForReconciliation.Distinct(StringComparer.Ordinal).Count() == observedJobs.Count;
+            var externalIdsForReconciliation = reconciliationCensus ?? legacyReconciliationIds;
+            var hasCompleteIdentities = reconciliationCensus is null
+                ? externalIdsForReconciliation.Length == observedJobs.Count &&
+                  externalIdsForReconciliation.Distinct(StringComparer.Ordinal).Count() == observedJobs.Count
+                : externalIdsForReconciliation.Distinct(StringComparer.Ordinal).Count() == externalIdsForReconciliation.Length &&
+                  legacyReconciliationIds.Length == observedJobs.Count &&
+                  legacyReconciliationIds.All(id => externalIdsForReconciliation.Contains(id, StringComparer.Ordinal));
             var blockers = new List<string>();
             if (source.AtsType == AtsType.Workday) blockers.Add("WorkdayNonAuthoritative");
             if (!providerSnapshotComplete) blockers.Add("ProviderSnapshotIncomplete");
