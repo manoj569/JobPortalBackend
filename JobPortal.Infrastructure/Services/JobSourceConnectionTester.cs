@@ -20,6 +20,7 @@ public sealed class JobSourceConnectionTester(IHttpClientFactory clients) : IJob
             AtsType.Greenhouse => GreenhouseExternalJobProvider.HttpClientName,
             AtsType.Lever => LeverExternalJobProvider.HttpClientName,
             AtsType.Ashby => AshbyExternalJobProvider.HttpClientName,
+            AtsType.SmartRecruiters => SmartRecruitersJobSourceProvider.HttpClientName,
             AtsType.Workday => WorkdayJobSourceProvider.HttpClientName,
             _ => SuccessFactorsJobSourceProvider.HttpClientName
         };
@@ -45,6 +46,7 @@ public sealed class JobSourceConnectionTester(IHttpClientFactory clients) : IJob
                 var root = document.RootElement;
                 var valid = source.AtsType switch
                 {
+                    AtsType.SmartRecruiters => root.Field("content").ValueKind == JsonValueKind.Array && root.Field("totalFound").ValueKind == JsonValueKind.Number,
                     AtsType.Lever => root.ValueKind == JsonValueKind.Array,
                     AtsType.Workday => root.Field("jobPostings").ValueKind == JsonValueKind.Array && root.Field("total").ValueKind == JsonValueKind.Number,
                     _ => root.Field("jobs").ValueKind == JsonValueKind.Array
