@@ -4,6 +4,7 @@ using System.Text.Json;
 using JobPortal.Application.Abstractions.Jobs;
 using JobPortal.Application.Abstractions.Persistence;
 using JobPortal.Application.Features.JobAggregation;
+using JobPortal.Application.Services;
 using JobPortal.Domain.Entities;
 using JobPortal.Domain.Enums;
 using JobPortal.Infrastructure;
@@ -280,6 +281,92 @@ public sealed class SmartRecruitersProviderTests
         var missingTwo = await runner.RunAsync(f.Source.Id); Assert.Equal(1, missingTwo.Closed);
     }
 
+    [Fact]
+    public async Task ExplicitIndiaEvidenceSurvivesProviderMappingPersistenceAndPublication()
+    {
+        using var f = new JobSourceFixture();
+        f.Source.AtsType = AtsType.SmartRecruiters; f.Source.AtsIdentifier = "ExampleCompany";
+        f.Source.CareerPageUrl = "https://careers.smartrecruiters.com/ExampleCompany";
+        await f.Context.SaveChangesAsync();
+        var handler = new FixtureHandler(1) { City = "Bengaluru", Region = "Karnataka", Country = "in" };
+        var provider = Provider(handler);
+        var snapshot = await provider.FetchSnapshotAsync(f.Source);
+        var mapped = Assert.Single(snapshot.Jobs);
+        Assert.Equal("in", Assert.Single(mapped.CountryCodes));
+        Assert.Equal("Bengaluru, Karnataka, in", mapped.Location);
+        Assert.Equal(IndiaJobEligibilityDecision.Accepted, IndiaJobEligibilityPolicy.Evaluate(mapped).Decision);
+
+        var result = await Runner(f, provider).RunAsync(f.Source.Id);
+        Assert.Equal(1, result.Created);
+        Assert.Equal(1, result.Published);
+        Assert.Equal(0, result.NeedsReview);
+        var saved = await f.Context.Jobs.SingleAsync();
+        Assert.Equal(IndiaJobEligibilityDecision.Accepted, ImportedJobIntegrity.Eligibility(saved).Decision);
+        using var metadata = JsonDocument.Parse(saved.SourceMetadataJson!);
+        Assert.Equal("in", metadata.RootElement.GetProperty("CountryCodes")[0].GetString());
+        Assert.Equal("Bengaluru, Karnataka, in", metadata.RootElement.GetProperty("Location").GetString());
+        Assert.Equal(JsonValueKind.Object, metadata.RootElement.GetProperty("ProviderPayload").GetProperty("location").ValueKind);
+        Assert.Equal(JobStatus.Published, saved.Status);
+    }
+
+    [Theory]
+    [InlineData("Paris", "FR", 1, 0)]
+    [InlineData(null, null, 0, 1)]
+    public async Task ExplicitNonIndiaAndUnknownOrRemoteOnlyLocationsDoNotPublish(
+        string? city, string? country, int expectedNonIndia, int expectedUnknown)
+    {
+        using var f = new JobSourceFixture();
+        f.Source.AtsType = AtsType.SmartRecruiters; f.Source.AtsIdentifier = "ExampleCompany";
+        f.Source.CareerPageUrl = "https://careers.smartrecruiters.com/ExampleCompany";
+        await f.Context.SaveChangesAsync();
+        var handler = new FixtureHandler(1) { City = city, Country = country,
+            Region = country == "IN" ? "Maharashtra" : null, Hybrid = false, Remote = true };
+        var result = await Runner(f, Provider(handler)).RunAsync(f.Source.Id);
+        Assert.True(result.Created == 0, JsonSerializer.Serialize(result));
+        Assert.Equal(expectedNonIndia, result.NonIndiaRejected);
+        Assert.Equal(expectedUnknown, result.IndiaEligibilityUnknown);
+        Assert.Equal(0, result.Published);
+        Assert.Empty(await f.Context.Jobs.ToArrayAsync());
+    }
+
+    [Fact]
+    public async Task ExistingNeedsReviewSmartRecruitersJobIsUpdatedAndPublishedWithoutDuplicate()
+    {
+        using var f = new JobSourceFixture();
+        f.Source.AtsType = AtsType.SmartRecruiters; f.Source.AtsIdentifier = "ExampleCompany";
+        f.Source.CareerPageUrl = "https://careers.smartrecruiters.com/ExampleCompany";
+        await f.Context.SaveChangesAsync();
+        var handler = new FixtureHandler(1);
+        var detail = JsonSerializer.Serialize(new
+        {
+            id = "1", uuid = Id(1), name = "Engineer 1", active = true,
+            company = new { identifier = "ExampleCompany", name = "Example" },
+            location = new { city = "Pune", region = "Maharashtra", country = "IN", remote = true, hybrid = true },
+            applyUrl = "https://jobs.smartrecruiters.com/ExampleCompany/1-engineer?oga=true",
+            postingUrl = "https://jobs.smartrecruiters.com/ExampleCompany/1-engineer"
+        });
+        var existingId = Guid.NewGuid();
+        f.Context.Jobs.Add(new Job
+        {
+            Id = existingId, Title = "Engineer 1", Slug = "engineer-1-legacy", Description = "Existing listing",
+            Location = "Pune, Maharashtra, IN", ApplicationUrl = "https://jobs.smartrecruiters.com/ExampleCompany/1-engineer?oga=true",
+            CompanyId = f.Company.Id, JobSourceId = f.Source.Id, ExternalJobId = Id(1),
+            SourceOwnsPublication = true, Status = JobStatus.Draft, SourceMetadataJson = detail,
+            FirstSeenAtUtc = JobSourceFixture.Now, LastSeenAtUtc = JobSourceFixture.Now
+        });
+        await f.Context.SaveChangesAsync();
+        var result = await Runner(f, Provider(handler)).RunAsync(f.Source.Id);
+        Assert.Equal(0, result.Created);
+        Assert.Equal(1, result.Updated);
+        Assert.Equal(1, result.Published);
+        Assert.Equal(0, result.NeedsReview);
+        var saved = Assert.Single(await f.Context.Jobs.ToArrayAsync());
+        Assert.Equal(existingId, saved.Id);
+        Assert.Equal(IndiaJobEligibilityDecision.Accepted, ImportedJobIntegrity.Eligibility(saved).Decision);
+        Assert.Equal(JobStatus.Published, saved.Status);
+        Assert.True(result.ReconciliationSafe);
+    }
+
     internal static JobSource Source() => new() { AtsType = AtsType.SmartRecruiters, AtsIdentifier = "ExampleCompany",
         CareerPageUrl = "https://careers.smartrecruiters.com/ExampleCompany", Company = new Company { Name = "Example" } };
     internal static SmartRecruitersOptions Settings() => new() { RequestIntervalMilliseconds = 0 };
@@ -291,7 +378,11 @@ public sealed class SmartRecruitersProviderTests
         public int Count { get; set; } = count;
         public string? Fault { get; set; } = fault;
         public string Title { get; set; } = "Engineer";
-        public string City { get; set; } = "Pune";
+        public string? City { get; set; } = "Pune";
+        public string? Country { get; set; } = "IN";
+        public string? Region { get; set; } = "Maharashtra";
+        public bool Hybrid { get; set; } = true;
+        public bool Remote { get; set; } = true;
         public bool Reverse { get; set; }
         public int DetailCalls { get; private set; }
         public List<int> Offsets { get; } = [];
@@ -341,7 +432,7 @@ public sealed class SmartRecruitersProviderTests
             company = new { identifier = "ExampleCompany" }, @ref = "http://127.0.0.1/never-fetch" };
         private object Detail(int i) => new { id = (Fault == "detailId" ? 999 : i).ToString(System.Globalization.CultureInfo.InvariantCulture), uuid = Fault == "detailUuid" ? Id(999) : Id(i),
             name = Title + " " + i, active = Fault != "detailInactive", company = new { identifier = "ExampleCompany", name = "Example" },
-            location = new { city = City, region = "Maharashtra", country = "IN", remote = true, hybrid = true },
+            location = new { city = City, region = Region, country = Country, remote = Remote, hybrid = Hybrid },
             releasedDate = "2026-10-20T10:00:00Z", typeOfEmployment = new { label = "Full-time" }, experienceLevel = new { id = "mid_senior_level" },
             department = new { label = "Engineering" }, function = new { label = "Technology" }, industry = new { label = "Software" },
             postingUrl = Fault == "noCanonical" ? null : $"https://jobs.smartrecruiters.com/ExampleCompany/{i}-engineer",

@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Net;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using JobPortal.Application.Abstractions.Jobs;
 using JobPortal.Application.Features.JobAggregation;
 using JobPortal.Application.Services;
@@ -139,7 +140,7 @@ public sealed class SmartRecruitersJobSourceProvider(IHttpClientFactory clients,
         var timestamp = detail.Text("releasedDate") ?? listing.Text("releasedDate");
         var dated = timestamp is not null && (timestamp.EndsWith('Z') || System.Text.RegularExpressions.Regex.IsMatch(timestamp, @"[+-]\d{2}:\d{2}$", System.Text.RegularExpressions.RegexOptions.CultureInvariant)) &&
             DateTimeOffset.TryParse(timestamp, CultureInfo.InvariantCulture, DateTimeStyles.None, out var instant) ? instant.UtcDateTime : (DateTime?)null;
-        return new() { ExternalId = identity, Title = detail.Text("name")!, CompanyId = source.CompanyId,
+        var mapped = new RawExternalJob { ExternalId = identity, Title = detail.Text("name")!, CompanyId = source.CompanyId,
             CompanyName = source.Company?.Name ?? detail.Field("company").Text("name") ?? "",
             Description = description, Requirements = Text("qualifications"),
             Location = string.Join(", ", new[] { location.Text("city"), location.Text("region"), country }.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct()),
@@ -150,8 +151,13 @@ public sealed class SmartRecruitersJobSourceProvider(IHttpClientFactory clients,
             ExperienceLevel = detail.Field("experienceLevel").Text("id") switch
             { "entry_level" => ExperienceLevel.Entry, "associate" => ExperienceLevel.Junior,
                 "director" or "executive" => ExperienceLevel.Executive, _ => null },
-            ExternalCategory = detail.Field("department").Text("label") ?? detail.Field("function").Text("label"),
-            SourceMetadataJson = detail.GetRawText() };
+            ExternalCategory = detail.Field("department").Text("label") ?? detail.Field("function").Text("label") };
+        // Persist the canonical shared job contract at the root so India eligibility
+        // can be reconstructed after ingestion. Keep the original provider response
+        // nested for diagnostics; its location object is not a RawExternalJob.Location.
+        var metadata = JsonSerializer.SerializeToNode(mapped)!.AsObject();
+        metadata["ProviderPayload"] = JsonNode.Parse(detail.GetRawText());
+        return mapped with { SourceMetadataJson = metadata.ToJsonString() };
     }
     private static bool CandidateUrl(string? value, string company, string numericId)
     {
