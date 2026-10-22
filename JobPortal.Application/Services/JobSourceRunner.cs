@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using System.Text.Json;
 using JobPortal.Application.Abstractions.Jobs;
 using JobPortal.Application.Abstractions.Persistence;
 using JobPortal.Domain.Enums;
@@ -87,6 +88,10 @@ public sealed partial class JobSourceRunner(
     [LoggerMessage(EventId = 4413, Level = LogLevel.Information,
         Message = "GreenhouseEligibleBatchReady SourceId={SourceId} Parsed={Parsed} Eligible={Eligible} NonIndiaRejected={NonIndiaRejected} Held={Held}.")]
     private static partial void LogGreenhouseEligibility(ILogger logger, Guid sourceId, int parsed, int eligible, int nonIndiaRejected, int held);
+    [LoggerMessage(EventId = 4414, Level = LogLevel.Information,
+        Message = "Event=EightfoldContinuationSaved SourceId={SourceId} Strategy={Strategy} Generation={Generation} Position={Position} Anchor={Anchor} CycleCompleted={CycleCompleted} InventoryCount={InventoryCount}")]
+    private static partial void EightfoldContinuationSaved(ILogger logger, Guid sourceId, string strategy,
+        string generation, int position, string anchor, bool cycleCompleted, int inventoryCount);
 
     [LoggerMessage(EventId = 4391, Level = LogLevel.Information,
         Message = "JobSourcePublication SourceId={SourceId} SourceName={SourceName} Provider={Provider} AutoPublishEnabled={AutoPublishEnabled} JobId={JobId} ReasonCode={ReasonCode}.")]
@@ -247,6 +252,7 @@ public sealed partial class JobSourceRunner(
             var observationId = checkpoint?.RunId ?? Guid.NewGuid();
             DateTime? observationAt = null;
             var reconciliationSafe = false;
+            var acquisitionSucceeded = false;
             IReadOnlyList<string> reconciliationBlockReasons = [];
             var rawJobs = new List<RawExternalJob>();
             var observedJobs = new List<RawExternalJob>(durable ? checkpoint!.State?.ObservedJobs ?? [] : []);
@@ -396,6 +402,7 @@ public sealed partial class JobSourceRunner(
                         batch.ObservedExternalIds ?? batch.Jobs.Select(x => x.ExternalId).Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x!).ToArray(),
                         observationAt.Value, cancellationToken);
                 continuationPending = batch.ContinuationPending;
+                acquisitionSucceeded |= batch.AcquisitionSucceeded;
                 var providerSkipped = (snapshot?.Skipped ?? 0) + batch.Skipped;
                 providerSnapshotComplete = provider is ICompleteExternalJobProvider && batch.IsComplete && !repeatedCensusGeneration;
                 snapshot = new(observedJobs, providerSkipped, providerSnapshotComplete)
@@ -733,10 +740,11 @@ public sealed partial class JobSourceRunner(
                 ? !continuationPending && !blockers.Contains("SelectionSnapshotIncomplete") && (listingDiagnostics?.ProcessingComplete ??
                     blockers.All(reason => reason == "WorkdayNonAuthoritative")) &&
                     listingDiagnostics?.InfrastructureFailure != true && failed == 0
+                : source.AtsType == AtsType.Custom && acquisitionSucceeded ? skipped == 0 && failed == 0
                 : provider is ICompleteExternalJobProvider ? canReconcile : skipped == 0 && failed == 0;
             source.LastSuccessfulRunAtUtc = successful ? now : previousSuccessfulRun;
-            source.LastError = continuationPending ? previousError : successful ? null : "External job source scan was incomplete or had failed/skipped items.";
-            source.ConsecutiveFailures = continuationPending ? previousFailures : successful ? 0 : previousFailures + 1;
+            source.LastError = successful ? null : continuationPending ? previousError : "External job source scan was incomplete or had failed/skipped items.";
+            source.ConsecutiveFailures = successful ? 0 : continuationPending ? previousFailures : previousFailures + 1;
 
             sources.Update(source);
 
@@ -765,7 +773,9 @@ public sealed partial class JobSourceRunner(
                 CheckpointCursor = partialResult.CheckpointCursor, LastCheckpointAtUtc = partialResult.LastCheckpointAtUtc,
                 RemainingWork = partialResult.RemainingWork, DurationMilliseconds = runTimer.Elapsed.TotalMilliseconds,
                 ContinuationPending = continuationPending,
-                StopReason = successful ? "Complete" : continuationPending ? "ExecutionSliceComplete" :
+                StopReason = successful && continuationPending ? "ExecutionSliceComplete" :
+                    successful && acquisitionSucceeded && !providerSnapshotComplete ? "NonAuthoritativeAcquisitionSucceeded" :
+                    successful ? "Complete" : continuationPending ? "ExecutionSliceComplete" :
                     source.AtsType == AtsType.Workday && (listingDiagnostics?.InfrastructureFailure == true || failed > 0) ? "InfrastructureFailure" :
                     listingDiagnostics is { ReasonCode: not "Complete" } ? listingDiagnostics.ReasonCode : "IncompleteOrUnsafeScan",
                 ListingDiagnostics = listingDiagnostics,
@@ -799,6 +809,11 @@ public sealed partial class JobSourceRunner(
             checkpoint?.StageCompletedResult(runResult);
             execution.Stage = "FinalBookkeepingPersistence";
             await unitOfWork.SaveChangesAsync(cancellationToken);
+            if (_logger is not null && source.AtsType == AtsType.Custom &&
+                TryReadEightfoldContinuation(source.EmployerStrategyJson, out var strategyName, out var generation,
+                    out var position, out var anchor, out var cycleCompleted, out var inventoryCount))
+                EightfoldContinuationSaved(_logger, source.Id, strategyName, generation, position, anchor,
+                    cycleCompleted, inventoryCount);
 
             if (_logger is not null)
             {
@@ -913,6 +928,40 @@ public sealed partial class JobSourceRunner(
             if (ingestionService is IBulkJobIngestionService bulk) await bulk.CompleteRunAsync();
             if (_logger is not null) Progress(_logger, source.Id, "Total duration (including cleanup)", 0, runTimer.Elapsed.TotalMilliseconds, null);
         }
+    }
+
+    private static bool TryReadEightfoldContinuation(string? json, out string strategy, out string generation,
+        out int position, out string anchor, out bool cycleCompleted, out int inventoryCount)
+    {
+        strategy = "Eightfold";
+        generation = "none";
+        position = 0;
+        anchor = "";
+        cycleCompleted = false;
+        inventoryCount = 0;
+        if (string.IsNullOrWhiteSpace(json)) return false;
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object) return false;
+            JsonElement state;
+            if (root.TryGetProperty("eightfoldSitemapContinuation", out state)) strategy = "EightfoldSitemap";
+            else if (root.TryGetProperty("eightfoldContinuation", out state)) strategy = "EightfoldCensus";
+            else return false;
+            if (state.ValueKind != JsonValueKind.Object) return false;
+            if (state.TryGetProperty("cursor", out var cursor)) cursor.TryGetInt32(out position);
+            if (state.TryGetProperty("anchorId", out var anchorValue) && anchorValue.ValueKind == JsonValueKind.String)
+                anchor = anchorValue.GetString() ?? "";
+            if (state.TryGetProperty("cycleCompleted", out var completed) && completed.ValueKind == JsonValueKind.True)
+                cycleCompleted = true;
+            if (state.TryGetProperty("count", out var count)) count.TryGetInt32(out inventoryCount);
+            var fingerprintName = strategy == "EightfoldSitemap" ? "inventoryDigest" : "binding";
+            if (state.TryGetProperty(fingerprintName, out var fingerprint) && fingerprint.ValueKind == JsonValueKind.String &&
+                fingerprint.GetString() is { Length: >= 12 } value) generation = value[..12];
+            return true;
+        }
+        catch (JsonException) { return false; }
     }
 
     private static async IAsyncEnumerable<ExternalJobSourceSnapshot> FetchBatchesAsync(

@@ -132,7 +132,12 @@ public sealed class JobSourceRunStore(JobPortalDbContext db) : IJobSourceRunStor
             JobSourceRunStatus.Paused or JobSourceRunStatus.Unsafe or JobSourceRunStatus.Cancelled))
             throw new ArgumentOutOfRangeException(nameof(status));
         var previousCursor = run.CheckpointJson is null ? 0 : JsonSerializer.Deserialize<JobPortal.Application.Abstractions.Jobs.WorkdayRunCheckpoint>(run.CheckpointJson)?.Cursor ?? 0;
-        var progressed = p.Counters.CheckpointCursor > previousCursor;
+        // Generic employer cursors are durably saved on JobSource rather than
+        // JobSourceRun.CheckpointJson. A successful slice with more work is
+        // therefore progress even though it has no Workday cursor in this row.
+        var progressed = run.CheckpointJson is null
+            ? status == JobSourceRunStatus.Paused && p.Counters.Succeeded && p.Counters.ContinuationPending
+            : p.Counters.CheckpointCursor > previousCursor;
         var attempts = progressed ? 0 : run.AttemptCount;
         if (status == JobSourceRunStatus.Paused && (attempts >= JobSourceRun.MaximumAttempts || run.ExecutionCount >= 1000))
         {

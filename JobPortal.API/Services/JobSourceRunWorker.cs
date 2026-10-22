@@ -131,7 +131,13 @@ public sealed partial class JobSourceRunWorker(IServiceScopeFactory scopes, JobS
             }
             executionStage = "RunnerResolutionOrExecution";
             var result = await services.GetRequiredService<IJobSourceRunner>().RunAsync(run.JobSourceId, execution.Token);
-            status = result.ContinuationPending ? JobSourceRunStatus.Paused : result.Succeeded ? JobSourceRunStatus.Succeeded :
+            // Workday owns a run checkpoint. Generic employer workers persist
+            // continuation on JobSource, but reuse this durable run queue so a
+            // successful bounded slice resumes promptly without a new manual or
+            // normal-interval schedule entry.
+            status = result.ContinuationPending &&
+                (executionProvider != AtsType.Custom || result.Succeeded)
+                    ? JobSourceRunStatus.Paused : result.Succeeded ? JobSourceRunStatus.Succeeded :
                 checkpoint?.Enabled == true && result.StopReason != "InfrastructureFailure" ? JobSourceRunStatus.Unsafe : JobSourceRunStatus.Failed;
             var captured = progress.Snapshot;
             // A final infrastructure failure can return a zero-counter error result

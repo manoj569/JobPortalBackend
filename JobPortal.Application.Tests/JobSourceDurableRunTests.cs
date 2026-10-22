@@ -9,6 +9,7 @@ using JobPortal.Application.Abstractions.Persistence;
 using JobPortal.Application.Common.Exceptions;
 using JobPortal.Application.Features.JobAggregation;
 using JobPortal.Domain.Entities;
+using JobPortal.Domain.Enums;
 using JobPortal.Persistence.Context;
 using JobPortal.Persistence.Repositories;
 using JobPortal.Shared.Models;
@@ -49,6 +50,42 @@ public sealed class JobSourceDurableRunTests
         await f.Worker().RunOnceAsync(default);
         Assert.Equal("Succeeded", (await f.Service.GetAsync(f.Source.Id, data.RunId, default)).Status);
         Assert.Equal(1, f.Calls);
+    }
+
+    [Fact]
+    public async Task GenericEmployerContinuationReusesDurableRunAfterConfiguredDelay()
+    {
+        using var f = new Fixture();
+        f.Source.AtsType = AtsType.Custom;
+        f.Source.AtsIdentifier = GenericEmployerContract.Identifier;
+        await f.Enqueue();
+        var executions = 0;
+        f.Run = (_, _) => Task.FromResult(Success(f.Source.Id) with
+        {
+            ContinuationPending = ++executions <= 4,
+            ScanComplete = false,
+            ReconciliationSafe = false,
+            StopReason = executions <= 4 ? "ExecutionSliceComplete" : "NonAuthoritativeAcquisitionSucceeded"
+        });
+
+        var run = Assert.Single(f.Store.Rows);
+        for (var slice = 1; slice <= 5; slice++)
+        {
+            await f.Worker().RunOnceAsync(default);
+            Assert.Equal(slice, run.ExecutionCount);
+            if (slice <= 4)
+            {
+                Assert.Equal(JobSourceRunStatus.Paused, run.Status);
+                Assert.True(JobSourceRunResponse.From(run).RetryPending);
+                Assert.Equal(f.Clock.Now.AddSeconds(60), run.NextAttemptAtUtc);
+                Assert.True(JobSourceRunResponse.From(run).Diagnostics!.Succeeded);
+                Assert.True(JobSourceRunResponse.From(run).Diagnostics!.ContinuationPending);
+                Assert.False(JobSourceRunResponse.From(run).Diagnostics!.ReconciliationSafe);
+                f.Clock.Now = run.NextAttemptAtUtc;
+            }
+        }
+        Assert.Equal(JobSourceRunStatus.Succeeded, run.Status);
+        Assert.False(JobSourceRunResponse.From(run).RetryPending);
     }
 
     [Fact]
@@ -340,7 +377,7 @@ public sealed class JobSourceDurableRunTests
         private readonly object gate = new();
         public List<JobSourceRun> Rows { get; } = [];
         public bool HeartbeatLost;
-        private static bool Active(JobSourceRun r) => r.Status is JobSourceRunStatus.Queued or JobSourceRunStatus.Running ||
+        private static bool Active(JobSourceRun r) => r.Status is JobSourceRunStatus.Queued or JobSourceRunStatus.Running or JobSourceRunStatus.Paused ||
             r.Status == JobSourceRunStatus.Interrupted && r.AttemptCount < 3;
         private static JobSourceRun Copy(JobSourceRun row) => JsonSerializer.Deserialize<JobSourceRun>(JsonSerializer.Serialize(row))!;
         public Task<JobSourceRun> EnqueueAsync(Guid sourceId, Guid? requestedBy, DateTime now, CancellationToken ct)
@@ -360,7 +397,7 @@ public sealed class JobSourceDurableRunTests
         public Task<IReadOnlyList<JobSourceRun>> CandidatesAsync(DateTime now, CancellationToken ct)
         {
             lock (gate) return Task.FromResult<IReadOnlyList<JobSourceRun>>(Rows.Where(x =>
-                (x.Status == JobSourceRunStatus.Queued || x.Status == JobSourceRunStatus.Interrupted && x.AttemptCount < 3) && x.NextAttemptAtUtc <= now ||
+                (x.Status is JobSourceRunStatus.Queued or JobSourceRunStatus.Paused || x.Status == JobSourceRunStatus.Interrupted && x.AttemptCount < 3) && x.NextAttemptAtUtc <= now ||
                 x.Status == JobSourceRunStatus.Running && x.LeaseExpiresAtUtc <= now).Take(25).Select(Copy).ToArray());
         }
         public Task<JobSourceRun?> TryClaimAsync(Guid runId, Guid owner, DateTime now, DateTime expiry, CancellationToken ct)
@@ -368,9 +405,9 @@ public sealed class JobSourceDurableRunTests
             lock (gate)
             {
                 var row = Rows.Single(x => x.Id == runId);
-                if (row.Status is not (JobSourceRunStatus.Queued or JobSourceRunStatus.Interrupted) || row.AttemptCount >= 3 || row.NextAttemptAtUtc > now)
+                if (row.Status is not (JobSourceRunStatus.Queued or JobSourceRunStatus.Paused or JobSourceRunStatus.Interrupted) || row.AttemptCount >= 3 || row.NextAttemptAtUtc > now)
                     return Task.FromResult<JobSourceRun?>(null);
-                row.Status = JobSourceRunStatus.Running; row.LeaseOwner = owner; row.LeaseExpiresAtUtc = expiry;
+                row.Status = JobSourceRunStatus.Running; row.LeaseOwner = owner; row.LeaseExpiresAtUtc = expiry; row.ExecutionCount++;
                 row.StartedAtUtc = now; row.HeartbeatAtUtc = now; row.AttemptCount++; row.CompletedAtUtc = null;
                 return Task.FromResult<JobSourceRun?>(Copy(row));
             }
@@ -395,6 +432,8 @@ public sealed class JobSourceDurableRunTests
             {
                 var row = Owned(run, now); if (row is null) return Task.FromResult(false);
                 SaveProgress(row, p); row.Status = status; row.NextAttemptAtUtc = retryAt;
+                if (status == JobSourceRunStatus.Paused && row.CheckpointJson is null && p.Counters.Succeeded && p.Counters.ContinuationPending)
+                    row.AttemptCount = 0;
                 row.CompletedAtUtc = status == JobSourceRunStatus.Interrupted && row.AttemptCount < 3 ? null : now;
                 if (status == JobSourceRunStatus.Interrupted) row.InterruptedAtUtc = now;
                 row.ErrorCode = status == JobSourceRunStatus.Succeeded ? null : status == JobSourceRunStatus.Interrupted ? "worker_interrupted" : "source_run_failed";

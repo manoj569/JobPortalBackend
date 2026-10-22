@@ -18,6 +18,9 @@ public sealed record ExternalJobSourceSnapshot(
     public DateTime? ObservedAtUtc { get; init; }
     public int? CheckpointCursor { get; init; }
     public bool ContinuationPending { get; init; }
+    // True when a bounded observation completed and its returned jobs can be
+    // persisted, even though it cannot prove a complete inventory census.
+    public bool AcquisitionSucceeded { get; init; }
     public WorkdayListingDiagnostics? ListingDiagnostics { get; init; }
     public int? ReportedListingTotal { get; init; }
     public IReadOnlyDictionary<string, int>? ProviderReasonCounts { get; init; }
