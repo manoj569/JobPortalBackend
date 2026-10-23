@@ -4,11 +4,15 @@ using JobPortal.Application.Abstractions.Auditing;
 using JobPortal.Application.Abstractions.Persistence;
 using JobPortal.Application.Common.Exceptions;
 using JobPortal.Application.Features.JobPromotions;
+using JobPortal.API.Middleware;
 using JobPortal.Domain.Entities;
 using JobPortal.Domain.Enums;
 using JobPortal.Persistence.Context;
 using JobPortal.Persistence.Repositories;
+using JobPortal.Shared.Models;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 
@@ -100,6 +104,50 @@ public sealed class JobPromotionTests
         Assert.Equal("image/png", repo.Promotion.BannerContentType);
     }
 
+    [Theory]
+    [InlineData("image/png")]
+    [InlineData("image/jpeg")]
+    [InlineData("image/webp")]
+    public async Task PublicBannerReturnsStoredImageWithCrossOriginResourcePolicy(string contentType)
+    {
+        var bytes = new byte[] { 1, 2, 3, 4 };
+        var service = new BannerService(new JobPromotionBanner(bytes, contentType));
+        var controller = new JobPromotionsController(service) { ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() } };
+
+        var result = await controller.Banner(Guid.NewGuid(), default);
+
+        var file = Assert.IsType<FileContentResult>(result);
+        Assert.Equal(bytes, file.FileContents);
+        Assert.Equal(contentType, file.ContentType);
+        Assert.Equal("cross-origin", controller.Response.Headers["Cross-Origin-Resource-Policy"]);
+    }
+
+    [Fact]
+    public async Task MissingPublicBannerKeepsNotFoundBehaviorAndDoesNotSetBannerPolicy()
+    {
+        var controller = new JobPromotionsController(new BannerService(null,
+            new NotFoundException("Promotion banner was not found.")))
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
+        };
+
+        await Assert.ThrowsAsync<NotFoundException>(() => controller.Banner(Guid.NewGuid(), default));
+
+        Assert.False(controller.Response.Headers.ContainsKey("Cross-Origin-Resource-Policy"));
+    }
+
+    [Fact]
+    public async Task SecurityHeadersMiddlewareRetainsSameSitePolicyForOtherEndpoints()
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Path = "/api/private/profile";
+        var middleware = new SecurityHeadersMiddleware(_ => Task.CompletedTask, new TestHostEnvironment());
+
+        await middleware.InvokeAsync(context);
+
+        Assert.Equal("same-site", context.Response.Headers["Cross-Origin-Resource-Policy"]);
+    }
+
     [Fact]
     public void PromotionDatesAndPriorityAreValidated()
     {
@@ -168,6 +216,24 @@ public sealed class JobPromotionTests
     private sealed class FixedClock(DateTime now) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => new(now);
+    }
+    private sealed class BannerService(JobPromotionBanner? banner, Exception? exception = null) : IJobPromotionService
+    {
+        public Task<JobPromotionBanner> BannerAsync(Guid jobId, CancellationToken cancellationToken) =>
+            exception is not null ? Task.FromException<JobPromotionBanner>(exception) : Task.FromResult(banner!);
+        public Task<JobPromotionConfigurationResponse> SaveAsync(Guid actorId, Guid jobId, SaveJobPromotionRequest request, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<JobPromotionConfigurationResponse> GetAsync(Guid jobId, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<PagedResponse<JobPromotionConfigurationResponse>> SearchAsync(JobPromotionQuery query, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<JobPromotionConfigurationResponse> DisableAsync(Guid actorId, Guid jobId, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<JobPromotionConfigurationResponse> UploadBannerAsync(Guid actorId, Guid jobId, JobPromotionBannerUpload upload, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<IReadOnlyCollection<PromotedJobResponse>> ActiveAsync(CancellationToken cancellationToken) => throw new NotImplementedException();
+    }
+    private sealed class TestHostEnvironment : Microsoft.Extensions.Hosting.IHostEnvironment
+    {
+        public string EnvironmentName { get; set; } = "Production";
+        public string ApplicationName { get; set; } = "JobPortal.Application.Tests";
+        public string ContentRootPath { get; set; } = AppContext.BaseDirectory;
+        public Microsoft.Extensions.FileProviders.IFileProvider ContentRootFileProvider { get; set; } = new Microsoft.Extensions.FileProviders.NullFileProvider();
     }
     private sealed class NoOpUnitOfWork : IUnitOfWork
     {

@@ -22,6 +22,7 @@ public sealed class JobPromotionsController(IJobPromotionService promotions) : C
     public async Task<IActionResult> Banner(Guid jobId, CancellationToken cancellationToken)
     {
         var banner = await promotions.BannerAsync(jobId, cancellationToken);
+        Response.Headers["Cross-Origin-Resource-Policy"] = "cross-origin";
         return File(banner.Content, banner.ContentType, enableRangeProcessing: true);
     }
 }
