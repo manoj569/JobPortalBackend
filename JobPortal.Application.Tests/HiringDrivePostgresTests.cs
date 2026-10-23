@@ -81,7 +81,7 @@ public sealed class HiringDrivePostgresTests(WorkdayCheckpointDatabase database)
         Assert.Null(await repository.ClickAsync(drive.Id, now, default));
     }
 
-    [Fact]
+    [LocalPostgresFact]
     public async Task InternalClickReturnsPersistedJobIdAndSlugAndRejectsNonPublicJobs()
     {
         var now = DateTime.UtcNow;

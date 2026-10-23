@@ -22,9 +22,12 @@ Each public item has exactly these JSON keys (nullable values serialize as JSON 
 | `locationText` | string or null | |
 | `experienceText` | string or null | |
 | `isSponsored` | boolean | |
+| `description` | string or null | Public campaign description |
+| `startAtUtc` | date-time | Campaign start |
+| `endAtUtc` | date-time or null | Campaign deadline when configured |
 | `destination` | object | Internal `{ type, jobId }` or external `{ type, url }` |
 
-Not returned: description, companyId as a separate property, ApplyUrl as a separate property, start/end dates, display order, analytics counts, active flag, or audit fields. A company ID is nested under `company.id`. Internal jobs take precedence when both JobId and ApplyUrl are set.
+Not returned: companyId as a separate property, ApplyUrl as a separate property, display order, analytics counts, active flag, or audit fields. A company ID is nested under `company.id`. Internal jobs take precedence when both JobId and ApplyUrl are set.
 
 Example matching the controller, DTOs and serializer:
 
@@ -46,6 +49,9 @@ Example matching the controller, DTOs and serializer:
       "locationText": "Bengaluru",
       "experienceText": "0-1 year",
       "isSponsored": false,
+      "description": "A public hiring opportunity.",
+      "startAtUtc": "2026-10-22T00:00:00Z",
+      "endAtUtc": null,
       "destination": {
         "type": "internalJob",
         "jobId": "e9c22e8a-0abd-49dc-95ca-2f31ac4cb523"
@@ -204,7 +210,7 @@ At least one of `jobId` or `applyUrl` must be present. Both may be present. Clie
 
 `AdminHiringDriveResponse`: `id` UUID, `campaign` SaveHiringDriveRequest, `impressionCount` integer (64-bit), `clickCount` integer (64-bit), `ctr` decimal number, `createdAtUtc` date-time, `updatedAtUtc` nullable date-time, `createdByUserId` nullable UUID, `updatedByUserId` nullable UUID. CTR is `clickCount / impressionCount * 100`, or zero when impressions is zero. It is not rounded in service code; JSON numeric formatting is serializer-controlled.
 
-`PublicHiringDriveResponse`: fields listed in Public list. Nested company has `id` UUID, `name` string, `logoUrl` string or null. Public destination `type` is the exact string `internalJob` or `external`; internal has UUID `jobId`, external has string `url`.
+`PublicHiringDriveResponse`: fields listed in Public list, plus `description` string or null, `startAtUtc` date-time, and `endAtUtc` date-time or null for public campaign details. These are campaign fields already stored by the backend; internal notes and admin audit data are not exposed. Nested company has `id` UUID, `name` string, `logoUrl` string or null. Public destination `type` is the exact string `internalJob` or `external`; internal has UUID `jobId`, external has string `url`.
 
 ## Enum values
 
@@ -313,6 +319,9 @@ export interface HiringDrivePublicDto {
   locationText: string | null;
   experienceText: string | null;
   isSponsored: boolean;
+  description: string | null;
+  startAtUtc: string;
+  endAtUtc: string | null;
   destination: HiringDriveDestinationDto;
 }
 

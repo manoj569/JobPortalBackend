@@ -89,7 +89,8 @@ public sealed class HiringDriveService(IHiringDriveRepository repository, IUnitO
             : new("external", Url: d.ApplyUrl);
     private static PublicHiringDriveResponse Public(HiringDrive d) => new(d.Id, d.Title, d.Subtitle,
         d.BadgeText, d.BadgeType, d.Company is { } c ? new(c.Id, c.Name, c.LogoUrl) : null,
-        d.ImageUrl, d.LocationText, d.ExperienceText, d.IsSponsored, Destination(d));
+        d.ImageUrl, d.LocationText, d.ExperienceText, d.IsSponsored, Destination(d),
+        d.Description, d.StartAtUtc, d.EndAtUtc);
     private static AdminHiringDriveResponse Admin(HiringDrive d) => new(d.Id,
         new(d.Title, d.StartAtUtc, d.CompanyId, d.Subtitle, d.Description, d.BadgeText, d.BadgeType,
             d.ImageUrl, d.LocationText, d.ExperienceText, d.JobId, d.ApplyUrl, d.EndAtUtc, d.DisplayOrder, d.IsActive, d.IsSponsored, d.ShowOnHome),

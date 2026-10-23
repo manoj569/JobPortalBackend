@@ -3,14 +3,27 @@ using JobPortal.Persistence.Postgres.Migrations;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
-using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Migrations.Operations;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Xunit;
 
 namespace JobPortal.Application.Tests;
 
 public sealed class HiringDriveMigrationTests
 {
+    [Fact]
+    public void HiringDriveMigrationsAreOrderedAndPresentInTheMigrationAssembly()
+    {
+        using var db = new JobPortalDbContext(new DbContextOptionsBuilder<JobPortalDbContext>()
+            .UseNpgsql("Host=localhost;Database=offline_model_only", o => o.MigrationsAssembly("JobPortal.Persistence.Postgres")).Options);
+        var migrations = db.Database.GetMigrations().ToArray();
+        var original = Array.IndexOf(migrations, "20261023070836_AddHiringDrives");
+        var placement = Array.IndexOf(migrations, "20261023110156_AddHiringDriveHomepagePlacement");
+        Assert.True(original >= 0);
+        Assert.True(placement > original);
+        Assert.False(db.Database.HasPendingModelChanges());
+    }
+
     [Fact]
     public void MigrationCreatesOnlyHiringDriveTableWithConstraintsAndRestrictiveReferences()
     {
