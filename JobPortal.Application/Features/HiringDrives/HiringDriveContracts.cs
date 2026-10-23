@@ -23,7 +23,8 @@ public sealed record HiringDriveClickResponse(string DestinationType,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Url = null);
 public sealed record PublicHiringDriveResponse(Guid Id, string Title, string? Subtitle,
     string? BadgeText, string? BadgeType, HiringDriveCompany? Company, string? ImageUrl,
-    string? LocationText, string? ExperienceText, bool IsSponsored, HiringDriveDestination Destination);
+    string? LocationText, string? ExperienceText, bool IsSponsored, HiringDriveDestination Destination,
+    string? Description = null, DateTime? StartAtUtc = null, DateTime? EndAtUtc = null);
 public sealed record AdminHiringDriveResponse(Guid Id, SaveHiringDriveRequest Campaign,
     long ImpressionCount, long ClickCount, decimal Ctr, DateTime CreatedAtUtc,
     DateTime? UpdatedAtUtc, Guid? CreatedByUserId, Guid? UpdatedByUserId);

@@ -20,7 +20,7 @@ namespace JobPortal.Application.Tests;
 public sealed class HiringDriveTests
 {
     private static readonly string[] OrderedTitles = ["C", "B", "A"];
-    private static readonly string[] CardFields = ["badgeText", "badgeType", "company", "destination", "experienceText", "id", "imageUrl", "isSponsored", "locationText", "subtitle", "title"];
+    private static readonly string[] CardFields = ["badgeText", "badgeType", "company", "description", "destination", "endAtUtc", "experienceText", "id", "imageUrl", "isSponsored", "locationText", "startAtUtc", "subtitle", "title"];
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly DateTime Now = new(2026, 10, 23, 0, 0, 0, DateTimeKind.Utc);
     private static SaveHiringDriveRequest Request() => new("Verified drive", Now.AddDays(-1), ApplyUrl: "https://careers.example.test/apply", IsActive: true);
@@ -141,12 +141,17 @@ public sealed class HiringDriveTests
         await Assert.ThrowsAsync<NotFoundException>(() => f.Service.GetAsync(saved.Id, default));
     }
     [Fact]
-    public async Task PublicDtoContainsOnlyCardFieldsAndExternalDestination()
+    public async Task PublicDtoContainsCampaignDetailsAndOnlyPublicDestinationData()
     {
         using var f = new Fixture();
-        await f.Service.SaveAsync(Guid.NewGuid(), null, Request() with { Description = "Private campaign description" }, default);
+        var start = Request().StartAtUtc;
+        var end = start.AddDays(3);
+        await f.Service.SaveAsync(Guid.NewGuid(), null, Request() with { Description = "Public campaign description", EndAtUtc = end }, default);
         var response = Assert.Single(await f.Service.PublicAsync(default));
         Assert.Equal("external", response.Destination.Type); Assert.Equal(Request().ApplyUrl, response.Destination.Url);
+        Assert.Equal("Public campaign description", response.Description);
+        Assert.Equal(start, response.StartAtUtc);
+        Assert.Equal(end, response.EndAtUtc);
         var json = JsonSerializer.SerializeToElement(response, JsonOptions);
         Assert.Equal(CardFields, json.EnumerateObject().Select(x => x.Name).Order());
         Assert.False(json.GetProperty("destination").TryGetProperty("jobId", out _));
