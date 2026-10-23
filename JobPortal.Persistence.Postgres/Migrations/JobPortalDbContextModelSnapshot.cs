@@ -4783,6 +4783,81 @@ namespace JobPortal.Persistence.Postgres.Migrations
                     b.ToTable("JobDiscoveryRuns", (string)null);
                 });
 
+            modelBuilder.Entity("JobPortal.Domain.Entities.JobPromotion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("BannerContentType")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<byte[]>("BannerImageContent")
+                        .HasColumnType("bytea");
+
+                    b.Property<string>("BannerImageUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("DisplayPriority")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("EndsAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("JobId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("StartsAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("IsDeleted");
+
+                    b.HasIndex("JobId")
+                        .IsUnique();
+
+                    b.HasIndex("UpdatedByUserId");
+
+                    b.HasIndex("IsEnabled", "StartsAtUtc", "EndsAtUtc", "DisplayPriority")
+                        .HasFilter("\"IsDeleted\" = FALSE");
+
+                    b.ToTable("JobPromotions", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_JobPromotions_Banner", "(\"BannerImageContent\" IS NULL AND \"BannerContentType\" IS NULL AND \"BannerImageUrl\" IS NULL) OR (\"BannerImageContent\" IS NOT NULL AND \"BannerContentType\" IN ('image/jpeg', 'image/png', 'image/webp') AND \"BannerImageUrl\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_JobPromotions_BannerSize", "\"BannerImageContent\" IS NULL OR octet_length(\"BannerImageContent\") BETWEEN 1 AND 5242880");
+
+                            t.HasCheckConstraint("CK_JobPromotions_Dates", "\"EndsAtUtc\" IS NULL OR \"StartsAtUtc\" IS NULL OR \"EndsAtUtc\" > \"StartsAtUtc\"");
+
+                            t.HasCheckConstraint("CK_JobPromotions_DisplayPriority", "\"DisplayPriority\" >= 0");
+                        });
+                });
+
             modelBuilder.Entity("JobPortal.Domain.Entities.JobRecruiterContact", b =>
                 {
                     b.Property<Guid>("Id")
@@ -8253,6 +8328,27 @@ namespace JobPortal.Persistence.Postgres.Migrations
                         .IsRequired();
 
                     b.Navigation("Run");
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.JobPromotion", b =>
+                {
+                    b.HasOne("JobPortal.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("JobPortal.Domain.Entities.Job", "Job")
+                        .WithMany()
+                        .HasForeignKey("JobId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JobPortal.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("UpdatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Job");
                 });
 
             modelBuilder.Entity("JobPortal.Domain.Entities.JobRecruiterContact", b =>
