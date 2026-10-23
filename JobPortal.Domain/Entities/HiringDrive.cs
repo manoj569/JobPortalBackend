@@ -22,6 +22,7 @@ public sealed class HiringDrive : BaseEntity
     public int DisplayOrder { get; set; }
     public bool IsActive { get; set; }
     public bool IsSponsored { get; set; }
+    public bool ShowOnHome { get; set; }
     public Guid? CreatedByUserId { get; set; }
     public Guid? UpdatedByUserId { get; set; }
     public long ImpressionCount { get; set; }

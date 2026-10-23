@@ -33,6 +33,7 @@ Backend feature completed using the existing application/service/repository laye
 | Method | Route | Access |
 |---|---|---|
 | GET | /api/public/hiring-drives | Anonymous |
+| GET | /api/public/hiring-drives/home | Anonymous; only explicitly selected homepage campaigns |
 | POST | /api/public/hiring-drives/{id}/click | Anonymous, rate limited |
 | POST | /api/public/hiring-drives/impressions | Anonymous, rate limited, bounded body/batch |
 | GET | /api/admin/hiring-drives | Administrator, paginated |
@@ -44,6 +45,8 @@ Backend feature completed using the existing application/service/repository laye
 ## Database changes
 
 Migration: `20261023070836_AddHiringDrives`.
+
+Homepage placement migration: `20261023110156_AddHiringDriveHomepagePlacement`, adding `ShowOnHome` with a database default of false and a filtered placement index.
 
 Adds only HiringDrives, with all editable campaign fields, base audit/soft-delete fields, creator/editor references, bigint ClickCount and ImpressionCount. Adds restrictive Company, Job and User foreign keys, indexes for active scheduling and display order, and checks for date ordering, nonnegative order/counters, and presence of a destination. Existing migrations were not edited. No data is seeded. Migration rollback drops only HiringDrives.
 

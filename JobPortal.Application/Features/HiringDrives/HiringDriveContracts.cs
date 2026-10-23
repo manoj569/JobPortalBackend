@@ -9,7 +9,7 @@ public sealed record SaveHiringDriveRequest(
     string? Description = null, string? BadgeText = null, string? BadgeType = null,
     string? ImageUrl = null, string? LocationText = null, string? ExperienceText = null,
     Guid? JobId = null, string? ApplyUrl = null, DateTime? EndAtUtc = null,
-    int DisplayOrder = 0, bool IsActive = false, bool IsSponsored = false);
+    int DisplayOrder = 0, bool IsActive = false, bool IsSponsored = false, bool ShowOnHome = false);
 public sealed record HiringDriveQuery(int PageNumber = 1, int PageSize = 20);
 public sealed record HiringDriveImpressionsRequest(IReadOnlyCollection<Guid> DriveIds);
 public sealed record HiringDriveCompany(Guid Id, string Name, string? LogoUrl);
@@ -31,6 +31,7 @@ public sealed record AdminHiringDriveResponse(Guid Id, SaveHiringDriveRequest Ca
 public interface IHiringDriveRepository
 {
     Task<IReadOnlyCollection<HiringDrive>> PublicAsync(DateTime now, CancellationToken cancellationToken);
+    Task<IReadOnlyCollection<HiringDrive>> HomepageAsync(DateTime now, CancellationToken cancellationToken);
     Task<(IReadOnlyCollection<HiringDrive> Items, int Total)> SearchAsync(HiringDriveQuery query, CancellationToken cancellationToken);
     Task<HiringDrive?> GetAsync(Guid id, CancellationToken cancellationToken);
     Task<bool> CompanyExistsAsync(Guid id, CancellationToken cancellationToken);
@@ -42,6 +43,7 @@ public interface IHiringDriveRepository
 public interface IHiringDriveService
 {
     Task<IReadOnlyCollection<PublicHiringDriveResponse>> PublicAsync(CancellationToken cancellationToken);
+    Task<IReadOnlyCollection<PublicHiringDriveResponse>> HomepageAsync(CancellationToken cancellationToken);
     Task<PagedResponse<AdminHiringDriveResponse>> SearchAsync(HiringDriveQuery query, CancellationToken cancellationToken);
     Task<AdminHiringDriveResponse> GetAsync(Guid id, CancellationToken cancellationToken);
     Task<AdminHiringDriveResponse> SaveAsync(Guid actorId, Guid? id, SaveHiringDriveRequest request, CancellationToken cancellationToken);

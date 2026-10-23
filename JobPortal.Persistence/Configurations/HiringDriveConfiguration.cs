@@ -25,11 +25,13 @@ public sealed class HiringDriveConfiguration : IEntityTypeConfiguration<HiringDr
         builder.Property(x => x.ApplyUrl).HasMaxLength(2048);
         builder.Property(x => x.LocationText).HasMaxLength(200);
         builder.Property(x => x.ExperienceText).HasMaxLength(100);
+        builder.Property(x => x.ShowOnHome).HasDefaultValue(false).IsRequired();
         builder.HasOne(x => x.Company).WithMany().HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(x => x.Job).WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne<User>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne<User>().WithMany().HasForeignKey(x => x.UpdatedByUserId).OnDelete(DeleteBehavior.Restrict);
         builder.HasIndex(x => new { x.IsActive, x.DisplayOrder, x.CreatedAtUtc }).HasFilter("\"IsDeleted\" = FALSE");
         builder.HasIndex(x => new { x.IsActive, x.StartAtUtc, x.EndAtUtc });
+        builder.HasIndex(x => new { x.ShowOnHome, x.IsActive, x.DisplayOrder }).HasFilter("\"IsDeleted\" = FALSE");
     }
 }

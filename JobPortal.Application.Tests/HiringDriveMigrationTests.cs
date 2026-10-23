@@ -40,4 +40,20 @@ public sealed class HiringDriveMigrationTests
         Assert.DoesNotContain("ALTER TABLE", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("DROP ", sql, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void HomepagePlacementMigrationAddsFalseDefaultAndFilteredIndex()
+    {
+        using var db = new JobPortalDbContext(new DbContextOptionsBuilder<JobPortalDbContext>()
+            .UseNpgsql("Host=localhost;Database=offline_model_only", o => o.MigrationsAssembly("JobPortal.Persistence.Postgres")).Options);
+        var migration = new AddHiringDriveHomepagePlacement();
+        var addColumn = Assert.Single(migration.UpOperations.OfType<AddColumnOperation>());
+        Assert.Equal("ShowOnHome", addColumn.Name);
+        Assert.Equal("HiringDrives", addColumn.Table);
+        Assert.Equal(false, addColumn.DefaultValue);
+        var index = Assert.Single(migration.UpOperations.OfType<CreateIndexOperation>());
+        Assert.Equal(new[] { "ShowOnHome", "IsActive", "DisplayOrder" }, index.Columns);
+        Assert.Equal("\"IsDeleted\" = FALSE", index.Filter);
+        Assert.False(db.Database.HasPendingModelChanges());
+    }
 }

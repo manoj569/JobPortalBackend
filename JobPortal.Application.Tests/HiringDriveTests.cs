@@ -65,6 +65,46 @@ public sealed class HiringDriveTests
         Assert.Equal(expected ? 1 : 0, (await f.Repository.PublicAsync(Now, default)).Count);
     }
     [Fact]
+    public async Task HomepageSelectionRequiresExplicitFlagAndAppliesVisibilityAndOrder()
+    {
+        using var f = new Fixture();
+        var shownLater = NewDrive("later", Now.AddDays(-1), showOnHome: true, displayOrder: 2);
+        var shownFirst = NewDrive("first", Now.AddDays(-1), showOnHome: true, displayOrder: 1, sponsored: true);
+        var notSelected = NewDrive("not-selected", Now.AddDays(-1), showOnHome: false, displayOrder: 0);
+        var inactive = NewDrive("inactive", Now.AddDays(-1), showOnHome: true, displayOrder: 0); inactive.IsActive = false;
+        var future = NewDrive("future", Now.AddDays(1), showOnHome: true, displayOrder: 0);
+        var expired = NewDrive("expired", Now.AddDays(-2), showOnHome: true, displayOrder: 0); expired.EndAtUtc = Now.AddDays(-1);
+        var endsNow = NewDrive("ends-now", Now.AddDays(-1), showOnHome: true, displayOrder: 0); endsNow.EndAtUtc = Now;
+        var deleted = NewDrive("deleted", Now.AddDays(-1), showOnHome: true, displayOrder: 0); deleted.IsDeleted = true;
+        f.Db.AddRange(shownLater, shownFirst, notSelected, inactive, future, expired, endsNow, deleted);
+        await f.Db.SaveChangesAsync();
+
+        var home = await f.Service.HomepageAsync(default);
+        Assert.Equal(new[] { "first", "later" }, home.Select(x => x.Title));
+        Assert.True(home.First().IsSponsored);
+        Assert.Equal(4, (await f.Service.PublicAsync(default)).Count);
+        Assert.Contains((await f.Service.PublicAsync(default)), item => item.Title == "ends-now");
+    }
+
+    [Fact]
+    public async Task SaveAndUpdateKeepShowOnHomeIndependentFromSponsored()
+    {
+        using var f = new Fixture();
+        var request = Request() with { ShowOnHome = true, IsSponsored = false };
+        var created = await f.Service.SaveAsync(Guid.NewGuid(), null, request, default);
+        Assert.True(created.Campaign.ShowOnHome);
+        Assert.False(created.Campaign.IsSponsored);
+        var updated = await f.Service.SaveAsync(Guid.NewGuid(), created.Id,
+            request with { ShowOnHome = false, IsSponsored = true }, default);
+        Assert.False(updated.Campaign.ShowOnHome);
+        Assert.True(updated.Campaign.IsSponsored);
+    }
+
+    private static HiringDrive NewDrive(string title, DateTime start, bool showOnHome, int displayOrder, bool sponsored = false) =>
+        new() { Title = title, StartAtUtc = start, ApplyUrl = "https://example.test/apply", IsActive = true,
+            ShowOnHome = showOnHome, DisplayOrder = displayOrder, IsSponsored = sponsored };
+
+    [Fact]
     public async Task PublicOrderUsesDisplayThenNewestAndExcludesDeleted()
     {
         using var f = new Fixture();
@@ -133,6 +173,7 @@ public sealed class HiringDriveTests
     [Fact]
     public void ManagementRequiresAdministratorAndAnalyticsIsRateLimited()
     {
+        Assert.NotNull(typeof(HiringDrivesController).GetCustomAttribute<AllowAnonymousAttribute>());
         var auth = typeof(AdminHiringDrivesController).GetCustomAttribute<AuthorizeAttribute>();
         Assert.Equal("Administrator", auth!.Roles);
         Assert.Null(typeof(AdminHiringDrivesController).GetCustomAttribute<AllowAnonymousAttribute>());
