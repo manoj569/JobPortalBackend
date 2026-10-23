@@ -14,6 +14,8 @@ public sealed class HiringDriveService(IHiringDriveRepository repository, IUnitO
 {
     public async Task<IReadOnlyCollection<PublicHiringDriveResponse>> PublicAsync(CancellationToken cancellationToken) =>
         (await repository.PublicAsync(clock.GetUtcNow().UtcDateTime, cancellationToken)).Select(Public).ToArray();
+    public async Task<IReadOnlyCollection<PublicHiringDriveResponse>> HomepageAsync(CancellationToken cancellationToken) =>
+        (await repository.HomepageAsync(clock.GetUtcNow().UtcDateTime, cancellationToken)).Select(Public).ToArray();
 
     public async Task<PagedResponse<AdminHiringDriveResponse>> SearchAsync(HiringDriveQuery query, CancellationToken cancellationToken)
     {
@@ -47,6 +49,7 @@ public sealed class HiringDriveService(IHiringDriveRepository repository, IUnitO
         drive.DisplayOrder = request.DisplayOrder;
         drive.IsActive = request.IsActive;
         drive.IsSponsored = request.IsSponsored;
+        drive.ShowOnHome = request.ShowOnHome;
         drive.UpdatedByUserId = actorId;
         if (!id.HasValue) await repository.AddAsync(drive, cancellationToken);
         await auditWriter.AppendAsync(new(id.HasValue ? AuditAction.Update : AuditAction.Create, "HiringDrive",
@@ -89,7 +92,7 @@ public sealed class HiringDriveService(IHiringDriveRepository repository, IUnitO
         d.ImageUrl, d.LocationText, d.ExperienceText, d.IsSponsored, Destination(d));
     private static AdminHiringDriveResponse Admin(HiringDrive d) => new(d.Id,
         new(d.Title, d.StartAtUtc, d.CompanyId, d.Subtitle, d.Description, d.BadgeText, d.BadgeType,
-            d.ImageUrl, d.LocationText, d.ExperienceText, d.JobId, d.ApplyUrl, d.EndAtUtc, d.DisplayOrder, d.IsActive, d.IsSponsored),
+            d.ImageUrl, d.LocationText, d.ExperienceText, d.JobId, d.ApplyUrl, d.EndAtUtc, d.DisplayOrder, d.IsActive, d.IsSponsored, d.ShowOnHome),
         d.ImpressionCount, d.ClickCount, d.ImpressionCount == 0 ? 0 : (decimal)d.ClickCount / d.ImpressionCount * 100,
         d.CreatedAtUtc, d.UpdatedAtUtc, d.CreatedByUserId, d.UpdatedByUserId);
 }

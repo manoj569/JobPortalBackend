@@ -57,6 +57,14 @@ Example matching the controller, DTOs and serializer:
 
 The values above illustrate shape only; no such campaign is seeded. Empty result is `{"data":[]}`.
 
+## Homepage carousel campaigns
+
+`GET /api/public/hiring-drives/home`
+
+Anonymous. Returns only campaigns explicitly selected by an administrator with `showOnHome: true`. It reuses the same public campaign and internal-job visibility rules as the normal list, with the additional homepage placement flag. Homepage eligibility requires `IsActive`, `StartAtUtc <= server UTC now`, and `EndAtUtc` null or strictly later than now; soft-deleted campaigns, future campaigns, ended campaigns, and internal campaigns whose linked Job is not publicly available are excluded. Results use the same `displayOrder` ascending, `createdAtUtc` descending, ID ascending ordering. There is no arbitrary result limit. `isSponsored` remains independent of homepage placement.
+
+The normal `GET /api/public/hiring-drives` response and its existing inclusive `EndAtUtc >= now` boundary are unchanged.
+
 ## Click tracking
 
 `POST /api/public/hiring-drives/{id}/click`
@@ -128,7 +136,8 @@ Requires an authenticated user with role `Administrator`. Query fields are optio
           "endAtUtc": null,
           "displayOrder": 0,
           "isActive": false,
-          "isSponsored": false
+          "isSponsored": false,
+          "showOnHome": false
         },
         "impressionCount": 0,
         "clickCount": 0,
@@ -189,6 +198,7 @@ Create and update use `SaveHiringDriveRequest`; JSON property names are camelCas
 | `displayOrder` | integer | Optional; defaults 0 | Must be >= 0 |
 | `isActive` | boolean | Optional; defaults false | Public list requires true |
 | `isSponsored` | boolean | Optional; defaults false | |
+| `showOnHome` | boolean | Optional; defaults false | Explicitly places the campaign in the public homepage carousel; independent of `isSponsored` |
 
 At least one of `jobId` or `applyUrl` must be present. Both may be present. Client should supply all editable properties on PUT. Admin response wraps these request properties under `campaign` and adds `id`, analytics, and audit fields.
 
@@ -245,7 +255,8 @@ Content-Type: application/json
   "endAtUtc": null,
   "displayOrder": 0,
   "isActive": false,
-  "isSponsored": false
+  "isSponsored": false,
+  "showOnHome": false
 }
 ```
 
@@ -332,6 +343,7 @@ export interface HiringDriveAdminCampaign {
   displayOrder?: number;
   isActive?: boolean;
   isSponsored?: boolean;
+  showOnHome?: boolean;
 }
 
 export type CreateHiringDriveRequest = HiringDriveAdminCampaign;

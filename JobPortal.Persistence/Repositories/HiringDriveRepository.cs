@@ -13,6 +13,10 @@ public sealed class HiringDriveRepository(JobPortalDbContext context) : IHiringD
     public async Task<IReadOnlyCollection<HiringDrive>> PublicAsync(DateTime now, CancellationToken cancellationToken) =>
         await Current(now).AsNoTracking().Include(x => x.Company).OrderBy(x => x.DisplayOrder)
             .ThenByDescending(x => x.CreatedAtUtc).ThenBy(x => x.Id).ToArrayAsync(cancellationToken);
+    public async Task<IReadOnlyCollection<HiringDrive>> HomepageAsync(DateTime now, CancellationToken cancellationToken) =>
+        await Current(now).Where(x => x.ShowOnHome && (x.EndAtUtc == null || x.EndAtUtc > now)).AsNoTracking().Include(x => x.Company)
+            .OrderBy(x => x.DisplayOrder).ThenByDescending(x => x.CreatedAtUtc).ThenBy(x => x.Id)
+            .ToArrayAsync(cancellationToken);
     public async Task<(IReadOnlyCollection<HiringDrive> Items, int Total)> SearchAsync(HiringDriveQuery query, CancellationToken cancellationToken)
     {
         var source = context.HiringDrives.AsNoTracking();

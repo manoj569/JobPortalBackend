@@ -16,6 +16,10 @@ public sealed class HiringDrivesController(IHiringDriveService drives) : Control
     public async Task<ActionResult<ApiResponse<IReadOnlyCollection<PublicHiringDriveResponse>>>> Get(CancellationToken cancellationToken) =>
         Ok(new ApiResponse<IReadOnlyCollection<PublicHiringDriveResponse>>(await drives.PublicAsync(cancellationToken)));
 
+    [HttpGet("home")]
+    public async Task<ActionResult<ApiResponse<IReadOnlyCollection<PublicHiringDriveResponse>>>> Home(CancellationToken cancellationToken) =>
+        Ok(new ApiResponse<IReadOnlyCollection<PublicHiringDriveResponse>>(await drives.HomepageAsync(cancellationToken)));
+
     [HttpPost("{id:guid}/click")]
     [EnableRateLimiting("HiringDriveAnalytics")]
     public async Task<ActionResult<ApiResponse<HiringDriveClickResponse>>> Click(Guid id, CancellationToken cancellationToken) =>

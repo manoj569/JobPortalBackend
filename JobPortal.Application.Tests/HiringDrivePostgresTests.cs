@@ -13,6 +13,44 @@ namespace JobPortal.Application.Tests;
 public sealed class HiringDrivePostgresTests(WorkdayCheckpointDatabase database) : IClassFixture<WorkdayCheckpointDatabase>
 {
     [LocalPostgresFact]
+    public async Task HomepageSelectionUsesExplicitFlagStrictEndBoundaryAndExistingOrdering()
+    {
+        var now = DateTime.UtcNow;
+        await using var db = database.Open();
+        var shownLater = new HiringDrive
+        {
+            Title = "Home later", StartAtUtc = now.AddDays(-1), IsActive = true,
+            ShowOnHome = true, DisplayOrder = 2, ApplyUrl = "https://example.test/later"
+        };
+        var shownFirst = new HiringDrive
+        {
+            Title = "Home first", StartAtUtc = now.AddDays(-1), IsActive = true,
+            ShowOnHome = true, DisplayOrder = 1, IsSponsored = true,
+            ApplyUrl = "https://example.test/first"
+        };
+        var notSelected = new HiringDrive
+        {
+            Title = "Not selected", StartAtUtc = now.AddDays(-1), IsActive = true,
+            ApplyUrl = "https://example.test/ordinary"
+        };
+        var endsNow = new HiringDrive
+        {
+            Title = "Ends now", StartAtUtc = now.AddDays(-1), EndAtUtc = now, IsActive = true,
+            ShowOnHome = true, ApplyUrl = "https://example.test/ended"
+        };
+        db.AddRange(shownLater, shownFirst, notSelected, endsNow);
+        await db.SaveChangesAsync();
+
+        var repository = new HiringDriveRepository(db);
+        Assert.Equal(new[] { "Home first", "Home later" },
+            (await repository.HomepageAsync(now, default)).Select(drive => drive.Title));
+        var publicDrives = await repository.PublicAsync(now, default);
+        Assert.Contains(publicDrives, drive => drive.Id == notSelected.Id);
+        Assert.Contains(publicDrives, drive => drive.Id == endsNow.Id);
+        Assert.False((await db.HiringDrives.SingleAsync(drive => drive.Id == notSelected.Id)).ShowOnHome);
+    }
+
+    [LocalPostgresFact]
     public async Task CountersAreAtomicBoundedToEligibleDrivesAndClickDestinationIsAuthoritative()
     {
         var now = DateTime.UtcNow;
@@ -100,6 +138,8 @@ public sealed class HiringDrivePostgresTests(WorkdayCheckpointDatabase database)
         Assert.Null(external.JobId);
         Assert.Null(external.JobSlug);
         Assert.Equal("https://careers.example.test/apply", external.Url);
+        db.ChangeTracker.Clear();
+        Assert.Equal(1, (await db.HiringDrives.SingleAsync(drive => drive.Id == externalDrive.Id)).ClickCount);
         foreach (var unavailableDrive in drives.Skip(1))
             Assert.Null(await repository.ClickAsync(unavailableDrive.Id, now, default));
 

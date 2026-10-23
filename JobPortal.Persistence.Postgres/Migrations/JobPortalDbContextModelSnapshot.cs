@@ -3968,6 +3968,11 @@ namespace JobPortal.Persistence.Postgres.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
+                    b.Property<bool>("ShowOnHome")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<DateTime>("StartAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -4002,6 +4007,9 @@ namespace JobPortal.Persistence.Postgres.Migrations
                         .HasFilter("\"IsDeleted\" = FALSE");
 
                     b.HasIndex("IsActive", "StartAtUtc", "EndAtUtc");
+
+                    b.HasIndex("ShowOnHome", "IsActive", "DisplayOrder")
+                        .HasFilter("\"IsDeleted\" = FALSE");
 
                     b.ToTable("HiringDrives", null, t =>
                         {
