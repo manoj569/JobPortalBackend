@@ -4,6 +4,7 @@ using JobPortal.Application.Abstractions.Persistence;
 using FluentValidation;
 using JobPortal.Domain.Entities;
 using JobPortal.Domain.Enums;
+using JobPortal.Persistence.Context;
 using JobPortal.Persistence.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
@@ -48,6 +49,33 @@ public sealed class HiringDrivePostgresTests(WorkdayCheckpointDatabase database)
         Assert.Contains(publicDrives, drive => drive.Id == notSelected.Id);
         Assert.Contains(publicDrives, drive => drive.Id == endsNow.Id);
         Assert.False((await db.HiringDrives.SingleAsync(drive => drive.Id == notSelected.Id)).ShowOnHome);
+    }
+
+    [LocalPostgresFact]
+    public async Task ExternalClickSucceedsWithNpgsqlRetryingExecutionStrategy()
+    {
+        var now = DateTime.UtcNow;
+        var options = new DbContextOptionsBuilder<JobPortalDbContext>()
+            .UseNpgsql(database.Connection, postgres =>
+                postgres.EnableRetryOnFailure(3, TimeSpan.FromSeconds(1), null))
+            .Options;
+        await using var db = new JobPortalDbContext(options);
+        Assert.Equal("NpgsqlRetryingExecutionStrategy", db.Database.CreateExecutionStrategy().GetType().Name);
+        var drive = new HiringDrive
+        {
+            Title = "Retry strategy external fixture", StartAtUtc = now.AddMinutes(-1),
+            IsActive = true, ApplyUrl = "https://careers.example.test/apply"
+        };
+        db.HiringDrives.Add(drive);
+        await db.SaveChangesAsync();
+
+        var result = await new HiringDriveRepository(db).ClickAsync(drive.Id, now, default);
+
+        Assert.NotNull(result);
+        Assert.Equal(drive.ApplyUrl, result.ApplyUrl);
+        db.ChangeTracker.Clear();
+        Assert.Equal(1, await db.HiringDrives.Where(item => item.Id == drive.Id)
+            .Select(item => item.ClickCount).SingleAsync());
     }
 
     [LocalPostgresFact]

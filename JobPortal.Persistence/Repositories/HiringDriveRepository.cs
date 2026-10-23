@@ -34,21 +34,26 @@ public sealed class HiringDriveRepository(JobPortalDbContext context) : IHiringD
     public async Task AddAsync(HiringDrive drive, CancellationToken cancellationToken) => await context.HiringDrives.AddAsync(drive, cancellationToken);
     public async Task<HiringDrive?> ClickAsync(Guid id, DateTime now, CancellationToken cancellationToken)
     {
-        // A row lock couples destination lookup and increment, including concurrent admin updates/deactivation.
-        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
-        var drive = await context.HiringDrives.FromSqlInterpolated($"SELECT * FROM \"HiringDrives\" WHERE \"Id\" = {id} FOR UPDATE")
-            .SingleOrDefaultAsync(cancellationToken);
-        if (drive is null || !drive.IsActive || drive.StartAtUtc > now || drive.EndAtUtc < now) return null;
-        if (drive.JobId is { } jobId)
+        var strategy = context.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync<HiringDrive?>(async retryCancellationToken =>
         {
-            drive.Job = await PublicJobRepository.AvailableJobs(context.Jobs, now)
-                .SingleOrDefaultAsync(job => job.Id == jobId, cancellationToken);
-            if (drive.Job is null) return null;
-        }
-        var changed = await Current(now).Where(x => x.Id == id).ExecuteUpdateAsync(
-            s => s.SetProperty(x => x.ClickCount, x => x.ClickCount + 1), cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
-        return changed == 1 ? drive : null;
+            // Keep the locked destination read, visibility check, and atomic increment in one
+            // retryable transaction. No tracking ensures each retry uses the newly locked row state.
+            await using var transaction = await context.Database.BeginTransactionAsync(retryCancellationToken);
+            var drive = await context.HiringDrives.FromSqlInterpolated($"SELECT * FROM \"HiringDrives\" WHERE \"Id\" = {id} FOR UPDATE")
+                .AsNoTracking().SingleOrDefaultAsync(retryCancellationToken);
+            if (drive is null || !drive.IsActive || drive.StartAtUtc > now || drive.EndAtUtc < now) return null;
+            if (drive.JobId is { } jobId)
+            {
+                drive.Job = await PublicJobRepository.AvailableJobs(context.Jobs, now)
+                    .SingleOrDefaultAsync(job => job.Id == jobId, retryCancellationToken);
+                if (drive.Job is null) return null;
+            }
+            var changed = await Current(now).Where(x => x.Id == id).ExecuteUpdateAsync(
+                s => s.SetProperty(x => x.ClickCount, x => x.ClickCount + 1), retryCancellationToken);
+            await transaction.CommitAsync(retryCancellationToken);
+            return changed == 1 ? drive : null;
+        }, cancellationToken);
     }
     public async Task ImpressionsAsync(IReadOnlyCollection<Guid> ids, DateTime now, CancellationToken cancellationToken) =>
         await Current(now).Where(x => ids.Contains(x.Id)).ExecuteUpdateAsync(
