@@ -57,6 +57,7 @@ public sealed class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(x => x.PreferredShiftsJson).HasColumnType("text").HasDefaultValue("[]").IsRequired();
         builder.Property(x => x.DesiredOpportunitiesJson).HasColumnType("text").HasDefaultValue("[]").IsRequired();
         builder.Property(x => x.WorkPreferencesJson).HasColumnType("text").HasDefaultValue("[]").IsRequired();
+        builder.Property(x => x.CareerSnapshotRequired).HasDefaultValue(false);
         builder.Property(x => x.College).HasMaxLength(200);
         builder.Property(x => x.Degree).HasMaxLength(200);
         builder.Property(x => x.YearsOfExperience).HasPrecision(4, 1);

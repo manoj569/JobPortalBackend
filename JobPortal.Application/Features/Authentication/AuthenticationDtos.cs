@@ -21,7 +21,7 @@ public sealed record VerifyRegistrationOtpRequest(Guid ChallengeId, string Otp);
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record ResendRegistrationOtpRequest(Guid ChallengeId);
 
-public sealed record RegistrationResponse(string Message);
+public sealed record RegistrationResponse(string Message, AuthenticationResponse? Authentication = null);
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record VerifyEmailRequest(string Token);
@@ -76,7 +76,8 @@ public sealed record AuthenticatedUserDto(
     string Email,
     string FirstName,
     string LastName,
-    string Role);
+    string Role,
+    bool CareerSnapshotRequired = false);
 
 public sealed record AuthenticationResponse(
     string AccessToken,

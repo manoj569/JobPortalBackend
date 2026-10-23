@@ -40,6 +40,7 @@ public sealed class User : BaseEntity
     public string CandidateJobTypesJson { get; set; } = "[]";
     public string CandidateEmploymentTypesJson { get; set; } = "[]";
     public string PreferredShiftsJson { get; set; } = "[]";
+    public bool CareerSnapshotRequired { get; set; }
     public CareerStage? CareerStage { get; set; }
     public string DesiredOpportunitiesJson { get; set; } = "[]";
     public string WorkPreferencesJson { get; set; } = "[]";

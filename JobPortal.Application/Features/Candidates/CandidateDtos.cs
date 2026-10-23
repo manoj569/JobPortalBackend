@@ -17,7 +17,12 @@ public sealed record CandidateProfileResponse(
     decimal TotalExperienceYears = 0,
     string? MobileNumber = null,
     bool MobileVerified = false,
-    CandidateAvailability? NoticePeriod = null);
+    CandidateAvailability? NoticePeriod = null,
+    bool CareerSnapshotRequired = false,
+    string? PrimaryRole = null,
+    CareerStage? CareerStage = null,
+    decimal? YearsOfExperience = null,
+    IReadOnlyCollection<WorkPreference>? WorkPreferences = null);
 public sealed record UpdateCandidateProfileRequest(
     string? Headline, string? Bio, string? Location, IReadOnlyCollection<string> Skills,
     IReadOnlyCollection<string> Education, IReadOnlyCollection<string> Experience,

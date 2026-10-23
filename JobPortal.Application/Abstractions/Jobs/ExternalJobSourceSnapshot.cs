@@ -8,12 +8,19 @@ public sealed record ExternalJobSourceSnapshot(
     int Skipped,
     bool IsComplete)
 {
+    // Optional complete presence census. Never an ingestion/publication payload.
+    // Null preserves the legacy Jobs-derived reconciliation path exactly.
+    public IReadOnlyCollection<string>? ObservedExternalIds { get; init; }
+    public ExternalJobInventoryEvidence? InventoryEvidence { get; init; }
     public DateTime? InventoryAtUtc { get; init; }
     public string? InventoryVersion { get; init; }
     public string? InventoryDigest { get; init; }
     public DateTime? ObservedAtUtc { get; init; }
     public int? CheckpointCursor { get; init; }
     public bool ContinuationPending { get; init; }
+    // True when a bounded observation completed and its returned jobs can be
+    // persisted, even though it cannot prove a complete inventory census.
+    public bool AcquisitionSucceeded { get; init; }
     public WorkdayListingDiagnostics? ListingDiagnostics { get; init; }
     public int? ReportedListingTotal { get; init; }
     public IReadOnlyDictionary<string, int>? ProviderReasonCounts { get; init; }
@@ -47,7 +54,9 @@ public sealed record WorkdayListingDiagnostics
 
 /// <summary>
 /// Optional extension for sources whose complete snapshot can be reconciled safely.
-/// Implementations must set IsComplete=false when any listing/detail was omitted.
+/// Legacy snapshots must include every observed job. An optional validated complete
+/// presence census can cover jobs enriched in earlier runs; incomplete enumeration,
+/// skipped data, or unproven identity coverage must still set IsComplete=false.
 /// </summary>
 public interface ICompleteExternalJobProvider : IExternalJobProvider
 {

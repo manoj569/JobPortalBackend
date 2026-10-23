@@ -442,6 +442,38 @@ public sealed class GoogleAuthenticationTests
         Assert.NotNull(codeMethod.GetCustomAttributes(typeof(AllowAnonymousAttribute), true).SingleOrDefault());
     }
 
+    [Fact]
+    public async Task NewGoogleCandidateRequiresSnapshotAndReloginPreservesCompletion()
+    {
+        var fixture = CreateFixture();
+        var registered = await fixture.Service.AuthenticateAsync(
+            new(RawCredential, GoogleAuthenticationIntent.Register, true), null);
+        Assert.True(registered.User.CareerSnapshotRequired);
+        var user = Assert.Single(fixture.Users.Items);
+        Assert.True(user.CareerSnapshotRequired);
+        user.CareerSnapshotRequired = false;
+        var relogin = await fixture.Service.AuthenticateAsync(
+            new(RawCredential, GoogleAuthenticationIntent.Login), null);
+        Assert.False(relogin.User.CareerSnapshotRequired);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExistingGoogleAccountLinkAndLoginPreserveSnapshotRequirement(bool required)
+    {
+        var fixture = CreateFixture();
+        var user = Candidate();
+        user.CareerSnapshotRequired = required;
+        fixture.Users.Items.Add(user);
+        var linked = await fixture.Service.AuthenticateAsync(
+            new(RawCredential, GoogleAuthenticationIntent.Register, true), null);
+        var login = await fixture.Service.AuthenticateCodeAsync(
+            new("valid-code", GoogleAuthenticationIntent.Login), "https://careerharbor.in", "1", null);
+        Assert.Equal(required, linked.User.CareerSnapshotRequired);
+        Assert.Equal(required, login.User.CareerSnapshotRequired);
+    }
+
     private static Fixture CreateFixture(bool enabled = true)
     {
         var users = new UserRepositoryFake();

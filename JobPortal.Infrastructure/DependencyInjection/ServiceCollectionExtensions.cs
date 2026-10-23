@@ -116,6 +116,15 @@ public static class ServiceCollectionExtensions
         }).ConfigurePrimaryHttpMessageHandler(SuccessFactorsHttpTransport.CreateHandler)
             .AddHttpMessageHandler<AggregationHttpRetryHandler>();
         services.AddScoped<IExternalJobProvider, AshbyExternalJobProvider>();
+        services.AddOptions<SmartRecruitersOptions>().Bind(configuration.GetSection("JobAggregation:SmartRecruiters"))
+            .Validate(value => value.IsValid(), "Invalid bounded SmartRecruiters options.").ValidateOnStart();
+        services.AddHttpClient(SmartRecruitersJobSourceProvider.HttpClientName, client =>
+        {
+            client.Timeout = Timeout.InfiniteTimeSpan;
+            client.DefaultRequestHeaders.Accept.ParseAdd("application/json");
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("CareerHarborJobAggregation/1.0 (+https://careerharbor.in)");
+        }).ConfigurePrimaryHttpMessageHandler(SuccessFactorsHttpTransport.CreateHandler);
+        services.AddScoped<IExternalJobProvider, SmartRecruitersJobSourceProvider>();
         services.AddHttpClient(SuccessFactorsJobSourceProvider.HttpClientName, client =>
         {
             client.Timeout = Timeout.InfiniteTimeSpan;

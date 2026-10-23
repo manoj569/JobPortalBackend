@@ -52,6 +52,53 @@ public sealed class CandidateService(
         [".docx"] = ["application/vnd.openxmlformats-officedocument.wordprocessingml.document"]
     };
 
+    public async Task<CandidateProfileResponse> UpdateCareerSnapshotAsync(
+        Guid userId, UpdateCareerSnapshotRequest request, CancellationToken cancellationToken = default)
+    {
+        await new UpdateCareerSnapshotRequestValidator().ValidateAndThrowAsync(request, cancellationToken);
+        var user = await RequiredCandidateAsync(userId, cancellationToken);
+        var primaryRole = NormalizeSelectionWhitespace(request.PrimaryRole);
+        var skills = request.Skills.Select(NormalizeSelectionWhitespace)
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var existingSkills = await candidates.GetSkillsAsync(userId, cancellationToken);
+        try
+        {
+            user.CareerStage = request.CareerStage;
+            user.WorkStatus = request.CareerStage == CareerStage.Experienced
+                ? CandidateWorkStatus.Experienced : CandidateWorkStatus.Fresher;
+            // Preferred roles already represent career interests. Their first entry is primary.
+            user.PreferredJobRolesJson = SerializeStrings(new[] { primaryRole }
+                .Concat(Deserialize<string>(user.PreferredJobRolesJson).Skip(1))
+                .Distinct(StringComparer.OrdinalIgnoreCase).Take(3).ToArray());
+            user.YearsOfExperience = request.YearsOfExperience;
+            if (request.City is not null)
+            {
+                user.CurrentCity = NormalizeSelectionWhitespace(request.City);
+                user.Location = user.CurrentCity;
+            }
+            user.WorkPreferencesJson = JsonSerializer.Serialize(request.WorkPreferences);
+            // Use the same structured skills edited through profile/skills; no second skills store.
+            foreach (var name in skills.Where(name => !existingSkills.Any(skill =>
+                         string.Equals(skill.NormalizedName, NormalizeSkillName(name), StringComparison.Ordinal))))
+                await candidates.AddSkillAsync(new CandidateSkill
+                {
+                    UserId = userId, Name = name, NormalizedName = NormalizeSkillName(name)
+                }, cancellationToken);
+            user.OnboardingCompletedAtUtc ??= UtcNow;
+            user.CareerSnapshotRequired = false;
+            await auditWriter.AppendAsync(new(AuditAction.Update, "CandidateProfile",
+                user.Id.ToString(), Actor: new(userId, "Candidate")), cancellationToken);
+            // EF saves profile, skills, audit and requirement together in one transaction.
+            await unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+        catch
+        {
+            unitOfWork.ResetAfterFailure();
+            throw;
+        }
+        return await GetProfileAsync(userId, cancellationToken);
+    }
+
     public async Task<CandidateProfileResponse> GetProfileAsync(Guid userId, CancellationToken cancellationToken = default)
     {
         var user = await RequiredCandidateAsync(userId, cancellationToken);
@@ -905,7 +952,9 @@ public sealed class CandidateService(
         Deserialize<EmploymentType>(user.PreferredJobTypesJson), MapResume(user, resumeId), user.PhoneNumber,
         photo is not null, photo?.Version.ToString("N"), MapBasicDetails(user, storedSkills),
         MapCareerPreferences(user), totalExperienceYears, user.PhoneNumber,
-        user.PhoneConfirmed, user.AvailabilityToJoin);
+        user.PhoneConfirmed, user.AvailabilityToJoin, user.CareerSnapshotRequired,
+        Deserialize<string>(user.PreferredJobRolesJson).FirstOrDefault(), user.CareerStage,
+        user.YearsOfExperience, Deserialize<WorkPreference>(user.WorkPreferencesJson));
     private static CandidateBasicDetailsResponse MapBasicDetails(User user,
         IReadOnlyCollection<string> storedSkills) => new(
         user.Email, user.PhoneNumber, user.PhoneConfirmed, user.WorkStatus, user.IsOutsideIndia, user.CurrentCountry,
