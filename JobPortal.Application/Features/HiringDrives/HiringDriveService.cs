@@ -16,6 +16,15 @@ public sealed class HiringDriveService(IHiringDriveRepository repository, IUnitO
         (await repository.PublicAsync(clock.GetUtcNow().UtcDateTime, cancellationToken)).Select(Public).ToArray();
     public async Task<IReadOnlyCollection<PublicHiringDriveResponse>> HomepageAsync(CancellationToken cancellationToken) =>
         (await repository.HomepageAsync(clock.GetUtcNow().UtcDateTime, cancellationToken)).Select(Public).ToArray();
+    public async Task<PublicHiringDriveDetailResponse> PublicDetailAsync(Guid id, CancellationToken cancellationToken)
+    {
+        var drive = await repository.PublicDetailAsync(id, clock.GetUtcNow().UtcDateTime, cancellationToken)
+            ?? throw new NotFoundException("Hiring drive is unavailable.");
+        return new(drive.Id, drive.Title, drive.Subtitle, drive.Description, drive.BadgeText, drive.BadgeType,
+            drive.Company is { } company ? new(company.Id, company.Name, company.LogoUrl) : null,
+            drive.ImageUrl, drive.LocationText, drive.ExperienceText, drive.IsSponsored,
+            drive.StartAtUtc, drive.EndAtUtc);
+    }
 
     public async Task<PagedResponse<AdminHiringDriveResponse>> SearchAsync(HiringDriveQuery query, CancellationToken cancellationToken)
     {

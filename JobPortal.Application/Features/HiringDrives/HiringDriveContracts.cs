@@ -25,6 +25,10 @@ public sealed record PublicHiringDriveResponse(Guid Id, string Title, string? Su
     string? BadgeText, string? BadgeType, HiringDriveCompany? Company, string? ImageUrl,
     string? LocationText, string? ExperienceText, bool IsSponsored, HiringDriveDestination Destination,
     string? Description = null, DateTime? StartAtUtc = null, DateTime? EndAtUtc = null);
+public sealed record PublicHiringDriveDetailResponse(Guid Id, string Title, string? Subtitle,
+    string? Description, string? BadgeText, string? BadgeType, HiringDriveCompany? Company,
+    string? ImageUrl, string? LocationText, string? ExperienceText, bool IsSponsored,
+    DateTime StartAtUtc, DateTime? EndAtUtc);
 public sealed record AdminHiringDriveResponse(Guid Id, SaveHiringDriveRequest Campaign,
     long ImpressionCount, long ClickCount, decimal Ctr, DateTime CreatedAtUtc,
     DateTime? UpdatedAtUtc, Guid? CreatedByUserId, Guid? UpdatedByUserId);
@@ -33,6 +37,7 @@ public interface IHiringDriveRepository
 {
     Task<IReadOnlyCollection<HiringDrive>> PublicAsync(DateTime now, CancellationToken cancellationToken);
     Task<IReadOnlyCollection<HiringDrive>> HomepageAsync(DateTime now, CancellationToken cancellationToken);
+    Task<HiringDrive?> PublicDetailAsync(Guid id, DateTime now, CancellationToken cancellationToken);
     Task<(IReadOnlyCollection<HiringDrive> Items, int Total)> SearchAsync(HiringDriveQuery query, CancellationToken cancellationToken);
     Task<HiringDrive?> GetAsync(Guid id, CancellationToken cancellationToken);
     Task<bool> CompanyExistsAsync(Guid id, CancellationToken cancellationToken);
@@ -45,6 +50,7 @@ public interface IHiringDriveService
 {
     Task<IReadOnlyCollection<PublicHiringDriveResponse>> PublicAsync(CancellationToken cancellationToken);
     Task<IReadOnlyCollection<PublicHiringDriveResponse>> HomepageAsync(CancellationToken cancellationToken);
+    Task<PublicHiringDriveDetailResponse> PublicDetailAsync(Guid id, CancellationToken cancellationToken);
     Task<PagedResponse<AdminHiringDriveResponse>> SearchAsync(HiringDriveQuery query, CancellationToken cancellationToken);
     Task<AdminHiringDriveResponse> GetAsync(Guid id, CancellationToken cancellationToken);
     Task<AdminHiringDriveResponse> SaveAsync(Guid actorId, Guid? id, SaveHiringDriveRequest request, CancellationToken cancellationToken);
