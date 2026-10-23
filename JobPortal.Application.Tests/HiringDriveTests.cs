@@ -21,6 +21,7 @@ public sealed class HiringDriveTests
 {
     private static readonly string[] OrderedTitles = ["C", "B", "A"];
     private static readonly string[] CardFields = ["badgeText", "badgeType", "company", "description", "destination", "endAtUtc", "experienceText", "id", "imageUrl", "isSponsored", "locationText", "startAtUtc", "subtitle", "title"];
+    private static readonly string[] DetailFields = ["badgeText", "badgeType", "company", "description", "endAtUtc", "experienceText", "id", "imageUrl", "isSponsored", "locationText", "startAtUtc", "subtitle", "title"];
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly DateTime Now = new(2026, 10, 23, 0, 0, 0, DateTimeKind.Utc);
     private static SaveHiringDriveRequest Request() => new("Verified drive", Now.AddDays(-1), ApplyUrl: "https://careers.example.test/apply", IsActive: true);
@@ -155,6 +156,101 @@ public sealed class HiringDriveTests
         var json = JsonSerializer.SerializeToElement(response, JsonOptions);
         Assert.Equal(CardFields, json.EnumerateObject().Select(x => x.Name).Order());
         Assert.False(json.GetProperty("destination").TryGetProperty("jobId", out _));
+    }
+
+    [Fact]
+    public async Task PublicDetailReturnsAvailableCampaignWithoutDestinationAndDoesNotRequireHomepagePlacement()
+    {
+        using var f = new Fixture();
+        var start = Now.AddDays(-1);
+        var end = Now.AddDays(2);
+        var company = new Company { Name = "Detail company", Slug = Guid.NewGuid().ToString("N"), LogoUrl = "https://example.test/logo.png" };
+        var drive = new HiringDrive
+        {
+            Title = "Public detail", Subtitle = "Subtitle", Description = "Stored description",
+            BadgeText = "Hiring", BadgeType = "hiring", ImageUrl = "https://example.test/image.png",
+            LocationText = "Remote", ExperienceText = "Entry level", ApplyUrl = "https://private.example.test/apply",
+            StartAtUtc = start, EndAtUtc = end, IsActive = true, ShowOnHome = false, IsSponsored = true,
+            Company = company
+        };
+        f.Db.HiringDrives.Add(drive);
+        await f.Db.SaveChangesAsync();
+
+        var detail = await f.Service.PublicDetailAsync(drive.Id, default);
+        Assert.Equal(drive.Id, detail.Id);
+        Assert.Equal(drive.Title, detail.Title);
+        Assert.Equal(drive.Description, detail.Description);
+        Assert.Equal(start, detail.StartAtUtc);
+        Assert.Equal(end, detail.EndAtUtc);
+        Assert.True(detail.IsSponsored);
+        Assert.Equal(company.Id, detail.Company!.Id);
+        Assert.Equal(company.Name, detail.Company.Name);
+        Assert.Empty(await f.Service.HomepageAsync(default));
+        var json = JsonSerializer.SerializeToElement(detail, JsonOptions);
+        Assert.Equal(DetailFields, json.EnumerateObject().Select(x => x.Name).Order());
+        Assert.False(json.TryGetProperty("destination", out _));
+        Assert.False(json.TryGetProperty("applyUrl", out _));
+    }
+
+    [Fact]
+    public async Task PublicDetailRejectsUnavailableCampaignsAndInternalJobs()
+    {
+        using var f = new Fixture();
+        var inactive = NewDrive("inactive detail", Now.AddDays(-1), showOnHome: false, displayOrder: 0);
+        inactive.IsActive = false;
+        var future = NewDrive("future detail", Now.AddDays(1), showOnHome: false, displayOrder: 0);
+        var expired = NewDrive("expired detail", Now.AddDays(-2), showOnHome: false, displayOrder: 0);
+        expired.EndAtUtc = Now.AddDays(-1);
+        var deleted = NewDrive("deleted detail", Now.AddDays(-1), showOnHome: false, displayOrder: 0);
+        deleted.IsDeleted = true;
+        var company = new Company { Name = "Unavailable detail fixture", Slug = Guid.NewGuid().ToString("N") };
+        var unavailableJob = new Job
+        {
+            ReferenceNumber = "unavailable-detail-job", Title = "Draft job",
+            Slug = "unavailable-detail-job-" + Guid.NewGuid().ToString("N"),
+            Status = JobPortal.Domain.Enums.JobStatus.Draft, Company = company
+        };
+        var deletedCompany = new Company { Name = "Deleted detail company", Slug = Guid.NewGuid().ToString("N") };
+        var deletedJob = new Job
+        {
+            ReferenceNumber = "deleted-detail-job", Title = "Deleted job",
+            Slug = "deleted-detail-job-" + Guid.NewGuid().ToString("N"),
+            Status = JobPortal.Domain.Enums.JobStatus.Published, PublishedAtUtc = Now.AddDays(-1),
+            Company = deletedCompany, IsDeleted = true
+        };
+        var internalDrive = NewDrive("internal unavailable detail", Now.AddDays(-1), showOnHome: false, displayOrder: 0);
+        internalDrive.Job = unavailableJob;
+        var deletedJobDrive = NewDrive("internal deleted job detail", Now.AddDays(-1), showOnHome: false, displayOrder: 0);
+        deletedJobDrive.Job = deletedJob;
+        f.Db.AddRange(inactive, future, expired, deleted, internalDrive, deletedJobDrive);
+        await f.Db.SaveChangesAsync();
+
+        foreach (var drive in new[] { inactive, future, expired, deleted, internalDrive, deletedJobDrive })
+            await Assert.ThrowsAsync<NotFoundException>(() => f.Service.PublicDetailAsync(drive.Id, default));
+        await Assert.ThrowsAsync<NotFoundException>(() => f.Service.PublicDetailAsync(Guid.NewGuid(), default));
+    }
+
+    [Fact]
+    public async Task PublicDetailAllowsAnInternalCampaignWithAVisibleJob()
+    {
+        using var f = new Fixture();
+        var company = new Company { Name = "Public detail fixture", Slug = Guid.NewGuid().ToString("N") };
+        var job = new Job
+        {
+            ReferenceNumber = "public-detail-job", Title = "Public job",
+            Slug = "persisted-public-detail-slug", Status = JobPortal.Domain.Enums.JobStatus.Published,
+            PublishedAtUtc = Now.AddDays(-1), Company = company
+        };
+        var drive = NewDrive("internal detail", Now.AddDays(-1), showOnHome: false, displayOrder: 0);
+        drive.Job = job;
+        f.Db.HiringDrives.Add(drive);
+        await f.Db.SaveChangesAsync();
+
+        var detail = await f.Service.PublicDetailAsync(drive.Id, default);
+        Assert.Equal(drive.Id, detail.Id);
+        var json = JsonSerializer.SerializeToElement(detail, JsonOptions);
+        Assert.False(json.TryGetProperty("jobId", out _));
+        Assert.False(json.TryGetProperty("destination", out _));
     }
     [Fact]
     public async Task InternalDestinationWinsWhenBothProvided()

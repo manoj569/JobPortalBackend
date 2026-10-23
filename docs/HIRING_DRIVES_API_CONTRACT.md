@@ -22,10 +22,10 @@ Each public item has exactly these JSON keys (nullable values serialize as JSON 
 | `locationText` | string or null | |
 | `experienceText` | string or null | |
 | `isSponsored` | boolean | |
-| `description` | string or null | Public campaign description |
+| `description` | string or null | Stored public campaign description |
 | `startAtUtc` | date-time | Campaign start |
 | `endAtUtc` | date-time or null | Campaign deadline when configured |
-| `destination` | object | Internal `{ type, jobId }` or external `{ type, url }` |
+| `destination` | object | Internal `{ type, jobId }` or external `{ type, url }`; resolve actual navigation through the click endpoint |
 
 Not returned: companyId as a separate property, ApplyUrl as a separate property, display order, analytics counts, active flag, or audit fields. A company ID is nested under `company.id`. Internal jobs take precedence when both JobId and ApplyUrl are set.
 
@@ -62,6 +62,36 @@ Example matching the controller, DTOs and serializer:
 ```
 
 The values above illustrate shape only; no such campaign is seeded. Empty result is `{"data":[]}`.
+
+## Public detail
+
+`GET /api/public/hiring-drives/{id}`
+
+Anonymous; `{id}` must be a UUID. Success is HTTP 200 with `ApiResponse<PublicHiringDriveDetailResponse>`. The detail response contains the stored public campaign fields (`id`, `title`, `subtitle`, `description`, `badgeText`, `badgeType`, `company`, `imageUrl`, `locationText`, `experienceText`, `isSponsored`, `startAtUtc`, and `endAtUtc`). It deliberately contains no destination, `jobId`, or raw `applyUrl`; callers resolve Apply through the tracked click endpoint.
+
+The endpoint applies the same public availability rules as the normal list: not deleted, active, started, not expired (the end time is inclusive), and for internal campaigns the linked Job must satisfy the existing public job-detail visibility query. `showOnHome` is not required; it controls homepage placement only. Unavailable or missing campaigns return the normal HTTP 404 not-found response. No salary, eligibility, education, skills, selection process, benefits, work mode, employment type, or other fields absent from the stored campaign are inferred or added.
+
+Example:
+
+```json
+{
+  "data": {
+    "id": "5c0911bb-b080-4f40-b461-76993d889ba1",
+    "title": "Software hiring drive",
+    "subtitle": "Graduate Engineer",
+    "description": "A public hiring opportunity.",
+    "badgeText": "Hiring Now",
+    "badgeType": "hiring",
+    "company": { "id": "fa29151f-7372-4e59-a19a-6dc18f66e516", "name": "Example Company", "logoUrl": null },
+    "imageUrl": null,
+    "locationText": "Bengaluru",
+    "experienceText": "0-1 year",
+    "isSponsored": false,
+    "startAtUtc": "2026-10-22T00:00:00Z",
+    "endAtUtc": null
+  }
+}
+```
 
 ## Homepage carousel campaigns
 
@@ -192,7 +222,7 @@ Create and update use `SaveHiringDriveRequest`; JSON property names are camelCas
 | `startAtUtc` | ISO date-time string | Required | Must be present and have UTC kind (`Z` recommended) |
 | `companyId` | UUID or null | Optional, nullable | If provided, must reference a nondeleted existing Company |
 | `subtitle` | string or null | Optional, nullable | Max 300 |
-| `description` | string or null | Optional, nullable | Max 10000; not returned publicly |
+| `description` | string or null | Optional, nullable | Max 10000; returned as stored campaign text on public listing and detail |
 | `badgeText` | string or null | Optional, nullable | Max 60 |
 | `badgeType` | string or null | Optional, nullable | `hiring`, `walkIn`, `openings`, `featured`, or null |
 | `imageUrl` | string or null | Optional, nullable | Max 2048; if provided must be an absolute HTTPS URL with host, no credentials/control characters/backslash |
@@ -211,6 +241,8 @@ At least one of `jobId` or `applyUrl` must be present. Both may be present. Clie
 `AdminHiringDriveResponse`: `id` UUID, `campaign` SaveHiringDriveRequest, `impressionCount` integer (64-bit), `clickCount` integer (64-bit), `ctr` decimal number, `createdAtUtc` date-time, `updatedAtUtc` nullable date-time, `createdByUserId` nullable UUID, `updatedByUserId` nullable UUID. CTR is `clickCount / impressionCount * 100`, or zero when impressions is zero. It is not rounded in service code; JSON numeric formatting is serializer-controlled.
 
 `PublicHiringDriveResponse`: fields listed in Public list, plus `description` string or null, `startAtUtc` date-time, and `endAtUtc` date-time or null for public campaign details. These are campaign fields already stored by the backend; internal notes and admin audit data are not exposed. Nested company has `id` UUID, `name` string, `logoUrl` string or null. Public destination `type` is the exact string `internalJob` or `external`; internal has UUID `jobId`, external has string `url`.
+
+`PublicHiringDriveDetailResponse`: `id`, `title`, `subtitle`, `description`, `badgeText`, `badgeType`, `company`, `imageUrl`, `locationText`, `experienceText`, `isSponsored`, `startAtUtc`, and `endAtUtc`. It contains no destination or apply URL; the click endpoint remains the only apply destination resolver.
 
 ## Enum values
 
@@ -279,13 +311,14 @@ Content-Type: application/json
 
 ## Frontend integration notes
 
-- Use the configured API origin and `/api` base path. Public controller is `[AllowAnonymous]`; no bearer token is required for public list or analytics.
+- Use the configured API origin and `/api` base path. Public controller is `[AllowAnonymous]`; no bearer token is required for public list, detail, or analytics. The public homepage may send anonymous users to login before Apply as a frontend experience rule; the backend click endpoint remains anonymous for compatibility.
 - Public endpoint is CORS-enabled only for configured `Cors:AllowedOrigins` in deployed environments. Development also allows `http://localhost:5173` and `http://localhost:4173`. A frontend production origin must be added to that server configuration or browsers will block cross-origin reads. Credentials are allowed by the default CORS policy. This source cannot establish whether a particular deployed frontend origin is currently configured.
 - Public JSON is inside `data`; map `response.data`. Admin list is `response.data.items`; pagination fields are in that same data object.
 - Call impressions when cards become visible, not merely after fetching. A batch may include up to 50 unique IDs. 204 has no body.
 - On apply, POST click, then use `response.data.destinationType`; for `internalJob` navigate directly using the returned authoritative `jobSlug` (retain `jobId` as stable identity), and for `external` navigate to returned `url`. Do not perform JobId-to-search-to-slug resolution or use a client-supplied destination.
 - Respect 429 and retry with backoff. Analytics count accepted events, not unique viewers/clickers. Rate limit is in-memory per API process and IP based for feature writes.
 - Render title, subtitle, badge, location, experience and description as text, never as HTML.
+- `showOnHome` selects homepage placement only; `isSponsored` is a separate presentation flag. Neither changes public detail availability.
 
 ## TypeScript types
 
