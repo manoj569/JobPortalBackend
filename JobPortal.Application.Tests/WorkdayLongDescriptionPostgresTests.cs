@@ -69,20 +69,20 @@ public sealed class WorkdayLongDescriptionPostgresTests(WorkdayCheckpointDatabas
         await db.SaveChangesAsync();
         var job = new Job { CompanyId = company.Id, Title = "Software Engineer", ReferenceNumber = Guid.NewGuid().ToString("N"),
             Slug = Guid.NewGuid().ToString("N"), Description = "Normal description", ApplicationUrl = "https://fixture.test/jobs/1",
-            Requirements = new string('s', 8001) };
+            EducationRequirement = new string('s', 201) };
         db.Add(job);
         var logger = new SafeLogger();
         var unit = new UnitOfWork(db, logger);
         var exception = await Assert.ThrowsAsync<DbUpdateException>(() => unit.SaveChangesAsync());
         Assert.Equal("22001", Assert.IsType<PostgresException>(exception.InnerException).SqlState);
-        Assert.Equal("Jobs.Requirements (Job.Requirements): 8001/8000", exception.Data["PersistenceLengthViolations"]);
+        Assert.Equal("Jobs.EducationRequirement (Job.EducationRequirement): 201/200", exception.Data["PersistenceLengthViolations"]);
         var message = Assert.Single(logger.Messages);
-        Assert.Contains("Property=Requirements", message);
-        Assert.Contains("ObservedLength=8001", message);
-        Assert.DoesNotContain(job.Requirements, message);
+        Assert.Contains("Property=EducationRequirement", message);
+        Assert.Contains("ObservedLength=201", message);
+        Assert.DoesNotContain(job.EducationRequirement, message);
         Assert.DoesNotContain(job.ApplicationUrl, message);
         unit.ResetAfterFailure();
-        job.Requirements = "Normal requirements";
+        job.EducationRequirement = "Graduate";
         db.Entry(job).State = EntityState.Added;
         await unit.SaveChangesAsync();
         Assert.True(await db.Jobs.AsNoTracking().AnyAsync(x => x.Id == job.Id));

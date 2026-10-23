@@ -319,16 +319,19 @@ public sealed partial class PublicJobRepository(
     }
 #pragma warning restore CA1304, CA1311, CA1862
 
-    private IQueryable<Job> AvailableJobs()
-    {
-        var utcNow = timeProvider.GetUtcNow().UtcDateTime;
-        return context.Jobs.AsNoTracking().Where(job =>
+    internal static IQueryable<Job> AvailableJobs(IQueryable<Job> jobs, DateTime utcNow) =>
+        jobs.AsNoTracking().Where(job =>
             job.Status == JobStatus.Published &&
             !job.Company.IsDeleted && (job.CategoryId == null || (job.Category != null && !job.Category.IsDeleted)) &&
             !job.IsHidden &&
             !job.IsDeleted &&
             job.PublishedAtUtc.HasValue &&
             (job.AcquisitionSource != null && (job.AcquisitionSource.ProviderKey == "website-crawler" || job.AcquisitionSource.ProviderKey == "talentd") || !job.ExpiresAtUtc.HasValue || job.ExpiresAtUtc > utcNow));
+
+    private IQueryable<Job> AvailableJobs()
+    {
+        var utcNow = timeProvider.GetUtcNow().UtcDateTime;
+        return AvailableJobs(context.Jobs, utcNow);
     }
 
 #pragma warning disable CA1304, CA1311, CA1862 // Parameterless casing is translated by EF; comparison overloads are not.

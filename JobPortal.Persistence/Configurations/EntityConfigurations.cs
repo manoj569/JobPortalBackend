@@ -228,9 +228,9 @@ public sealed class JobConfiguration : IEntityTypeConfiguration<Job>
         builder.Property(x => x.Slug).HasMaxLength(270).IsRequired();
         // Employer-authored long-form content is unbounded (PostgreSQL text).
         builder.Property(x => x.Description).IsRequired();
-        builder.Property(x => x.Responsibilities).HasMaxLength(8000);
-        builder.Property(x => x.Requirements).HasMaxLength(8000);
-        builder.Property(x => x.Benefits).HasMaxLength(4000);
+        builder.Property(x => x.Responsibilities).HasColumnType("text");
+        builder.Property(x => x.Requirements).HasColumnType("text");
+        builder.Property(x => x.Benefits).HasColumnType("text");
         builder.Property(x => x.ApplicationUrl).HasMaxLength(2048).IsRequired();
         builder.Property(x => x.DiscoveredUrl).HasMaxLength(2048);
         builder.Property(x => x.CanonicalJobUrl).HasMaxLength(2048);
@@ -396,6 +396,9 @@ public sealed class JobReferralConfiguration : IEntityTypeConfiguration<JobRefer
         builder.Property(x => x.ApprovalStatus).IsConcurrencyToken();
         builder.ToTable("JobReferrals", table => table.HasCheckConstraint("CK_JobReferrals_Slots", "\"ReferralSlots\" > 0"));
         builder.Property(x => x.ReferralSlots).HasDefaultValue(1);
+        builder.Property(x => x.LinkedInUrl).HasMaxLength(2048);
+        builder.Property(x => x.ContactEmail).HasMaxLength(254);
+        builder.Property(x => x.ContactPhone).HasMaxLength(40);
         builder.ConfigureBaseEntity();
 
         builder.Property(x => x.SourceUrl)

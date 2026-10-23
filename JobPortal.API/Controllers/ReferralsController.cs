@@ -41,6 +41,16 @@ public sealed class ReferralsController(
             new ApiResponse<JobReferralResponse>(result, "Referral submitted for admin approval."));
     }
 
+    [HttpPut("{id:guid}/contact-preferences")]
+    [Authorize]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    public async Task<ActionResult<ApiResponse<JobReferralResponse>>> UpdateContact(
+        Guid id, [FromBody] UpdateReferralContactRequest request, CancellationToken cancellationToken)
+    {
+        var result = await referralService.UpdateContactAsync(User.GetRequiredUserId(), id, request, cancellationToken);
+        return Ok(new ApiResponse<JobReferralResponse>(result));
+    }
+
     /// <summary>
     /// Public listing of approved referral jobs for the "Referral jobs" browse tab.
     /// No contact details.
@@ -68,6 +78,7 @@ public sealed class ReferralsController(
     /// Referrer's own past submissions with search, status filtering, and pagination.
     /// </summary>
     [HttpGet("mine")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
     [Authorize]
     [ProducesResponseType(typeof(ApiResponse<PagedResponse<JobReferralResponse>>), StatusCodes.Status200OK)]
     public async Task<ActionResult<ApiResponse<PagedResponse<JobReferralResponse>>>> GetMine(

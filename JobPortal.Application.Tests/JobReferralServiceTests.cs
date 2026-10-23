@@ -20,7 +20,7 @@ public sealed class JobReferralServiceTests
     {
         var f = CreateFixture();
         f.Referrals.AdministratorIds = [f.AdminUserId];
-        var submitted = await f.Service.SubmitAsync(f.ReferrerUserId, new(new(new("Role")), null, true, false, false));
+        var submitted = await f.Service.SubmitAsync(f.ReferrerUserId, new(new(new("Role")), null, true, false, false, LinkedInUrl: "https://linkedin.com/in/offer"));
         Assert.Equal(JobReferralApprovalStatus.Pending, submitted.ApprovalStatus);
         Assert.Equal(2, f.Outbox.Deliveries.Count);
         Assert.All(f.Outbox.Deliveries, d =>
@@ -39,7 +39,7 @@ public sealed class JobReferralServiceTests
     public async Task DecisionsEnqueueExactlyTwoReferrerDeliveriesAndRetriesDoNotDuplicate(JobReferralApprovalStatus decision, NotificationSource source)
     {
         var f = CreateFixture();
-        var submitted = await f.Service.SubmitAsync(f.ReferrerUserId, new(new(new("Test")), null, true, false, false));
+        var submitted = await f.Service.SubmitAsync(f.ReferrerUserId, new(new(new("Test")), null, true, false, false, LinkedInUrl: "https://linkedin.com/in/offer"));
         await f.Service.ReviewAsync(submitted.Id, f.AdminUserId, new(decision, "Admin-only text"));
         Assert.Equal(2, f.Outbox.Deliveries.Count);
         Assert.All(f.Outbox.Deliveries, d =>
@@ -68,7 +68,7 @@ public sealed class JobReferralServiceTests
         foreach (var name in Enumerable.Range(1, 25).Select(x => $"Skill {x}").Concat([" C# ", "c#", " "]))
             job.JobSkills.Add(new JobSkill { Skill = new Skill { Name = name } });
         var submitted = await fixture.Service.SubmitAsync(fixture.ReferrerUserId,
-            new(new(new("Test")), null, true, true, true));
+            new(new(new("Test")), null, true, true, true, LinkedInUrl: "https://linkedin.com/in/offer", ContactEmail: "offer@example.com", ContactPhone: "+91 9876543210"));
         await fixture.Service.ReviewAsync(submitted.Id, fixture.AdminUserId, new(JobReferralApprovalStatus.Approved, null));
 
         var card = Assert.Single((await fixture.Service.GetApprovedPublicAsync(1, 20)).Items);
@@ -98,7 +98,7 @@ public sealed class JobReferralServiceTests
     {
         var fixture = CreateFixture();
         var submitted = await fixture.Service.SubmitAsync(fixture.ReferrerUserId,
-            new(new(new("Test")), null, true, false, false));
+            new(new(new("Test")), null, true, false, false, LinkedInUrl: "https://linkedin.com/in/offer"));
         await fixture.Service.ReviewAsync(submitted.Id, fixture.AdminUserId, new(JobReferralApprovalStatus.Approved, null));
         var seeker = Guid.NewGuid();
         fixture.Memberships.ActiveMembershipUserId = seeker;
@@ -135,7 +135,7 @@ public sealed class JobReferralServiceTests
             StartDate = new DateOnly(2023, 9, 18)
         });
         var submitted = await fixture.Service.SubmitAsync(fixture.ReferrerUserId,
-            new(new(new("Test")), null, true, false, false));
+            new(new(new("Test")), null, true, false, false, LinkedInUrl: "https://linkedin.com/in/offer"));
         await fixture.Service.ReviewAsync(submitted.Id, fixture.AdminUserId, new(JobReferralApprovalStatus.Approved, null));
         var card = Assert.Single((await fixture.Service.GetApprovedPublicAsync(1, 20)).Items);
         Assert.Equal(published && visible ? "Test role" : null, card.ReferrerCurrentRole);
@@ -152,7 +152,7 @@ public sealed class JobReferralServiceTests
             "https://example.test/jobs/frontend-developer",
             ShowLinkedIn: true,
             ShowEmail: false,
-            ShowPhone: false));
+            ShowPhone: false, LinkedInUrl: "https://www.linkedin.com/in/riya"));
 
         Assert.Equal(JobReferralApprovalStatus.Pending, response.ApprovalStatus);
         Assert.True(response.ShowLinkedIn);
@@ -170,7 +170,7 @@ public sealed class JobReferralServiceTests
             fixture.ReferrerUserId,
             new SubmitJobReferralRequest(
                 new ComposeJobRequest(new ComposeJobDraftRequest("Backend Developer")),
-                null, ShowLinkedIn: false, ShowEmail: false, ShowPhone: false)));
+                null, ShowLinkedIn: false, ShowEmail: false, ShowPhone: false, LinkedInUrl: "https://www.linkedin.com/in/riya")));
     }
 
     [Fact]
@@ -179,7 +179,7 @@ public sealed class JobReferralServiceTests
         var fixture = CreateFixture();
         var submitted = await fixture.Service.SubmitAsync(fixture.ReferrerUserId, new SubmitJobReferralRequest(
             new ComposeJobRequest(new ComposeJobDraftRequest("QA Engineer")),
-            null, ShowLinkedIn: true, ShowEmail: false, ShowPhone: false));
+            null, ShowLinkedIn: true, ShowEmail: false, ShowPhone: false, LinkedInUrl: "https://www.linkedin.com/in/riya"));
 
         // Rejecting without a reason is invalid.
         await Assert.ThrowsAsync<BadRequestException>(() => fixture.Service.ReviewAsync(
@@ -206,7 +206,7 @@ public sealed class JobReferralServiceTests
         var fixture = CreateFixture();
         var submitted = await fixture.Service.SubmitAsync(fixture.ReferrerUserId, new SubmitJobReferralRequest(
             new ComposeJobRequest(new ComposeJobDraftRequest("Data Analyst")),
-            null, ShowLinkedIn: true, ShowEmail: false, ShowPhone: true));
+            null, ShowLinkedIn: true, ShowEmail: false, ShowPhone: true, LinkedInUrl: "https://www.linkedin.com/in/riya", ContactPhone: "+91 9876543210"));
         await fixture.Service.ReviewAsync(
             submitted.Id, fixture.AdminUserId, new ReviewJobReferralRequest(JobReferralApprovalStatus.Approved, null));
 
@@ -230,7 +230,7 @@ public sealed class JobReferralServiceTests
         var fixture = CreateFixture();
         await fixture.Service.SubmitAsync(fixture.ReferrerUserId, new SubmitJobReferralRequest(
             new ComposeJobRequest(new ComposeJobDraftRequest("Unreviewed Role")),
-            null, ShowLinkedIn: true, ShowEmail: false, ShowPhone: false));
+            null, ShowLinkedIn: true, ShowEmail: false, ShowPhone: false, LinkedInUrl: "https://www.linkedin.com/in/riya"));
 
         // Still pending, not approved.
         await Assert.ThrowsAsync<NotFoundException>(
@@ -249,7 +249,7 @@ public sealed class JobReferralServiceTests
                 null,
                 ShowLinkedIn: true,
                 ShowEmail: false,
-                ShowPhone: false));
+                ShowPhone: false, LinkedInUrl: "https://www.linkedin.com/in/riya"));
 
         var result = await fixture.Service.GetMySubmissionsAsync(
             fixture.ReferrerUserId,
@@ -271,6 +271,71 @@ public sealed class JobReferralServiceTests
         var f = CreateFixture();
         await Assert.ThrowsAsync<BadRequestException>(() =>
             f.Service.GetMySubmissionsAsync(f.ReferrerUserId, null, null, int.MaxValue, 50));
+    }
+
+    [Theory]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(false, false, true)]
+    [InlineData(true, true, true)]
+    public async Task ExplicitContactValuesAreTrimmedStoredAndReturnedOnlyWhenEnabled(bool linkedIn, bool email, bool phone)
+    {
+        var f = CreateFixture();
+        var result = await f.Service.SubmitAsync(f.ReferrerUserId, new SubmitJobReferralRequest(
+            new ComposeJobRequest(new ComposeJobDraftRequest("Role")), null, linkedIn, email, phone,
+            LinkedInUrl: "  https://www.linkedin.com/in/offer  ", ContactEmail: " offer@example.com ",
+            ContactPhone: " +91 9876543210 "));
+        var stored = (await f.Referrals.GetByIdAsync(result.Id))!;
+        Assert.Equal(linkedIn ? "https://www.linkedin.com/in/offer" : null, stored.LinkedInUrl);
+        Assert.Equal(email ? "offer@example.com" : null, stored.ContactEmail);
+        Assert.Equal(phone ? "+91 9876543210" : null, stored.ContactPhone);
+        var own = Assert.Single((await f.Service.GetMySubmissionsAsync(f.ReferrerUserId, null, null, 1, 10)).Items);
+        Assert.Equal(stored.LinkedInUrl, own.LinkedInUrl);
+        Assert.Equal(stored.ContactEmail, own.ContactEmail);
+        Assert.Equal(stored.ContactPhone, own.ContactPhone);
+        Assert.DoesNotContain("offer@example.com", System.Text.Json.JsonSerializer.Serialize(f.Audit.Events));
+    }
+
+    [Theory]
+    [InlineData(true, false, false, null, null, null)]
+    [InlineData(false, true, false, null, null, null)]
+    [InlineData(false, false, true, null, null, null)]
+    [InlineData(true, false, false, "https://linkedin.com.evil.test/in/person", null, null)]
+    [InlineData(true, false, false, "http://linkedin.com/in/person", null, null)]
+    [InlineData(true, false, false, "https://www.linkedin.com/jobs", null, null)]
+    [InlineData(false, true, false, null, "not-an-email", null)]
+    [InlineData(false, false, true, null, null, "call-me")]
+    [InlineData(false, false, true, null, null, "+123")]
+    [InlineData(false, false, true, null, null, "+1234567890123456")]
+    public async Task InvalidContactIsRejectedBeforeCreatingReferral(bool linkedIn, bool email, bool phone,
+        string? url, string? address, string? number)
+    {
+        var f = CreateFixture();
+        await Assert.ThrowsAsync<BadRequestException>(() => f.Service.SubmitAsync(f.ReferrerUserId,
+            new SubmitJobReferralRequest(new ComposeJobRequest(new ComposeJobDraftRequest("Role")),
+                null, linkedIn, email, phone, LinkedInUrl: url, ContactEmail: address, ContactPhone: number)));
+        Assert.Empty((await f.Service.GetMySubmissionsAsync(f.ReferrerUserId, null, null, 1, 10)).Items);
+    }
+
+    [Fact]
+    public async Task UpdateIsOwnerOnlyAndReplacesValuesAndClearsDisabledMethods()
+    {
+        var f = CreateFixture();
+        var created = await f.Service.SubmitAsync(f.ReferrerUserId, new SubmitJobReferralRequest(
+            new ComposeJobRequest(new ComposeJobDraftRequest("Role")), null, true, false, false,
+            LinkedInUrl: "https://linkedin.com/in/offer"));
+        var update = new UpdateReferralContactRequest(false, true, true, "https://linkedin.com/in/ignored",
+            " new@example.com ", " +44 (20) 1234-5678 ");
+        await Assert.ThrowsAsync<NotFoundException>(() => f.Service.UpdateContactAsync(Guid.NewGuid(), created.Id, update));
+        await Assert.ThrowsAsync<BadRequestException>(() => f.Service.UpdateContactAsync(f.ReferrerUserId, created.Id,
+            new UpdateReferralContactRequest(false, true, false)));
+        Assert.Equal("https://linkedin.com/in/offer", (await f.Referrals.GetByIdAsync(created.Id))!.LinkedInUrl);
+        var changed = await f.Service.UpdateContactAsync(f.ReferrerUserId, created.Id, update);
+        Assert.Null(changed.LinkedInUrl);
+        Assert.Equal("new@example.com", changed.ContactEmail);
+        Assert.Equal("+44 (20) 1234-5678", changed.ContactPhone);
+        var again = await f.Service.UpdateContactAsync(f.ReferrerUserId, created.Id, update);
+        Assert.Equal(changed, again);
     }
 
     private static Fixture CreateFixture()

@@ -24,6 +24,49 @@ public sealed class ReferralMarketplaceTests
         Assert.Equal(0, await f.Db.ReferralRequests.CountAsync());
     }
     [Fact]
+    public async Task ExplicitOfferContactsArePrivateAndDoNotUseProfileFallback()
+    {
+        await using var f = await ReferralFixture.CreateAsync();
+        var offer = await f.Db.JobReferrals.SingleAsync();
+        offer.ShowLinkedIn = true; offer.ShowEmail = true; offer.ShowPhone = false;
+        offer.LinkedInUrl = "https://linkedin.com/in/explicit-offer";
+        offer.ContactEmail = "private-offer@example.com";
+        offer.ContactPhone = "+91 9876543210";
+        await f.Db.SaveChangesAsync();
+        f.Db.ChangeTracker.Clear();
+        offer = await f.Db.JobReferrals.SingleAsync();
+        Assert.Equal("private-offer@example.com", offer.ContactEmail);
+        var row = await f.Request();
+        await Error("REFERRAL_CONTACT_NOT_AVAILABLE", () => f.Service.ContactAsync(f.CandidateId, row.Id, default));
+        var listing = JsonSerializer.Serialize(await f.Public.GetApprovedPublicAsync(1, 20, f.CandidateId));
+        Assert.DoesNotContain("private-offer", listing);
+        Assert.DoesNotContain("explicit-offer", listing);
+        await f.Service.AcceptAsync(f.ReferrerId, row.Id, default);
+        var contact = await f.Service.ContactAsync(f.CandidateId, row.Id, default);
+        Assert.Equal(offer.LinkedInUrl, contact.LinkedInUrl);
+        Assert.Equal(offer.ContactEmail, contact.Email);
+        Assert.Null(contact.PhoneNumber);
+        var other = await f.AddCandidate();
+        await Assert.ThrowsAsync<NotFoundException>(() => f.Service.ContactAsync(other, row.Id, default));
+        Assert.Null(await f.Service.ContactForOpportunityAsync(other, f.ReferralId, default));
+        Assert.Null((await f.Public.UnlockContactAsync(other, f.JobId)).Contact);
+        await f.Public.UpdateContactAsync(f.ReferrerId, f.ReferralId,
+            new UpdateReferralContactRequest(false, true, true, ContactEmail: "changed@example.com",
+                ContactPhone: "+44 2012345678"));
+        f.Db.ChangeTracker.Clear();
+        var changed = await f.Service.ContactAsync(f.CandidateId, row.Id, default);
+        Assert.Null(changed.LinkedInUrl);
+        Assert.Equal("changed@example.com", changed.Email);
+        Assert.Equal("+44 2012345678", changed.PhoneNumber);
+        offer = await f.Db.JobReferrals.SingleAsync();
+        offer.LinkedInUrl = null; offer.ContactEmail = null; offer.ContactPhone = null;
+        await f.Db.SaveChangesAsync();
+        var legacy = await f.Service.ContactAsync(f.CandidateId, row.Id, default);
+        Assert.Null(legacy.LinkedInUrl); Assert.Null(legacy.Email); Assert.Null(legacy.PhoneNumber);
+        Assert.Single((await f.Public.GetApprovedPublicAsync(1, 20)).Items);
+    }
+
+    [Fact]
     public async Task RequestDoesNotConsumeAndDuplicateIsBlocked()
     {
         await using var f = await ReferralFixture.CreateAsync();
@@ -450,7 +493,7 @@ internal sealed class ReferralFixture : IAsyncDisposable
             Status = JobStatus.Published,
             PublishedAtUtc = Clock.Utc
         };
-        var opportunity = new JobReferral { Job = job, ReferrerUserId = ReferrerId, ApprovalStatus = JobReferralApprovalStatus.Approved, ReferralSlots = slots, ShowEmail = true };
+        var opportunity = new JobReferral { Job = job, ReferrerUserId = ReferrerId, ApprovalStatus = JobReferralApprovalStatus.Approved, ReferralSlots = slots, ShowEmail = true, ContactEmail = "employee@example.test" };
         Db.Add(opportunity); await Db.SaveChangesAsync(); return opportunity.Id;
     }
     public ValueTask DisposeAsync() => Db.DisposeAsync();

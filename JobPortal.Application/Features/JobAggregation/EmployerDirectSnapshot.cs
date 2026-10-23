@@ -68,10 +68,16 @@ public sealed class EmployerDirectSnapshotProvider(IJobSourceRunStore? runs = nu
     public AtsType AtsType => AtsType.Custom;
     public async Task<ExternalJobSourceSnapshot> FetchSnapshotAsync(JobSource source, CancellationToken cancellationToken = default)
     {
-        if (source.AtsIdentifier is EmployerDirectInventoryContract.Identifier or "employer-direct:auto-v1")
+        if (source.AtsType != AtsType.Custom)
+            throw new InvalidOperationException("Employer acquisition requires a Custom source.");
+        if (source.AtsIdentifier is EmployerDirectInventoryContract.Identifier or GenericEmployerContract.Identifier)
             return await (scanner ?? throw new InvalidOperationException("Inventory scanner is not registered.")).ScanAsync(source, cancellationToken);
         var runId = checkpoint?.RunId ?? throw new InvalidOperationException("Employer snapshot requires a durable source run.");
         var run = await (runs ?? throw new InvalidOperationException("Employer run store is not registered.")).GetAsync(source.Id, runId, cancellationToken) ?? throw new InvalidOperationException("Source run not found.");
+        // The old UI alias also supports explicit snapshot submissions. Only runs
+        // without a submitted payload may fall through to live acquisition.
+        if (source.AtsIdentifier == GenericEmployerContract.LegacyIdentifier && string.IsNullOrEmpty(run.CheckpointJson))
+            return await (scanner ?? throw new InvalidOperationException("Generic scanner is not registered.")).ScanAsync(source, cancellationToken);
         var envelope = run.CheckpointJson is null ? null : JsonSerializer.Deserialize<EmployerDirectSnapshotEnvelope>(run.CheckpointJson, EmployerDirectSnapshotService.JsonOptions);
         if (source.AtsIdentifier != "employer-direct" || envelope?.Kind != "employer-direct-v1" || envelope.Snapshot.CompanyId != source.CompanyId ||
             envelope.Snapshot.CareerPageUrl != source.CareerPageUrl || envelope.Snapshot.IsComplete)

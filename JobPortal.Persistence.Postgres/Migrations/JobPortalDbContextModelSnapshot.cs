@@ -3899,6 +3899,122 @@ namespace JobPortal.Persistence.Postgres.Migrations
                     b.ToTable("ExternalJobSiteSessions", (string)null);
                 });
 
+            modelBuilder.Entity("JobPortal.Domain.Entities.HiringDrive", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ApplyUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.Property<string>("BadgeText")
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)");
+
+                    b.Property<string>("BadgeType")
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<long>("ClickCount")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid?>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(10000)
+                        .HasColumnType("character varying(10000)");
+
+                    b.Property<int>("DisplayOrder")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("EndAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ExperienceText")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("ImageUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.Property<long>("ImpressionCount")
+                        .HasColumnType("bigint");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsSponsored")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid?>("JobId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("LocationText")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime>("StartAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Subtitle")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("IsDeleted");
+
+                    b.HasIndex("JobId");
+
+                    b.HasIndex("UpdatedByUserId");
+
+                    b.HasIndex("IsActive", "DisplayOrder", "CreatedAtUtc")
+                        .HasFilter("\"IsDeleted\" = FALSE");
+
+                    b.HasIndex("IsActive", "StartAtUtc", "EndAtUtc");
+
+                    b.ToTable("HiringDrives", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_HiringDrives_Counts", "\"ClickCount\" >= 0 AND \"ImpressionCount\" >= 0");
+
+                            t.HasCheckConstraint("CK_HiringDrives_Dates", "\"EndAtUtc\" IS NULL OR \"EndAtUtc\" > \"StartAtUtc\"");
+
+                            t.HasCheckConstraint("CK_HiringDrives_Destination", "\"JobId\" IS NOT NULL OR \"ApplyUrl\" IS NOT NULL");
+
+                            t.HasCheckConstraint("CK_HiringDrives_DisplayOrder", "\"DisplayOrder\" >= 0");
+                        });
+                });
+
             modelBuilder.Entity("JobPortal.Domain.Entities.InsightHelpfulnessFeedback", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4170,8 +4286,7 @@ namespace JobPortal.Persistence.Postgres.Migrations
                         .HasColumnType("character varying(2048)");
 
                     b.Property<string>("Benefits")
-                        .HasMaxLength(4000)
-                        .HasColumnType("character varying(4000)");
+                        .HasColumnType("text");
 
                     b.Property<string>("CanonicalApplicationUrlHash")
                         .HasMaxLength(64)
@@ -4295,12 +4410,10 @@ namespace JobPortal.Persistence.Postgres.Migrations
                         .HasColumnType("character varying(50)");
 
                     b.Property<string>("Requirements")
-                        .HasMaxLength(8000)
-                        .HasColumnType("character varying(8000)");
+                        .HasColumnType("text");
 
                     b.Property<string>("Responsibilities")
-                        .HasMaxLength(8000)
-                        .HasColumnType("character varying(8000)");
+                        .HasColumnType("text");
 
                     b.Property<string>("RoleCategory")
                         .HasMaxLength(150)
@@ -4724,6 +4837,14 @@ namespace JobPortal.Persistence.Postgres.Migrations
                         .IsConcurrencyToken()
                         .HasColumnType("integer");
 
+                    b.Property<string>("ContactEmail")
+                        .HasMaxLength(254)
+                        .HasColumnType("character varying(254)");
+
+                    b.Property<string>("ContactPhone")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -4735,6 +4856,10 @@ namespace JobPortal.Persistence.Postgres.Migrations
 
                     b.Property<Guid>("JobId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("LinkedInUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
 
                     b.Property<int>("ReferralSlots")
                         .ValueGeneratedOnAdd()
@@ -7926,6 +8051,33 @@ namespace JobPortal.Persistence.Postgres.Migrations
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.HiringDrive", b =>
+                {
+                    b.HasOne("JobPortal.Domain.Entities.Company", "Company")
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("JobPortal.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("JobPortal.Domain.Entities.Job", "Job")
+                        .WithMany()
+                        .HasForeignKey("JobId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("JobPortal.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("UpdatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Company");
+
+                    b.Navigation("Job");
                 });
 
             modelBuilder.Entity("JobPortal.Domain.Entities.InsightHelpfulnessFeedback", b =>

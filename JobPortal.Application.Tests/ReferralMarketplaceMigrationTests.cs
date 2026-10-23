@@ -12,6 +12,25 @@ namespace JobPortal.Application.Tests;
 public sealed class ReferralMarketplaceMigrationTests
 {
     [Fact]
+    public void ContactMigrationAddsOnlyNullableBoundedColumnsAndCanBeReversed()
+    {
+        var migration = new AddReferralContactValues();
+        var columns = migration.UpOperations.OfType<AddColumnOperation>().ToArray();
+        Assert.Equal(3, columns.Length);
+        Assert.Equal(3, migration.UpOperations.Count);
+        Assert.All(columns, column =>
+        {
+            Assert.Equal("JobReferrals", column.Table);
+            Assert.True(column.IsNullable);
+            Assert.Null(column.DefaultValue);
+        });
+        Assert.Equal(2048, Assert.Single(columns, c => c.Name == "LinkedInUrl").MaxLength);
+        Assert.Equal(254, Assert.Single(columns, c => c.Name == "ContactEmail").MaxLength);
+        Assert.Equal(40, Assert.Single(columns, c => c.Name == "ContactPhone").MaxLength);
+        Assert.Equal(3, migration.DownOperations.OfType<DropColumnOperation>().Count());
+    }
+
+    [Fact]
     public void MigrationAddsOnlyRequestsSlotsAndTheirConstraintsAndIndexes()
     {
         var migration = new AddReferralMarketplacePhase1();

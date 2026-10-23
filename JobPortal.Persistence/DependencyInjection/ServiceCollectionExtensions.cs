@@ -31,6 +31,7 @@ public static class ServiceCollectionExtensions
                     null);
             }), poolSize: 128);
         services.AddScoped(provider => provider.GetRequiredService<IDbContextFactory<JobPortalDbContext>>().CreateDbContext());
+        services.AddScoped<JobPortal.Application.Features.HiringDrives.IHiringDriveRepository, HiringDriveRepository>();
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<JobPortal.Application.Features.AIResume.IAIResumeRepository, AIResumeRepository>();
         services.AddScoped<JobPortal.Application.Features.Support.ISupportTicketRepository, SupportTicketRepository>();

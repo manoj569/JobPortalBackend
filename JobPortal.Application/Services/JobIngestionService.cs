@@ -252,6 +252,7 @@ public sealed class JobIngestionService(
         // This is the last boundary before either creation or mutation of Jobs.
         // Publication status cannot substitute for positive hiring-location evidence.
         rawJob = new ExternalJobNormalizer().Normalize(rawJob);
+        if (ExternalJobStorageContract.Validate(rawJob) is { } storageError) return Invalid(storageError);
         var website = (rawJob.AcquisitionProviderKey is "website-crawler" or "talentd") && rawJob.AcquisitionSourceId is { } acquisitionId &&
             acquisitionSources is not null && await acquisitionSources.GetSourceByIdAsync(acquisitionId, cancellationToken) is
                 { ProviderKey: "website-crawler" or "talentd", IsEnabled: true, IsDeleted: false };

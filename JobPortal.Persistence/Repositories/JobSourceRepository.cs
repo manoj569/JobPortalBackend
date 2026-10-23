@@ -22,9 +22,9 @@ public sealed class JobSourceRepository(JobPortalDbContext context, IOptions<Job
         return context.JobSources.AsNoTracking()
             .Where(JobSourceSchedule.DuePredicate(nowUtc,
                 options?.Value.Scheduler.InterruptedRunCooldownMinutes ?? 60))
-            // Payload-only sources require explicit submissions. Configured inventory-v1
-            // sources execute through this existing scheduler and durable run worker.
-            .Where(x => x.AtsType != AtsType.Custom || (x.AtsIdentifier == EmployerDirectInventoryContract.Identifier || x.AtsIdentifier == "employer-direct:auto-v1"))
+            // Inventory and generic website sources (including the old UI alias)
+            // execute through the existing scheduler and durable run worker.
+            .Where(x => x.AtsType != AtsType.Custom || (x.AtsIdentifier == EmployerDirectInventoryContract.Identifier || x.AtsIdentifier == GenericEmployerContract.Identifier || x.AtsIdentifier == GenericEmployerContract.LegacyIdentifier))
             .Where(x => !context.JobSourceRuns.Where(JobSourceRunStore.ActivePredicate).Any(r => r.JobSourceId == x.Id))
             .OrderBy(x => x.LastRunAtUtc.HasValue)
             .ThenBy(x => x.LastRunAtUtc).ThenBy(x => x.Id)
@@ -47,7 +47,10 @@ public sealed class JobSourceRepository(JobPortalDbContext context, IOptions<Job
     public Task<bool> ConfigurationExistsAsync(Guid companyId, AtsType atsType, string? atsIdentifier,
         Guid? excludingId = null, CancellationToken cancellationToken = default) =>
         context.JobSources.AnyAsync(x => x.CompanyId == companyId && x.AtsType == atsType &&
-            x.AtsIdentifier == atsIdentifier && (!excludingId.HasValue || x.Id != excludingId), cancellationToken);
+            (x.AtsIdentifier == atsIdentifier || atsType == AtsType.Custom &&
+                (atsIdentifier == GenericEmployerContract.Identifier || atsIdentifier == GenericEmployerContract.LegacyIdentifier) &&
+                (x.AtsIdentifier == GenericEmployerContract.Identifier || x.AtsIdentifier == GenericEmployerContract.LegacyIdentifier)) &&
+            (!excludingId.HasValue || x.Id != excludingId), cancellationToken);
 
     public Task AddAsync(JobSource source, CancellationToken cancellationToken = default) =>
         context.JobSources.AddAsync(source, cancellationToken).AsTask();

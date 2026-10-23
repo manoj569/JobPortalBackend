@@ -46,6 +46,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddApplication(this IServiceCollection services)
     {
         services.AddSingleton<IJobClassificationService, JobClassificationService>();
+        services.AddScoped<JobPortal.Application.Features.HiringDrives.IHiringDriveService, JobPortal.Application.Features.HiringDrives.HiringDriveService>();
         services.AddValidatorsFromAssembly(typeof(ServiceCollectionExtensions).Assembly);
         services.AddScoped<JobPortal.Application.Features.Support.ISupportTicketService,
             JobPortal.Application.Features.Support.SupportTicketService>();
