@@ -109,7 +109,13 @@ public sealed class GlobalExceptionMiddleware(
             };
 
             // 3. Log the error
-            if (statusCode >= 500 && context.Request.Path.Equals(new PathString("/api/internal/v1/jobs/bulk-import")))
+            if (statusCode == StatusCodes.Status400BadRequest && context.Request.Path.StartsWithSegments("/api/admin/job-sources"))
+            {
+                var sourceError = JobSourceRequestErrors.FromException(exception, context);
+                error = sourceError;
+                JobSourceRequestErrors.Log(logger, context, sourceError);
+            }
+            else if (statusCode >= 500 && context.Request.Path.Equals(new PathString("/api/internal/v1/jobs/bulk-import")))
                 BulkImportRequestFailed(logger, context.TraceIdentifier, exception.GetType().Name);
             else if (statusCode >= 500)
                 UnhandledRequestException(logger, context.Request.Method, context.Request.Path, exception);

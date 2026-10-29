@@ -25,8 +25,10 @@ public sealed partial class RippleHireSourceDiscovery(IHttpClientFactory clients
             var direct = RippleHireSourceConfiguration.Resolve(directUrl, identifier);
             if (direct.IsValid)
                 return await VerifyAsync(RippleHireSourceConfiguration.Normalize(input!), "ManualUrlVerified", budget.Token);
-            // A supplied token or candidate query must not silently fall back to a different board.
-            if (!string.IsNullOrWhiteSpace(identifier) || RippleHireSourceConfiguration.IsTenant(input!) && input!.Query.Length != 0)
+            // A complete candidate URL must not silently fall back to a different board.
+            // On employer/tenant entry pages, an identifier is a constraint on public discovery,
+            // not a substitute for finding and verifying the publicly exposed token.
+            if (RippleHireSourceConfiguration.IsTenant(input!) && input!.Query.Length != 0)
                 return Failed("InvalidConfiguration", direct.ReasonCode, direct.Message);
             if (input!.Fragment.Length != 0)
                 return Failed("Unsupported", "RIPPLEHIRE_DISCOVERY_UNSUPPORTED", "Provide the employer career page or tenant root without a job fragment, or a complete public career URL.");
@@ -43,7 +45,10 @@ public sealed partial class RippleHireSourceDiscovery(IHttpClientFactory clients
                 return Failed("Ambiguous", "RIPPLEHIRE_DISCOVERY_AMBIGUOUS", "Multiple distinct RippleHire public sources were exposed. Supply the exact employer public career URL containing its token.");
             if (candidates.Count == 0)
                 return Failed("NotFound", "RIPPLEHIRE_PUBLIC_TOKEN_NOT_FOUND", "No supported public RippleHire career URL was exposed. Supply the employer's complete https://{tenant}.ripplehire.com/candidate/?token=... URL. Internal shareToken fields are not public source evidence.");
-            return await VerifyAsync(candidates.Single(), "Resolved", budget.Token);
+            var candidate = candidates.Single();
+            var constrained = RippleHireSourceConfiguration.Resolve(candidate, identifier);
+            if (!constrained.IsValid) return Failed("InvalidConfiguration", constrained.ReasonCode, constrained.Message);
+            return await VerifyAsync(candidate, "Resolved", budget.Token);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception error) when (error is HttpRequestException or OperationCanceledException or InvalidDataException or JsonException or InvalidOperationException or RegexMatchTimeoutException)
