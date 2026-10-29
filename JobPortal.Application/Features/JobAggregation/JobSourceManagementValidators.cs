@@ -7,21 +7,22 @@ public sealed class SaveJobSourceRequestValidator : AbstractValidator<SaveJobSou
 {
     public SaveJobSourceRequestValidator()
     {
-        RuleFor(x => x.CompanyId).NotEmpty();
-        RuleFor(x => x.CareerPageUrl).NotEmpty().MaximumLength(2048)
+        RuleFor(x => x.CompanyId).NotEmpty().WithErrorCode("COMPANY_REQUIRED").WithMessage("CompanyId must be the GUID of an existing company.");
+        RuleFor(x => x.CareerPageUrl).NotEmpty().WithErrorCode("CAREER_URL_REQUIRED").MaximumLength(2048).WithErrorCode("CAREER_URL_TOO_LONG")
             .Must(value => Uri.TryCreate(value?.Trim(), UriKind.Absolute, out var uri) &&
                 uri.Scheme is "http" or "https" && string.IsNullOrEmpty(uri.UserInfo))
-            .WithMessage("CareerPageUrl must be an absolute HTTP or HTTPS URL without credentials.");
-        RuleFor(x => x.AtsType).IsInEnum();
-        RuleFor(x => x.AtsIdentifier).MaximumLength(255);
-        RuleFor(x => x.MissingCompleteSnapshotThreshold).InclusiveBetween(2, 100);
-        RuleFor(x => x.ScanIntervalMinutes).InclusiveBetween(1, 10080);
+            .WithErrorCode("CAREER_URL_INVALID").WithMessage("CareerPageUrl must be an absolute HTTP or HTTPS URL without credentials.");
+        RuleFor(x => x.AtsType).IsInEnum().WithErrorCode("ATS_TYPE_INVALID");
+        RuleFor(x => x.AtsIdentifier).MaximumLength(255).WithErrorCode("ATS_IDENTIFIER_TOO_LONG");
+        RuleFor(x => x.MissingCompleteSnapshotThreshold).InclusiveBetween(2, 100).WithErrorCode("SNAPSHOT_THRESHOLD_INVALID");
+        RuleFor(x => x.ScanIntervalMinutes).InclusiveBetween(1, 10080).WithErrorCode("SCAN_INTERVAL_INVALID");
         RuleFor(x => x).Custom((request, context) =>
         {
             if (request.AtsType == AtsType.RippleHire)
             {
                 if (!RippleHireSourceConfiguration.IsPublicDiscoveryUrl(request.CareerPageUrl, out _))
-                    context.AddFailure(nameof(request.CareerPageUrl), "RippleHire discovery requires a public HTTPS career URL on port 443 without credentials.");
+                    context.AddFailure(new FluentValidation.Results.ValidationFailure(nameof(request.CareerPageUrl), "RippleHire discovery requires a public HTTPS career URL on port 443 without credentials.")
+                        { ErrorCode = "RIPPLEHIRE_DISCOVERY_UNSAFE_URL" });
             }
             else if (request.AtsType is not AtsType.OracleRecruitingCloud and not AtsType.Custom)
             {

@@ -61,6 +61,8 @@ builder.Services.Configure<ApiBehaviorOptions>(options =>
 {
     options.InvalidModelStateResponseFactory = context =>
     {
+        if (context.HttpContext.Request.Path.StartsWithSegments("/api/admin/job-sources"))
+            return JobSourceRequestErrors.BindingFailure(context);
         var hasSpecificError = context.ModelState.Any(entry =>
             !string.Equals(entry.Key, "request", StringComparison.OrdinalIgnoreCase) &&
             entry.Value?.Errors.Count > 0);
