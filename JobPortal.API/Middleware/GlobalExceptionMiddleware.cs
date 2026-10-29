@@ -69,6 +69,8 @@ public sealed class GlobalExceptionMiddleware(
 
                 GoogleRegistrationConflictException google => (google.StatusCode,
                     (object)new ApiError(google.Code, google.Message, LoginMethod: "google")),
+                JobPortal.Application.Abstractions.Jobs.RippleHireDiscoveryException discoveryException =>
+                    (discoveryException.StatusCode, (object)new { code = discoveryException.Code, message = discoveryException.Message, discovery = discoveryException.Discovery }),
                 AppException appException => (appException.StatusCode, (object)new ApiError(appException.Code, appException.Message)),
 
                 ValidationException validationException => (StatusCodes.Status400BadRequest, (object)new ApiError(

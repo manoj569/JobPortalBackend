@@ -18,7 +18,12 @@ public sealed class SaveJobSourceRequestValidator : AbstractValidator<SaveJobSou
         RuleFor(x => x.ScanIntervalMinutes).InclusiveBetween(1, 10080);
         RuleFor(x => x).Custom((request, context) =>
         {
-            if (request.AtsType is not AtsType.OracleRecruitingCloud and not AtsType.Custom)
+            if (request.AtsType == AtsType.RippleHire)
+            {
+                if (!RippleHireSourceConfiguration.IsPublicDiscoveryUrl(request.CareerPageUrl, out _))
+                    context.AddFailure(nameof(request.CareerPageUrl), "RippleHire discovery requires a public HTTPS career URL on port 443 without credentials.");
+            }
+            else if (request.AtsType is not AtsType.OracleRecruitingCloud and not AtsType.Custom)
             {
                 var result = JobSourceConfiguration.Resolve(request.AtsType, request.CareerPageUrl, request.AtsIdentifier);
                 if (!result.IsValid)

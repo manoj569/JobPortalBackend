@@ -17,7 +17,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Update="Fixtures\PublicAts\*.json" CopyToOutputDirectory="PreserveNewest" />
-    <None Update="Fixtures\RippleHire\*.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Fixtures\RippleHire\*" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Fixtures\WebsiteCrawler\*.json" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Fixtures\Talentd\*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

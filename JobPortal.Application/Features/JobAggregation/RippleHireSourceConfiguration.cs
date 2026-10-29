@@ -4,6 +4,27 @@ namespace JobPortal.Application.Features.JobAggregation;
 
 public static partial class RippleHireSourceConfiguration
 {
+    public static bool IsPublicDiscoveryUrl(string? value, out Uri? uri)
+    {
+        uri = null;
+        return value is { Length: > 0 and <= 2048 } && Uri.TryCreate(value, UriKind.Absolute, out uri) &&
+        uri.Scheme == "https" && uri.Port == 443 && uri.UserInfo.Length == 0 &&
+        uri.HostNameType == UriHostNameType.Dns && !uri.IsLoopback && uri.Host.Contains('.') &&
+        !uri.Host.EndsWith(".local", StringComparison.OrdinalIgnoreCase) &&
+        !uri.Host.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase) &&
+        !value.Contains('\\');
+    }
+
+    public static bool IsTenant(Uri uri) => TenantHost().IsMatch(uri.Host);
+
+    public static string Normalize(Uri uri)
+    {
+        var builder = new UriBuilder(uri) { Fragment = "" };
+        var pairs = uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries);
+        builder.Query = string.Join("&", pairs.Order(StringComparer.Ordinal));
+        return builder.Uri.AbsoluteUri;
+    }
+
     public static ResolvedJobSourceConfiguration Resolve(string? url, string? identifier)
     {
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme != "https" || uri.Port != 443 ||

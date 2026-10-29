@@ -151,6 +151,13 @@ public static class ServiceCollectionExtensions
             client.DefaultRequestHeaders.UserAgent.ParseAdd("CareerHarborJobAggregation/1.0 (+https://careerharbor.in)");
         }).ConfigurePrimaryHttpMessageHandler(SuccessFactorsHttpTransport.CreateHandler).RemoveAllLoggers();
         services.AddScoped<IExternalJobProvider, RippleHireJobSourceProvider>();
+        services.AddHttpClient(RippleHireSourceDiscovery.HttpClientName, client =>
+        {
+            client.Timeout = Timeout.InfiniteTimeSpan;
+            client.DefaultRequestHeaders.Accept.ParseAdd("text/html,application/xhtml+xml");
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("CareerHarborJobAggregation/1.0 (+https://careerharbor.in)");
+        }).ConfigurePrimaryHttpMessageHandler(SuccessFactorsHttpTransport.CreateHandler).RemoveAllLoggers();
+        services.AddScoped<IRippleHireSourceDiscovery, RippleHireSourceDiscovery>();
         services.AddScoped<IJobSourceConnectionTester, JobSourceConnectionTester>();
 
         services.Configure<AiExtractionOptions>(configuration.GetSection(AiExtractionOptions.SectionName));

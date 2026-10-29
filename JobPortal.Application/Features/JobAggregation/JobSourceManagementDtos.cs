@@ -1,4 +1,5 @@
 using JobPortal.Domain.Enums;
+using JobPortal.Application.Abstractions.Jobs;
 
 namespace JobPortal.Application.Features.JobAggregation;
 
@@ -26,6 +27,7 @@ public sealed record JobSourceResponse(
     int ConsecutiveFailures, Guid? CategoryId, string? CategoryName,
     DateTime CreatedAtUtc, DateTime? UpdatedAtUtc)
 {
+    public RippleHireDiscoveryResult? Discovery { get; init; }
     public int MissingCompleteSnapshotThreshold { get; init; } = 2;
     public string? EmployerStrategyJson { get; init; }
     public string? EmployerDiagnosticsJson { get; init; }

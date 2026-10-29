@@ -8,11 +8,18 @@ using JobPortal.Domain.Enums;
 namespace JobPortal.Infrastructure.Services;
 
 // Listing-only health check. Does not invoke ingestion, publication or reconciliation.
-public sealed class JobSourceConnectionTester(IHttpClientFactory clients) : IJobSourceConnectionTester
+public sealed class JobSourceConnectionTester(IHttpClientFactory clients, IRippleHireSourceDiscovery? rippleHireDiscovery = null) : IJobSourceConnectionTester
 {
     public async Task<JobSourceConnectionResult> TestAsync(JobSource source, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        if (source.AtsType == AtsType.RippleHire && rippleHireDiscovery is not null)
+        {
+            var result = await rippleHireDiscovery.DiscoverAsync(source.CareerPageUrl, source.AtsIdentifier, cancellationToken);
+            return new(source.AtsType, result.Succeeded, result.Succeeded, result.Succeeded,
+                result.ReasonCode, result.Succeeded ? "Public source verified; save the resolved configuration to persist it." : string.Join(" ", result.ValidationErrors))
+                { Discovery = result };
+        }
         var configuration = JobSourceConfiguration.Resolve(source.AtsType, source.CareerPageUrl, source.AtsIdentifier);
         if (!configuration.IsValid) return new(source.AtsType, false, false, false, configuration.ReasonCode, configuration.Message);
         if (source.AtsType == AtsType.RippleHire)
