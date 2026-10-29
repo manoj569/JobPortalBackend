@@ -12,6 +12,8 @@ public static partial class JobSourceConfiguration
 {
     public static ResolvedJobSourceConfiguration Resolve(AtsType provider, string? careerUrl, string? identifier)
     {
+        if (provider == AtsType.RippleHire)
+            return RippleHireSourceConfiguration.Resolve(careerUrl, identifier);
         if (provider == AtsType.SmartRecruiters)
             return SmartRecruitersSourceConfiguration.Resolve(careerUrl, identifier);
         if (provider == AtsType.Workday)

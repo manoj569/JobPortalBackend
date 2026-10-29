@@ -99,6 +99,14 @@ public sealed class UrlCanonicalizer : IUrlCanonicalizer
             // Build canonical URL
             var canonicalUrl = $"{scheme}://{authority}{path}{normalizedQuery}";
 
+            // RippleHire routes distinct public jobs through a fragment on one board URL.
+            // Dropping that identity merges every job for the employer during URL deduplication.
+            const string rippleJobPrefix = "#detail/job/";
+            if (host.EndsWith(".ripplehire.com", StringComparison.Ordinal) && path == "/candidate" &&
+                uri.Fragment.StartsWith(rippleJobPrefix, StringComparison.Ordinal) &&
+                uri.Fragment.Length > rippleJobPrefix.Length && uri.Fragment[rippleJobPrefix.Length..].All(char.IsAsciiDigit))
+                canonicalUrl += uri.Fragment;
+
             return canonicalUrl;
         }
         catch
