@@ -20,9 +20,9 @@ The observed search returned 1,416 listings. Page 1 and job 905121 detail were a
 
 Fixtures retain actual public listing, next-page and job detail responses. The detail fixture excludes company administration/contact metadata. Tests alter counts/IDs to exercise bounded scenarios; these test variations are never imported or presented as live jobs.
 
-## Supported configuration
+## Resolved provider configuration
 
-`https://{tenant}.ripplehire.com/candidate/?token={public-career-token}` with optional `source={value}` and `lang=en`. Supply the employer's public career token, never a private candidate token. AtsIdentifier may be null or match that token. Fragment-bearing job URLs cannot configure a source. Legacy `/ripplehire/candidate`, custom domains, non-English variants, unknown query parameters, unsafe characters and alternate ports are rejected.
+`https://{tenant}.ripplehire.com/candidate/?token={public-career-token}` with optional `source={value}` and `lang=en`. Supply the employer's public career token, never a private candidate token. AtsIdentifier may be null or match that token. Job-detail fragment URLs cannot configure a source. Public list-view fragments can be normalized during admin discovery as described below. Legacy `/ripplehire/candidate`, custom domains, non-English variants, unknown query parameters, unsafe characters and alternate ports are rejected.
 
 Tenant validation plus the existing connection-pinned public-IP transport blocks private/loopback/link-local/reserved DNS resolutions and DNS rebinding. Redirects, proxies and cookies are disabled. The named client's HTTP logging is disabled so token-bearing URLs do not enter standard HTTP logs.
 
@@ -103,3 +103,112 @@ The provider implements IExternalJobProvider, not the authoritative inventory in
 - Test compilation with normal analyzers is blocked by pre-existing analyzer diagnostics in unrelated test files (for example CA1707 in JobQualityGateTests and JobIngestionServiceTests, and CA1869 in MultiCompanyProviderTests). Executed tests use `-p:RunAnalyzers=false`; application production code still passed the normal analyzer-enabled build.
 - No full live employer import or PostgreSQL production operation was performed.
 - Final RippleHire-specific suite: 23 passed, zero failed, including actual EF in-memory upserts, duplicate identity rejection, verified fixtures, pagination, cancellation, rate limiting, source validation and India geography (`../ripplehire-test-results/ripplehire-focused.trx`).
+
+## Automatic public source discovery
+
+The admin create/update flow now resolves and verifies RippleHire sources before persisting `CareerPageUrl` and `AtsIdentifier`. The provider and scheduled/manual synchronization code are unchanged: they use the saved resolved values and never perform discovery. No database migration is required.
+
+Supported inputs:
+
+1. Existing complete public token URL. It is normalized and listing-verified without fetching HTML.
+2. Public tenant root (`https://{tenant}.ripplehire.com/`) or `/candidate/`. Discovery reads the known public `/candidate/` entry, avoiding the tenant root's employee SSO redirect. A tenant succeeds only if that page exposes a supported public link or metadata; a tenant name alone does not imply a usable token.
+3. Public employer HTTPS careers page containing a direct RippleHire anchor/iframe URL, canonical link, or `og:url` metadata. Relative URLs are resolved against the final fetched page.
+
+The bounded static HTML parser inspects quoted `href`, `src`, and metadata `content` attributes. It ignores HTML comments, script/style content, arbitrary JavaScript strings, forms, `shareToken`/hidden input fields and job-detail fragments. It does not execute JavaScript, visit linked employer pages, scrape search engines, or guess tokens. Public `#list`/`#list/...` view fragments can be removed to recover the candidate root; the existing India eligibility policy remains responsible for import geography. Fragment filters are not persisted or treated as supported API filters.
+
+Repeated links with the same tenant and token count as one source. Multiple distinct tenant/token pairs produce an Ambiguous result before any listing calls. A single exposed source is normalized, passed through RippleHireSourceConfiguration and verified with the existing provider's first-page search and response validator. Failure never creates/updates a source. Create/update return the normalized saved URL/token and a transient `discovery` result. Search/GET continue returning the persisted normal source fields; discovery results are not a new database field.
+
+Security limits: HTTPS/default port only; no credentials or literal IP hosts. Every redirect is revalidated and uses the existing DNS-pinned public-IP transport, which rejects private, loopback, reserved and mixed public/private address sets at the actual connection. Automatic redirects, proxying and cookies remain disabled. Discovery permits at most four redirects/five HTML requests, ten seconds per HTML request, 1 MiB HTML bodies, one-second regex timeouts and a 45-second overall budget (including listing verification). Known auth/login/SSO paths, authentication failures, anti-bot pages without usable public evidence and unsafe redirects fail closed. HTTP request logging is disabled on discovery and provider clients. Errors contain fixed actionable messages, without raw response bodies or HTTP exception URLs. Caller cancellation propagates.
+
+### Verified employer evidence
+
+On 29 October 2026:
+
+- `https://www.ltm.com/india-careers` exposed `https://ltimindtree.ripplehire.com/candidate/?token=xviyQvbnyYZdGtozXoNm&lang=en&source=CAREERSITE#list/geo=India`. Its exact token was independently verified using the existing public search POST, returning `errorStatus=success` and 1,416 jobs. The captured public anchor is stored in `Fixtures/RippleHire/employer-careers.html` with HTML entity normalization and link text for the fixture; the URL and token are actual public evidence. Employer identities/URLs are not hardcoded into discovery.
+- `https://www.ltm.com/us-careers` exposed more than one distinct token (`nP1GISU2A024qt3otg3V` and `xviyQvbnyYZdGtozXoNm`). This is an ambiguity example, not a claimed successful automatic resolution.
+- LTM and UST tenant roots redirected toward employee SSO. The public `/candidate/` entries exposed empty `token` inputs and internal `shareToken` fields; the observed LTM shareToken returned HTTP 500 when independently checked. Those fields are deliberately unsupported. No successful token discovery from these bare tenants is claimed. Tenant-link/metadata success is covered by mocked tests and remains conditional on public exposure.
+
+These observations verify specific public configurations, not universal RippleHire support. No full employer job import was run live.
+
+### Admin API contract
+
+Existing POST/PUT `/api/admin/job-sources` accepts the same JSON fields. For RippleHire, `careerPageUrl` may now be an employer careers URL or tenant entry, and `atsIdentifier` should be null for discovery. An explicitly supplied identifier must match a complete public token URL; discovery never silently replaces a conflicting token.
+
+```json
+{
+  "companyId": "<existing-employer-company-guid>",
+  "careerPageUrl": "https://www.ltm.com/india-careers",
+  "atsType": 8,
+  "atsIdentifier": null,
+  "isActive": true,
+  "scanIntervalMinutes": 720,
+  "autoPublishEnabled": false
+}
+```
+
+The existing generic connection-test action additionally accepts POST `/api/admin/job-sources/test` with an unsaved configuration body. This permits preview before a source exists, using the same tester implementation. Existing POST `/{id}/test` still tests the saved configuration without a body. Both are Administrator-only and neither persists anything or imports jobs.
+
+```http
+POST /api/admin/job-sources/test
+Content-Type: application/json
+Authorization: Bearer <administrator-token>
+
+{"atsType":8,"careerPageUrl":"https://www.ltm.com/india-careers","atsIdentifier":null}
+```
+
+Successful test response shape (example derived from the verified source; not a live API invocation):
+
+```json
+{
+  "data": {
+    "provider": 8,
+    "configurationValid": true,
+    "providerReachable": true,
+    "listingReachable": true,
+    "reasonCode": "RIPPLEHIRE_SOURCE_VERIFIED",
+    "message": "Public source verified; save the resolved configuration to persist it.",
+    "statusCode": null,
+    "discovery": {
+      "status": "Resolved",
+      "resolvedCareerPageUrl": "https://ltimindtree.ripplehire.com/candidate/?lang=en&source=CAREERSITE&token=xviyQvbnyYZdGtozXoNm",
+      "manualConfigurationRequired": false,
+      "reasonCode": "RIPPLEHIRE_SOURCE_VERIFIED",
+      "validationErrors": [],
+      "succeeded": true
+    }
+  }
+}
+```
+
+Discovery statuses: `Resolved`, `ManualUrlVerified`, `UnsafeInput`, `InvalidConfiguration`, `Unsupported`, `NotFound`, `Ambiguous`, `VerificationFailed`. Failure sets `manualConfigurationRequired=true`, `resolvedCareerPageUrl=null` and supplies `validationErrors`. Test failures are returned as structured test results; create/update failure returns HTTP 400 with `code`, `message`, and `discovery`, leaving the saved configuration untouched. Transport/verification failures may be transient: the message also suggests retrying.
+
+### Frontend work required
+
+No frontend files were changed. The existing free-text career URL field can submit these inputs immediately. To expose the improved onboarding flow, change the RippleHire field hint to allow employer/tenant URLs and make the token optional; use the generic unsaved `/test` action for preview; display `discovery.status`, the resolved URL, validation errors and manual fallback guidance. Show the saved normalized URL after create/update. Keep a complete-token URL input as the manual fallback. Avoid rejecting employer URLs with frontend-only tenant validation. Other ATS forms and payloads remain unchanged.
+
+### Discovery files changed
+
+- JobPortal.Application/Abstractions/Jobs/IRippleHireSourceDiscovery.cs (new contract, result and structured exception)
+- JobPortal.Application/Abstractions/Jobs/IJobSourceConnectionTester.cs
+- JobPortal.Application/Features/JobAggregation/RippleHireSourceConfiguration.cs
+- JobPortal.Application/Features/JobAggregation/JobSourceManagementDtos.cs
+- JobPortal.Application/Features/JobAggregation/JobSourceManagementValidators.cs
+- JobPortal.Application/Features/JobAggregation/JobSourceManagementService.cs
+- JobPortal.Infrastructure/Services/RippleHireSourceDiscovery.cs (new implementation)
+- JobPortal.Infrastructure/Services/JobSourceConnectionTester.cs
+- JobPortal.Infrastructure/DependencyInjection/ServiceCollectionExtensions.cs
+- JobPortal.API/Controllers/AdminJobSourcesController.cs
+- JobPortal.API/Middleware/GlobalExceptionMiddleware.cs
+- JobPortal.Application.Tests/RippleHireSourceDiscoveryTests.cs (new)
+- JobPortal.Application.Tests/Fixtures/RippleHire/employer-careers.html (new)
+- JobPortal.Application.Tests/JobPortal.Application.Tests.csproj
+- JobPortal.Application.Tests/JobSourceAdministrationTests.cs (fixture injection helper)
+- docs/RIPPLEHIRE_INTEGRATION.md
+
+### Discovery verification results
+
+- Final analyzer-enabled backend build passed with zero warnings and zero errors: `../ripplehire-discovery-build-final.log`.
+- Final mocked discovery/security/persistence and existing ATS/admin regression run: **274 passed, zero failed, zero skipped**, `../ripplehire-discovery-results/ripplehire-discovery-final.trx`.
+- Tests use the previously documented `-p:RunAnalyzers=false` workaround for unrelated existing test analyzer diagnostics. Production code passed the normal analyzer-enabled build.
+- Discovery tests include verified employer-link extraction, conditional tenant-entry discovery, relative metadata, missing token, ambiguous/equivalent links, unsafe inputs/discovered URLs/redirects, private DNS rejection through the shared transport, redirect loops/limits, body size, verification failures, cancellation, full-token compatibility, structured connection results, failed-save/failed-edit preservation and persisted configuration reused for repeated synchronizations.
+- No push, deployment, migration or live job import was performed.

@@ -73,11 +73,22 @@ public sealed class AdminJobSourcesController(IJobSourceManagementService source
     }
 
     [HttpPost("{id:guid}/test")]
-    public async Task<ActionResult<ApiResponse<JobSourceConnectionResult>>> Test(Guid id, CancellationToken cancellationToken)
+    [HttpPost("test")]
+    public async Task<ActionResult<ApiResponse<JobSourceConnectionResult>>> Test(Guid? id, CancellationToken cancellationToken,
+        [FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] JobSourceConnectionTestRequest? request = null)
     {
-        var saved = await sources.GetByIdAsync(id, cancellationToken);
-        var source = new JobPortal.Domain.Entities.JobSource { Id = saved.Id, CompanyId = saved.CompanyId,
-            AtsType = saved.AtsType, AtsIdentifier = saved.AtsIdentifier, CareerPageUrl = saved.CareerPageUrl };
+        JobPortal.Domain.Entities.JobSource source;
+        if (id is { } sourceId)
+        {
+            var saved = await sources.GetByIdAsync(sourceId, cancellationToken);
+            source = new() { Id = saved.Id, CompanyId = saved.CompanyId,
+                AtsType = saved.AtsType, AtsIdentifier = saved.AtsIdentifier, CareerPageUrl = saved.CareerPageUrl };
+        }
+        else
+        {
+            if (request is null) return BadRequest(new { code = "configuration_required", message = "Supply the ATS type and public career URL to test an unsaved source." });
+            source = new() { AtsType = request.AtsType, CareerPageUrl = request.CareerPageUrl, AtsIdentifier = request.AtsIdentifier };
+        }
         var result = await (connectionTester ?? throw new InvalidOperationException("Connection testing is not registered."))
             .TestAsync(source, cancellationToken);
         return Ok(new ApiResponse<JobSourceConnectionResult>(result));

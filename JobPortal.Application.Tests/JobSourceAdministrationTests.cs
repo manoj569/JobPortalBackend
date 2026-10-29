@@ -544,10 +544,11 @@ internal sealed class JobSourceFixture : IDisposable
         Service = CreateService();
     }
 
-    public JobSourceManagementService CreateService(IJobSourceRunner? runner = null, IUnitOfWork? unitOfWork = null) =>
+    public JobSourceManagementService CreateService(IJobSourceRunner? runner = null, IUnitOfWork? unitOfWork = null,
+        IRippleHireSourceDiscovery? discovery = null) =>
         new(Repository, new CompanyManagementRepository(Context), new CategoryManagementRepository(Context), Resolver,
             runner ?? Runner, Guard, unitOfWork ?? new UnitOfWork(Context), Audit,
-            new SaveJobSourceRequestValidator(), new JobSourceSearchQueryValidator(), Locks);
+            new SaveJobSourceRequestValidator(), new JobSourceSearchQueryValidator(), Locks, discovery);
 
     public void Map(string? value)
     {

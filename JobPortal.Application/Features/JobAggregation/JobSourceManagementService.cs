@@ -22,7 +22,8 @@ public sealed class JobSourceManagementService(
     IAuditWriter audit,
     IValidator<SaveJobSourceRequest> saveValidator,
     IValidator<JobSourceSearchQuery> searchValidator,
-    IJobSourceExecutionLock executionLock) : IJobSourceManagementService
+    IJobSourceExecutionLock executionLock,
+    IRippleHireSourceDiscovery? rippleHireDiscovery = null) : IJobSourceManagementService
 {
     public async Task<PagedResponse<JobSourceResponse>> SearchAsync(
         JobSourceSearchQuery query, CancellationToken cancellationToken = default)
@@ -42,6 +43,8 @@ public sealed class JobSourceManagementService(
     {
         await saveValidator.ValidateAndThrowAsync(request, cancellationToken);
         var company = await RequiredCompanyAsync(request.CompanyId, cancellationToken);
+        var resolution = await ResolveRippleHireAsync(request, cancellationToken);
+        request = resolution.Request;
         var identifier = SourceIdentifier(request);
         await EnsureUniqueAsync(request, identifier, null, cancellationToken);
         var source = new JobSource();
@@ -50,7 +53,7 @@ public sealed class JobSourceManagementService(
         await audit.AppendAsync(new(AuditAction.Create, "JobSource", source.Id.ToString(),
             new Dictionary<string, string?> { ["autoPublishEnabled"] = source.AutoPublishEnabled.ToString() }), cancellationToken);
         await SaveAsync(cancellationToken);
-        return await ToResponseAsync(source, cancellationToken);
+        return (await ToResponseAsync(source, cancellationToken)) with { Discovery = resolution.Discovery };
     }
 
     public async Task<JobSourceResponse> UpdateAsync(Guid id, SaveJobSourceRequest request, CancellationToken cancellationToken = default)
@@ -61,6 +64,8 @@ public sealed class JobSourceManagementService(
         await saveValidator.ValidateAndThrowAsync(request with
             { AutoPublishEnabled = request.AutoPublishEnabled ?? source.AutoPublishEnabled }, cancellationToken);
         var company = await RequiredCompanyAsync(request.CompanyId, cancellationToken);
+        var resolution = await ResolveRippleHireAsync(request, cancellationToken);
+        request = resolution.Request;
         var identifier = SourceIdentifier(request);
         await EnsureUniqueAsync(request, identifier, id, cancellationToken);
         var previousAutoPublish = source.AutoPublishEnabled;
@@ -68,7 +73,7 @@ public sealed class JobSourceManagementService(
         // The source is tracked; do not call the runner's bookkeeping-only Update.
         await AppendPublicationConfigurationAuditAsync(source, previousAutoPublish, cancellationToken);
         await SaveAsync(cancellationToken);
-        return await ToResponseAsync(source, cancellationToken);
+        return (await ToResponseAsync(source, cancellationToken)) with { Discovery = resolution.Discovery };
     }
 
     public async Task<JobSourceResponse> UpdateAutoPublicationAsync(Guid id,
@@ -168,6 +173,17 @@ public sealed class JobSourceManagementService(
 
     private static ConflictException DuplicateSource() =>
         new("A job source with this company, ATS type and identifier already exists.", "duplicate_job_source");
+
+    private async Task<(SaveJobSourceRequest Request, RippleHireDiscoveryResult? Discovery)> ResolveRippleHireAsync(
+        SaveJobSourceRequest request, CancellationToken token)
+    {
+        if (request.AtsType != AtsType.RippleHire) return (request, null);
+        var discovery = rippleHireDiscovery ?? throw new InvalidOperationException("RippleHire discovery is not registered.");
+        var result = await discovery.DiscoverAsync(request.CareerPageUrl, request.AtsIdentifier, token);
+        if (!result.Succeeded || result.ResolvedCareerPageUrl is null) throw new RippleHireDiscoveryException(result);
+        var resolved = JobSourceConfiguration.Require(AtsType.RippleHire, result.ResolvedCareerPageUrl, null);
+        return (request with { CareerPageUrl = result.ResolvedCareerPageUrl, AtsIdentifier = resolved.Identifier }, result);
+    }
 
     private static string? SourceIdentifier(SaveJobSourceRequest request) =>
         request.AtsType == AtsType.OracleRecruitingCloud
