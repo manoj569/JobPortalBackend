@@ -15,6 +15,19 @@ public sealed class JobSourceConnectionTester(IHttpClientFactory clients) : IJob
         cancellationToken.ThrowIfCancellationRequested();
         var configuration = JobSourceConfiguration.Resolve(source.AtsType, source.CareerPageUrl, source.AtsIdentifier);
         if (!configuration.IsValid) return new(source.AtsType, false, false, false, configuration.ReasonCode, configuration.Message);
+        if (source.AtsType == AtsType.RippleHire)
+        {
+            try
+            {
+                using var listing = await RippleHireJobSourceProvider.SearchAsync(clients.CreateClient(RippleHireJobSourceProvider.HttpClientName),
+                    new Uri(source.CareerPageUrl), configuration.Identifier!, 0, cancellationToken);
+                RippleHireJobSourceProvider.ValidateListing(listing.RootElement);
+                return new(source.AtsType, true, true, true, "CONNECTION_VALID", "Public RippleHire listing verified; no jobs imported.");
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception error) when (error is HttpRequestException or JsonException or InvalidDataException or OperationCanceledException or InvalidOperationException)
+            { return new(source.AtsType, true, false, false, JobSourceFailure.Code(error), "Public RippleHire listing could not be verified; check the public career token and source format."); }
+        }
         var name = source.AtsType switch
         {
             AtsType.Greenhouse => GreenhouseExternalJobProvider.HttpClientName,

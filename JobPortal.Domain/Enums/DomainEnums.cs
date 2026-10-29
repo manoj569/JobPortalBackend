@@ -113,7 +113,8 @@ public enum AtsType
     SuccessFactors = 4,
     Workday = 5,
     OracleRecruitingCloud = 6,
-    SmartRecruiters = 7
+    SmartRecruiters = 7,
+    RippleHire = 8
 }
 
 public enum SalaryPeriod { Yearly = 1, Monthly, Hourly }
