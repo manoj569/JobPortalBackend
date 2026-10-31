@@ -210,10 +210,23 @@ public sealed class JobSourceDurableRunTests
         Assert.Equal(1025, row.Created); Assert.Equal(475, row.Updated);
     }
 
-    [Fact]
-    public async Task HeartbeatRenewsDuringLongFetchAndLostLeaseCancelsExecution()
+    [Theory]
+    [InlineData(AtsType.Greenhouse)]
+    [InlineData(AtsType.RippleHire)]
+    public async Task HeartbeatRenewsDuringLongFetchAndLostLeaseCancelsExecution(AtsType ats)
     {
         using var f = new Fixture();
+        f.Source.AtsType = ats;
+        if (ats == AtsType.RippleHire)
+        {
+            f.Source.CareerPageUrl = "https://ust.ripplehire.com/candidate/?token=fixture-public-token";
+            f.Source.AtsIdentifier = null;
+        }
+        else
+        {
+            f.Source.CareerPageUrl = "https://boards.greenhouse.io/acme";
+            f.Source.AtsIdentifier = "acme";
+        }
         await f.Enqueue();
         var started = Signal();
         f.Run = async (_, ct) => { started.TrySetResult(); await Task.Delay(Timeout.Infinite, ct); return Success(f.Source.Id); };

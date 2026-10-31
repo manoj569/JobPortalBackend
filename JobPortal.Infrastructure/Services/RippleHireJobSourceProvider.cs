@@ -11,7 +11,7 @@ namespace JobPortal.Infrastructure.Services;
 
 // Public candidate application v738 contract verified against LTM. No absence reconciliation:
 // offset pagination over a live board does not establish an authoritative inventory.
-public sealed class RippleHireJobSourceProvider(IHttpClientFactory clients, ILogger<RippleHireJobSourceProvider>? logger = null) : IExternalJobProvider
+public sealed class RippleHireJobSourceProvider(IHttpClientFactory clients, ILogger<RippleHireJobSourceProvider>? logger = null) : IBatchedExternalJobProvider
 {
     private static readonly Action<ILogger, Guid, int, int, Exception?> PageFetched = LoggerMessage.Define<Guid, int, int>(
         LogLevel.Information, new EventId(4380, "RippleHirePageFetched"),
@@ -21,7 +21,22 @@ public sealed class RippleHireJobSourceProvider(IHttpClientFactory clients, ILog
     private const int MaximumJobs = 2000;
     public AtsType AtsType => AtsType.RippleHire;
 
+    public const int ProcessingBatchSize = 50;
+
+    // Compatibility callers explicitly requesting a collection still receive one.
+    // Production runner consumes FetchBatchesAsync with backpressure.
     public async Task<IReadOnlyCollection<RawExternalJob>> FetchJobsAsync(JobSource source, CancellationToken cancellationToken = default)
+    {
+        var jobs = new List<RawExternalJob>();
+        await foreach (var batch in FetchBatchesAsync(source, cancellationToken)) jobs.AddRange(batch.Jobs);
+        return jobs;
+    }
+
+    public async Task<ExternalJobSourceSnapshot> FetchSnapshotAsync(JobSource source, CancellationToken cancellationToken = default)
+        => new(await FetchJobsAsync(source, cancellationToken), 0, false);
+
+    public async IAsyncEnumerable<ExternalJobSourceSnapshot> FetchBatchesAsync(JobSource source,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(source);
         cancellationToken.ThrowIfCancellationRequested();
@@ -80,8 +95,18 @@ public sealed class RippleHireJobSourceProvider(IHttpClientFactory clients, ILog
                 });
             }
             await Task.Delay(TimeSpan.FromMilliseconds(250), token);
+            if ((page + 1) % (ProcessingBatchSize / PageSize) == 0 || (page + 1) * PageSize >= total)
+            {
+                // Listing pages contain at most ten jobs; yield after five pages.
+                // Never certify absence reconciliation for this live offset feed.
+                yield return new ExternalJobSourceSnapshot(jobs, 0, false)
+                {
+                    ReportedListingTotal = total,
+                    AcquisitionSucceeded = (page + 1) * PageSize >= total
+                };
+                jobs = new List<RawExternalJob>();
+            }
         }
-        return jobs;
     }
 
     internal static void ValidateListing(JsonElement root)

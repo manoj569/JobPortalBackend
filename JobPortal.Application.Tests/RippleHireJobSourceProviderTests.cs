@@ -146,6 +146,45 @@ public sealed class RippleHireJobSourceProviderTests
         Assert.Equal(JobPortal.Application.Services.IndiaJobEligibilityDecision.Accepted, JobPortal.Application.Services.IndiaJobEligibilityPolicy.Evaluate(job).Decision);
         Assert.NotEqual(JobPortal.Application.Services.IndiaJobEligibilityDecision.Accepted, JobPortal.Application.Services.IndiaJobEligibilityPolicy.Evaluate(job with { Location = "USA", AdditionalLocations = [] }).Decision);
     }
+    [Fact]
+    public async Task ProductionEnumerationYieldsFiftyBeforeFetchingRemainingDetails()
+    {
+        var pageNumber = 0;
+        var details = 0;
+        var handler = new Handler((request, _) =>
+        {
+            if (request.Method == HttpMethod.Post)
+            {
+                var entries = new JsonArray();
+                var start = pageNumber++ * 10 + 1;
+                for (var id = start; id <= Math.Min(start + 9, 51); id++)
+                    entries.Add(new JsonObject { ["jobSeq"] = id.ToString(System.Globalization.CultureInfo.InvariantCulture), ["jobLocation"] = "Pune, India" });
+                return Json(pageNumber == 1 ? new JsonObject
+                {
+                    ["errorStatus"] = "success", ["totalJobCount"] = 51, ["jobVoList"] = entries
+                }.ToJsonString() : entries.ToJsonString());
+            }
+            details++;
+            var detail = JsonNode.Parse(Fixture("detail"))!;
+            detail["jobVO"]!["jobSeq"] = request.RequestUri!.Query.Split("jobSeq=")[1].Split('&')[0];
+            return Json(detail.ToJsonString());
+        });
+        var provider = new RippleHireJobSourceProvider(new Factory(handler));
+        await using var batches = provider.FetchBatchesAsync(Source()).GetAsyncEnumerator();
+        Assert.True(await batches.MoveNextAsync());
+        Assert.Equal(50, batches.Current.Jobs.Count);
+        Assert.Equal(50, details);
+        Assert.Equal(5, pageNumber);
+        Assert.False(batches.Current.IsComplete);
+        Assert.False(batches.Current.AcquisitionSucceeded);
+        Assert.True(await batches.MoveNextAsync());
+        Assert.Single(batches.Current.Jobs);
+        Assert.True(batches.Current.AcquisitionSucceeded);
+        Assert.False(batches.Current.IsComplete);
+        Assert.False(await batches.MoveNextAsync());
+        Assert.Equal(51, details);
+    }
+
     private static HttpResponseMessage Json(string content) => new(HttpStatusCode.OK) { Content = new StringContent(content, Encoding.UTF8, "application/json") };
     [Fact]
     public async Task RepeatedImportUpdatesSourceIdentityWithoutDuplicatingJobs()

@@ -88,4 +88,6 @@ public interface IUnitOfWork
 {
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
     void ResetAfterFailure() { }
+    // Called only at a committed aggregation boundary. Never discard pending writes.
+    int ReleaseCommittedAggregationBatch() => 0;
 }

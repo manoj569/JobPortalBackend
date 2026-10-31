@@ -12,6 +12,8 @@ public sealed class JobSourceRunCheckpoint(JobPortalDbContext db, TimeProvider c
 {
     private JobSourceRun? run;
     private RawExternalJob? current;
+    private bool rippleHire;
+    private readonly Dictionary<string, JobSourceRunItem> rippleHireReceipts = new(StringComparer.Ordinal);
     private WorkdayRunCheckpoint? stagedState;
     private readonly Dictionary<int, JobSourceRunItem> committed = [];
     private readonly Dictionary<int, JobSourceRunItem> staged = [];
@@ -41,16 +43,20 @@ public sealed class JobSourceRunCheckpoint(JobPortalDbContext db, TimeProvider c
         await RefreshAsync(ct);
     }
 
-    public void Enable(JobSource source) => Enabled = run is not null && run.JobSourceId == source.Id && source.AtsType == AtsType.Workday;
+    public void Enable(JobSource source)
+    {
+        rippleHire = source.AtsType == AtsType.RippleHire;
+        Enabled = run is not null && run.JobSourceId == source.Id && (source.AtsType == AtsType.Workday || rippleHire);
+    }
 
     public async Task RefreshAsync(CancellationToken ct)
     {
         stagedState = null;
-        staged.Clear(); committed.Clear();
+        staged.Clear(); committed.Clear(); rippleHireReceipts.Clear();
         ingestionCounts.Clear(); publicationCounts.Clear(); reasons.Clear(); validation.Clear(); quality.Clear();
         if (run is null) return;
         var rows = await db.Set<JobSourceRunItem>().AsNoTracking().Where(x => x.RunId == run.Id).ToArrayAsync(ct);
-        foreach (var row in rows) { committed.Add(row.Ordinal, row); Tally(row, 1); }
+        foreach (var row in rows) { committed.Add(row.Ordinal, row); rippleHireReceipts[row.ExternalId] = row; Tally(row, 1); }
     }
 
     public async Task PrepareAsync(string sourceIdentity, string listingIdentity, int total, int pages, CancellationToken ct,
@@ -131,7 +137,11 @@ public sealed class JobSourceRunCheckpoint(JobPortalDbContext db, TimeProvider c
 
     private JobSourceRunItem? Receipt(RawExternalJob raw)
     {
-        if (!Enabled || raw.SourceOrdinal is not { } ordinal) return null;
+        if (!Enabled) return null;
+        // A live offset listing can reorder between attempts. RippleHire replay
+        // uses external identity, never a positional cursor.
+        if (rippleHire) return raw.ExternalId is { } id ? rippleHireReceipts.GetValueOrDefault(id.Trim()) : null;
+        if (raw.SourceOrdinal is not { } ordinal) return null;
         var receipt = committed.GetValueOrDefault(ordinal);
         return receipt?.ExternalId == raw.ExternalId?.Trim() ? receipt : null;
     }
@@ -151,8 +161,13 @@ public sealed class JobSourceRunCheckpoint(JobPortalDbContext db, TimeProvider c
 
     public void StageIngestion(RawExternalJob raw, JobIngestionResult result)
     {
-        if (!Enabled || raw.SourceOrdinal is not { } ordinal || raw.JobSourceId != run?.JobSourceId) return;
-        if (Receipt(raw) is not null || staged.ContainsKey(ordinal)) return;
+        if (!Enabled || raw.JobSourceId != run?.JobSourceId) return;
+        if (Receipt(raw) is not null) return;
+        if (rippleHire && string.IsNullOrWhiteSpace(raw.ExternalId)) return;
+        if (!rippleHire && raw.SourceOrdinal is null) return;
+        var ordinal = rippleHire ? committed.Keys.Concat(staged.Keys).DefaultIfEmpty(-1).Max() + 1 : raw.SourceOrdinal!.Value;
+        if (rippleHire && ordinal > 9999) throw new JobSourceSnapshotUnsafeException("InvalidReceiptOrdinal");
+        if (staged.ContainsKey(ordinal)) return;
         var row = new JobSourceRunItem
         {
             RunId = run!.Id, Ordinal = ordinal, ExternalId = raw.ExternalId?.Trim() ?? string.Empty,
@@ -180,7 +195,8 @@ public sealed class JobSourceRunCheckpoint(JobPortalDbContext db, TimeProvider c
 
     public void StagePublication(Guid jobId, JobAutoPublishResult result)
     {
-        if (!Enabled || current?.SourceOrdinal is not { } ordinal || !committed.TryGetValue(ordinal, out var receipt) || receipt.JobId != jobId) return;
+        if (current is null || Receipt(current) is not { } receipt || receipt.JobId != jobId) return;
+        var ordinal = receipt.Ordinal;
         var tracked = db.Set<JobSourceRunItem>().Local.SingleOrDefault(x => x.RunId == receipt.RunId && x.Ordinal == ordinal);
         if (tracked is null) { tracked = Copy(receipt); db.Attach(tracked); }
         tracked.PublicationOutcome = (int)result.Outcome;
@@ -195,6 +211,7 @@ public sealed class JobSourceRunCheckpoint(JobPortalDbContext db, TimeProvider c
         {
             if (committed.TryGetValue(ordinal, out var previous)) Tally(previous, -1);
             committed[ordinal] = Copy(row);
+            rippleHireReceipts[row.ExternalId] = committed[ordinal];
             Tally(row, 1);
         }
         staged.Clear();

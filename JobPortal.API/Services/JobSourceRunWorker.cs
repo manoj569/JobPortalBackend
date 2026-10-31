@@ -28,6 +28,11 @@ public sealed partial class JobSourceRunWorker(IServiceScopeFactory scopes, JobS
         string stopReason, int listingTotal, int checkpoint, int created, int existing, int failed, int published,
         bool reconciliationSafe, double durationMs, DateTime nextAttemptUtc);
 
+    [LoggerMessage(EventId = 4416, Level = LogLevel.Information,
+        Message = "JobSourceLease Source={SourceId} Run={RunId} LeaseRenewed={LeaseRenewed} Received={Received} Published={Published} WorkingSetMB={WorkingSetMB}")]
+    private static partial void LeaseRenewed(ILogger logger, Guid sourceId, Guid runId, bool leaseRenewed,
+        int received, int published, double workingSetMB);
+
     public async Task RunOnceAsync(CancellationToken stoppingToken)
     {
         IReadOnlyList<JobSourceRun> candidates;
@@ -138,7 +143,7 @@ public sealed partial class JobSourceRunWorker(IServiceScopeFactory scopes, JobS
             status = result.ContinuationPending &&
                 (executionProvider != AtsType.Custom || result.Succeeded)
                     ? JobSourceRunStatus.Paused : result.Succeeded ? JobSourceRunStatus.Succeeded :
-                checkpoint?.Enabled == true && result.StopReason != "InfrastructureFailure" ? JobSourceRunStatus.Unsafe : JobSourceRunStatus.Failed;
+                executionProvider == AtsType.Workday && checkpoint?.Enabled == true && result.StopReason != "InfrastructureFailure" ? JobSourceRunStatus.Unsafe : JobSourceRunStatus.Failed;
             var captured = progress.Snapshot;
             // A final infrastructure failure can return a zero-counter error result
             // after per-item durable commits. Keep the last observed progress in that case.
@@ -155,7 +160,7 @@ public sealed partial class JobSourceRunWorker(IServiceScopeFactory scopes, JobS
             { RunId = run.Id, Succeeded = false, ReconciliationSafe = false, FailureStage = "SourceExecution",
               FailureReasonCode = stoppingToken.IsCancellationRequested ? "HOST_SHUTDOWN" : "LEASE_INTERRUPTED",
               StopReason = stoppingToken.IsCancellationRequested ? "HostShutdown" : "LeaseInterrupted" } });
-            if (checkpoint?.Enabled == true)
+            if (executionProvider == AtsType.Workday && checkpoint?.Enabled == true)
             {
                 status = JobSourceRunStatus.Paused;
                 var captured = progress.Snapshot;
@@ -294,6 +299,8 @@ public sealed partial class JobSourceRunWorker(IServiceScopeFactory scopes, JobS
                     await execution.CancelAsync();
                     return;
                 }
+                LeaseRenewed(logger, run.JobSourceId, run.Id, true, captured.Counters.TotalReceived,
+                    captured.Counters.Published, Environment.WorkingSet / 1048576d);
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
