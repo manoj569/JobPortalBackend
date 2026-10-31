@@ -250,5 +250,21 @@ public sealed class UnitOfWork(JobPortalDbContext context, Microsoft.Extensions.
         }
     }
 
+    public int ReleaseCommittedAggregationBatch()
+    {
+        if (context.ChangeTracker.HasChanges())
+            throw new InvalidOperationException("Cannot release an aggregation batch with pending changes.");
+        // Preserve the small source/reference graph used for final bookkeeping.
+        // Detach receipts, audits, vacancies and publication-loaded jobs as well.
+        foreach (var entry in context.ChangeTracker.Entries().Where(x =>
+            x.Entity is not (JobSource or Company or Category)).ToArray())
+            entry.State = EntityState.Detached;
+        // Detaching does not release CLR inverse-navigation references.
+        // No job remains tracked, so clearing these cannot orphan pending jobs.
+        foreach (var company in context.ChangeTracker.Entries<Company>()) company.Entity.Jobs.Clear();
+        foreach (var category in context.ChangeTracker.Entries<Category>()) category.Entity.Jobs.Clear();
+        return context.ChangeTracker.Entries().Count();
+    }
+
     public void ResetAfterFailure() => context.ChangeTracker.Clear();
 }

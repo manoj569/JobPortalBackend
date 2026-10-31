@@ -270,6 +270,7 @@ public sealed partial class JobSourceRunner(
             var savedCalls = 0;
             var saveMilliseconds = 0d;
             var batchPrepared = false;
+            var batchNumber = 0;
             (categoryResolver as IJobSourceCategoryRunCache)?.BeginRun();
 
             var created = 0;
@@ -308,7 +309,7 @@ public sealed partial class JobSourceRunner(
                     JobSourceId = source.Id, RunId = durable ? checkpoint!.RunId : null,
                     ListingDiagnostics = listingDiagnostics,
                     ProviderReasonCounts = new Dictionary<string,int>(providerReasons),
-                    ListingTotal = durable ? checkpoint!.State?.ListingTotal ?? 0 : listingDiagnostics?.UniquePaths ?? reportedListingTotal,
+                    ListingTotal = durable ? checkpoint!.State?.ListingTotal ?? reportedListingTotal : listingDiagnostics?.UniquePaths ?? reportedListingTotal,
                     RebaseCount = durable ? checkpoint!.State?.RebaseCount ?? 0 : 0,
                     ListingPages = durable ? checkpoint!.State?.ListingPages ?? 0 : listingDiagnostics?.PageCount ?? 0,
                     CheckpointCursor = durable ? checkpoint!.State?.Cursor ?? 0 : 0,
@@ -339,6 +340,7 @@ public sealed partial class JobSourceRunner(
             execution.Stage = "ProviderFetch";
             await foreach (var batch in FetchBatchesAsync(provider, source, cancellationToken))
             {
+                if (source.AtsType == AtsType.RippleHire) LogRippleHireMemoryStage(source.Id, "Fetched", batch.Jobs.Count);
                 var repeatedCensusGeneration = false;
                 if (batch.ObservedExternalIds is not null)
                 {
@@ -381,7 +383,7 @@ public sealed partial class JobSourceRunner(
                     source.AtsType + "PersistenceStarted", 0, 0, batch.Skipped, 0);
                 // Provider prepares the replacement before its first yield. Old observed
                 // identities and selection skips cannot join the new census.
-                if (durable && checkpoint!.State?.RebaseCount != traversalRebaseCount)
+                if (durable && checkpoint!.State is { } batchState && batchState.RebaseCount != traversalRebaseCount)
                 {
                     traversalRebaseCount = checkpoint.State?.RebaseCount ?? 0;
                     observedJobs.Clear(); rawJobs.Clear(); snapshot = null;
@@ -419,6 +421,7 @@ public sealed partial class JobSourceRunner(
                     CompanyName = source.Company?.Name ?? x.CompanyName
                 }).ToArray();
                 rawJobs.AddRange(newJobs);
+                if (source.AtsType == AtsType.RippleHire) LogRippleHireMemoryStage(source.Id, "MappedAndFiltered", newJobs.Length);
                 if (_logger is not null && source.AtsType == AtsType.Greenhouse)
                     LogGreenhouseEligibility(_logger, source.Id, batch.Jobs.Count, newJobs.Length,
                         (snapshot.SelectionReasonCounts?.GetValueOrDefault("NonIndiaLocation") ?? 0) + (snapshot.SelectionReasonCounts?.GetValueOrDefault("IndiaRemoteExcluded") ?? 0),
@@ -445,6 +448,7 @@ public sealed partial class JobSourceRunner(
                     if (_logger is not null && !deferredPreload) Progress(_logger, source.Id, "DB batch preload completed", newJobs.Length, preloadTimer.Elapsed.TotalMilliseconds, null);
                 }
 
+                if (source.AtsType == AtsType.RippleHire) LogRippleHireMemoryStage(source.Id, "Preloaded", newJobs.Length);
                 IReadOnlyList<JobIngestionResult>? committedBatch = null;
                 RawExternalJob[]? preparedBatch = null;
                 if (newJobs.Length > 0 && source.AtsType == JobPortal.Domain.Enums.AtsType.Workday &&
@@ -678,6 +682,30 @@ public sealed partial class JobSourceRunner(
                     LogBatchStage(_logger, source.Id, source.AtsType.ToString(), source.AtsType + "PersistenceCompleted", created, updated + unchanged + matched, skipped, published);
                     LogBatchStage(_logger, source.Id, source.AtsType.ToString(), source.AtsType + "PublicationCompleted", created, updated + unchanged + matched, needsReview + disabled + qualityRejected, published);
                 }
+                if (source.AtsType == AtsType.RippleHire)
+                {
+                    // Selection is cumulative (including configured import caps), but
+                    // earlier descriptions/metadata and saved entity caches are not needed.
+                    for (var i = 0; i < observedJobs.Count; i++) observedJobs[i] = RippleHireSelectionFacts(observedJobs[i]);
+                    for (var i = 0; i < rawJobs.Count; i++) rawJobs[i] = RippleHireSelectionFacts(rawJobs[i]);
+                    snapshot = snapshot! with { Jobs = snapshot.Jobs.Select(RippleHireSelectionFacts).ToArray() };
+                    if (ingestionService is IBulkJobIngestionService completedBulk)
+                    {
+                        if (batchPrepared && completedBulk.RunMetrics is { } completedMetrics)
+                        {
+                            savedCalls += completedMetrics.SaveCalls;
+                            saveMilliseconds += completedMetrics.SaveMilliseconds;
+                        }
+                        await completedBulk.CompleteRunAsync();
+                        batchPrepared = false;
+                    }
+                    await unitOfWork.SaveChangesAsync(cancellationToken);
+                    var tracked = unitOfWork.ReleaseCommittedAggregationBatch();
+                    if (_logger is not null)
+                        LogRippleHireBatch(_logger, source.Id, ++batchNumber, batch.Jobs.Count, observedJobs.Count,
+                            created, published, partialResult.Rejected, System.GC.GetTotalMemory(false) / 1048576d,
+                            Environment.WorkingSet / 1048576d, tracked);
+                }
                 execution.Stage = "ProviderFetch";
             }
             execution.Stage = "Reconciliation";
@@ -728,7 +756,8 @@ public sealed partial class JobSourceRunner(
                 Progress(_logger, source.Id, "Enrichment completed", processed, enrichmentMilliseconds, null);
                 Progress(_logger, source.Id, "Insert/update processing completed (includes saves)", processed, ingestionMilliseconds, null);
                 if ((ingestionService as IBulkJobIngestionService)?.RunMetrics is { } metrics)
-                    Progress(_logger, source.Id, "Item SaveChanges attempts", savedCalls + metrics.SaveCalls, saveMilliseconds + metrics.SaveMilliseconds, null);
+                    Progress(_logger, source.Id, "Item SaveChanges attempts", savedCalls + (source.AtsType == AtsType.RippleHire ? 0 : metrics.SaveCalls),
+                        saveMilliseconds + (source.AtsType == AtsType.RippleHire ? 0 : metrics.SaveMilliseconds), null);
                 Progress(_logger, source.Id, "Reconciliation completed", closed, reconciliationTimer.Elapsed.TotalMilliseconds, null);
             }
 
@@ -740,7 +769,7 @@ public sealed partial class JobSourceRunner(
                 ? !continuationPending && !blockers.Contains("SelectionSnapshotIncomplete") && (listingDiagnostics?.ProcessingComplete ??
                     blockers.All(reason => reason == "WorkdayNonAuthoritative")) &&
                     listingDiagnostics?.InfrastructureFailure != true && failed == 0
-                : source.AtsType == AtsType.Custom && acquisitionSucceeded ? skipped == 0 && failed == 0
+                : source.AtsType is (AtsType.Custom or AtsType.RippleHire) && acquisitionSucceeded ? skipped == 0 && failed == 0
                 : provider is ICompleteExternalJobProvider ? canReconcile : skipped == 0 && failed == 0;
             source.LastSuccessfulRunAtUtc = successful ? now : previousSuccessfulRun;
             source.LastError = successful ? null : continuationPending ? previousError : "External job source scan was incomplete or had failed/skipped items.";
@@ -929,6 +958,28 @@ public sealed partial class JobSourceRunner(
             if (_logger is not null) Progress(_logger, source.Id, "Total duration (including cleanup)", 0, runTimer.Elapsed.TotalMilliseconds, null);
         }
     }
+
+    [LoggerMessage(EventId = 4415, Level = LogLevel.Information,
+        Message = "RippleHireBatch Source={SourceId} Batch={Batch} BatchSize={BatchSize} Received={Received} Created={Created} Published={Published} Rejected={Rejected} ManagedMemoryMB={ManagedMemoryMB} WorkingSetMB={WorkingSetMB} Tracked={Tracked}")]
+    private static partial void LogRippleHireBatch(ILogger logger, Guid sourceId, int batch, int batchSize,
+        int received, int created, int published, int rejected, double managedMemoryMB, double workingSetMB, int tracked);
+
+    [LoggerMessage(EventId = 4417, Level = LogLevel.Information,
+        Message = "RippleHireMemory Source={SourceId} Stage={Stage} BatchSize={BatchSize} ManagedMemoryMB={ManagedMemoryMB} WorkingSetMB={WorkingSetMB}")]
+    private static partial void LogRippleHireMemory(ILogger logger, Guid sourceId, string stage, int batchSize, double managedMemoryMB, double workingSetMB);
+
+    private void LogRippleHireMemoryStage(Guid sourceId, string stage, int batchSize)
+    {
+        if (_logger is not null)
+            LogRippleHireMemory(_logger, sourceId, stage, batchSize, System.GC.GetTotalMemory(false) / 1048576d, Environment.WorkingSet / 1048576d);
+    }
+
+    private static RawExternalJob RippleHireSelectionFacts(RawExternalJob job) => new()
+    {
+        ExternalId = job.ExternalId, Location = job.Location, AdditionalLocations = job.AdditionalLocations,
+        CountryCodes = job.CountryCodes, RemoteEligibilityText = job.RemoteEligibilityText,
+        WorkplaceType = job.WorkplaceType, WorkplaceTypeText = job.WorkplaceTypeText
+    };
 
     private static bool TryReadEightfoldContinuation(string? json, out string strategy, out string generation,
         out int position, out string anchor, out bool cycleCompleted, out int inventoryCount)
