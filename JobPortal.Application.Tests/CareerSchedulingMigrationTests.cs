@@ -9,18 +9,22 @@ namespace JobPortal.Application.Tests;
 
 public sealed class CareerSchedulingMigrationTests
 {
+    private static readonly string[] ExpectedValues1 = new[] { "CareerConsultantAvailability", "CareerConsultantAvailabilityExceptions", "CareerGuidanceBookings" };
+    private static readonly string[] ExpectedValues2 = new[] { "IsAcceptingBookings", "TimeZoneId" };
+    private static readonly string[] ExpectedValues3 = new[] { "CareerConsultantAvailability", "CareerConsultantAvailabilityExceptions", "CareerGuidanceBookings" };
+
     [Fact]
     public void MigrationOnlyAddsSchedulingObjectsAndDatabaseOverlapProtection()
     {
         var migration = new AddCareerGuidanceSchedulingAndBookings();
         var operations = migration.UpOperations;
         Assert.All(operations, o => Assert.True(o is AlterDatabaseOperation or AddColumnOperation or CreateTableOperation or CreateIndexOperation or SqlOperation));
-        Assert.Equal(new[] { "CareerConsultantAvailability", "CareerConsultantAvailabilityExceptions", "CareerGuidanceBookings" },
+        Assert.Equal(ExpectedValues1,
             operations.OfType<CreateTableOperation>().Select(o => o.Name).Order().ToArray());
         Assert.All(operations.OfType<AddColumnOperation>(), o => Assert.Equal("CareerConsultants", o.Table));
-        Assert.Equal(new[] { "IsAcceptingBookings", "TimeZoneId" }, operations.OfType<AddColumnOperation>().Select(o => o.Name).Order().ToArray());
+        Assert.Equal(ExpectedValues2, operations.OfType<AddColumnOperation>().Select(o => o.Name).Order().ToArray());
         Assert.All(operations.OfType<CreateIndexOperation>(), o => Assert.Contains(o.Table,
-            new[] { "CareerConsultantAvailability", "CareerConsultantAvailabilityExceptions", "CareerGuidanceBookings" }));
+            ExpectedValues3));
         Assert.NotNull(Assert.Single(operations.OfType<AlterDatabaseOperation>()).FindAnnotation("Npgsql:PostgresExtension:btree_gist"));
         var sql = Assert.Single(operations.OfType<SqlOperation>()).Sql;
         Assert.Contains("EXCLUDE USING gist", sql);

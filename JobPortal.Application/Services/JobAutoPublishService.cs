@@ -142,9 +142,11 @@ public sealed partial class JobAutoPublishService(
         JobAutoPublishResult Decision(string reason, JobAutoPublishOutcome outcome,
             IReadOnlyList<JobQualityReasonCode>? reasons = null)
         {
-            if (logger is not null)
-                LogDecision(logger, sourceId, source?.Company?.Name ?? string.Empty, source?.AtsType.ToString() ?? string.Empty,
-                    source?.AutoPublishEnabled ?? false, job.Id, reason);
+            if (logger is not null && logger.IsEnabled(LogLevel.Information))
+            {
+                var providerName = source?.AtsType.ToString() ?? string.Empty;
+                LogDecision(logger, sourceId, source?.Company?.Name ?? string.Empty, providerName, source?.AutoPublishEnabled ?? false, job.Id, reason);
+            }
             return new() { Outcome = outcome, Reasons = reasons ?? [] };
         }
     }

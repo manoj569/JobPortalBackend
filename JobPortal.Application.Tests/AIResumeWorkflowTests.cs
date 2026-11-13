@@ -27,10 +27,15 @@ namespace JobPortal.Application.Tests;
 
 public sealed class AIResumeWorkflowTests
 {
+    private static readonly string[] ExpectedSnapshotFields = new[] { "SessionId", "SkillsCount", "ExperienceCount", "ProjectsCount", "EducationCount",
+                "CertificationsCount", "AdditionalInfoCount", "EvidenceCount", "HasContact", "HasSummary", "SourceResumeId" };
+
+    private static readonly JsonSerializerOptions WebJsonOptions = new(JsonSerializerDefaults.Web);
+
 
 
     [Fact]
-    public async Task StructuredParser_UsesTheOwnedUploadedResumeTextAsSourceEvidence()
+    public async Task StructuredParserUsesTheOwnedUploadedResumeTextAsSourceEvidence()
     {
         var user = new User
         {
@@ -93,7 +98,7 @@ public sealed class AIResumeWorkflowTests
         // A fresh context reads only persisted JSON, independent of the creation scope's change tracker.
         await using var reload = new JobPortalDbContext(options);
         var session = await reload.AIResumeSessions.AsNoTracking().SingleAsync(x => x.Id == response.Id);
-        var json = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        var json = WebJsonOptions;
         var source = JsonSerializer.Deserialize<TailoredResumeContent>(session.SourceJson, json)!;
         var evidence = JsonSerializer.Deserialize<ResumeSessionEvidence>(session.EvidenceJson, json)!.Evidence;
         Assert.Equal("Morgan Example", source.Contact.Name);
@@ -115,8 +120,7 @@ public sealed class AIResumeWorkflowTests
             const string prefix = "AIResumeSourceSnapshot ";
             Assert.StartsWith(prefix, message);
             using var metadata = JsonDocument.Parse(message[prefix.Length..]);
-            Assert.Equal(new[] { "SessionId", "SkillsCount", "ExperienceCount", "ProjectsCount", "EducationCount",
-                "CertificationsCount", "AdditionalInfoCount", "EvidenceCount", "HasContact", "HasSummary", "SourceResumeId" },
+            Assert.Equal(ExpectedSnapshotFields,
                 metadata.RootElement.EnumerateObject().Select(x => x.Name));
             Assert.Equal(response.Id, metadata.RootElement.GetProperty("SessionId").GetGuid());
             Assert.Equal(resumeId, metadata.RootElement.GetProperty("SourceResumeId").GetGuid());
@@ -144,7 +148,7 @@ public sealed class AIResumeWorkflowTests
     }
 
     [Fact]
-    public void EvidenceGuard_AllowsGroundedParaphrase_ButRejectsFabricatedMetricAndTeamSize()
+    public void EvidenceGuardAllowsGroundedParaphraseButRejectsFabricatedMetricAndTeamSize()
     {
         var source = Source();
         var evidence = ResumeEvidenceCatalog.Create(source);
@@ -196,7 +200,7 @@ public sealed class AIResumeWorkflowTests
     }
 
     [Fact]
-    public async Task ExternalJd_AnalysisPurchaseGenerateEditAndRedownload_UsesCreditsExactlyOnce()
+    public async Task ExternalJdAnalysisPurchaseGenerateEditAndRedownloadUsesCreditsExactlyOnce()
     {
         var database = Guid.NewGuid().ToString("N");
         var options = new DbContextOptionsBuilder<JobPortalDbContext>().UseInMemoryDatabase(database).Options;
@@ -289,7 +293,7 @@ public sealed class AIResumeWorkflowTests
         var session = await service.CreateSessionAsync(userId, new(resumeId, null,
             "Backend developer required to build reliable C# and .NET services and work with SQL Server."), default);
         var snapshot = (await db.AIResumeSessions.SingleAsync()).SourceJson;
-        var source = JsonSerializer.Deserialize<TailoredResumeContent>(snapshot, new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+        var source = JsonSerializer.Deserialize<TailoredResumeContent>(snapshot, WebJsonOptions)!;
         Assert.Equal(20, source.Skills.Length); Assert.Equal(2, source.Experience.Length);
         Assert.Equal(39, ResumeEvidenceCatalog.Create(source).Length);
         Assert.Equal(0, (await service.CreditsAsync(userId, default)).LifetimeConsumed);
@@ -483,17 +487,17 @@ public sealed class AIResumeWorkflowTests
         public IAIResumeRepository Inner { get; set; } = null!;
         public int Writes { get; private set; }
         public int FailAtWrite { get; set; }
-        protected override object? Invoke(MethodInfo? method, object?[]? args)
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
         {
-            if (method!.Name == nameof(IAIResumeRepository.WriteAsync) && ++Writes == FailAtWrite)
+            if (targetMethod!.Name == nameof(IAIResumeRepository.WriteAsync) && ++Writes == FailAtWrite)
                 throw new DbUpdateException("Test-only persistence failure");
-            try { return method.Invoke(Inner, args); }
+            try { return targetMethod.Invoke(Inner, args); }
             catch (TargetInvocationException ex) when (ex.InnerException is not null) { ExceptionDispatchInfo.Capture(ex.InnerException).Throw(); throw; }
         }
     }
 
     [Fact]
-    public async Task PhonePeWebhookAndReturnReplay_GrantPurchaseCreditsOnce()
+    public async Task PhonePeWebhookAndReturnReplayGrantPurchaseCreditsOnce()
     {
         var database = Guid.NewGuid().ToString("N");
         var options = new DbContextOptionsBuilder<JobPortalDbContext>().UseInMemoryDatabase(database).Options;
@@ -519,7 +523,7 @@ public sealed class AIResumeWorkflowTests
     }
 
     [Fact]
-    public async Task CreditLedger_RejectsMutationAndDeletion()
+    public async Task CreditLedgerRejectsMutationAndDeletion()
     {
         var database = Guid.NewGuid().ToString("N");
         var options = new DbContextOptionsBuilder<JobPortalDbContext>().UseInMemoryDatabase(database).Options;
@@ -538,7 +542,7 @@ public sealed class AIResumeWorkflowTests
     }
 
     [Fact]
-    public async Task CareerHarborJobSession_UsesPublishedJobSnapshot()
+    public async Task CareerHarborJobSessionUsesPublishedJobSnapshot()
     {
         var database = Guid.NewGuid().ToString("N");
         var options = new DbContextOptionsBuilder<JobPortalDbContext>().UseInMemoryDatabase(database).Options;
@@ -612,7 +616,7 @@ public sealed class AIResumeWorkflowTests
     }
 
     [Fact]
-    public async Task ConcurrentGenerate_OnlyOneReservationAndConsumption()
+    public async Task ConcurrentGenerateOnlyOneReservationAndConsumption()
     {
         var database = Guid.NewGuid().ToString("N");
         var options = new DbContextOptionsBuilder<JobPortalDbContext>().UseInMemoryDatabase(database).Options;
@@ -700,7 +704,7 @@ public sealed class AIResumeWorkflowTests
         public Task<AIResumeProviderResult<TailoringPatch>> GenerateTailoringPatchAsync(GenerateTailoringPatchRequest request, CancellationToken cancellationToken = default)
         {
             GenerationCalls++;
-            GenerationSourceJson = JsonSerializer.Serialize(request.Source, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            GenerationSourceJson = JsonSerializer.Serialize(request.Source, WebJsonOptions);
             var target = request.EditableTargets.First(x => x.Scope.StartsWith("experience/", StringComparison.Ordinal));
             return Task.FromResult(new AIResumeProviderResult<TailoringPatch>(new([new(target.Id, target.Text,
                 target.Text.Replace("Built", "Developed", StringComparison.Ordinal), [target.Id], [], "Supported wording")], []), "fake", 20, 10));
@@ -716,7 +720,7 @@ public sealed class AIResumeWorkflowTests
         public async Task<AIResumeProviderResult<TailoredResumeContent>> GenerateTailoredResumeAsync(GenerateTailoredResumeRequest request, CancellationToken cancellationToken = default)
         {
             GenerationCalls++; GenerationStarted.TrySetResult();
-            GenerationSourceJson = JsonSerializer.Serialize(request.Source, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            GenerationSourceJson = JsonSerializer.Serialize(request.Source, WebJsonOptions);
             OnGeneration?.Invoke();
             if (GenerationFailure is not null) throw GenerationFailure;
             if (BlockGeneration) await ContinueGeneration.Task.WaitAsync(cancellationToken);

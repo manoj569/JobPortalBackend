@@ -26,6 +26,9 @@ public static class ServiceCollectionExtensions
     {
         ValidateEmailConfiguration(configuration);
         ValidateGoogleConfiguration(configuration);
+        services.AddOptions<JobPortal.Application.Features.CareerAccelerator.AcceleratorOptions>()
+            .Bind(configuration.GetSection(JobPortal.Application.Features.CareerAccelerator.AcceleratorOptions.SectionName))
+            .Validate(value => value.IsValid(), "Invalid Career Accelerator limits.").ValidateOnStart();
 
         services.AddSingleton<IPasswordHasher, Pbkdf2PasswordHasher>();
         services.AddHttpClient(CompanyLogoResolver.HttpClientName, client =>

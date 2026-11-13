@@ -13,13 +13,13 @@ public class JobDeduplicationServiceTests
 {
     private readonly TestJobRepository _jobs = new();
     private readonly TestUrlCanonicalizer _urls = new();
-    private readonly IJobFingerprintService _fingerprints = new JobFingerprintService();
+    private readonly JobFingerprintService _fingerprints = new JobFingerprintService();
     private readonly JobDeduplicationService _service;
 
     public JobDeduplicationServiceTests() => _service = new(_jobs, _fingerprints, _urls);
 
     [Fact]
-    public async Task FindDuplicateAsync_ExternalUrlMatch_ReturnsSourceUrlMatch()
+    public async Task FindDuplicateAsyncExternalUrlMatchReturnsSourceUrlMatch()
     {
         var job = CreateJob("Existing Title", "Acme Corp", "SF");
         _jobs.ExternalUrlMatch = job;
@@ -28,7 +28,7 @@ public class JobDeduplicationServiceTests
     }
 
     [Fact]
-    public async Task FindDuplicateAsync_FingerprintMatch_ReturnsFingerprintMatch()
+    public async Task FindDuplicateAsyncFingerprintMatchReturnsFingerprintMatch()
     {
         const string title = "Software Engineer", company = "Acme Corp", location = "San Francisco";
         var job = CreateJob(title, company, location);
@@ -39,7 +39,7 @@ public class JobDeduplicationServiceTests
     }
 
     [Fact]
-    public async Task FindDuplicateAsync_FuzzyMatchAboveThreshold_ReturnsFuzzyMatch()
+    public async Task FindDuplicateAsyncFuzzyMatchAboveThresholdReturnsFuzzyMatch()
     {
         var job = CreateJob("Software Engineer", "Acme Corp", "San Francisco"); _jobs.FuzzyCandidates = [job];
         var result = await Find("Senior Software Engineer", "Acme Corp", "San Francisco");
@@ -47,7 +47,7 @@ public class JobDeduplicationServiceTests
     }
 
     [Fact]
-    public async Task FindDuplicateAsync_FuzzyMatchBelowThreshold_ReturnsNoMatch()
+    public async Task FindDuplicateAsyncFuzzyMatchBelowThresholdReturnsNoMatch()
     {
         _jobs.FuzzyCandidates = [CreateJob("Data Scientist", "Acme Corp", "New York")];
         var result = await Find("Marketing Manager", "Acme Corp", "Los Angeles");
@@ -55,14 +55,14 @@ public class JobDeduplicationServiceTests
     }
 
     [Fact]
-    public async Task FindDuplicateAsync_NoMatch_ReturnsNoMatch()
+    public async Task FindDuplicateAsyncNoMatchReturnsNoMatch()
     {
         var result = await Find("Software Engineer", "Acme Corp", "San Francisco");
         Assert.False(result.IsDuplicate); Assert.Equal(MatchType.None, result.MatchTypeEnum); Assert.Null(result.MatchedJob); Assert.Null(result.SimilarityScore);
     }
 
     [Fact]
-    public async Task FindDuplicateAsync_UrlMatchTakesPrecedenceOverFingerprint()
+    public async Task FindDuplicateAsyncUrlMatchTakesPrecedenceOverFingerprint()
     {
         var urlJob = CreateJob("URL Match", "Company A", "Location A"); _jobs.ExternalUrlMatch = urlJob; _jobs.FingerprintMatch = CreateJob("Fingerprint Match", "Company B", "Location B");
         var result = await Find("Any Title", "Any Company", "Any Location", "https://example.com/job");
@@ -70,7 +70,7 @@ public class JobDeduplicationServiceTests
     }
 
     [Fact]
-    public async Task FindDuplicateAsync_FingerprintTakesPrecedenceOverFuzzy()
+    public async Task FindDuplicateAsyncFingerprintTakesPrecedenceOverFuzzy()
     {
         const string title = "Software Engineer", company = "Acme Corp", location = "San Francisco";
         var job = CreateJob(title, company, location); job.FingerprintHash = _fingerprints.GenerateFingerprint(title, company, location);
@@ -80,21 +80,21 @@ public class JobDeduplicationServiceTests
     }
 
     [Fact]
-    public async Task FindDuplicateAsync_NullCompanyId_SkipsFuzzyMatch()
+    public async Task FindDuplicateAsyncNullCompanyIdSkipsFuzzyMatch()
     {
         var result = await _service.FindDuplicateAsync("Software Engineer", "Acme Corp", "San Francisco", null, null);
         Assert.False(result.IsDuplicate); Assert.Equal(MatchType.None, result.MatchTypeEnum); Assert.Equal(0, _jobs.FuzzyMatchCalls);
     }
 
     [Fact]
-    public async Task FindDuplicateAsync_EmptyExternalUrl_SkipsUrlMatch()
+    public async Task FindDuplicateAsyncEmptyExternalUrlSkipsUrlMatch()
     {
         var result = await Find("Software Engineer", "Acme Corp", "San Francisco", "");
         Assert.False(result.IsDuplicate); Assert.Equal(0, _jobs.ExternalUrlLookupCalls);
     }
 
     [Fact]
-    public async Task FindDuplicateAsync_CanonicalizedUrlMatch_ReturnsSourceUrlMatch()
+    public async Task FindDuplicateAsyncCanonicalizedUrlMatchReturnsSourceUrlMatch()
     {
         var job = CreateJob("Existing Title", "Acme Corp", "SF");
         _urls.Overrides["https://example.com/job/123?utm_source=test"] = "https://example.com/job/123"; _jobs.ExternalUrlMatch = job;
@@ -103,7 +103,7 @@ public class JobDeduplicationServiceTests
     }
 
     [Fact]
-    public async Task FindDuplicateAsync_MultipleFuzzyCandidates_ReturnsHighestSimilarity()
+    public async Task FindDuplicateAsyncMultipleFuzzyCandidatesReturnsHighestSimilarity()
     {
         var low = CreateJob("Data Analyst", "Acme Corp", "Boston"); var high = CreateJob("Senior Software Engineer", "Acme Corp", "San Francisco"); var medium = CreateJob("Software Developer", "Acme Corp", "San Jose"); _jobs.FuzzyCandidates = [low, high, medium];
         var result = await Find("Senior Software Engineer", "Acme Corp", "San Francisco");

@@ -136,6 +136,15 @@ public static class ServiceCollectionExtensions
         services.AddScoped<JobPortal.Application.Features.FresherAcquisition.IFresherBulkImportService,
             JobPortal.Application.Features.FresherAcquisition.FresherBulkImportService>();
 
+        services.AddScoped<JobPortal.Application.Features.CareerAccelerator.AcceleratorService>();
+        services.AddScoped<JobPortal.Application.Features.CareerAccelerator.AcceleratorQuotaService>();
+        services.AddScoped<JobPortal.Application.Features.CareerAccelerator.AcceleratorPhase2Service>();
+        services.AddScoped<JobPortal.Application.Features.CareerAccelerator.AcceleratorPhase3Service>();
+        services.AddScoped<JobPortal.Application.Features.CareerAccelerator.ITutorContextBuilder, JobPortal.Application.Features.CareerAccelerator.TutorContextBuilder>();
+        services.AddSingleton<JobPortal.Application.Features.CareerAccelerator.IAcceleratorAIProvider,
+            JobPortal.Application.Features.CareerAccelerator.UnavailableAcceleratorAIProvider>();
+        services.AddSingleton<JobPortal.Application.Features.CareerAccelerator.IAiTutorProvider,
+            JobPortal.Application.Features.CareerAccelerator.UnavailableAiTutorProvider>();
         return services;
     }
 }

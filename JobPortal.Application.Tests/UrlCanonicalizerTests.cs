@@ -8,10 +8,10 @@ namespace JobPortal.Application.Tests;
 /// </summary>
 public class UrlCanonicalizerTests
 {
-    private readonly IUrlCanonicalizer _canonicalizer = new UrlCanonicalizer();
+    private readonly UrlCanonicalizer _canonicalizer = new UrlCanonicalizer();
 
     [Fact]
-    public void Canonicalize_IdenticalUrl_ReturnsSameUrl()
+    public void CanonicalizeIdenticalUrlReturnsSameUrl()
     {
         // Arrange
         var url = "https://example.com/job/123";
@@ -26,7 +26,7 @@ public class UrlCanonicalizerTests
     }
 
     [Fact]
-    public void Canonicalize_HostCasing_NormalizesToLowerCase()
+    public void CanonicalizeHostCasingNormalizesToLowerCase()
     {
         // Arrange
         var url1 = "https://EXAMPLE.com/job/123";
@@ -42,7 +42,7 @@ public class UrlCanonicalizerTests
     }
 
     [Fact]
-    public void Canonicalize_DefaultPort80_RemovesPort()
+    public void CanonicalizeDefaultPort80RemovesPort()
     {
         // Arrange
         var url1 = "http://example.com:80/job/123";
@@ -58,7 +58,7 @@ public class UrlCanonicalizerTests
     }
 
     [Fact]
-    public void Canonicalize_DefaultPort443_RemovesPort()
+    public void CanonicalizeDefaultPort443RemovesPort()
     {
         // Arrange
         var url1 = "https://example.com:443/job/123";
@@ -74,7 +74,7 @@ public class UrlCanonicalizerTests
     }
 
     [Fact]
-    public void Canonicalize_NonDefaultPort_PreservesPort()
+    public void CanonicalizeNonDefaultPortPreservesPort()
     {
         // Arrange
         var url = "https://example.com:8080/job/123";
@@ -87,7 +87,7 @@ public class UrlCanonicalizerTests
     }
 
     [Fact]
-    public void Canonicalize_TrailingSlash_NormalizesConsistently()
+    public void CanonicalizeTrailingSlashNormalizesConsistently()
     {
         // Arrange
         var url1 = "https://example.com/job/";
@@ -103,7 +103,7 @@ public class UrlCanonicalizerTests
     }
 
     [Fact]
-    public void Canonicalize_Fragment_RemovesFragment()
+    public void CanonicalizeFragmentRemovesFragment()
     {
         // Arrange
         var url1 = "https://example.com/job/123#section";
@@ -119,7 +119,7 @@ public class UrlCanonicalizerTests
     }
 
     [Fact]
-    public void Canonicalize_UtmParameters_RemovesTrackingParams()
+    public void CanonicalizeUtmParametersRemovesTrackingParams()
     {
         // Arrange
         var url = "https://example.com/job/123?utm_source=google&utm_medium=cpc&utm_campaign=spring";
@@ -132,7 +132,7 @@ public class UrlCanonicalizerTests
     }
 
     [Fact]
-    public void Canonicalize_GclidParameter_RemovesGclid()
+    public void CanonicalizeGclidParameterRemovesGclid()
     {
         // Arrange
         var url = "https://example.com/job/123?gclid=abc123";
@@ -145,7 +145,7 @@ public class UrlCanonicalizerTests
     }
 
     [Fact]
-    public void Canonicalize_FbclidParameter_RemovesFbclid()
+    public void CanonicalizeFbclidParameterRemovesFbclid()
     {
         // Arrange
         var url = "https://example.com/job/123?fbclid=xyz789";
@@ -158,7 +158,7 @@ public class UrlCanonicalizerTests
     }
 
     [Fact]
-    public void Canonicalize_QueryOrdering_SortsDeterministically()
+    public void CanonicalizeQueryOrderingSortsDeterministically()
     {
         // Arrange
         var url1 = "https://example.com/job/123?z=last&a=first&m=middle";
@@ -174,7 +174,7 @@ public class UrlCanonicalizerTests
     }
 
     [Fact]
-    public void Canonicalize_MeaningfulQueryParameters_PreservesNonTrackingParams()
+    public void CanonicalizeMeaningfulQueryParametersPreservesNonTrackingParams()
     {
         // Arrange
         var url = "https://example.com/job/123?job_id=456&source=careers";
@@ -189,7 +189,7 @@ public class UrlCanonicalizerTests
     }
 
     [Fact]
-    public void Canonicalize_DifferentJobIdValues_ProducesDifferentUrls()
+    public void CanonicalizeDifferentJobIdValuesProducesDifferentUrls()
     {
         // Arrange
         var url1 = "https://example.com/job?id=123";
@@ -204,7 +204,7 @@ public class UrlCanonicalizerTests
     }
 
     [Fact]
-    public void Canonicalize_MalformedUrl_DoesNotThrow()
+    public void CanonicalizeMalformedUrlDoesNotThrow()
     {
         // Arrange
         var malformedUrls = new[]
@@ -225,7 +225,7 @@ public class UrlCanonicalizerTests
     }
 
     [Fact]
-    public void Canonicalize_NullInput_ReturnsNull()
+    public void CanonicalizeNullInputReturnsNull()
     {
         // Act
         var result = _canonicalizer.Canonicalize(null);
@@ -235,7 +235,7 @@ public class UrlCanonicalizerTests
     }
 
     [Fact]
-    public void Canonicalize_EmptyInput_ReturnsNull()
+    public void CanonicalizeEmptyInputReturnsNull()
     {
         // Act
         var result = _canonicalizer.Canonicalize("");
@@ -245,7 +245,7 @@ public class UrlCanonicalizerTests
     }
 
     [Fact]
-    public void Canonicalize_WhitespaceInput_ReturnsNull()
+    public void CanonicalizeWhitespaceInputReturnsNull()
     {
         // Act
         var result = _canonicalizer.Canonicalize("   ");
@@ -255,7 +255,7 @@ public class UrlCanonicalizerTests
     }
 
     [Fact]
-    public void Canonicalize_LeadingTrailingWhitespace_TrimsAndProcesses()
+    public void CanonicalizeLeadingTrailingWhitespaceTrimsAndProcesses()
     {
         // Arrange
         var url1 = "  https://example.com/job/123  ";
@@ -270,7 +270,7 @@ public class UrlCanonicalizerTests
     }
 
     [Fact]
-    public void Canonicalize_SchemeCase_NormalizesToLower()
+    public void CanonicalizeSchemeCaseNormalizesToLower()
     {
         // Arrange
         var url1 = "HTTPS://example.com/job/123";
@@ -286,7 +286,7 @@ public class UrlCanonicalizerTests
     }
 
     [Fact]
-    public void Canonicalize_AllTrackingParams_RemovesAll()
+    public void CanonicalizeAllTrackingParamsRemovesAll()
     {
         // Arrange
         var url = "https://example.com/job/123?utm_source=g&utm_medium=m&utm_campaign=c&utm_term=t&utm_content=co&utm_id=i&gclid=gc&fbclid=fc";
@@ -299,7 +299,7 @@ public class UrlCanonicalizerTests
     }
 
     [Fact]
-    public void Canonicalize_MixedTrackingAndMeaningful_RemovesOnlyTracking()
+    public void CanonicalizeMixedTrackingAndMeaningfulRemovesOnlyTracking()
     {
         // Arrange
         var url = "https://example.com/job/123?job_id=456&utm_source=google&department=engineering";
@@ -314,7 +314,7 @@ public class UrlCanonicalizerTests
     }
 
     [Fact]
-    public void Canonicalize_CaseInsensitiveTrackingParamNames_RemovesRegardlessOfCase()
+    public void CanonicalizeCaseInsensitiveTrackingParamNamesRemovesRegardlessOfCase()
     {
         // Arrange
         var url = "https://example.com/job/123?UTM_SOURCE=google&Utm_Medium=cpc";
@@ -327,7 +327,7 @@ public class UrlCanonicalizerTests
     }
 
     [Fact]
-    public void Canonicalize_PathCasing_PreservesPathCase()
+    public void CanonicalizePathCasingPreservesPathCase()
     {
         // Arrange
         var url = "https://example.com/Jobs/Software-Engineer/Apply";
@@ -340,7 +340,7 @@ public class UrlCanonicalizerTests
     }
 
     [Fact]
-    public void Canonicalize_RelativeUrl_HandlesDeterministically()
+    public void CanonicalizeRelativeUrlHandlesDeterministically()
     {
         // Arrange
         var relativeUrl = "/jobs/123";

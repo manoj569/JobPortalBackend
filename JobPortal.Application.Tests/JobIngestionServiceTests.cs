@@ -48,7 +48,7 @@ public class JobIngestionServiceTests
     }
 
     [Fact]
-    public async Task IngestAsync_NewValidJob_CreatesDraftJob()
+    public async Task IngestAsyncNewValidJobCreatesDraftJob()
     {
         var raw = CreateRawJob();
 
@@ -94,7 +94,7 @@ public class JobIngestionServiceTests
     [InlineData(-1, JobQualityDecision.Rejected)]
     [InlineData(1, JobQualityDecision.Eligible)]
     [InlineData(null, JobQualityDecision.Eligible)]
-    public async Task IngestAsync_SourceExpiryRemainsDraftAndControlsQuality(int? days, JobQualityDecision expected)
+    public async Task IngestAsyncSourceExpiryRemainsDraftAndControlsQuality(int? days, JobQualityDecision expected)
     {
         var now = new DateTime(2026, 10, 1, 12, 0, 0, DateTimeKind.Utc);
         var expiry = days.HasValue ? now.AddDays(days.Value) : (DateTime?)null;
@@ -116,7 +116,7 @@ public class JobIngestionServiceTests
     [Theory]
     [InlineData(DateTimeKind.Local)]
     [InlineData(DateTimeKind.Unspecified)]
-    public async Task IngestAsync_AmbiguousExpiryIsNotPersisted(DateTimeKind kind)
+    public async Task IngestAsyncAmbiguousExpiryIsNotPersisted(DateTimeKind kind)
     {
         await _service.IngestAsync(CreateRawJob() with
         {
@@ -126,7 +126,7 @@ public class JobIngestionServiceTests
     }
 
     [Fact]
-    public async Task IngestAsync_UrlDuplicate_ReturnsExistingJob()
+    public async Task IngestAsyncUrlDuplicateReturnsExistingJob()
     {
         var existing = CreateExistingJob();
 
@@ -149,7 +149,7 @@ public class JobIngestionServiceTests
     }
 
     [Fact]
-    public async Task IngestAsync_FingerprintDuplicate_ReturnsExistingJob()
+    public async Task IngestAsyncFingerprintDuplicateReturnsExistingJob()
     {
         var existing = CreateExistingJob();
 
@@ -170,7 +170,7 @@ public class JobIngestionServiceTests
     }
 
     [Fact]
-    public async Task IngestAsync_FuzzyDuplicate_ReturnsExistingJob()
+    public async Task IngestAsyncFuzzyDuplicateReturnsExistingJob()
     {
         var existing = CreateExistingJob();
 
@@ -193,7 +193,7 @@ public class JobIngestionServiceTests
     }
 
     [Fact]
-    public async Task IngestAsync_Duplicate_DoesNotOverwriteCuratedFields()
+    public async Task IngestAsyncDuplicateDoesNotOverwriteCuratedFields()
     {
         var existing = CreateExistingJob();
 
@@ -271,7 +271,7 @@ public class JobIngestionServiceTests
     }
 
     [Fact]
-    public async Task IngestAsync_CompanyNotFound_DoesNotCreateJob()
+    public async Task IngestAsyncCompanyNotFoundDoesNotCreateJob()
     {
         _companies.Company = null;
 
@@ -291,7 +291,7 @@ public class JobIngestionServiceTests
     }
 
     [Fact]
-    public async Task IngestAsync_MissingCategory_CreatesUncategorisedJob()
+    public async Task IngestAsyncMissingCategoryCreatesUncategorisedJob()
     {
         var raw = CreateRawJob() with
         {
@@ -310,7 +310,7 @@ public class JobIngestionServiceTests
     }
 
     [Fact]
-    public async Task IngestAsync_MalformedApplicationUrl_ReturnsInvalid()
+    public async Task IngestAsyncMalformedApplicationUrlReturnsInvalid()
     {
         var raw = CreateRawJob() with
         {
@@ -326,7 +326,7 @@ public class JobIngestionServiceTests
     }
 
     [Fact]
-    public async Task IngestAsync_InvalidSalaryRange_ReturnsInvalid()
+    public async Task IngestAsyncInvalidSalaryRangeReturnsInvalid()
     {
         var raw = CreateRawJob() with
         {
@@ -343,7 +343,7 @@ public class JobIngestionServiceTests
     }
 
     [Fact]
-    public async Task IngestAsync_DuplicateWithoutAggregationMetadata_FillsMissingMetadata()
+    public async Task IngestAsyncDuplicateWithoutAggregationMetadataFillsMissingMetadata()
     {
         var existing = CreateExistingJob();
 
@@ -369,7 +369,7 @@ public class JobIngestionServiceTests
     }
 
     [Fact]
-    public async Task IngestAsync_DuplicateWithExistingAggregationMetadata_PreservesFirstSeenAndFingerprint()
+    public async Task IngestAsyncDuplicateWithExistingAggregationMetadataPreservesFirstSeenAndFingerprint()
     {
         var existing = CreateExistingJob();
 
@@ -400,7 +400,7 @@ public class JobIngestionServiceTests
     }
 
     [Fact]
-    public async Task IngestAsync_InvalidCategory_DoesNotCreateNewJob()
+    public async Task IngestAsyncInvalidCategoryDoesNotCreateNewJob()
     {
         var raw = CreateRawJob() with
         {
@@ -419,7 +419,7 @@ public class JobIngestionServiceTests
     }
 
     [Fact]
-    public async Task IngestAsync_EmptyCategory_CreatesUncategorisedJob()
+    public async Task IngestAsyncEmptyCategoryCreatesUncategorisedJob()
     {
         var result = await _service.IngestAsync(CreateRawJob() with { CategoryId = Guid.Empty });
 
@@ -429,7 +429,7 @@ public class JobIngestionServiceTests
     }
 
     [Fact]
-    public async Task IngestAsync_MissingCategory_StillRefreshesCanonicalJob()
+    public async Task IngestAsyncMissingCategoryStillRefreshesCanonicalJob()
     {
         var existing = CreateExistingJob();
         _deduplication.Result = DeduplicationResult.SourceUrlMatch(existing);
@@ -446,7 +446,7 @@ public class JobIngestionServiceTests
     }
 
     [Fact]
-    public async Task IngestAsync_NewValidJob_ReturnsCreatedReasonCode()
+    public async Task IngestAsyncNewValidJobReturnsCreatedReasonCode()
     {
         var result = await _service.IngestAsync(CreateRawJob());
 
@@ -455,7 +455,7 @@ public class JobIngestionServiceTests
     }
 
     [Fact]
-    public async Task IngestAsync_UrlDuplicate_ReturnsCanonicalUrlReasonCode()
+    public async Task IngestAsyncUrlDuplicateReturnsCanonicalUrlReasonCode()
     {
         var existing = CreateExistingJob();
 
@@ -473,7 +473,7 @@ public class JobIngestionServiceTests
     }
 
     [Fact]
-    public async Task IngestAsync_FingerprintDuplicate_ReturnsFingerprintReasonCode()
+    public async Task IngestAsyncFingerprintDuplicateReturnsFingerprintReasonCode()
     {
         var existing = CreateExistingJob();
 
@@ -491,7 +491,7 @@ public class JobIngestionServiceTests
     }
 
     [Fact]
-    public async Task IngestAsync_FuzzyDuplicate_ReturnsFuzzyReasonCode()
+    public async Task IngestAsyncFuzzyDuplicateReturnsFuzzyReasonCode()
     {
         var existing = CreateExistingJob();
 
@@ -509,7 +509,7 @@ public class JobIngestionServiceTests
     }
 
     [Fact]
-    public async Task IngestAsync_CompanyNotFound_ReturnsCompanyNotFoundReasonCode()
+    public async Task IngestAsyncCompanyNotFoundReturnsCompanyNotFoundReasonCode()
     {
         _companies.Company = null;
 
@@ -528,7 +528,7 @@ public class JobIngestionServiceTests
     }
 
     [Fact]
-    public async Task IngestAsync_MalformedApplicationUrl_ReturnsInvalidApplicationUrlReasonCode()
+    public async Task IngestAsyncMalformedApplicationUrlReturnsInvalidApplicationUrlReasonCode()
     {
         var raw = CreateRawJob() with
         {
@@ -547,7 +547,7 @@ public class JobIngestionServiceTests
     }
 
     [Fact]
-    public async Task IngestAsync_InvalidSalary_ReturnsInvalidSourceDataReasonCode()
+    public async Task IngestAsyncInvalidSalaryReturnsInvalidSourceDataReasonCode()
     {
         var raw = CreateRawJob() with
         {

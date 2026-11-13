@@ -19,6 +19,8 @@ namespace JobPortal.Application.Tests;
 
 public sealed class HiringDriveTests
 {
+    private static readonly string[] ExpectedValues1 = new[] { "first", "later" };
+
     private static readonly string[] OrderedTitles = ["C", "B", "A"];
     private static readonly string[] CardFields = ["badgeText", "badgeType", "company", "description", "destination", "endAtUtc", "experienceText", "id", "imageUrl", "isSponsored", "locationText", "startAtUtc", "subtitle", "title"];
     private static readonly string[] DetailFields = ["badgeText", "badgeType", "company", "description", "endAtUtc", "experienceText", "id", "imageUrl", "isSponsored", "locationText", "startAtUtc", "subtitle", "title"];
@@ -81,7 +83,7 @@ public sealed class HiringDriveTests
         await f.Db.SaveChangesAsync();
 
         var home = await f.Service.HomepageAsync(default);
-        Assert.Equal(new[] { "first", "later" }, home.Select(x => x.Title));
+        Assert.Equal(ExpectedValues1, home.Select(x => x.Title));
         Assert.True(home.First().IsSponsored);
         Assert.Equal(4, (await f.Service.PublicAsync(default)).Count);
         Assert.Contains((await f.Service.PublicAsync(default)), item => item.Title == "ends-now");

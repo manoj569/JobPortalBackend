@@ -27,6 +27,8 @@ namespace JobPortal.Application.Tests;
 
 public sealed class CandidateModuleTests
 {
+    private static readonly JsonSerializerOptions WebJsonOptions = new(JsonSerializerDefaults.Web);
+
     public class QuotaMembershipProxy : DispatchProxy
     {
         public Func<Guid, string, Membership?> Lookup { get; set; } = null!;
@@ -1187,7 +1189,7 @@ public sealed class CandidateModuleTests
         Assert.Equal(saved.Id, dto.SavedJobId);
         Assert.Equal(f.Job.Id, dto.JobId);
         Assert.Equal(1, page.TotalCount);
-        var json = JsonSerializer.Serialize(dto, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var json = JsonSerializer.Serialize(dto, WebJsonOptions);
         Assert.Contains("\"companyId\":", json);
         Assert.Contains("\"companyLogoUrl\":", json);
         await Assert.ThrowsAsync<UnauthorizedException>(() => f.Service.GetSavedJobsAsync(Guid.NewGuid(), new()));

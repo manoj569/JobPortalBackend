@@ -37,8 +37,13 @@ public sealed partial class GreenhouseExternalJobProvider(IHttpClientFactory cli
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(source);
-        if (logger is not null)
-            LogConfigurationInput(logger, source.Id, SafeIdentifier(source.AtsIdentifier), CareerHost(source.CareerPageUrl), CareerPath(source.CareerPageUrl));
+        if (logger is not null && logger.IsEnabled(LogLevel.Information))
+        {
+            var identifier = SafeIdentifier(source.AtsIdentifier);
+            var host = CareerHost(source.CareerPageUrl);
+            var path = CareerPath(source.CareerPageUrl);
+            LogConfigurationInput(logger, source.Id, identifier, host, path);
+        }
         ResolvedJobSourceConfiguration resolved;
         try
         {
@@ -120,9 +125,13 @@ public sealed partial class GreenhouseExternalJobProvider(IHttpClientFactory cli
                     ids.SequenceEqual(current.EnumerateArray().Select(entry => entry.NumericId("id")).Order(StringComparer.Ordinal), StringComparer.Ordinal);
                 if (!healthy) reasonCounts["PROVIDER_SNAPSHOT_CHANGED"] = 1;
             }
-            if (logger is not null) { var succeeded = available.Where((value, index) => value && attempted[index]).Count();
-                LogBatchCompleted(logger, source.Id, batchNumber, succeeded, attempted.Count(value => value) - succeeded);
-                LogReady(logger, source.Id, batchNumber, selected.Jobs.Count, skipped); }
+            if (logger is not null && logger.IsEnabled(LogLevel.Information))
+            {
+                var succeeded = available.Where((value, index) => value && attempted[index]).Count();
+                var failed = attempted.Count(value => value) - succeeded;
+                LogBatchCompleted(logger, source.Id, batchNumber, succeeded, failed);
+                LogReady(logger, source.Id, batchNumber, selected.Jobs.Count, skipped);
+            }
             // Iterator backpressure: the runner commits this batch before fetching the next.
             yield return selected with { Skipped = skipped, IsComplete = strict && healthy && start + size >= entries.Length,
                 ReportedListingTotal = total ?? entries.Length, ProviderReasonCounts = reasonCounts };

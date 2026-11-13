@@ -307,8 +307,11 @@ public sealed partial class WorkdayJobSourceProvider(
                 succeeded += jobs.Length;
                 failed += batchFailed;
                 if (logger is not null) LogBatch(logger, source.Id, attempted, succeeded, failed, stopwatch.Elapsed.TotalMilliseconds);
-                if (logger is not null) LogStage(logger, source.Id, "DetailBatch", chunk.Length,
-                    detailTimer.Elapsed.TotalMilliseconds, Math.Min(settings.DetailConcurrency, Volatile.Read(ref adaptiveConcurrency)));
+                if (logger is not null && logger.IsEnabled(LogLevel.Information))
+                {
+                    var concurrency = Math.Min(settings.DetailConcurrency, Volatile.Read(ref adaptiveConcurrency));
+                    LogStage(logger, source.Id, "DetailBatch", chunk.Length, detailTimer.Elapsed.TotalMilliseconds, concurrency);
+                }
                 // Bounded producer can fetch the next detail batch while the sole
                 // DbContext consumer commits this one. Backpressure bounds memory.
                 cursor += chunk.Length;

@@ -755,7 +755,7 @@ public sealed class WorkdayBatchIngestionTests(ITestOutputHelper output)
         var id = request.RequestUri!.AbsolutePath.Split('_').Last();
         return JsonSerializer.Serialize(new { jobPostingInfo = new { title = $"Engineer {id}", jobReqId = $"REQ-{id}",
             jobDescription = description ?? $"<p>Build reliable software for product {id}, collaborating with the engineering team and delivering high quality code.</p>",
-            location = "Pune, India", timeType = "Full time", remoteType = "On-site", startDate = DateTime.UtcNow.ToString("yyyy-MM-dd") } });
+            location = "Pune, India", timeType = "Full time", remoteType = "On-site", startDate = DateTime.UtcNow.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) } });
     }
 
     private static HttpResponseMessage Json(string value) => new(HttpStatusCode.OK)

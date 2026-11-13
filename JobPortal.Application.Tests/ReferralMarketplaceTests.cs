@@ -14,6 +14,8 @@ namespace JobPortal.Application.Tests;
 
 public sealed class ReferralMarketplaceTests
 {
+    private static readonly JsonSerializerOptions WebJsonOptions = new(JsonSerializerDefaults.Web);
+
     [Theory]
     [InlineData(null)]
     [InlineData("CareerHarborMembership")]
@@ -294,7 +296,7 @@ public sealed class ReferralMarketplaceTests
         await using var f = await ReferralFixture.CreateAsync();
         var page = await f.Public.GetApprovedPublicAsync(1, 20, f.CandidateId);
         var envelope = new JobPortal.Shared.Models.ApiResponse<JobPortal.Shared.Models.PagedResponse<PublicReferralJobResponse>>(page);
-        var json = JsonSerializer.Serialize(envelope, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var json = JsonSerializer.Serialize(envelope, WebJsonOptions);
         foreach (var forbidden in new[] { "referrerName", "referrerUserId", "email", "phone", "linkedIn", "profileImage", "Private Referrer", "employee@example.test", "+919999999999", "linkedin.com/in/private", f.ReferrerId.ToString() })
             Assert.DoesNotContain(forbidden, json, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Employee Referrer", json); Assert.Contains("remainingReferralSlots", json);

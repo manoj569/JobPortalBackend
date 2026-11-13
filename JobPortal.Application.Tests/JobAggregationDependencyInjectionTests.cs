@@ -122,7 +122,11 @@ public sealed class JobAggregationDependencyInjectionTests
             .GetServices<IExternalJobProvider>()
             .ToArray();
 
-        Assert.Equal(7, providers.Length);
+        Assert.Equal(9, providers.Length);
+        Assert.Equal(providers.Length, providers.Select(x => x.AtsType).Distinct().Count());
+        Assert.Contains(providers, x => x is SmartRecruitersJobSourceProvider);
+        Assert.Contains(providers, x => x is RippleHireJobSourceProvider);
+        Assert.Contains(providers, x => x is OracleRecruitingCloudJobSourceProvider);
 
         Assert.Contains(
             providers,

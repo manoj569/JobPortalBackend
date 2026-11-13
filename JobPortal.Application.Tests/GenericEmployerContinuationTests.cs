@@ -18,6 +18,8 @@ namespace JobPortal.Application.Tests;
 
 public sealed class GenericEmployerContinuationTests
 {
+    private static readonly int[] ExpectedValues1 = new[] { 0, 35, 70, 105 };
+
     [Fact]
     public async Task SitemapSlicesAdvanceFromPersistedSourceStrategyAndLateIndiaJobPublishesOnce()
     {
@@ -106,7 +108,7 @@ public sealed class GenericEmployerContinuationTests
         Assert.Equal(1, replay.Unchanged);
         Assert.Equal(0, replay.Closed);
         Assert.Single(await fixture.Context.Jobs.Where(job => job.JobSourceId == sourceId).ToListAsync());
-        Assert.Equal(new[] { 0, 35, 70, 105 }, handler.RequestedCursors);
+        Assert.Equal(ExpectedValues1, handler.RequestedCursors);
         var savedSource = await fixture.Context.JobSources.AsNoTracking().SingleAsync(source => source.Id == sourceId);
         Assert.Equal(106, ContinuationCursor(savedSource.EmployerStrategyJson));
 

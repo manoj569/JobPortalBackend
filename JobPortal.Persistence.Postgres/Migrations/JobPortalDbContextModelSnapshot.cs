@@ -2082,6 +2082,1333 @@ namespace JobPortal.Persistence.Postgres.Migrations
                         });
                 });
 
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorAllowance", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Allocated")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CycleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Feature")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsDeleted");
+
+                    b.HasIndex("CycleId", "Feature")
+                        .IsUnique();
+
+                    b.ToTable("AcceleratorAllowances", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AcceleratorAllowance_Bounds", "\"Allocated\" BETWEEN 1 AND 10000 AND \"Feature\" BETWEEN 1 AND 5");
+                        });
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorAssessmentAnswer", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AttemptId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("EvaluationEvidenceJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<bool?>("IsCorrect")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("QuestionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("QuestionVersion")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<decimal?>("Score")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("numeric(5,2)");
+
+                    b.Property<int>("Sequence")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("SubmittedAnswerJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsDeleted");
+
+                    b.HasIndex("AttemptId", "QuestionId")
+                        .IsUnique();
+
+                    b.HasIndex("AttemptId", "Sequence")
+                        .IsUnique();
+
+                    b.ToTable("AcceleratorAssessmentAnswers", (string)null);
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorAssessmentAttempt", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("AttemptNumber")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("ExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("GoalId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("RequestHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid>("RequestKey")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal?>("Score")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("numeric(5,2)");
+
+                    b.Property<string>("SelectionStrategy")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<DateTime?>("StartedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("SubmittedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("TaxonomyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("TemplateId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("TemplateVersion")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GoalId");
+
+                    b.HasIndex("IsDeleted");
+
+                    b.HasIndex("UserId", "RequestKey")
+                        .IsUnique();
+
+                    b.HasIndex("UserId", "GoalId", "Status");
+
+                    b.ToTable("AcceleratorAssessmentAttempts", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AcceleratorAssessmentAttempt_Number", "\"AttemptNumber\" >= 1");
+                        });
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorAssessmentTemplate", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("MaximumQuestions")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("RoleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SelectionStrategy")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<int>("TimeLimitMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Version")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsDeleted");
+
+                    b.HasIndex("RoleId", "IsActive");
+
+                    b.HasIndex("RoleId", "Version")
+                        .IsUnique();
+
+                    b.ToTable("AcceleratorAssessmentTemplates", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AcceleratorAssessmentTemplate_Limits", "\"TimeLimitMinutes\" BETWEEN 1 AND 240 AND \"MaximumQuestions\" BETWEEN 1 AND 100");
+                        });
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorBillingCycle", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("EndsAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("PaymentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("PlanVersion")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<DateTime>("StartsAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsDeleted");
+
+                    b.HasIndex("PaymentId")
+                        .IsUnique();
+
+                    b.HasIndex("UserId", "StartsAtUtc", "EndsAtUtc");
+
+                    b.ToTable("AcceleratorBillingCycles", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AcceleratorCycle_Bounds", "\"EndsAtUtc\" > \"StartsAtUtc\"");
+                        });
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorCareerGoal", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("RequestHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid>("RequestKey")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RoleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("TargetAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("TaxonomyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("WeeklyStudyMinutes")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsDeleted");
+
+                    b.HasIndex("RoleId", "TaxonomyId");
+
+                    b.HasIndex("UserId", "RequestKey")
+                        .IsUnique();
+
+                    b.HasIndex("UserId", "CreatedAtUtc", "Id");
+
+                    b.ToTable("AcceleratorCareerGoals", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AcceleratorGoal_Status", "\"Status\" BETWEEN 1 AND 3");
+
+                            t.HasCheckConstraint("CK_AcceleratorGoal_Study", "\"WeeklyStudyMinutes\" BETWEEN 15 AND 10080");
+                        });
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorCareerRole", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<Guid>("TaxonomyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsDeleted");
+
+                    b.HasIndex("TaxonomyId", "Code")
+                        .IsUnique();
+
+                    b.ToTable("AcceleratorCareerRoles", (string)null);
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorCompetency", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AssessmentMethodsJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<int>("Difficulty")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid?>("ParentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ResourcesJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<Guid>("SkillId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SkillNameSnapshot")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<Guid>("TaxonomyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsDeleted");
+
+                    b.HasIndex("SkillId");
+
+                    b.HasIndex("ParentId", "TaxonomyId");
+
+                    b.HasIndex("TaxonomyId", "SkillId")
+                        .IsUnique();
+
+                    b.ToTable("AcceleratorCompetencies", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AcceleratorCompetency_Difficulty", "\"Difficulty\" BETWEEN 1 AND 5");
+                        });
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorLearningActivity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("EstimatedMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RoadmapNodeId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("ScheduledAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsDeleted");
+
+                    b.HasIndex("RoadmapNodeId");
+
+                    b.HasIndex("UserId", "ScheduledAtUtc", "Status");
+
+                    b.ToTable("AcceleratorLearningActivities", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AcceleratorLearningActivity_Effort", "\"EstimatedMinutes\" BETWEEN 1 AND 1440");
+                        });
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorPrerequisite", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompetencyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("RequiredCompetencyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("TaxonomyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsDeleted");
+
+                    b.HasIndex("CompetencyId", "RequiredCompetencyId")
+                        .IsUnique();
+
+                    b.HasIndex("CompetencyId", "TaxonomyId");
+
+                    b.HasIndex("RequiredCompetencyId", "TaxonomyId");
+
+                    b.ToTable("AcceleratorPrerequisites", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AcceleratorPrerequisite_NotSelf", "\"CompetencyId\" <> \"RequiredCompetencyId\"");
+                        });
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorProfile", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("EducationSummary")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<decimal>("ExperienceYears")
+                        .HasPrecision(3, 1)
+                        .HasColumnType("numeric(3,1)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("LinkedResumeUploadedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("WeeklyStudyMinutes")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsDeleted");
+
+                    b.HasIndex("UserId")
+                        .IsUnique()
+                        .HasFilter("\"IsDeleted\" = FALSE");
+
+                    b.ToTable("AcceleratorProfiles", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AcceleratorProfile_Experience", "\"ExperienceYears\" BETWEEN 0 AND 60");
+
+                            t.HasCheckConstraint("CK_AcceleratorProfile_Study", "\"WeeklyStudyMinutes\" BETWEEN 15 AND 10080");
+                        });
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorProfileSkill", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("ProfileId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("SelfReportedProficiency")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("SkillId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsDeleted");
+
+                    b.HasIndex("SkillId");
+
+                    b.HasIndex("ProfileId", "SkillId")
+                        .IsUnique()
+                        .HasFilter("\"IsDeleted\" = FALSE");
+
+                    b.ToTable("AcceleratorProfileSkills", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AcceleratorProfileSkill_Proficiency", "\"SelfReportedProficiency\" BETWEEN 0 AND 5");
+                        });
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorProgressEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ActivityId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("EvidenceJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("OccurredAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("RequestKey")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsDeleted");
+
+                    b.HasIndex("ActivityId", "OccurredAtUtc");
+
+                    b.HasIndex("UserId", "RequestKey")
+                        .IsUnique();
+
+                    b.ToTable("AcceleratorProgressEvents", (string)null);
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorQuestion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AnswerKeyJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<Guid>("CompetencyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Difficulty")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Explanation")
+                        .IsRequired()
+                        .HasMaxLength(8000)
+                        .HasColumnType("character varying(8000)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("OptionsJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<string>("Prompt")
+                        .IsRequired()
+                        .HasMaxLength(8000)
+                        .HasColumnType("character varying(8000)");
+
+                    b.Property<string>("RubricJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<Guid>("TaxonomyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Type")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Version")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<decimal>("Weight")
+                        .HasPrecision(9, 4)
+                        .HasColumnType("numeric(9,4)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsDeleted");
+
+                    b.HasIndex("CompetencyId", "TaxonomyId");
+
+                    b.HasIndex("CompetencyId", "Version")
+                        .IsUnique();
+
+                    b.HasIndex("TaxonomyId", "IsActive", "Difficulty");
+
+                    b.ToTable("AcceleratorQuestions", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AcceleratorQuestion_Bounds", "\"Difficulty\" BETWEEN 1 AND 5 AND \"Weight\" > 0");
+                        });
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorRecommendation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("EvidenceJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<DateTime>("GeneratedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("GoalId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("Priority")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<Guid?>("RoadmapNodeId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsDeleted");
+
+                    b.HasIndex("UserId", "GoalId", "GeneratedAtUtc");
+
+                    b.ToTable("AcceleratorRecommendations", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AcceleratorRecommendation_Priority", "\"Priority\" BETWEEN 1 AND 100");
+                        });
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorRoadmap", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("EstimatedMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Explanation")
+                        .IsRequired()
+                        .HasMaxLength(8000)
+                        .HasColumnType("character varying(8000)");
+
+                    b.Property<string>("GenerationStrategy")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<Guid>("GoalId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime>("PlannedStartAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("TargetAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("TaxonomyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsDeleted");
+
+                    b.HasIndex("GoalId", "Version")
+                        .IsUnique();
+
+                    b.HasIndex("UserId", "Status");
+
+                    b.ToTable("AcceleratorRoadmaps", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AcceleratorRoadmap_Timeline", "\"TargetAtUtc\" > \"PlannedStartAtUtc\" AND \"EstimatedMinutes\" >= 0");
+                        });
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorRoadmapEdge", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("FromNodeId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("RoadmapId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ToNodeId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsDeleted");
+
+                    b.HasIndex("RoadmapId", "ToNodeId");
+
+                    b.HasIndex("RoadmapId", "FromNodeId", "ToNodeId")
+                        .IsUnique();
+
+                    b.ToTable("AcceleratorRoadmapEdges", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AcceleratorRoadmapEdge_NotSelf", "\"FromNodeId\" <> \"ToNodeId\"");
+                        });
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorRoadmapNode", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompetencyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CompletionEvidenceJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("EstimatedMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("ProgressPercent")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("RoadmapId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Sequence")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("StableKey")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsDeleted");
+
+                    b.HasIndex("RoadmapId", "Sequence")
+                        .IsUnique();
+
+                    b.HasIndex("RoadmapId", "StableKey")
+                        .IsUnique();
+
+                    b.ToTable("AcceleratorRoadmapNodes", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AcceleratorRoadmapNode_Progress", "\"EstimatedMinutes\" >= 0 AND \"ProgressPercent\" BETWEEN 0 AND 100");
+                        });
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorRoleRequirement", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompetencyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("ExpectedProficiency")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("RoleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("TaxonomyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsDeleted");
+
+                    b.HasIndex("CompetencyId", "TaxonomyId");
+
+                    b.HasIndex("RoleId", "CompetencyId")
+                        .IsUnique();
+
+                    b.HasIndex("RoleId", "TaxonomyId");
+
+                    b.ToTable("AcceleratorRoleRequirements", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AcceleratorRequirement_Proficiency", "\"ExpectedProficiency\" BETWEEN 1 AND 5");
+                        });
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorSkillEvidence", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("AttemptId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompetencyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Confidence")
+                        .HasPrecision(5, 4)
+                        .HasColumnType("numeric(5,4)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("EvaluatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("GoalId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("Proficiency")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ScoringVersion")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<int>("Source")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AttemptId")
+                        .IsUnique()
+                        .HasFilter("\"AttemptId\" IS NOT NULL");
+
+                    b.HasIndex("IsDeleted");
+
+                    b.HasIndex("UserId", "GoalId", "CompetencyId", "EvaluatedAtUtc");
+
+                    b.ToTable("AcceleratorSkillEvidence", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AcceleratorSkillEvidence_Confidence", "\"Confidence\" BETWEEN 0 AND 1");
+                        });
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorTaxonomy", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ContentHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime>("PublishedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Version")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsDeleted");
+
+                    b.HasIndex("PublishedAtUtc");
+
+                    b.HasIndex("Version")
+                        .IsUnique();
+
+                    b.ToTable("AcceleratorTaxonomies", (string)null);
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorUsageEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("CostInr")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("numeric(18,6)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime>("OccurredAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("ReservationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("State")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsDeleted");
+
+                    b.HasIndex("OccurredAtUtc");
+
+                    b.HasIndex("ReservationId", "State")
+                        .IsUnique();
+
+                    b.ToTable("AcceleratorUsageEvents", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AcceleratorUsageEvent_State", "\"State\" BETWEEN 1 AND 5 AND \"CostInr\" >= 0");
+                        });
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorUsageReservation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal?>("ActualCostInr")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("numeric(18,6)");
+
+                    b.Property<DateTime>("BudgetDayUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CycleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Feature")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("FinishedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("InputTokens")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime>("LeaseExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Model")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<int>("OutputTokens")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("PolicyViolation")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<string>("RequestHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid>("RequestKey")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("ReservedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal>("ReservedCostInr")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("numeric(18,6)");
+
+                    b.Property<int>("ReservedInputTokens")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ReservedOutputTokens")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("State")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsDeleted");
+
+                    b.HasIndex("BudgetDayUtc", "State");
+
+                    b.HasIndex("CycleId", "UserId");
+
+                    b.HasIndex("State", "LeaseExpiresAtUtc");
+
+                    b.HasIndex("UserId", "RequestKey")
+                        .IsUnique();
+
+                    b.HasIndex("UserId", "ReservedAtUtc");
+
+                    b.HasIndex("CycleId", "Feature", "State");
+
+                    b.ToTable("AcceleratorUsageReservations", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AcceleratorUsage_Cost", "\"ReservedCostInr\" >= 0 AND (\"ActualCostInr\" IS NULL OR \"ActualCostInr\" >= 0)");
+
+                            t.HasCheckConstraint("CK_AcceleratorUsage_Lease", "\"LeaseExpiresAtUtc\" > \"ReservedAtUtc\"");
+
+                            t.HasCheckConstraint("CK_AcceleratorUsage_State", "\"State\" BETWEEN 1 AND 5 AND \"Feature\" BETWEEN 1 AND 5");
+
+                            t.HasCheckConstraint("CK_AcceleratorUsage_Tokens", "\"InputTokens\" >= 0 AND \"OutputTokens\" >= 0 AND \"ReservedInputTokens\" >= 0 AND \"ReservedOutputTokens\" >= 0");
+                        });
+                });
+
             modelBuilder.Entity("JobPortal.Domain.Entities.CareerConsultant", b =>
                 {
                     b.Property<Guid>("Id")
@@ -7728,6 +9055,263 @@ namespace JobPortal.Persistence.Postgres.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorAllowance", b =>
+                {
+                    b.HasOne("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorBillingCycle", "Cycle")
+                        .WithMany("Allowances")
+                        .HasForeignKey("CycleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Cycle");
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorAssessmentAnswer", b =>
+                {
+                    b.HasOne("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorAssessmentAttempt", "Attempt")
+                        .WithMany("Answers")
+                        .HasForeignKey("AttemptId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Attempt");
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorAssessmentAttempt", b =>
+                {
+                    b.HasOne("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorCareerGoal", "Goal")
+                        .WithMany()
+                        .HasForeignKey("GoalId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Goal");
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorAssessmentTemplate", b =>
+                {
+                    b.HasOne("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorCareerRole", "Role")
+                        .WithMany()
+                        .HasForeignKey("RoleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Role");
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorBillingCycle", b =>
+                {
+                    b.HasOne("JobPortal.Domain.Entities.Payment", "Payment")
+                        .WithMany()
+                        .HasForeignKey("PaymentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JobPortal.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Payment");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorCareerGoal", b =>
+                {
+                    b.HasOne("JobPortal.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorCareerRole", "Role")
+                        .WithMany()
+                        .HasForeignKey("RoleId", "TaxonomyId")
+                        .HasPrincipalKey("Id", "TaxonomyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Role");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorCareerRole", b =>
+                {
+                    b.HasOne("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorTaxonomy", "Taxonomy")
+                        .WithMany("Roles")
+                        .HasForeignKey("TaxonomyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Taxonomy");
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorCompetency", b =>
+                {
+                    b.HasOne("JobPortal.Domain.Entities.Skill", "Skill")
+                        .WithMany()
+                        .HasForeignKey("SkillId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorTaxonomy", "Taxonomy")
+                        .WithMany("Competencies")
+                        .HasForeignKey("TaxonomyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorCompetency", "Parent")
+                        .WithMany()
+                        .HasForeignKey("ParentId", "TaxonomyId")
+                        .HasPrincipalKey("Id", "TaxonomyId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Parent");
+
+                    b.Navigation("Skill");
+
+                    b.Navigation("Taxonomy");
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorLearningActivity", b =>
+                {
+                    b.HasOne("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorRoadmapNode", null)
+                        .WithMany()
+                        .HasForeignKey("RoadmapNodeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorPrerequisite", b =>
+                {
+                    b.HasOne("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorCompetency", "Competency")
+                        .WithMany("Prerequisites")
+                        .HasForeignKey("CompetencyId", "TaxonomyId")
+                        .HasPrincipalKey("Id", "TaxonomyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorCompetency", "RequiredCompetency")
+                        .WithMany()
+                        .HasForeignKey("RequiredCompetencyId", "TaxonomyId")
+                        .HasPrincipalKey("Id", "TaxonomyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Competency");
+
+                    b.Navigation("RequiredCompetency");
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorProfile", b =>
+                {
+                    b.HasOne("JobPortal.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorProfileSkill", b =>
+                {
+                    b.HasOne("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorProfile", "Profile")
+                        .WithMany("Skills")
+                        .HasForeignKey("ProfileId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JobPortal.Domain.Entities.Skill", "Skill")
+                        .WithMany()
+                        .HasForeignKey("SkillId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Profile");
+
+                    b.Navigation("Skill");
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorProgressEvent", b =>
+                {
+                    b.HasOne("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorLearningActivity", null)
+                        .WithMany()
+                        .HasForeignKey("ActivityId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorQuestion", b =>
+                {
+                    b.HasOne("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorCompetency", "Competency")
+                        .WithMany()
+                        .HasForeignKey("CompetencyId", "TaxonomyId")
+                        .HasPrincipalKey("Id", "TaxonomyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Competency");
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorRoadmapNode", b =>
+                {
+                    b.HasOne("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorRoadmap", "Roadmap")
+                        .WithMany("Nodes")
+                        .HasForeignKey("RoadmapId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Roadmap");
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorRoleRequirement", b =>
+                {
+                    b.HasOne("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorCompetency", "Competency")
+                        .WithMany()
+                        .HasForeignKey("CompetencyId", "TaxonomyId")
+                        .HasPrincipalKey("Id", "TaxonomyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorCareerRole", "Role")
+                        .WithMany("Requirements")
+                        .HasForeignKey("RoleId", "TaxonomyId")
+                        .HasPrincipalKey("Id", "TaxonomyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Competency");
+
+                    b.Navigation("Role");
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorUsageEvent", b =>
+                {
+                    b.HasOne("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorUsageReservation", "Reservation")
+                        .WithMany()
+                        .HasForeignKey("ReservationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Reservation");
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorUsageReservation", b =>
+                {
+                    b.HasOne("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorBillingCycle", "Cycle")
+                        .WithMany()
+                        .HasForeignKey("CycleId", "UserId")
+                        .HasPrincipalKey("Id", "UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Cycle");
+                });
+
             modelBuilder.Entity("JobPortal.Domain.Entities.CareerConsultant", b =>
                 {
                     b.HasOne("JobPortal.Domain.Entities.Company", "Company")
@@ -8852,6 +10436,43 @@ namespace JobPortal.Persistence.Postgres.Migrations
             modelBuilder.Entity("JobPortal.Domain.Entities.CandidatePortfolio", b =>
                 {
                     b.Navigation("SectionSettings");
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorAssessmentAttempt", b =>
+                {
+                    b.Navigation("Answers");
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorBillingCycle", b =>
+                {
+                    b.Navigation("Allowances");
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorCareerRole", b =>
+                {
+                    b.Navigation("Requirements");
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorCompetency", b =>
+                {
+                    b.Navigation("Prerequisites");
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorProfile", b =>
+                {
+                    b.Navigation("Skills");
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorRoadmap", b =>
+                {
+                    b.Navigation("Nodes");
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorTaxonomy", b =>
+                {
+                    b.Navigation("Competencies");
+
+                    b.Navigation("Roles");
                 });
 
             modelBuilder.Entity("JobPortal.Domain.Entities.CareerConsultant", b =>

@@ -12,19 +12,23 @@ namespace JobPortal.Application.Tests;
 
 public sealed class CareerTrustMigrationTests
 {
+    private static readonly string[] ExpectedValues1 = new[] { "CareerGuidanceDisputeEvidence", "CareerGuidanceDisputes", "CareerGuidanceReviews" };
+    private static readonly string[] ExpectedValues2 = new[] { "BookingId" };
+    private static readonly string[] ExpectedValues3 = new[] { "DisputeId", "RequestId" };
+
     [Fact]
     public void MigrationAddsOnlyThreeTrustTablesAndRestrictiveForeignKeys()
     {
         var operations = new AddCareerGuidanceReviewsDisputesAndTrust().UpOperations;
         Assert.All(operations, o => Assert.True(o is CreateTableOperation or CreateIndexOperation));
         var tables = operations.OfType<CreateTableOperation>().ToArray();
-        Assert.Equal(new[] { "CareerGuidanceDisputeEvidence", "CareerGuidanceDisputes", "CareerGuidanceReviews" }, tables.Select(t => t.Name).Order().ToArray());
+        Assert.Equal(ExpectedValues1, tables.Select(t => t.Name).Order().ToArray());
         Assert.All(tables.SelectMany(t => t.ForeignKeys), fk => Assert.Equal(ReferentialAction.Restrict, fk.OnDelete));
         Assert.All(tables, t => Assert.NotEmpty(t.CheckConstraints));
         var indexes = operations.OfType<CreateIndexOperation>().ToArray();
         foreach (var table in new[] { "CareerGuidanceReviews", "CareerGuidanceDisputes" })
-            Assert.Contains(indexes, i => i.Table == table && i.IsUnique && i.Columns.SequenceEqual(new[] { "BookingId" }) && i.Filter == null);
-        Assert.Contains(indexes, i => i.Table == "CareerGuidanceDisputeEvidence" && i.IsUnique && i.Columns.SequenceEqual(new[] { "DisputeId", "RequestId" }));
+            Assert.Contains(indexes, i => i.Table == table && i.IsUnique && i.Columns.SequenceEqual(ExpectedValues2) && i.Filter == null);
+        Assert.Contains(indexes, i => i.Table == "CareerGuidanceDisputeEvidence" && i.IsUnique && i.Columns.SequenceEqual(ExpectedValues3));
         Assert.Contains(tables.Single(t => t.Name == "CareerGuidanceReviews").CheckConstraints, c => c.Name == "CK_CGReview_Rating");
         Assert.Contains(tables.Single(t => t.Name == "CareerGuidanceDisputes").CheckConstraints, c => c.Name == "CK_CGDispute_Resolution");
     }

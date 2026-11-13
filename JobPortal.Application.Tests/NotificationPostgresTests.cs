@@ -49,12 +49,12 @@ public sealed class NotificationPostgresTests
             var now = DateTime.UtcNow; var user = Guid.NewGuid(); var schedule = Guid.NewGuid(); var revision = Guid.NewGuid();
             await setup.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Users\" (\"Id\", \"Status\") VALUES ({user}, {(int)JobPortal.Domain.Enums.UserStatus.Active})");
             await setup.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"CandidateInterviewSchedules\" (\"Id\", \"CandidateId\", \"ReminderRevision\", \"ReminderRequested\", \"Status\", \"InterviewAtUtc\") VALUES ({schedule}, {user}, {revision}, TRUE, 1, {now.AddHours(1)})");
-            var row = NotificationOutbox.Create(NotificationSource.InterviewReminder, schedule, revision, user, "interview:test", "Reminder", "Body", null, now).First();
+            var row = NotificationOutbox.Create(NotificationSource.InterviewReminder, schedule, revision, user, "interview:test", "Reminder", "Body", null, now)[0];
             setup.NotificationDeliveries.Add(row); await setup.SaveChangesAsync();
             await using var a = new JobPortalDbContext(options); await using var b = new JobPortalDbContext(options);
             var first = new NotificationDeliveryRepository(a); var second = new NotificationDeliveryRepository(b);
             var claims = await Task.WhenAll(first.ClaimAsync(now, new(), default), second.ClaimAsync(now, new(), default));
-            var owner = Assert.Single(claims.Where(x => x is not null))!;
+            var owner = Assert.Single(claims, x => x is not null)!;
             Assert.Null(await second.ClaimAsync(now.AddSeconds(30), new(), default));
             var recovered = await second.ClaimAsync(now.AddMinutes(4), new(), default);
             Assert.NotNull(recovered); Assert.NotEqual(owner.LeaseOwner, recovered.LeaseOwner);

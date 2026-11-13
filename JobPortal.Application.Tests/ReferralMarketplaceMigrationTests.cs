@@ -11,6 +11,8 @@ namespace JobPortal.Application.Tests;
 
 public sealed class ReferralMarketplaceMigrationTests
 {
+    private static readonly string[] ExpectedValues1 = new[] { "CandidateUserId", "JobReferralId" };
+
     [Fact]
     public void ContactMigrationAddsOnlyNullableBoundedColumnsAndCanBeReversed()
     {
@@ -49,7 +51,7 @@ public sealed class ReferralMarketplaceMigrationTests
         using var db = new JobPortalDbContext(new DbContextOptionsBuilder<JobPortalDbContext>().UseNpgsql("Host=localhost;Database=careerharbor_referral_test").Options);
         var entity = db.Model.FindEntityType(typeof(ReferralRequest))!;
         var unique = Assert.Single(entity.GetIndexes(), x => x.IsUnique);
-        Assert.Equal(new[] { "CandidateUserId", "JobReferralId" }, unique.Properties.Select(x => x.Name).ToArray());
+        Assert.Equal(ExpectedValues1, unique.Properties.Select(x => x.Name).ToArray());
         Assert.Null(unique.GetFilter());
         Assert.Equal(4, entity.GetForeignKeys().Count());
         Assert.DoesNotContain(entity.GetProperties(), p => p.IsShadowProperty());

@@ -28,7 +28,7 @@ using static JobPortal.Application.Features.Jobs.JobSearchQueryValidator;
 namespace JobPortal.Application.Tests;
 
 [CollectionDefinition("Talentd local PostgreSQL")]
-public sealed class TalentdLocalPostgresCollection { }
+public sealed class TalentdLocalPostgresFixture { }
 
 [Collection("Talentd local PostgreSQL")]
 public sealed partial class TalentdDatabaseValidationTests(ITestOutputHelper output)

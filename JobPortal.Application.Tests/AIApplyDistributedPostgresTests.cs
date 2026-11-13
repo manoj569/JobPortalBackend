@@ -11,11 +11,10 @@ namespace JobPortal.Application.Tests;
 
 public sealed class AIApplyDistributedPostgresTests
 {
-    [Fact]
+    [LocalAIApplyPostgresFact]
     public async Task ConcurrentClaimsRespectPerUserLimitAndNeverDuplicateApplications()
     {
-        var connection = Environment.GetEnvironmentVariable("AIAPPLY_STEP5_POSTGRES");
-        if (string.IsNullOrWhiteSpace(connection)) return;
+        var connection = Environment.GetEnvironmentVariable("AIAPPLY_STEP5_POSTGRES")!;
         var stamp = Guid.NewGuid().ToString("N");
         await using (var setup = Context(connection))
         {
@@ -65,11 +64,10 @@ public sealed class AIApplyDistributedPostgresTests
         Assert.All(claimed, item => Assert.Equal(200, item.Priority));
     }
 
-    [Fact]
+    [LocalAIApplyPostgresFact]
     public async Task TwoInstancesShareWorkersCircuitProbeAndManualOverride()
     {
-        var connection = Environment.GetEnvironmentVariable("AIAPPLY_STEP5_POSTGRES");
-        if (string.IsNullOrWhiteSpace(connection)) return;
+        var connection = Environment.GetEnvironmentVariable("AIAPPLY_STEP5_POSTGRES")!;
         var options = new AIApplyOptions { Reliability = new() { SiteHealthMinimumSamples = 2, SiteFailureThreshold = .5m, SiteObservationMinutes = 15, CircuitCooldownSeconds = 10 }, Observability = new() { HalfOpenProbeLeaseSeconds = 30 } };
         await using var a = Context(connection); await using var b = Context(connection);
         await a.AIApplySiteOperationalStates.Where(x => x.Site == JobSiteIdentifier.Greenhouse).ExecuteDeleteAsync();
@@ -102,10 +100,10 @@ public sealed class AIApplyDistributedPostgresTests
         Assert.Contains(await storeB.GetWorkersAsync(now, default), x => x.WorkerInstanceId == "step5-a" && x.Status == "Inactive");
     }
 
-    [Fact]
+    [LocalAIApplyPostgresFact]
     public async Task FailedHalfOpenProbeReopensForAllInstances()
     {
-        var connection = Environment.GetEnvironmentVariable("AIAPPLY_STEP5_POSTGRES"); if (string.IsNullOrWhiteSpace(connection)) return;
+        var connection = Environment.GetEnvironmentVariable("AIAPPLY_STEP5_POSTGRES")!;
         var options = new AIApplyOptions { Reliability = new() { SiteHealthMinimumSamples = 2, SiteFailureThreshold = .5m, SiteObservationMinutes = 15, CircuitCooldownSeconds = 10 } };
         await using var a = Context(connection); await using var b = Context(connection); var sa = new AIApplyOperationalStore(a, Options.Create(options)); var sb = new AIApplyOperationalStore(b, Options.Create(options)); var now = DateTime.UtcNow;
         await a.AIApplySiteOperationalStates.Where(x => x.Site == JobSiteIdentifier.Lever).ExecuteDeleteAsync();
@@ -114,5 +112,19 @@ public sealed class AIApplyDistributedPostgresTests
         Assert.Equal(AIApplyCircuitState.Open, (await sa.GetSiteAsync(JobSiteIdentifier.Lever, default)).CircuitState);
     }
 
-    private static JobPortalDbContext Context(string connection) => new(new DbContextOptionsBuilder<JobPortalDbContext>().UseNpgsql(connection, x => x.EnableRetryOnFailure()).Options);
+    private static JobPortalDbContext Context(string connection)
+    {
+        var settings = new Npgsql.NpgsqlConnectionStringBuilder(connection);
+        Assert.True(settings.Host is "localhost" or "127.0.0.1" or "::1");
+        Assert.EndsWith("_test", settings.Database, StringComparison.Ordinal);
+        return new(new DbContextOptionsBuilder<JobPortalDbContext>().UseNpgsql(connection, x => x.EnableRetryOnFailure()).Options);
+    }
+    private sealed class LocalAIApplyPostgresFactAttribute : FactAttribute
+    {
+        public LocalAIApplyPostgresFactAttribute()
+        {
+            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("AIAPPLY_STEP5_POSTGRES")))
+                Skip = "Requires AIAPPLY_STEP5_POSTGRES for an explicitly disposable, migrated localhost database ending in _test.";
+        }
+    }
 }

@@ -22,6 +22,10 @@ namespace JobPortal.Application.Tests;
 
 public sealed class TalentdBackendTests
 {
+    private static readonly string[] ExpectedValues1 = new[] { " C# ", "c#", "SQL" };
+    private static readonly int[] ExpectedValues2 = new[] { 2025, 2026 };
+    private static readonly string[] ExpectedValues3 = new[] { "SQL", "Python" };
+
     [Fact]
     public async Task DisabledTalentdSourceDoesNotPersist()
     {
@@ -60,11 +64,11 @@ public sealed class TalentdBackendTests
     {
         using var f = new Fixture();
         var node = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(Candidate("London", 4, "FULL_TIME", "LOW")))!;
-        node["Skills"] = JsonSerializer.SerializeToNode(new[] { " C# ", "c#", "SQL" });
+        node["Skills"] = JsonSerializer.SerializeToNode(ExpectedValues1);
         node["SourceMetadata"] = JsonSerializer.SerializeToNode(new { provider = "talentd", talentd = new {
             degree = "B.Tech", responsibilities = "<b>Build services</b>", qualifications = "Degree required", benefits = "Health coverage",
             salary_text = "20K–30K a month", salary = new { currency = "INR", value = new { minValue = 20000, maxValue = 30000, unitText = "MONTH" } },
-            batch_years = new[] { 2025, 2026 }, updated_at = "2026-10-15" } });
+            batch_years = ExpectedValues2, updated_at = "2026-10-15" } });
         var candidate = JsonSerializer.Deserialize<FresherImportCandidate>(node.ToJsonString())!;
         var result = await f.Import.ImportAsync(Request(candidate));
         Assert.Equal(1, result.Published);
@@ -76,7 +80,7 @@ public sealed class TalentdBackendTests
         Assert.Equal("Degree required", job.Requirements); Assert.Equal("Health coverage", job.Benefits);
         Assert.Equal(2, job.JobSkills.Count);
         Assert.Contains("batch_years", job.SourceMetadataJson); Assert.Contains("salary_text", job.SourceMetadataJson);
-        node["Skills"] = JsonSerializer.SerializeToNode(new[] { "SQL", "Python" });
+        node["Skills"] = JsonSerializer.SerializeToNode(ExpectedValues3);
         await f.Import.ImportAsync(Request(JsonSerializer.Deserialize<FresherImportCandidate>(node.ToJsonString())!));
         Assert.Equal(3, job.JobSkills.Count);
         Assert.Equal(JobStatus.Published, job.Status);

@@ -46,7 +46,7 @@ public class JobSourceRunnerTests
     }
 
     [Fact]
-    public async Task RunAsync_PartiallyFailedRun_UpdatesSourceAndCountersWithoutSuccess()
+    public async Task RunAsyncPartiallyFailedRunUpdatesSourceAndCountersWithoutSuccess()
     {
         _source.ConsecutiveFailures = 3;
         _source.LastError = "Previous failure";
@@ -98,7 +98,7 @@ public class JobSourceRunnerTests
     }
 
     [Fact]
-    public async Task RunAsync_AllMatchTypes_CountAsMatched()
+    public async Task RunAsyncAllMatchTypesCountAsMatched()
     {
         _provider.Jobs =
         [
@@ -132,7 +132,7 @@ public class JobSourceRunnerTests
     }
 
     [Fact]
-    public async Task RunAsync_IndividualRecordFailure_ContinuesRemainingJobs()
+    public async Task RunAsyncIndividualRecordFailureContinuesRemainingJobs()
     {
         _provider.Jobs =
         [
@@ -167,7 +167,7 @@ public class JobSourceRunnerTests
     }
 
     [Fact]
-    public async Task RunAsync_ProviderFailure_RecordsFailureState()
+    public async Task RunAsyncProviderFailureRecordsFailureState()
     {
         var previousSuccess = DateTime.UtcNow.AddDays(-1);
 
@@ -200,7 +200,7 @@ public class JobSourceRunnerTests
     }
 
     [Fact]
-    public async Task RunAsync_SourceNotFound_ReturnsFailure()
+    public async Task RunAsyncSourceNotFoundReturnsFailure()
     {
         _sources.Source = null;
 
@@ -216,7 +216,7 @@ public class JobSourceRunnerTests
     }
 
     [Fact]
-    public async Task RunAsync_InactiveSource_DoesNotCallProvider()
+    public async Task RunAsyncInactiveSourceDoesNotCallProvider()
     {
         _source.IsActive = false;
 
@@ -232,7 +232,7 @@ public class JobSourceRunnerTests
     }
 
     [Fact]
-    public async Task RunAsync_NoMatchingProvider_ReturnsFailure()
+    public async Task RunAsyncNoMatchingProviderReturnsFailure()
     {
         _source.AtsType = AtsType.Lever;
 
@@ -252,7 +252,7 @@ public class JobSourceRunnerTests
     }
 
     [Fact]
-    public async Task RunAsync_Cancellation_Propagates()
+    public async Task RunAsyncCancellationPropagates()
     {
         using var cancellation =
             new CancellationTokenSource();
@@ -289,7 +289,7 @@ public class JobSourceRunnerTests
     }
 
     [Fact]
-    public async Task RunAsync_Phase1Counters_GroupOutcomesCorrectly()
+    public async Task RunAsyncPhase1CountersGroupOutcomesCorrectly()
     {
         _provider.Jobs =
         [
@@ -372,7 +372,7 @@ public class JobSourceRunnerTests
     }
 
     [Fact]
-    public async Task RunAsync_IndividualException_IsCountedAndRemainingJobContinues()
+    public async Task RunAsyncIndividualExceptionIsCountedAndRemainingJobContinues()
     {
         _provider.Jobs =
         [
@@ -406,7 +406,7 @@ public class JobSourceRunnerTests
 
 
     [Fact]
-    public async Task RunAsync_CreatedJob_InvokesAutoPublish()
+    public async Task RunAsyncCreatedJobInvokesAutoPublish()
     {
         var jobId = Guid.NewGuid();
 
@@ -445,7 +445,7 @@ public class JobSourceRunnerTests
     }
 
     [Fact]
-    public async Task RunAsync_DuplicateJob_DoesNotPublishAnUnownedMatch()
+    public async Task RunAsyncDuplicateJobDoesNotPublishAnUnownedMatch()
     {
         _provider.Jobs =
         [
@@ -484,7 +484,7 @@ public class JobSourceRunnerTests
     }
 
     [Fact]
-    public async Task RunAsync_AutoPublishFailure_IsolatedAndContinuesRemainingJobs()
+    public async Task RunAsyncAutoPublishFailureIsolatedAndContinuesRemainingJobs()
     {
         var firstJobId = Guid.NewGuid();
         var secondJobId = Guid.NewGuid();

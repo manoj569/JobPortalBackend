@@ -34,6 +34,9 @@ public static class ServiceCollectionExtensions
         services.AddScoped<JobPortal.Application.Features.HiringDrives.IHiringDriveRepository, HiringDriveRepository>();
         services.AddScoped<JobPortal.Application.Features.JobPromotions.IJobPromotionRepository, JobPromotionRepository>();
         services.AddScoped<IUserRepository, UserRepository>();
+        services.AddScoped<JobPortal.Application.Features.CareerAccelerator.IAcceleratorStore, AcceleratorStore>();
+        services.AddScoped<JobPortal.Application.Features.CareerAccelerator.IAcceleratorPhase2Store, AcceleratorPhase2Store>();
+        services.AddScoped<JobPortal.Application.Features.CareerAccelerator.IAcceleratorPhase3Store, AcceleratorPhase3Store>();
         services.AddScoped<JobPortal.Application.Features.AIResume.IAIResumeRepository, AIResumeRepository>();
         services.AddScoped<JobPortal.Application.Features.Support.ISupportTicketRepository, SupportTicketRepository>();
         services.AddScoped<JobPortal.Application.Features.Notifications.INotificationOutbox, NotificationOutboxRepository>();

@@ -6,6 +6,8 @@ namespace JobPortal.Application.Tests;
 
 public sealed class JobSourceTrackingTests
 {
+    private static readonly string[] ExpectedValues1 = new[] { "ConsecutiveFailures", "EmployerDiagnosticsJson", "EmployerStrategyJson", "LastError", "LastInventoryAtUtc", "LastInventoryDigest", "LastInventoryVersion", "LastObservedAtUtc", "LastObservedSnapshotId", "LastRunAtUtc", "LastSuccessfulRunAtUtc" };
+
     [Fact]
     public void UpdateDoesNotAttachDuplicateEvenWhenTrackedSourceIsMarkedDeleted()
     {
@@ -42,7 +44,7 @@ public sealed class JobSourceTrackingTests
 
         var entry = Assert.Single(f.Context.ChangeTracker.Entries<JobSource>());
         Assert.Same(reloaded ?? source, entry.Entity);
-        Assert.Equal(new[] { "ConsecutiveFailures", "EmployerDiagnosticsJson", "EmployerStrategyJson", "LastError", "LastInventoryAtUtc", "LastInventoryDigest", "LastInventoryVersion", "LastObservedAtUtc", "LastObservedSnapshotId", "LastRunAtUtc", "LastSuccessfulRunAtUtc" },
+        Assert.Equal(ExpectedValues1,
             entry.Properties.Where(x => x.IsModified).Select(x => x.Metadata.Name).OrderBy(x => x).ToArray());
         Assert.Same(f.Company, Assert.Single(f.Context.Companies.Local));
         await f.Context.SaveChangesAsync();

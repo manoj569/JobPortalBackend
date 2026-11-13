@@ -58,7 +58,7 @@ public sealed class JobSourceRunPostgresTests
                 await using var db = new JobPortalDbContext(options);
                 return await new JobSourceRunStore(db).TryClaimAsync(id, Guid.NewGuid(), now, now.AddSeconds(120), default);
             }));
-            var owner = Assert.Single(claims.Where(x => x is not null))!;
+            var owner = Assert.Single(claims, x => x is not null)!;
             var repository = new JobSourceRunStore(setup);
             var progress = new JobSourceRunProgressSnapshot("Ingestion", 475, new() { TotalReceived = 1500, Created = 475 });
             Assert.True(await repository.HeartbeatAsync(owner, now.AddSeconds(20), now.AddSeconds(140), progress, default));

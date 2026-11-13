@@ -12,20 +12,25 @@ namespace JobPortal.Application.Tests;
 
 public sealed class NotificationOutboxTests
 {
+    private static readonly string[] ExpectedValues1 = new[] { "CandidateInterviewSchedules.ReminderOffsetMinutes", "CandidateInterviewSchedules.ReminderRevision", "CandidateInterviewSchedules.TimeZoneId", "Notifications.BusinessKey" };
+    private static readonly string[] ExpectedValues2 = new[] { "BusinessKey", "UserId", "Channel" };
+
     [Fact]
-    public void PendingSchemaDeltaIsLimitedToTheNotificationFoundation()
+    public void NotificationFoundationMigrationIsLimitedAndSnapshotMatchesCurrentModel()
     {
         using var db = new JobPortalDbContext(new DbContextOptionsBuilder<JobPortalDbContext>()
             .UseNpgsql("Host=localhost;Database=model_only", o => o.MigrationsAssembly("JobPortal.Persistence.Postgres")).Options);
         var snapshot = db.GetService<IMigrationsAssembly>().ModelSnapshot!.Model;
         var prior = db.GetService<IModelRuntimeInitializer>().Initialize(snapshot, designTime: true);
         var current = db.GetService<IDesignTimeModel>().Model;
-        var delta = db.GetService<IMigrationsModelDiffer>().GetDifferences(prior.GetRelationalModel(), current.GetRelationalModel());
+        Assert.Empty(db.GetService<IMigrationsModelDiffer>().GetDifferences(prior.GetRelationalModel(), current.GetRelationalModel()));
+        // The foundation has been migrated: inspect its actual operations, not pending changes.
+        var delta = new JobPortal.Persistence.Postgres.Migrations.AddCentralizedNotificationDelivery().UpOperations;
         Assert.NotEmpty(delta);
         Assert.All(delta, operation => Assert.True(operation is CreateTableOperation or AddColumnOperation or CreateIndexOperation or AddCheckConstraintOperation,
             $"Unexpected schema operation: {operation.GetType().Name}"));
         Assert.Equal("NotificationDeliveries", Assert.Single(delta.OfType<CreateTableOperation>()).Name);
-        Assert.Equal(new[] { "CandidateInterviewSchedules.ReminderOffsetMinutes", "CandidateInterviewSchedules.ReminderRevision", "CandidateInterviewSchedules.TimeZoneId", "Notifications.BusinessKey" },
+        Assert.Equal(ExpectedValues1,
             delta.OfType<AddColumnOperation>().Select(x => x.Table + "." + x.Name).Order().ToArray());
         var sql = string.Join("\n", db.GetService<IMigrationsSqlGenerator>().Generate(delta, current).Select(x => x.CommandText));
         Assert.DoesNotContain("xmin", sql); Assert.DoesNotContain("JobId1", sql);
@@ -62,7 +67,7 @@ public sealed class NotificationOutboxTests
             .UseNpgsql("Host=localhost;Database=notification_model_only;Username=postgres").Options);
         var delivery = db.Model.FindEntityType(typeof(NotificationDelivery))!;
         Assert.Contains(delivery.GetIndexes(), x => x.IsUnique &&
-            x.Properties.Select(p => p.Name).SequenceEqual(new[] { "BusinessKey", "UserId", "Channel" }));
+            x.Properties.Select(p => p.Name).SequenceEqual(ExpectedValues2));
         var inbox = db.Model.FindEntityType(typeof(Notification))!;
         Assert.Contains(inbox.GetIndexes(), x => x.IsUnique && x.Properties.Any(p => p.Name == "BusinessKey"));
     }

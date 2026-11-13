@@ -379,8 +379,12 @@ public sealed partial class JobSourceRunner(
                 reportedListingTotal = batch.ReportedListingTotal ?? reportedListingTotal;
                 foreach (var (reason, count) in batch.ProviderReasonCounts ?? new Dictionary<string,int>())
                     providerReasons[reason] = providerReasons.GetValueOrDefault(reason) + count;
-                if (_logger is not null) LogBatchStage(_logger, source.Id, source.AtsType.ToString(),
-                    source.AtsType + "PersistenceStarted", 0, 0, batch.Skipped, 0);
+                if (_logger is not null && _logger.IsEnabled(LogLevel.Information))
+                {
+                    var providerName = source.AtsType.ToString();
+                    var stageName = source.AtsType + "PersistenceStarted";
+                    LogBatchStage(_logger, source.Id, providerName, stageName, 0, 0, batch.Skipped, 0);
+                }
                 // Provider prepares the replacement before its first yield. Old observed
                 // identities and selection skips cannot join the new census.
                 if (durable && checkpoint!.State is { } batchState && batchState.RebaseCount != traversalRebaseCount)
@@ -422,10 +426,12 @@ public sealed partial class JobSourceRunner(
                 }).ToArray();
                 rawJobs.AddRange(newJobs);
                 if (source.AtsType == AtsType.RippleHire) LogRippleHireMemoryStage(source.Id, "MappedAndFiltered", newJobs.Length);
-                if (_logger is not null && source.AtsType == AtsType.Greenhouse)
-                    LogGreenhouseEligibility(_logger, source.Id, batch.Jobs.Count, newJobs.Length,
-                        (snapshot.SelectionReasonCounts?.GetValueOrDefault("NonIndiaLocation") ?? 0) + (snapshot.SelectionReasonCounts?.GetValueOrDefault("IndiaRemoteExcluded") ?? 0),
-                        (snapshot.SelectionReasonCounts?.GetValueOrDefault("AmbiguousLocation") ?? 0) + (snapshot.SelectionReasonCounts?.GetValueOrDefault("ContradictoryLocation") ?? 0) + (snapshot.SelectionReasonCounts?.GetValueOrDefault("UnknownCountry") ?? 0));
+                if (_logger is not null && _logger.IsEnabled(LogLevel.Information) && source.AtsType == AtsType.Greenhouse)
+                {
+                    var nonIndiaRejected = (snapshot.SelectionReasonCounts?.GetValueOrDefault("NonIndiaLocation") ?? 0) + (snapshot.SelectionReasonCounts?.GetValueOrDefault("IndiaRemoteExcluded") ?? 0);
+                    var held = (snapshot.SelectionReasonCounts?.GetValueOrDefault("AmbiguousLocation") ?? 0) + (snapshot.SelectionReasonCounts?.GetValueOrDefault("ContradictoryLocation") ?? 0) + (snapshot.SelectionReasonCounts?.GetValueOrDefault("UnknownCountry") ?? 0);
+                    LogGreenhouseEligibility(_logger, source.Id, batch.Jobs.Count, newJobs.Length, nonIndiaRejected, held);
+                }
                 if (_logger is not null) Progress(_logger, source.Id, "Eligible batch received", newJobs.Length, runTimer.Elapsed.TotalMilliseconds, null);
                 skipped += batch.Skipped;
                 if (batch.Skipped > 0)
@@ -590,10 +596,12 @@ public sealed partial class JobSourceRunner(
                             publication ??= batchReview is not null && batchReview.TryGetValue(result.JobId.Value, out var reviewed)
                                 ? reviewed : await autoPublishService.TryPublishAsync(result.JobId.Value, cancellationToken);
                             durablePublication = publication;
-                            if (_logger is not null)
-                                LogPublicationDecision(_logger, source.Id, source.Company?.Name ?? string.Empty,
-                                    source.AtsType.ToString(), source.AutoPublishEnabled, result.JobId.Value,
-                                    publication.Outcome == JobAutoPublishOutcome.Published ? "AUTO_PUBLISHED" : publication.Outcome.ToString());
+                            if (_logger is not null && _logger.IsEnabled(LogLevel.Information))
+                            {
+                                var providerName = source.AtsType.ToString();
+                                var publicationReason = publication.Outcome == JobAutoPublishOutcome.Published ? "AUTO_PUBLISHED" : publication.Outcome.ToString();
+                                LogPublicationDecision(_logger, source.Id, source.Company?.Name ?? string.Empty, providerName, source.AutoPublishEnabled, result.JobId.Value, publicationReason);
+                            }
                             switch (publication.Outcome)
                             {
                                 case JobAutoPublishOutcome.Published: published++; break;
@@ -677,10 +685,15 @@ public sealed partial class JobSourceRunner(
                     ReportProgress("CheckpointCommitted");
                 }
                 ReportProgress("BatchPersisted");
-                if (_logger is not null)
+                if (_logger is not null && _logger.IsEnabled(LogLevel.Information))
                 {
-                    LogBatchStage(_logger, source.Id, source.AtsType.ToString(), source.AtsType + "PersistenceCompleted", created, updated + unchanged + matched, skipped, published);
-                    LogBatchStage(_logger, source.Id, source.AtsType.ToString(), source.AtsType + "PublicationCompleted", created, updated + unchanged + matched, needsReview + disabled + qualityRejected, published);
+                    var providerName = source.AtsType.ToString();
+                    var persistenceStage = source.AtsType + "PersistenceCompleted";
+                    var publicationStage = source.AtsType + "PublicationCompleted";
+                    LogBatchStage(_logger, source.Id, providerName, persistenceStage,
+                        created, updated + unchanged + matched, skipped, published);
+                    LogBatchStage(_logger, source.Id, providerName, publicationStage,
+                        created, updated + unchanged + matched, needsReview + disabled + qualityRejected, published);
                 }
                 if (source.AtsType == AtsType.RippleHire)
                 {
@@ -701,10 +714,12 @@ public sealed partial class JobSourceRunner(
                     }
                     await unitOfWork.SaveChangesAsync(cancellationToken);
                     var tracked = unitOfWork.ReleaseCommittedAggregationBatch();
-                    if (_logger is not null)
-                        LogRippleHireBatch(_logger, source.Id, ++batchNumber, batch.Jobs.Count, observedJobs.Count,
-                            created, published, partialResult.Rejected, System.GC.GetTotalMemory(false) / 1048576d,
-                            Environment.WorkingSet / 1048576d, tracked);
+                    if (_logger is not null) batchNumber++;
+                    if (_logger is not null && _logger.IsEnabled(LogLevel.Information))
+                    {
+                        var managedMemoryMb = System.GC.GetTotalMemory(false) / 1048576d;
+                        LogRippleHireBatch(_logger, source.Id, batchNumber, batch.Jobs.Count, observedJobs.Count, created, published, partialResult.Rejected, managedMemoryMb, Environment.WorkingSet / 1048576d, tracked);
+                    }
                 }
                 execution.Stage = "ProviderFetch";
             }
@@ -838,7 +853,7 @@ public sealed partial class JobSourceRunner(
             checkpoint?.StageCompletedResult(runResult);
             execution.Stage = "FinalBookkeepingPersistence";
             await unitOfWork.SaveChangesAsync(cancellationToken);
-            if (_logger is not null && source.AtsType == AtsType.Custom &&
+            if (_logger is not null && _logger.IsEnabled(LogLevel.Information) && source.AtsType == AtsType.Custom &&
                 TryReadEightfoldContinuation(source.EmployerStrategyJson, out var strategyName, out var generation,
                     out var position, out var anchor, out var cycleCompleted, out var inventoryCount))
                 EightfoldContinuationSaved(_logger, source.Id, strategyName, generation, position, anchor,
@@ -853,13 +868,17 @@ public sealed partial class JobSourceRunner(
                 PublicationCompleted(_logger, source.Id, published, needsReview, qualityRejected, publishFailed, disabled, null);
                 // Final counters after source/checkpoint SaveChanges; attempts are logged separately.
                 // Reconciliation closes jobs rather than issuing editorial unpublish operations.
-                LogPublicationSummary(_logger, source.Id, source.Company?.Name ?? string.Empty, source.AtsType.ToString(),
-                    source.AutoPublishEnabled, created, updated, published, closed, skipped, runResult.Rejected, publishFailed);
+                if (_logger.IsEnabled(LogLevel.Information))
+                {
+                    var providerName = source.AtsType.ToString();
+                    LogPublicationSummary(_logger, source.Id, source.Company?.Name ?? string.Empty, providerName, source.AutoPublishEnabled, created, updated, published, closed, skipped, runResult.Rejected, publishFailed);
+                }
                 if (source.AtsType == JobPortal.Domain.Enums.AtsType.SuccessFactors)
                     LogSuccessFactorsSyncCompleted(_logger, source.Id, runResult.TotalReceived, created, updated, unchanged,
                         closed, failed, runTimer.Elapsed.TotalMilliseconds);
-                foreach (var (reason, count) in qualityReasons)
-                    RunReason(_logger, source.Id, $"Quality.{reason}", count, null);
+                if (_logger.IsEnabled(LogLevel.Debug))
+                    foreach (var (reason, count) in qualityReasons)
+                        RunReason(_logger, source.Id, $"Quality.{reason}", count, null);
                 RunCompleted(
                     _logger,
                     source.Id,
@@ -909,7 +928,8 @@ public sealed partial class JobSourceRunner(
             {
                 SourceRunFailed(_logger, source.Id, null);
                 LogFailed(_logger, source.Id, exception.GetType().Name);
-                LogProviderFailure(_logger, source.Id, source.AtsType.ToString(), JobSourceFailure.Stage(exception), exception.GetType().Name,
+                if (_logger.IsEnabled(LogLevel.Warning))
+                    LogProviderFailure(_logger, source.Id, source.AtsType.ToString(), JobSourceFailure.Stage(exception), exception.GetType().Name,
                     JobSourceFailure.Code(exception), exception is HttpRequestException requestError ? (int?)requestError.StatusCode : null);
                 if (source.AtsType == AtsType.Workday && (exception is InvalidOperationException || JobSourceFailure.Code(exception) == "UNEXPECTED_INTERNAL_ERROR"))
                     WorkdayExecutionDiagnostics.PreExecutionFailure(_logger, source.Id,
@@ -938,9 +958,11 @@ public sealed partial class JobSourceRunner(
         {
             // Keep partial-run evidence even when the provider budget/cancellation
             // prevents the normal completion block from running.
-            if (_logger is not null)
+            if (_logger is not null && _logger.IsEnabled(LogLevel.Information))
             {
-                LogExecutionSummary(_logger, source.Id, source.AtsType.ToString(), source.AtsType + "RunCompleted",
+                var providerName = source.AtsType.ToString();
+                var stageName = source.AtsType + "RunCompleted";
+                LogExecutionSummary(_logger, source.Id, providerName, stageName,
                     cancellationToken.IsCancellationRequested ? "Cancelled" : partialResult.Succeeded ? "Completed" : "PartialOrFailed",
                     partialResult.FailureReasonCode ?? partialResult.StopReason, partialResult.TotalReceived, partialResult.Parsed,
                     partialResult.Created, partialResult.Existing, partialResult.Published, partialResult.ReconciliationSafe);
@@ -970,8 +992,11 @@ public sealed partial class JobSourceRunner(
 
     private void LogRippleHireMemoryStage(Guid sourceId, string stage, int batchSize)
     {
-        if (_logger is not null)
-            LogRippleHireMemory(_logger, sourceId, stage, batchSize, System.GC.GetTotalMemory(false) / 1048576d, Environment.WorkingSet / 1048576d);
+        if (_logger is not null && _logger.IsEnabled(LogLevel.Information))
+        {
+            var managedMemoryMb = System.GC.GetTotalMemory(false) / 1048576d;
+            LogRippleHireMemory(_logger, sourceId, stage, batchSize, managedMemoryMb, Environment.WorkingSet / 1048576d);
+        }
     }
 
     private static RawExternalJob RippleHireSelectionFacts(RawExternalJob job) => new()

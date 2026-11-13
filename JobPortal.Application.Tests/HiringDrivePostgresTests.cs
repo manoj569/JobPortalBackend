@@ -13,6 +13,8 @@ namespace JobPortal.Application.Tests;
 
 public sealed class HiringDrivePostgresTests(WorkdayCheckpointDatabase database) : IClassFixture<WorkdayCheckpointDatabase>
 {
+    private static readonly string[] ExpectedValues1 = new[] { "Home first", "Home later" };
+
     [LocalPostgresFact]
     public async Task HomepageSelectionUsesExplicitFlagStrictEndBoundaryAndExistingOrdering()
     {
@@ -43,7 +45,7 @@ public sealed class HiringDrivePostgresTests(WorkdayCheckpointDatabase database)
         await db.SaveChangesAsync();
 
         var repository = new HiringDriveRepository(db);
-        Assert.Equal(new[] { "Home first", "Home later" },
+        Assert.Equal(ExpectedValues1,
             (await repository.HomepageAsync(now, default)).Select(drive => drive.Title));
         var publicDrives = await repository.PublicAsync(now, default);
         Assert.Contains(publicDrives, drive => drive.Id == notSelected.Id);

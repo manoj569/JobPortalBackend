@@ -17,6 +17,8 @@ namespace JobPortal.Application.Tests;
 
 public sealed class CareerAnalyticsTests
 {
+    private static readonly string[] ExpectedValues1 = new[] { "Email", "Phone", "AdminNotes", "ProviderPaymentId", "JoinUrl", "Questions", "Evidence" };
+
     [Fact]
     public void DefaultRangeIsUtcAndBounded()
     {
@@ -189,7 +191,7 @@ public sealed class CareerAnalyticsTests
         Assert.True(typeof(AdminCareerAnalyticsController).GetCustomAttribute<ResponseCacheAttribute>()!.NoStore);
         Assert.True(typeof(CareerOwnerAnalyticsController).GetCustomAttribute<ResponseCacheAttribute>()!.NoStore);
         foreach (var type in new[] { typeof(CareerGuidanceAdminAnalytics), typeof(CareerGuidanceConsultantAnalytics), typeof(CareerGuidanceCandidateSummary) })
-            Assert.DoesNotContain(type.GetProperties(), p => new[] { "Email", "Phone", "AdminNotes", "ProviderPaymentId", "JoinUrl", "Questions", "Evidence" }.Contains(p.Name));
+            Assert.DoesNotContain(type.GetProperties(), p => ExpectedValues1.Contains(p.Name));
     }
 
     [Theory]

@@ -16,6 +16,8 @@ namespace JobPortal.Application.Tests;
 
 public sealed class CareerTrustTests
 {
+    private static readonly string[] ExpectedValues1 = new[] { "CandidateDisplayName", "Comment", "CreatedAtUtc", "Id", "Rating", "Title" };
+
     [Fact]
     public async Task CompletedPaidReviewIsPendingAndIdenticalReplayIsSafe()
     {
@@ -256,7 +258,7 @@ public sealed class CareerTrustTests
         Assert.Equal("Administrator", typeof(AdminCareerTrustController).GetCustomAttribute<AuthorizeAttribute>()!.Roles);
         Assert.NotNull(typeof(CareerConsultantTrustController).GetCustomAttribute<AuthorizeAttribute>());
         Assert.NotNull(typeof(CareerPublicReviewsController).GetCustomAttribute<AllowAnonymousAttribute>());
-        Assert.Equal(new[] { "CandidateDisplayName", "Comment", "CreatedAtUtc", "Id", "Rating", "Title" }, typeof(CareerPublicReview).GetProperties().Select(p => p.Name).Order().ToArray());
+        Assert.Equal(ExpectedValues1, typeof(CareerPublicReview).GetProperties().Select(p => p.Name).Order().ToArray());
         Assert.False(new CareerTrustOptions { DisputeOpenWindowHours = 0 }.IsValid());
     }
 

@@ -141,6 +141,7 @@ builder.Services.AddOutputCache(options =>
         .Tag("public-jobs"));
 });
 builder.Services.AddHostedService<JobExpiryHostedService>();
+builder.Services.AddHostedService<AcceleratorMaintenanceHostedService>();
 builder.Services.AddOptions<JobAggregationOptions>()
     .Bind(builder.Configuration.GetSection(JobAggregationOptions.SectionName))
     .Validate(o => o.Workday.IsValid() && o.Scheduler.MaxConcurrentSources is >= 1 and <= 8,
@@ -324,6 +325,9 @@ builder.Services.AddRateLimiter(options =>
     options.AddPolicy("AIResumeGeneration", context => RateLimitPartition.GetFixedWindowLimiter(
         context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "unknown",
         _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromHours(1), QueueLimit = 0, AutoReplenishment = true }));
+    options.AddPolicy("CareerAccelerator", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 60, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true }));
     options.OnRejected = async (context, cancellationToken) =>
     {
         if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))

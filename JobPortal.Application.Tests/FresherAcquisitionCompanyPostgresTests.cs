@@ -128,12 +128,13 @@ public sealed partial class FresherAcquisitionPostgresTests
         await db.Database.MigrateAsync();
         var (source, _) = await CreateSourceAndCompanyAsync(db);
         var name = "New employer " + Guid.NewGuid().ToString("N");
+        var normalizedName = name.ToLowerInvariant();
         var request = Request("company-new", source.ProviderKey,
             [CompanyCandidate("one", name), CompanyCandidate("two", "  " + name.ToUpperInvariant() + "  ")]);
         var importer = CreateImporter(db, 50);
         var first = await importer.ImportAsync(request);
         Assert.Equal(2, first.Created);
-        var company = await db.Companies.SingleAsync(x => x.NormalizedName == name.ToLowerInvariant());
+        var company = await db.Companies.SingleAsync(x => x.NormalizedName == normalizedName);
         Assert.False(company.IsVerified);
         Assert.Null(company.WebsiteUrl);
         Assert.Null(company.NormalizedWebsiteDomain);
@@ -151,6 +152,7 @@ public sealed partial class FresherAcquisitionPostgresTests
         await setup.Database.MigrateAsync();
         var (source, _) = await CreateSourceAndCompanyAsync(setup);
         var name = "Concurrent employer " + Guid.NewGuid().ToString("N");
+        var normalizedName = name.ToLowerInvariant();
         async Task<FresherBulkImportResponse> Import(string id, string companyName, string? website)
         {
             var options = new DbContextOptionsBuilder<JobPortalDbContext>().UseNpgsql(
@@ -161,7 +163,7 @@ public sealed partial class FresherAcquisitionPostgresTests
         }
         var names = await Task.WhenAll(Import("name-one", name, null), Import("name-two", name.ToUpperInvariant(), null));
         Assert.All(names, x => Assert.Equal(1, x.Created));
-        Assert.Equal(1, await setup.Companies.CountAsync(x => x.NormalizedName == name.ToLowerInvariant()));
+        Assert.Equal(1, await setup.Companies.CountAsync(x => x.NormalizedName == normalizedName));
         var domain = $"employer-{Guid.NewGuid():N}.example.test";
         var domains = await Task.WhenAll(Import("domain-one", "Brand " + Guid.NewGuid().ToString("N"), "https://" + domain),
             Import("domain-two", "Alias " + Guid.NewGuid().ToString("N"), "https://" + domain));
@@ -178,9 +180,10 @@ public sealed partial class FresherAcquisitionPostgresTests
         foreach (var website in new[] { "https://www.linkedin.com/company/example", "https://in.indeed.com", "https://jobs.google.com", null })
         {
             var name = "Website employer " + Guid.NewGuid().ToString("N");
+            var normalizedName = name.ToLowerInvariant();
             var response = await CreateImporter(db, 50).ImportAsync(Request(name, source.ProviderKey, [CompanyCandidate(name, name, website)]));
             Assert.Equal(1, response.Created);
-            var company = await db.Companies.SingleAsync(x => x.NormalizedName == name.ToLowerInvariant());
+            var company = await db.Companies.SingleAsync(x => x.NormalizedName == normalizedName);
             Assert.Null(company.WebsiteUrl);
             Assert.Null(company.NormalizedWebsiteDomain);
             Assert.Null(company.LogoUrl);

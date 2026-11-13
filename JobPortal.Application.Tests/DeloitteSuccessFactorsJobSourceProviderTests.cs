@@ -75,7 +75,7 @@ public sealed class DeloitteSuccessFactorsJobSourceProviderTests
     public void DetailUsesStablePostingIdWhenRequisitionIdIsAbsent()
     {
         var listing = new SuccessFactorsJobSourceProvider.ListingEntry("Engineer", "Pune, India",
-            DateTimeOffset.Parse("2026-10-04T00:00:00Z"), new Uri("https://southasiacareers.deloitte.com/job/engineer/123/"));
+            DateTimeOffset.Parse("2026-10-04T00:00:00Z", System.Globalization.CultureInfo.InvariantCulture), new Uri("https://southasiacareers.deloitte.com/job/engineer/123/"));
         var html = Detail("Engineer").Replace("Job requisition ID : 100536", "", StringComparison.Ordinal);
         var parsed = SuccessFactorsJobSourceProvider.ParseDetail(html, listing, "Deloitte");
         Assert.Equal("123", parsed!.ExternalId);

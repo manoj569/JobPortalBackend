@@ -13,6 +13,8 @@ namespace JobPortal.Application.Tests;
 
 public sealed class PublicPopularCompaniesTests
 {
+    private static readonly string[] ExpectedValues1 = new[] { "CompanyId", "LogoUrl", "Name" };
+
     private static readonly DateTime Now =
         new(2026, 7, 30, 10, 0, 0, DateTimeKind.Utc);
 
@@ -161,7 +163,7 @@ public sealed class PublicPopularCompaniesTests
             result.Select(company => company.CompanyId).Order().ToArray());
         Assert.Equal(result.OrderBy(company => company.Name).ThenBy(company => company.CompanyId), result);
         Assert.All(result, company => Assert.False(string.IsNullOrWhiteSpace(company.LogoUrl)));
-        Assert.Equal(new[] { "CompanyId", "LogoUrl", "Name" },
+        Assert.Equal(ExpectedValues1,
             typeof(PublicCompanyLogoResponse).GetProperties().Select(property => property.Name).Order().ToArray());
     }
 

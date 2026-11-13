@@ -28,6 +28,7 @@ public sealed class JobAggregationDueSourceTests
     {
         using var f = new JobSourceFixture();
         f.Source.AtsType = JobPortal.Domain.Enums.AtsType.Custom;
+        f.Source.AtsIdentifier = GenericEmployerContract.Identifier;
         f.Source.ScanIntervalMinutes = 60;
         f.Source.LastSuccessfulRunAtUtc = JobSourceFixture.Now.AddDays(-1);
         await f.Context.SaveChangesAsync();
@@ -117,7 +118,7 @@ public sealed class JobAggregationDueSourceTests
 
     private static JobSource Source(Guid companyId, Guid id, DateTime? lastRun = null) => new()
     {
-        Id = id, CompanyId = companyId, CareerPageUrl = "https://example.test/careers",
+        Id = id, CompanyId = companyId, AtsType = JobPortal.Domain.Enums.AtsType.Greenhouse, CareerPageUrl = "https://example.test/careers",
         ScanIntervalMinutes = 60, LastRunAtUtc = lastRun
     };
 }

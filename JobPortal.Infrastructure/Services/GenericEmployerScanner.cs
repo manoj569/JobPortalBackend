@@ -76,10 +76,16 @@ public sealed partial class GenericEmployerScanner(IHttpClientFactory clients, I
         }
         var priorState = default(JsonElement);
         var priorEightfold = strategy is { ValueKind: JsonValueKind.Object } && TryGetEightfoldContinuation(strategy.Value, out priorState);
-        if (priorEightfold && logger is not null)
-            EightfoldContinuationLoaded(logger, source.Id, StrategyName(strategy!.Value),
-                FingerprintPrefix(priorState), ReadInt(priorState, "cursor"), ReadString(priorState, "anchorId"),
-                ReadBool(priorState, "cycleCompleted"), ReadInt(priorState, "count"));
+        if (priorEightfold && logger is not null && logger.IsEnabled(LogLevel.Information))
+        {
+            var strategyName = StrategyName(strategy!.Value);
+            var loggedGeneration = FingerprintPrefix(priorState);
+            var position = ReadInt(priorState, "cursor");
+            var anchor = ReadString(priorState, "anchorId");
+            var cycleCompleted = ReadBool(priorState, "cycleCompleted");
+            var count = ReadInt(priorState, "count");
+            EightfoldContinuationLoaded(logger, source.Id, strategyName, loggedGeneration, position, anchor, cycleCompleted, count);
+        }
         request.Content = JsonContent.Create(new { runId, source = new { source.Id, source.CompanyId,
             CompanyName = source.Company?.Name, source.CareerPageUrl, source.AutoPublishEnabled, source.ScanIntervalMinutes, strategy } });
         using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
@@ -111,7 +117,7 @@ public sealed partial class GenericEmployerScanner(IHttpClientFactory clients, I
         source.EmployerDiagnosticsJson = metadata;
         var isEightfold = IsEightfold(observed.Strategy);
         var pendingContinuation = IsContinuationPending(observed);
-        if (isEightfold && logger is not null)
+        if (isEightfold && logger is not null && logger.IsEnabled(LogLevel.Information))
         {
             var sitemapState = TryGetSitemapContinuation(observed.Strategy, out var currentState) ? currentState : default;
             var ids = observed.Jobs.Select(job => job.ExternalId).Where(id => !string.IsNullOrWhiteSpace(id))
@@ -122,9 +128,12 @@ public sealed partial class GenericEmployerScanner(IHttpClientFactory clients, I
             var end = ReadInt(observed.Metrics, "inventory_batch_end", ReadInt(sitemapState, "cursor"));
             var count = ReadInt(observed.Metrics, "inventory_expected_count", ReadInt(sitemapState, "count"));
             var anchor = ReadString(observed.Metrics, "inventory_anchor_id", ReadString(sitemapState, "anchorId"));
-            EightfoldAcquisition(logger, source.Id, host, StrategyName(observed.Strategy),
-                FingerprintPrefix(sitemapState), count, start, end, ids.Length, end, anchor, pendingContinuation,
-                ReadBool(observed.Metrics, "inventory_cycle_completed"), observed.IsComplete,
+            var strategyName = StrategyName(observed.Strategy);
+            var loggedGeneration = FingerprintPrefix(sitemapState);
+            var cycleCompleted = ReadBool(observed.Metrics, "inventory_cycle_completed");
+            EightfoldAcquisition(logger, source.Id, host, strategyName,
+                loggedGeneration, count, start, end, ids.Length, end, anchor, pendingContinuation,
+                cycleCompleted, observed.IsComplete,
                 observed.IsComplete && observed.ObservedExternalIds is not null, batchDigest);
         }
         if (observed.ProviderRoutes.Count > 0)

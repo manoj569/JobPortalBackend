@@ -364,7 +364,15 @@ public sealed class CareerFinanceTests
             Service = new(new CareerFinanceRepository(Db), new UserRepository(Db), Gateway, new AuditWriterTestDouble(), Scheduling.Clock,
                 Microsoft.Extensions.Options.Options.Create(Options), NotificationTestSupport.Outbox(Db, Scheduling.Clock));
         }
-        public Task<CareerBookingResponse> Setup() => Scheduling.Book();
+        public async Task<CareerBookingResponse> Setup(int lifecycleVersion = 1)
+        {
+            // These fixtures exercise the legacy lifecycle; newly created bookings use v2.
+            var response = await Scheduling.Book();
+            var booking = await Db.CareerGuidanceBookings.SingleAsync(x => x.Id == response.Id);
+            booking.LifecycleVersion = lifecycleVersion;
+            await Db.SaveChangesAsync();
+            return response;
+        }
         public Task<CareerCheckout> Order(Guid bookingId) => Service.OrderAsync(Candidate, bookingId, default);
         public Task<CareerPaymentResponse> Verify(Guid bookingId, CareerCheckout order) => Service.VerifyAsync(Candidate, bookingId, new(order.OrderId, "pay_test", "accepted"), default);
         public void Dispose() => Scheduling.Dispose();

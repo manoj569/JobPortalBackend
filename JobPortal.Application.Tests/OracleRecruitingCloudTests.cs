@@ -125,9 +125,9 @@ public sealed class OracleRecruitingCloudTests
     [Fact]
     public async Task ProviderCannotReturnFakeJobsOrCertifyAnEmptySnapshot()
     {
-        IExternalJobProvider provider = new OracleRecruitingCloudJobSourceProvider();
+        var provider = new OracleRecruitingCloudJobSourceProvider();
         var source = new JobSource { AtsType = AtsType.OracleRecruitingCloud, AtsIdentifier = Identifier, CareerPageUrl = CareerPage };
-        Assert.False(provider is ICompleteExternalJobProvider);
+        Assert.False(typeof(ICompleteExternalJobProvider).IsAssignableFrom(provider.GetType()));
         var blocked = await Assert.ThrowsAsync<BadRequestException>(() => provider.FetchJobsAsync(source));
         Assert.Equal(OracleRecruitingCloudConfiguration.ErrorCode, blocked.Code);
         using var cancelled = new CancellationTokenSource();

@@ -73,7 +73,7 @@ public sealed class AggregationLockMaintenanceTests
         public Dictionary<long, Connection> Owners { get; } = [];
         public List<Connection> Connections { get; } = [];
         public bool IgnoreExclusion { get; init; }
-        public DbConnection Connect() { var c = new Connection(this); Connections.Add(c); return c; }
+        public Connection Connect() { var c = new Connection(this); Connections.Add(c); return c; }
     }
 
     private sealed class Connection(Server server) : DbConnection

@@ -23,6 +23,9 @@ namespace JobPortal.Application.Tests;
 
 public sealed class ClaudeAIResumeProviderTests
 {
+    private static readonly string[] ExpectedValues1 = new[] { "Category", "Reason", "Path", "Count", "HasValue", "Model", "InputTokens", "OutputTokens" };
+    private static readonly JsonSerializerOptions WebJsonOptions = new(JsonSerializerDefaults.Web);
+
     private const string JobDescription = "Backend developer required. C# and Kubernetes experience are required for this position.";
     internal static TailoredResumeContent Source => new(new("Candidate", "candidate@example.invalid", "", "Pune", []),
         "Backend developer with C# experience.", ["C#"],
@@ -95,8 +98,8 @@ public sealed class ClaudeAIResumeProviderTests
             Options.Create(new AIResumeOptions { ApiKey = apiKey, WorkspaceId = workspaceId }), logger, new DevelopmentEnvironment());
         Assert.False((await provider.ValidateTailoredResumeAsync(new(source, generated))).IsValid); var error = new AIResumeProviderException("unsupported_claims");
         Assert.Equal("unsupported_claims", error.Code);
-        var diagnostic = Assert.Single(logger.Messages.Where(x => x.StartsWith("AIResumeGroundingRejected", StringComparison.Ordinal)));
-        var groundingEvent = Assert.Single(logger.Events.Where(x => x.EventId.Id == 7404));
+        var diagnostic = Assert.Single(logger.Messages, x => x.StartsWith("AIResumeGroundingRejected", StringComparison.Ordinal));
+        var groundingEvent = Assert.Single(logger.Events, x => x.EventId.Id == 7404);
         Assert.Equal(LogLevel.Warning, groundingEvent.Level);
         Assert.Equal("AIResumeGroundingRejected", groundingEvent.EventId.Name);
         Assert.Contains("experience/0/bullets/0", diagnostic);
@@ -111,7 +114,7 @@ public sealed class ClaudeAIResumeProviderTests
         provider = new ClaudeAIResumeProvider(new Factory(handler), Options.Create(new AIResumeOptions { ApiKey = apiKey, WorkspaceId = workspaceId }), logger, production);
         Assert.False((await provider.ValidateTailoredResumeAsync(new(source, generated))).IsValid);
         Assert.Empty(logger.Messages);
-        Assert.Single(logger.Events.Where(x => x.EventId.Id == 7404));
+        Assert.Single(logger.Events, x => x.EventId.Id == 7404);
     }
 
     [Fact]
@@ -146,7 +149,7 @@ public sealed class ClaudeAIResumeProviderTests
             new(first.Id, first.Text, first.Text.Replace("Built", "Developed", StringComparison.Ordinal), [first.Id], ["C#"], "Emphasize supported API experience"),
             new(second.Id, second.Text, second.Text.Replace("Built", "Developed", StringComparison.Ordinal), [second.Id], [], "Emphasize supported project work")
         ], []);
-        var json = JsonSerializer.Serialize(patch, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var json = JsonSerializer.Serialize(patch, WebJsonOptions);
         var handler = new Handler((_, _) => Task.FromResult(ResponseText($"```json\n{json}\n```")));
 
         var result = await Provider(handler).GenerateTailoringPatchAsync(new(source, JobDescription, Analysis,
@@ -276,7 +279,7 @@ public sealed class ClaudeAIResumeProviderTests
         var source = UploadedResumeFactParser.Parse(UploadedResumeSourcePipelineTests.Resume);
         var response = Analysis with { MatchedSkills = [" c# ", "C#", " .net "], MissingSkills = [], PartialMatches = [] };
         var handler = new Handler((_, _) => Task.FromResult(ResponseText("```json\n" +
-            JsonSerializer.Serialize(response, new JsonSerializerOptions(JsonSerializerDefaults.Web)) + "\n```")));
+            JsonSerializer.Serialize(response, WebJsonOptions) + "\n```")));
         var result = await Provider(handler).AnalyzeAsync(new(source, JobDescription));
         Assert.Equal(["C#", ".NET"], result.Content.MatchedSkills);
         Assert.Empty(result.Content.MissingSkills);
@@ -315,7 +318,7 @@ public sealed class ClaudeAIResumeProviderTests
         foreach (var message in logger.Messages.Where(x => x.StartsWith("AIResumeAnalysisRejected", StringComparison.Ordinal)))
         {
             using var metadata = JsonDocument.Parse(message["AIResumeAnalysisRejected ".Length..]);
-            Assert.Equal(new[] { "Category", "Reason", "Path", "Count", "HasValue", "Model", "InputTokens", "OutputTokens" },
+            Assert.Equal(ExpectedValues1,
                 metadata.RootElement.EnumerateObject().Select(x => x.Name));
             Assert.Equal(reason, metadata.RootElement.GetProperty("Reason").GetString());
             Assert.Equal(path, metadata.RootElement.GetProperty("Path").GetString());
@@ -400,7 +403,7 @@ public sealed class ClaudeAIResumeProviderTests
         Assert.Equal(AIResumeSessionStatus.Created, (await service.GetSessionAsync(candidate.Id, session.Id, default)).Status);
         Assert.Null(db.AIResumeSessions.Single().AnalysisOwner);
         Assert.Empty(db.AIResumeCreditWallets); Assert.Empty(db.AIResumeCreditTransactions);
-        Assert.Single(logger.Events.Where(x => x.EventId.Id == 7406));
+        Assert.Single(logger.Events, x => x.EventId.Id == 7406);
         Assert.All(logger.Messages, message => {
             Assert.DoesNotContain("private-name", message); Assert.DoesNotContain("email@example.invalid", message);
             Assert.DoesNotContain("private-key", message); Assert.DoesNotContain("private-workspace", message);
@@ -548,7 +551,7 @@ public sealed class ClaudeAIResumeProviderTests
     [Fact]
     public async Task PaidContentInFreeAnalysisIsRejected()
     {
-        var content = JsonSerializer.SerializeToNode(Analysis, new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+        var content = JsonSerializer.SerializeToNode(Analysis, WebJsonOptions)!;
         content["professionalSummary"] = "Rewritten paid summary";
         var handler = new Handler((_, _) => Task.FromResult(ResponseText(content.ToJsonString())));
         var error = await Assert.ThrowsAsync<AIResumeProviderException>(() => Provider(handler).AnalyzeAsync(new(Source, JobDescription)));
@@ -645,7 +648,7 @@ public sealed class ClaudeAIResumeProviderTests
         var provider = new ClaudeAIResumeProvider(new Factory(handler),
             Options.Create(new AIResumeOptions { ApiKey = "fixture-secret", WorkspaceId = "fixture-workspace" }), logger, new DevelopmentEnvironment());
         Assert.False((await provider.ValidateTailoredResumeAsync(new(Source, generated))).IsValid);
-        Assert.NotEmpty(logger.Events.Where(x => x.EventId.Id == 7404 && x.Level == LogLevel.Warning));
+        Assert.Contains(logger.Events, x => x.EventId.Id == 7404 && x.Level == LogLevel.Warning);
         foreach (var message in logger.Messages)
             foreach (var secret in new[] { "fixture-secret", "fixture-workspace", Source.Contact.Email, Source.ProfessionalSummary })
                 Assert.DoesNotContain(secret, message);
@@ -712,7 +715,7 @@ public sealed class ClaudeAIResumeProviderTests
 
     private static ClaudeAIResumeProvider Provider(Handler handler) => new(new Factory(handler),
         Options.Create(new AIResumeOptions { ApiKey = "non-secret-http-fixture-marker" }), NullLogger<ClaudeAIResumeProvider>.Instance);
-    internal static HttpResponseMessage Response<T>(T content) => ResponseText(JsonSerializer.Serialize(content, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+    internal static HttpResponseMessage Response<T>(T content) => ResponseText(JsonSerializer.Serialize(content, WebJsonOptions));
     private static HttpResponseMessage ResponseText(string text, string stop = "end_turn") => new(HttpStatusCode.OK)
     {
         Content = new StringContent(JsonSerializer.Serialize(new { model = "claude-haiku-4-5-20251001", stop_reason = stop,

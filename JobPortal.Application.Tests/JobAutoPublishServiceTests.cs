@@ -17,7 +17,7 @@ public class JobAutoPublishServiceTests
         new(2026, 9, 30, 12, 0, 0, DateTimeKind.Utc);
 
     [Fact]
-    public async Task TryPublishAsync_LegacyFlagDisabled_StillPublishesImportedJob()
+    public async Task TryPublishAsyncLegacyFlagDisabledStillPublishesImportedJob()
     {
         var repository = new JobRepositoryFake
         {
@@ -43,7 +43,7 @@ public class JobAutoPublishServiceTests
     }
 
     [Fact]
-    public async Task TryPublishAsync_EligibleJob_PublishesExactlyOnce()
+    public async Task TryPublishAsyncEligibleJobPublishesExactlyOnce()
     {
         var job = CreateValidJob();
 
@@ -72,7 +72,7 @@ public class JobAutoPublishServiceTests
     }
 
     [Fact]
-    public async Task TryPublishAsync_MissingLocation_IsHeldForEvidence()
+    public async Task TryPublishAsyncMissingLocationIsHeldForEvidence()
     {
         var job = CreateValidJob();
         job.Location = string.Empty;
@@ -101,7 +101,7 @@ public class JobAutoPublishServiceTests
     }
 
     [Fact]
-    public async Task TryPublishAsync_MissingExpiry_Publishes()
+    public async Task TryPublishAsyncMissingExpiryPublishes()
     {
         var job = CreateValidJob();
         job.ExpiresAtUtc = null;
@@ -130,7 +130,7 @@ public class JobAutoPublishServiceTests
     }
 
     [Fact]
-    public async Task TryPublishAsync_InvalidUrl_RejectsAndDoesNotPublish()
+    public async Task TryPublishAsyncInvalidUrlRejectsAndDoesNotPublish()
     {
         var job = CreateValidJob();
         job.ApplicationUrl = "not-a-valid-url";
@@ -161,7 +161,7 @@ public class JobAutoPublishServiceTests
     }
 
     [Fact]
-    public async Task TryPublishAsync_ExpiredJob_RejectsAndDoesNotPublish()
+    public async Task TryPublishAsyncExpiredJobRejectsAndDoesNotPublish()
     {
         var job = CreateValidJob();
         job.ExpiresAtUtc = Now.AddMinutes(-1);
@@ -192,7 +192,7 @@ public class JobAutoPublishServiceTests
     }
 
     [Fact]
-    public async Task TryPublishAsync_JobNotFound_DoesNotPublish()
+    public async Task TryPublishAsyncJobNotFoundDoesNotPublish()
     {
         var repository = new JobRepositoryFake();
 

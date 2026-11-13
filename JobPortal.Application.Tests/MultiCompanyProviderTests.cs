@@ -19,6 +19,8 @@ namespace JobPortal.Application.Tests;
 // Saved synthetic fixtures; never call live job feeds, production DBs, or AI providers.
 public sealed class MultiCompanyProviderTests
 {
+    private static readonly JsonSerializerOptions WebJsonOptions = new(JsonSerializerDefaults.Web);
+
     [Theory]
     [InlineData(AtsType.Greenhouse, "greenhouse.json", 2)]
     [InlineData(AtsType.Lever, "lever.json", 1)]
@@ -262,13 +264,15 @@ public sealed class MultiCompanyProviderTests
     {
         using var f = new JobSourceFixture();
         f.Source.AtsType = AtsType.Lever;
+        f.Source.MissingCompleteSnapshotThreshold = 2;
+        var clock = new AdvancingClock();
         f.Company.IsVerified = true;
         f.Map(f.Category.Id.ToString());
         Job Existing(string id) => new()
         {
             Title = "Existing " + id, Slug = id, ReferenceNumber = id, Description = "Existing source vacancy.",
             CompanyId = f.Company.Id, Company = f.Company, CategoryId = f.Category.Id, Category = f.Category,
-            JobSourceId = f.Source.Id, ExternalJobId = id, Status = JobStatus.Published, PublishedAtUtc = JobSourceFixture.Now
+            JobSourceId = f.Source.Id, SourceOwnsPublication = true, ExternalJobId = id, Status = JobStatus.Published, PublishedAtUtc = JobSourceFixture.Now
         };
         var foreign = Existing("foreign");
         var missing = Existing("missing");
@@ -287,13 +291,21 @@ public sealed class MultiCompanyProviderTests
         var canonicalizer = new UrlCanonicalizer();
         var ingestion = new JobIngestionService(repository, new CompanyManagementRepository(f.Context),
             new CategoryManagementRepository(f.Context), new JobDeduplicationService(repository, fingerprints, canonicalizer),
-            fingerprints, unit, new Clock(), f.Locks, canonicalizer);
-        var runner = new JobSourceRunner(f.Repository, [new LeverExternalJobProvider(factory)], ingestion, unit, new Clock(),
+            fingerprints, unit, clock, f.Locks, canonicalizer);
+        var runner = new JobSourceRunner(f.Repository, [new LeverExternalJobProvider(factory)], ingestion, unit, clock,
             f.Resolver, new ExternalJobNormalizer(), jobRepository: repository, publicationPolicy: Policy(f.Source));
         var result = await runner.RunAsync(f.Source.Id);
         Assert.True(result.Succeeded);
         Assert.Equal(1, result.Created);
-        Assert.Equal(1, result.Closed);
+        Assert.True(result.ReconciliationSafe);
+        Assert.Equal(0, result.Closed);
+        Assert.Equal(JobStatus.Published, (await f.Context.Jobs.AsNoTracking().SingleAsync(x => x.Id == missing.Id)).Status);
+        clock.Now = clock.Now.AddHours(1);
+        var second = await runner.RunAsync(f.Source.Id);
+        Assert.True(second.Succeeded);
+        Assert.True(second.ReconciliationSafe);
+        Assert.Equal(0, second.Created);
+        Assert.Equal(1, second.Closed);
         Assert.Equal(JobStatus.Published, (await f.Context.Jobs.AsNoTracking().SingleAsync(x => x.Id == foreign.Id)).Status);
         Assert.Equal(JobStatus.Closed, (await f.Context.Jobs.AsNoTracking().SingleAsync(x => x.Id == missing.Id)).Status);
     }
@@ -491,7 +503,7 @@ public sealed class MultiCompanyProviderTests
         Assert.Equal("/media/admin-approved-logo.png", source.Company.LogoUrl);
         var job = new Job { Company = source.Company, CompanyId = source.CompanyId, Category = new Category(), PublishedAtUtc = JobSourceFixture.Now };
         var dto = PublicJobProjections.Summary.Compile()(job);
-        var json = JsonSerializer.Serialize(dto, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var json = JsonSerializer.Serialize(dto, WebJsonOptions);
         Assert.Contains("\"companyId\":", json);
         Assert.Contains("\"companyName\":\"Acme\"", json);
         Assert.Contains("\"companyLogoUrl\":\"/media/admin-approved-logo.png\"", json);

@@ -10,7 +10,7 @@ namespace JobPortal.Application.Tests;
 public sealed class ExternalJobProviderTests
 {
     [Fact]
-    public async Task Greenhouse_MapsPublicBoardResponse()
+    public async Task GreenhouseMapsPublicBoardResponse()
     {
         const string json = """
         {
@@ -63,7 +63,7 @@ public sealed class ExternalJobProviderTests
     }
 
     [Fact]
-    public async Task Lever_MapsPublicPostingsResponse()
+    public async Task LeverMapsPublicPostingsResponse()
     {
         const string json = """
         [
@@ -115,7 +115,7 @@ public sealed class ExternalJobProviderTests
     }
 
     [Fact]
-    public async Task Greenhouse_MissingIdentifier_Throws()
+    public async Task GreenhouseMissingIdentifierThrows()
     {
         var handler = new StubHttpMessageHandler("""{"jobs":[]}""");
 
@@ -136,7 +136,7 @@ public sealed class ExternalJobProviderTests
     }
 
     [Fact]
-    public async Task Lever_MissingIdentifier_Throws()
+    public async Task LeverMissingIdentifierThrows()
     {
         var handler = new StubHttpMessageHandler("[]");
 
@@ -157,7 +157,7 @@ public sealed class ExternalJobProviderTests
     }
 
     [Fact]
-    public async Task Greenhouse_HttpFailure_Throws()
+    public async Task GreenhouseHttpFailureThrows()
     {
         var handler = new StubHttpMessageHandler(
             "{}",
@@ -175,7 +175,7 @@ public sealed class ExternalJobProviderTests
     }
 
     [Fact]
-    public async Task Lever_HttpFailure_Throws()
+    public async Task LeverHttpFailureThrows()
     {
         var handler = new StubHttpMessageHandler(
             "[]",
@@ -214,7 +214,7 @@ public sealed class ExternalJobProviderTests
         };
     }
 
-    private static IHttpClientFactory CreateFactory(
+    private static TestHttpClientFactory CreateFactory(
         HttpMessageHandler handler)
     {
         var client = new HttpClient(handler)

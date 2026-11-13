@@ -22,6 +22,8 @@ namespace JobPortal.Application.Tests;
 // Uses the production controllers, services and repositories with an isolated in-memory database.
 public sealed class AdminCompanyCreationTests
 {
+    private static readonly JsonSerializerOptions WebJsonOptions = new(JsonSerializerDefaults.Web);
+
     [Fact]
     public async Task MinimalAdminRequestCreatesTrimmedCompanyAndReturnedIdWorksForJobSource()
     {
@@ -30,7 +32,7 @@ public sealed class AdminCompanyCreationTests
         var controller = Controller(f, administrator);
         var request = JsonSerializer.Deserialize<CreateCompanyRequest>(
             """{"name":"  Razorpay  ","websiteUrl":"https://razorpay.com"}""",
-            new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+            WebJsonOptions)!;
 
         var action = await controller.Create(request, default);
         var created = Assert.IsType<CreatedAtActionResult>(action.Result);

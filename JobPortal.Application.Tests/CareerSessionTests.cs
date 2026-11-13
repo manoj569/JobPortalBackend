@@ -22,6 +22,10 @@ namespace JobPortal.Application.Tests;
 
 public sealed class CareerSessionTests
 {
+    private static readonly int[] ExpectedValues1 = new[] { 20 };
+    private static readonly string[] ExpectedValues2 = new[] { "meet.example.test" };
+    private static readonly int[] ExpectedValues3 = new[] { 60, 10 };
+
     [Theory]
     [InlineData(1440)]
     [InlineData(60)]
@@ -31,6 +35,9 @@ public sealed class CareerSessionTests
         using var f = new Fixture();
         var booking = await f.Finance.Scheduling.Book(new DateTimeOffset(f.Clock.Utc.AddDays(7).AddHours(3).AddMinutes(30)));
         var order = await f.Finance.Order(booking.Id); await f.Finance.Verify(booking.Id, order);
+        var paidBooking = await f.Db.CareerGuidanceBookings.SingleAsync();
+        Assert.Equal(CareerBookingStatus.AwaitingConsultant, paidBooking.Status);
+        await f.Finance.Scheduling.Service.AcceptAsync(f.Owner, booking.Id, new(paidBooking.Revision), default);
         var session = await f.Service.ProvisionAsync(f.Candidate, booking.Id, CareerSessionAudience.Candidate, default);
         f.Clock.Utc = session.ScheduledStartUtc.AddMinutes(-offset);
         var processor = new CareerSessionReminderProcessor(f.Repository, new DashboardRepository(f.Db, f.Clock), f.Clock, NotificationTestSupport.Outbox(f.Db, f.Clock));
@@ -96,8 +103,8 @@ public sealed class CareerSessionTests
         var services = new ServiceCollection(); services.AddInfrastructure(configuration);
         using var sp = services.BuildServiceProvider();
         var options = sp.GetRequiredService<IOptions<CareerSessionOptions>>().Value;
-        Assert.Equal(new[] { 20 }, options.ReminderOffsetsMinutes);
-        Assert.Equal(new[] { "meet.example.test" }, options.AllowedMeetingHosts);
+        Assert.Equal(ExpectedValues1, options.ReminderOffsetsMinutes);
+        Assert.Equal(ExpectedValues2, options.AllowedMeetingHosts);
     }
 
     [Fact]
@@ -109,7 +116,7 @@ public sealed class CareerSessionTests
         var reminders = await f.Db.Set<CareerGuidanceSessionReminder>().ToArrayAsync();
         Assert.Equal(4, reminders.Length); Assert.All(reminders, r => Assert.True(r.ScheduledForUtc >= f.Clock.Utc));
         Assert.Equal(4, reminders.Select(r => (r.SessionId, r.RecipientUserId, r.OffsetMinutes)).Distinct().Count());
-        Assert.All(reminders, r => Assert.Contains(r.OffsetMinutes, new[] { 60, 10 }));
+        Assert.All(reminders, r => Assert.Contains(r.OffsetMinutes, ExpectedValues3));
     }
 
     [Fact]
@@ -283,7 +290,7 @@ public sealed class CareerSessionTests
         using var f = new Fixture(); var s = await f.Setup(true); f.Clock.Utc = s.ScheduledStartUtc.AddMinutes(-60);
         var processor = new CareerSessionReminderProcessor(f.Repository, new DashboardRepository(f.Db, f.Clock), f.Clock, NotificationTestSupport.Outbox(f.Db, f.Clock));
         Assert.Equal(2, await processor.ProcessAsync(default)); Assert.Equal(0, await processor.ProcessAsync(default));
-        var notifications = await f.Db.Set<Notification>().ToArrayAsync(); Assert.Equal(2, notifications.Length);
+        var notifications = await f.Db.Set<Notification>().AsNoTracking().ToArrayAsync(); Assert.Equal(2, notifications.Length);
         Assert.DoesNotContain("https", JsonSerializer.Serialize(notifications), StringComparison.OrdinalIgnoreCase);
         Assert.All(await f.Db.Set<CareerGuidanceSessionReminder>().Where(r => r.OffsetMinutes == 60).ToArrayAsync(), r =>
         { Assert.Equal(CareerReminderStatus.Delivered, r.Status); Assert.NotNull(r.SentAtUtc); });
@@ -313,6 +320,24 @@ public sealed class CareerSessionTests
         Assert.False(new CareerSessionOptions().SessionRemindersEnabled); Assert.True(new CareerSessionOptions().IsValid());
         Assert.False(new CareerSessionOptions { EarningReleaseDelayHours = 0 }.IsValid());
         Assert.False(new CareerSessionOptions { ReminderOffsetsMinutes = [10, 10] }.IsValid());
+    }
+
+    [Fact]
+    public async Task VersionTwoPaymentRequiresConsultantAcceptanceBeforeSessionProvisioning()
+    {
+        using var f = new Fixture();
+        var booking = await f.Finance.Setup(lifecycleVersion: 2);
+        var order = await f.Finance.Order(booking.Id);
+        await f.Finance.Verify(booking.Id, order);
+        var awaiting = await f.Db.CareerGuidanceBookings.SingleAsync();
+        Assert.Equal(CareerBookingStatus.AwaitingConsultant, awaiting.Status);
+        await Assert.ThrowsAsync<ConflictException>(() => f.Service.ProvisionAsync(
+            f.Candidate, booking.Id, CareerSessionAudience.Candidate, default));
+        await f.Finance.Scheduling.Service.AcceptAsync(f.Owner, booking.Id, new(awaiting.Revision), default);
+        var session = await f.Service.ProvisionAsync(f.Candidate, booking.Id, CareerSessionAudience.Candidate, default);
+        Assert.Equal(CareerBookingStatus.Confirmed, awaiting.Status);
+        Assert.Equal(booking.Id, session.BookingId);
+        Assert.Single(await f.Db.Set<CareerGuidanceSession>().ToArrayAsync());
     }
 
     internal sealed class Fixture : IDisposable

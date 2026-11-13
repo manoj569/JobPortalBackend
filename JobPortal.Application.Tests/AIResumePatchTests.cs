@@ -12,6 +12,9 @@ namespace JobPortal.Application.Tests;
 
 public sealed class AIResumePatchTests
 {
+    private static readonly string[] ExpectedValues2 = new[] { "accepted", "rejected" };
+    private static readonly string[] ExpectedValues3 = new[] { "replacements", "emphasizedSkillEvidenceIds" };
+
     [Fact]
     public void EightOfTenApplyIndependentlyAndAllSourceIdentitiesRemain()
     {
@@ -148,7 +151,7 @@ public sealed class AIResumePatchTests
 
         Assert.Equal(1, result.AcceptedCount);
         Assert.Equal(2, result.Decisions.Length);
-        Assert.Equal(new[] { "accepted", "rejected" }, result.Decisions.Select(x => x.Status));
+        Assert.Equal(ExpectedValues2, result.Decisions.Select(x => x.Status));
         Assert.Contains(result.Decisions, x => x.RejectionCategory == "technology" && x.RejectionReason == "claim_not_supported_by_cited_evidence");
         Assert.Equal("Built REST APIs using ASP.NET Core and SQL Server.", result.Content.Experience[0].Bullets[0]);
         Assert.Equal("Developed database services using SQL Server.", result.Content.Experience[0].Bullets[1]);
@@ -204,7 +207,7 @@ public sealed class AIResumePatchTests
         Assert.Equal(10, result.Content.Replacements.Length); Assert.Equal(1, handler.Calls);
         using var body = JsonDocument.Parse(handler.Body!);
         var schema = body.RootElement.GetProperty("output_config").GetProperty("format").GetProperty("schema");
-        Assert.Equal(new[] { "replacements", "emphasizedSkillEvidenceIds" }, schema.GetProperty("properties").EnumerateObject().Select(x => x.Name));
+        Assert.Equal(ExpectedValues3, schema.GetProperty("properties").EnumerateObject().Select(x => x.Name));
         var targetIds = schema.GetProperty("properties").GetProperty("replacements").GetProperty("items").GetProperty("properties").GetProperty("targetId").GetProperty("enum");
         Assert.DoesNotContain(targetIds.EnumerateArray(), x => x.GetString()!.Contains("IDENTITY", StringComparison.Ordinal));
         var evidenceIds = schema.GetProperty("properties").GetProperty("replacements").GetProperty("items").GetProperty("properties")
@@ -269,25 +272,28 @@ public sealed class AIResumePatchTests
 
 internal static class MasterResumeFixture
 {
-    internal static readonly XNamespace W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
-    internal const string Jd = "Optimize application performance and scalability using problem solving and cross-functional collaboration. Requirements include CUDA, Triton, GPU programming and parallel computing.";
-    internal static ResumeAnalysis Analysis => new(68, ["Performance Optimization", "Scalability", "Problem Solving", "Cross-functional Collaboration"],
-        ["Application optimization supports related performance work"], ["CUDA", "Triton", "GPU programming", "parallel computing"],
-        ["performance", "scalability"], ["Problem Solving"], ["GPU programming missing"], ["Emphasize supported optimization"]);
-    internal static string Text => string.Join('\n', new[]
+    private static readonly string[] EducationLines = new[] { "EDUCATION", "Bachelor of Engineering | Example Institute | 2006 - 2010", "Diploma | Example College | 2004 - 2006",
+            "CERTIFICATIONS", "Cloud Fundamentals | Example Academy | 2023", "ADDITIONAL INFORMATION", "Supported cross-functional collaboration through problem solving." };
+    private static readonly string[] HeaderLines = new[]
     {
         "Morgan Example", "Email: morgan@example.invalid", "Phone: +91 90000 00000", "Location: Pune",
         "PROFESSIONAL SUMMARY", "Backend developer with C# experience in performance optimization and scalable application solutions.",
         "TECHNICAL SKILLS", "Engineering: Performance Optimization | Scalability | Problem Solving | Cross-functional Collaboration",
         "Languages: C# | Java | Python | TypeScript", "Platforms: .NET | ASP.NET | SQL Server | PostgreSQL | Redis | Docker | Azure",
         "WORK EXPERIENCE"
-    }.Concat(Enumerable.Range(1, 5).SelectMany(i => new[] { $"Backend Developer | Cedar Software {i} | Jan {2010 + i} - Dec {2010 + i}",
+    };
+    private static readonly string[] ExpectedValues1 = new[] { "PROJECTS" };
+    internal static readonly XNamespace W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+    internal const string Jd = "Optimize application performance and scalability using problem solving and cross-functional collaboration. Requirements include CUDA, Triton, GPU programming and parallel computing.";
+    internal static ResumeAnalysis Analysis => new(68, ["Performance Optimization", "Scalability", "Problem Solving", "Cross-functional Collaboration"],
+        ["Application optimization supports related performance work"], ["CUDA", "Triton", "GPU programming", "parallel computing"],
+        ["performance", "scalability"], ["Problem Solving"], ["GPU programming missing"], ["Emphasize supported optimization"]);
+    internal static string Text => string.Join('\n', HeaderLines.Concat(Enumerable.Range(1, 5).SelectMany(i => new[] { $"Backend Developer | Cedar Software {i} | Jan {2010 + i} - Dec {2010 + i}",
         $"- Built reliable C# APIs for service {i} using performance optimization and scalable solutions.",
         $"- Reduced recurring support incidents for service {i} by 30% through problem solving and workflow improvements." }))
-        .Concat(new[] { "PROJECTS" }).Concat(Enumerable.Range(1, 5).SelectMany(i => new[] { $"Project: Inventory Portal {i}", "Technologies: C#, SQL Server",
+        .Concat(ExpectedValues1).Concat(Enumerable.Range(1, 5).SelectMany(i => new[] { $"Project: Inventory Portal {i}", "Technologies: C#, SQL Server",
             $"- Built C# APIs using SQL Server for project {i}." }))
-        .Concat(new[] { "EDUCATION", "Bachelor of Engineering | Example Institute | 2006 - 2010", "Diploma | Example College | 2004 - 2006",
-            "CERTIFICATIONS", "Cloud Fundamentals | Example Academy | 2023", "ADDITIONAL INFORMATION", "Supported cross-functional collaboration through problem solving." }));
+        .Concat(EducationLines));
     internal static TailoredResumeContent Source => UploadedResumeFactParser.Parse(Text);
     internal static ResumeTextReplacement Change(ResumeSourceEvidence target) => new(target.Id, target.Text,
         target.Text.Replace("Built", "Developed", StringComparison.Ordinal), [target.Id], ["performance"], "Emphasize supported source work");

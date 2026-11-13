@@ -12,17 +12,22 @@ namespace JobPortal.Application.Tests;
 
 public sealed class CareerSessionMigrationTests
 {
+    private static readonly string[] ExpectedValues1 = new[] { "CareerGuidanceSessionReminders", "CareerGuidanceSessions" };
+    private static readonly string[] ExpectedValues2 = new[] { "BookingId" };
+    private static readonly string[] ExpectedValues3 = new[] { "MeetingProvider", "ProviderMeetingId" };
+    private static readonly string[] ExpectedValues4 = new[] { "SessionId", "RecipientUserId", "OffsetMinutes" };
+
     [Fact]
     public void MigrationAddsOnlySessionAndReminderTablesWithRestrictiveForeignKeys()
     {
         var operations = new AddCareerGuidanceSessionsAndReminders().UpOperations;
         Assert.All(operations, o => Assert.True(o is CreateTableOperation or CreateIndexOperation));
-        Assert.Equal(new[] { "CareerGuidanceSessionReminders", "CareerGuidanceSessions" }, operations.OfType<CreateTableOperation>().Select(t => t.Name).Order().ToArray());
+        Assert.Equal(ExpectedValues1, operations.OfType<CreateTableOperation>().Select(t => t.Name).Order().ToArray());
         Assert.All(operations.OfType<CreateTableOperation>().SelectMany(t => t.ForeignKeys), fk => Assert.Equal(ReferentialAction.Restrict, fk.OnDelete));
         var indexes = operations.OfType<CreateIndexOperation>().ToArray();
-        Assert.Contains(indexes, i => i.IsUnique && i.Table == "CareerGuidanceSessions" && i.Columns.SequenceEqual(new[] { "BookingId" }));
-        Assert.Contains(indexes, i => i.IsUnique && i.Columns.SequenceEqual(new[] { "MeetingProvider", "ProviderMeetingId" }) && i.Filter == "\"ProviderMeetingId\" IS NOT NULL");
-        Assert.Contains(indexes, i => i.IsUnique && i.Columns.SequenceEqual(new[] { "SessionId", "RecipientUserId", "OffsetMinutes" }));
+        Assert.Contains(indexes, i => i.IsUnique && i.Table == "CareerGuidanceSessions" && i.Columns.SequenceEqual(ExpectedValues2));
+        Assert.Contains(indexes, i => i.IsUnique && i.Columns.SequenceEqual(ExpectedValues3) && i.Filter == "\"ProviderMeetingId\" IS NOT NULL");
+        Assert.Contains(indexes, i => i.IsUnique && i.Columns.SequenceEqual(ExpectedValues4));
         var session = operations.OfType<CreateTableOperation>().Single(t => t.Name == "CareerGuidanceSessions");
         Assert.Contains(session.CheckConstraints, c => c.Name == "CK_CGSession_Interval");
         Assert.Contains(session.CheckConstraints, c => c.Name == "CK_CGSession_Status");

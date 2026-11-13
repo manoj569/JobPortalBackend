@@ -24,12 +24,14 @@ namespace JobPortal.Application.Tests;
 
 public sealed class FinalWebsitePostgresTests
 {
+    private static readonly string[] ExpectedValues1 = new[] { "localhost", "127.0.0.1" };
+
     [WebsitePostgresFact]
     public async Task NewCompanyAndUnknownEmployerPersistPublishAndRefreshWithRealForeignKeys()
     {
         var connection = Environment.GetEnvironmentVariable("CAREERHARBOR_WEBSITE_TEST_POSTGRES")!;
         var parsed = new NpgsqlConnectionStringBuilder(connection);
-        Assert.Contains(parsed.Host, new[] { "localhost", "127.0.0.1" });
+        Assert.Contains(parsed.Host, ExpectedValues1);
         Assert.EndsWith("_test", parsed.Database, StringComparison.Ordinal);
         await using var db = new JobPortalDbContext(new DbContextOptionsBuilder<JobPortalDbContext>()
             .UseNpgsql(connection, pg => pg.MigrationsAssembly("JobPortal.Persistence.Postgres")).Options);

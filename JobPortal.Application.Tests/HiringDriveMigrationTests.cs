@@ -11,6 +11,8 @@ namespace JobPortal.Application.Tests;
 
 public sealed class HiringDriveMigrationTests
 {
+    private static readonly string[] ExpectedValues1 = new[] { "ShowOnHome", "IsActive", "DisplayOrder" };
+
     [Fact]
     public void HiringDriveMigrationsAreOrderedAndPresentInTheMigrationAssembly()
     {
@@ -65,7 +67,7 @@ public sealed class HiringDriveMigrationTests
         Assert.Equal("HiringDrives", addColumn.Table);
         Assert.Equal(false, addColumn.DefaultValue);
         var index = Assert.Single(migration.UpOperations.OfType<CreateIndexOperation>());
-        Assert.Equal(new[] { "ShowOnHome", "IsActive", "DisplayOrder" }, index.Columns);
+        Assert.Equal(ExpectedValues1, index.Columns);
         Assert.Equal("\"IsDeleted\" = FALSE", index.Filter);
         Assert.False(db.Database.HasPendingModelChanges());
     }

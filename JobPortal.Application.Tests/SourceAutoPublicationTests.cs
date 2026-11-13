@@ -11,6 +11,8 @@ namespace JobPortal.Application.Tests;
 
 public sealed class SourceAutoPublicationTests
 {
+    private static readonly int[] ExpectedValues1 = new[] { 1, 2, 3, 4, 5, 6 };
+
     [Theory]
     [InlineData(AtsType.Greenhouse, false)]
     [InlineData(AtsType.Greenhouse, true)]
@@ -250,7 +252,7 @@ public sealed class SourceAutoPublicationTests
     [Fact]
     public void ProviderEnumValuesRemainStable()
     {
-        Assert.Equal(new[] { 1, 2, 3, 4, 5, 6 }, new[] { (int)AtsType.Greenhouse, (int)AtsType.Lever,
+        Assert.Equal(ExpectedValues1, new[] { (int)AtsType.Greenhouse, (int)AtsType.Lever,
             (int)AtsType.Ashby, (int)AtsType.SuccessFactors, (int)AtsType.Workday, (int)AtsType.OracleRecruitingCloud });
     }
 }

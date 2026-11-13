@@ -11,7 +11,7 @@ public class JobFingerprintServiceTests
     private readonly JobFingerprintService _service = new();
 
     [Fact]
-    public void GenerateFingerprint_SameValues_ProducesSameFingerprint()
+    public void GenerateFingerprintSameValuesProducesSameFingerprint()
     {
         // Arrange
         var title = "Software Engineer";
@@ -27,7 +27,7 @@ public class JobFingerprintServiceTests
     }
 
     [Fact]
-    public void GenerateFingerprint_CaseDifferences_Normalizes()
+    public void GenerateFingerprintCaseDifferencesNormalizes()
     {
         // Arrange
         var title1 = "SOFTWARE ENGINEER";
@@ -44,7 +44,7 @@ public class JobFingerprintServiceTests
     }
 
     [Fact]
-    public void GenerateFingerprint_LeadingTrailingWhitespace_Normalizes()
+    public void GenerateFingerprintLeadingTrailingWhitespaceNormalizes()
     {
         // Arrange
         var title1 = "  Software Engineer  ";
@@ -63,7 +63,7 @@ public class JobFingerprintServiceTests
     }
 
     [Fact]
-    public void GenerateFingerprint_RepeatedWhitespace_Normalizes()
+    public void GenerateFingerprintRepeatedWhitespaceNormalizes()
     {
         // Arrange
         var title1 = "Software    Engineer";
@@ -80,7 +80,7 @@ public class JobFingerprintServiceTests
     }
 
     [Fact]
-    public void GenerateFingerprint_PunctuationDifferences_Normalizes()
+    public void GenerateFingerprintPunctuationDifferencesNormalizes()
     {
         // Arrange
         var title1 = "Software Engineer, Senior";
@@ -99,7 +99,7 @@ public class JobFingerprintServiceTests
     }
 
     [Fact]
-    public void GenerateFingerprint_UnicodeInput_RemainsDeterministic()
+    public void GenerateFingerprintUnicodeInputRemainsDeterministic()
     {
         // Arrange
         var title = "Ingénieur Logiciel";
@@ -116,7 +116,7 @@ public class JobFingerprintServiceTests
     }
 
     [Fact]
-    public void GenerateFingerprint_DifferentMeaningfulValues_ProducesDifferentFingerprints()
+    public void GenerateFingerprintDifferentMeaningfulValuesProducesDifferentFingerprints()
     {
         // Arrange
         var title1 = "Software Engineer";
@@ -133,7 +133,7 @@ public class JobFingerprintServiceTests
     }
 
     [Fact]
-    public void GenerateFingerprint_Output_IsExactly64LowercaseHexCharacters()
+    public void GenerateFingerprintOutputIsExactly64LowercaseHexCharacters()
     {
         // Arrange
         var title = "Software Engineer";
@@ -150,7 +150,7 @@ public class JobFingerprintServiceTests
     }
 
     [Fact]
-    public void GenerateFingerprint_NullEmptyHandling_IsDeterministic()
+    public void GenerateFingerprintNullEmptyHandlingIsDeterministic()
     {
         // Arrange
         var nullTitle = _service.GenerateFingerprint(null, "Acme", "SF");
@@ -163,7 +163,7 @@ public class JobFingerprintServiceTests
     }
 
     [Fact]
-    public void GenerateFingerprint_AllNullInputs_ProducesValidHash()
+    public void GenerateFingerprintAllNullInputsProducesValidHash()
     {
         // Act
         var fingerprint = _service.GenerateFingerprint(null, null, null);
@@ -174,7 +174,7 @@ public class JobFingerprintServiceTests
     }
 
     [Fact]
-    public void GenerateFingerprint_TechnologyPunctuationNormalization_DotNetDeveloper()
+    public void GenerateFingerprintTechnologyPunctuationNormalizationDotNetDeveloper()
     {
         // Arrange - Testing how .NET Developer is normalized
         var input1 = ".NET Developer";
@@ -193,7 +193,7 @@ public class JobFingerprintServiceTests
     }
 
     [Fact]
-    public void GenerateFingerprint_TechnologyPunctuationNormalization_CSharpDeveloper()
+    public void GenerateFingerprintTechnologyPunctuationNormalizationCSharpDeveloper()
     {
         // Arrange - Testing how C# Developer is normalized
         var input1 = "C# Developer";
@@ -216,7 +216,7 @@ public class JobFingerprintServiceTests
     }
 
     [Fact]
-    public void GenerateFingerprint_TechnologyPunctuationNormalization_CppDeveloper()
+    public void GenerateFingerprintTechnologyPunctuationNormalizationCppDeveloper()
     {
         // Arrange - Testing how C++ Developer is normalized
         var input1 = "C++ Developer";
@@ -239,7 +239,7 @@ public class JobFingerprintServiceTests
     }
 
     [Fact]
-    public void GenerateFingerprint_TechnologyPunctuationNormalization_NodeJsDeveloper()
+    public void GenerateFingerprintTechnologyPunctuationNormalizationNodeJsDeveloper()
     {
         // Arrange - Testing how Node.js Developer is normalized
         var input1 = "Node.js Developer";

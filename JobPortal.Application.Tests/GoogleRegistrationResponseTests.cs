@@ -9,6 +9,8 @@ namespace JobPortal.Application.Tests;
 
 public sealed class GoogleRegistrationResponseTests
 {
+    private static readonly JsonSerializerOptions WebJsonOptions = new(JsonSerializerDefaults.Web);
+
     [Fact]
     public async Task GoogleConflictUsesExistingApiErrorEnvelopeWithLoginMethod()
     {
@@ -31,7 +33,7 @@ public sealed class GoogleRegistrationResponseTests
     public void OrdinaryErrorsDoNotGainAnAuthenticationMethodProperty()
     {
         var json = JsonSerializer.Serialize(new JobPortal.Shared.Models.ApiError("unauthorized", "Invalid identifier or password."),
-            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            WebJsonOptions);
         Assert.DoesNotContain("loginMethod", json, StringComparison.Ordinal);
     }
 }

@@ -143,9 +143,10 @@ public sealed class ExternalJobEnrichmentTests
         new ExternalJobCategoryClassifier().Classify(new RawExternalJob { Title = title }));
 
     [Theory]
-    [InlineData("Civil Engineer", "Infrastructure")]
-    [InlineData("Mechanical Designer", "Design")]
-    public void BroadDepartmentsDoNotImplyTechnologyRoles(string title, string department) => Assert.Null(
+    [InlineData("Civil Engineer", "Infrastructure", "general")]
+    [InlineData("Engineer", "Infrastructure", null)]
+    [InlineData("Mechanical Designer", "Design", null)]
+    public void BroadDepartmentsDoNotImplyTechnologyRoles(string title, string department, string? expected) => Assert.Equal(expected,
         new ExternalJobCategoryClassifier().Classify(new RawExternalJob { Title = title, ExternalCategory = department }));
 
     [Fact]

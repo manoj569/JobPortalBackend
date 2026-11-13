@@ -559,7 +559,7 @@ public sealed class PortalMembershipTests
         await Task.WhenAll(returning, webhook);
         Assert.Equal(PaymentStatus.Paid, fixture.Payments.Payment!.Status);
         Assert.Equal(Now.AddDays(30), fixture.Memberships.Membership!.EndsAtUtc);
-        Assert.Single(fixture.Memberships.Membership.History.Where(x => x.CurrentStatus == MembershipStatus.Active));
+        Assert.Single(fixture.Memberships.Membership.History, x => x.CurrentStatus == MembershipStatus.Active);
     }
 
     [Theory]

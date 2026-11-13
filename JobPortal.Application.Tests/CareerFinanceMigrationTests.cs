@@ -12,6 +12,8 @@ namespace JobPortal.Application.Tests;
 
 public sealed class CareerFinanceMigrationTests
 {
+    private static readonly string[] ExpectedValues1 = new[] { "CareerGuidanceEarnings", "CareerGuidancePaymentEvents", "CareerGuidancePayments", "CareerGuidanceRefunds" };
+
     [Fact]
     public void PostgreSqlMigrationSqlGeneratesOfflineWithExpectedChecksAndIndexes()
     {
@@ -29,7 +31,7 @@ public sealed class CareerFinanceMigrationTests
     {
         var operations = new AddCareerGuidancePaymentsAndEarnings().UpOperations;
         Assert.All(operations, o => Assert.True(o is CreateTableOperation or CreateIndexOperation or AddColumnOperation));
-        Assert.Equal(new[] { "CareerGuidanceEarnings", "CareerGuidancePaymentEvents", "CareerGuidancePayments", "CareerGuidanceRefunds" },
+        Assert.Equal(ExpectedValues1,
             operations.OfType<CreateTableOperation>().Select(t => t.Name).Order().ToArray());
         var column = Assert.Single(operations.OfType<AddColumnOperation>());
         Assert.Equal("CareerGuidanceBookings", column.Table); Assert.Equal("RequiresPayment", column.Name); Assert.Equal(false, column.DefaultValue);

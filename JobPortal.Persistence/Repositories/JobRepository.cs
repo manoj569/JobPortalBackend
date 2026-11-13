@@ -292,7 +292,9 @@ public sealed class JobRepository(JobPortalDbContext context) : IJobRepository
         if (source.LastCompleteSnapshotCount is >= 5 && active.Count < source.LastCompleteSnapshotCount.Value * 0.5)
             throw new InvalidOperationException("Suspicious source inventory drop.");
         // Bootstrap source-owned legacy rows without inferring additional ownership.
-        var owned = await context.Jobs.Where(x => x.JobSourceId == sourceId && !x.IsDeleted && x.ExternalJobId != null).ToArrayAsync(cancellationToken);
+        // Presence checks need only detached evidence; tracking the whole inventory
+        // makes a completed large scan retain every job until final SaveChanges.
+        var owned = await context.Jobs.AsNoTracking().Where(x => x.JobSourceId == sourceId && !x.IsDeleted && x.ExternalJobId != null).ToArrayAsync(cancellationToken);
         var members = await context.Set<JobSourceVacancy>().Where(x => x.JobSourceId == sourceId).ToListAsync(cancellationToken);
         foreach (var job in owned)
             if (!members.Any(x => x.ExternalJobId == job.ExternalJobId))
@@ -313,10 +315,13 @@ public sealed class JobRepository(JobPortalDbContext context) : IJobRepository
             if (member.IsCurrent) continue;
             var anotherCurrent = await context.Set<JobSourceVacancy>().AnyAsync(x => x.JobId == member.JobId && x.JobSourceId != sourceId && x.IsCurrent && context.JobSources.Any(s => s.Id == x.JobSourceId && s.IsActive && !s.IsDeleted), cancellationToken);
             if (anotherCurrent) continue;
-            var job = owned.FirstOrDefault(x => x.Id == member.JobId) ?? await context.Jobs.SingleOrDefaultAsync(x => x.Id == member.JobId, cancellationToken);
+            // Preserve pending editorial changes already held by this context.
+            var job = context.Jobs.Local.FirstOrDefault(x => x.Id == member.JobId) ??
+                owned.FirstOrDefault(x => x.Id == member.JobId) ?? await context.Jobs.SingleOrDefaultAsync(x => x.Id == member.JobId, cancellationToken);
             if (job is null || job.IsDeleted || job.IsHidden || !job.SourceOwnsPublication || job.Status is not (JobStatus.Published or JobStatus.Draft)) continue;
             // Only the owning source may close a shared job; secondary evidence only protects it.
             if (job.JobSourceId != sourceId) continue;
+            job = TrackAggregationJob(job);
             job.Status = JobStatus.Closed; job.IsFeatured = false; job.SourceClosedBySnapshotId = snapshotId;
             job.UpdatedAtUtc = observedAtUtc; closed++;
         }

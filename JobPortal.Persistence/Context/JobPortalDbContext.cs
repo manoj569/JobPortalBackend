@@ -1,5 +1,6 @@
 using JobPortal.Domain.Common;
 using JobPortal.Domain.Entities;
+using JobPortal.Domain.Entities.CareerAccelerator;
 using JobPortal.Application.Features.CandidateCompanies;
 using JobPortal.Application.Abstractions.Jobs;
 using Microsoft.EntityFrameworkCore;
@@ -94,9 +95,42 @@ public sealed class JobPortalDbContext(DbContextOptions<JobPortalDbContext> opti
     public DbSet<TailoredResume> TailoredResumes => Set<TailoredResume>();
     public DbSet<TailoredResumeEdit> TailoredResumeEdits => Set<TailoredResumeEdit>();
     public DbSet<AIResumeCreditTransaction> AIResumeCreditTransactions => Set<AIResumeCreditTransaction>();
+    public DbSet<AcceleratorTaxonomy> AcceleratorTaxonomies => Set<AcceleratorTaxonomy>();
+    public DbSet<AcceleratorCareerRole> AcceleratorCareerRoles => Set<AcceleratorCareerRole>();
+    public DbSet<AcceleratorCompetency> AcceleratorCompetencies => Set<AcceleratorCompetency>();
+    public DbSet<AcceleratorPrerequisite> AcceleratorPrerequisites => Set<AcceleratorPrerequisite>();
+    public DbSet<AcceleratorRoleRequirement> AcceleratorRoleRequirements => Set<AcceleratorRoleRequirement>();
+    public DbSet<AcceleratorProfile> AcceleratorProfiles => Set<AcceleratorProfile>();
+    public DbSet<AcceleratorProfileSkill> AcceleratorProfileSkills => Set<AcceleratorProfileSkill>();
+    public DbSet<AcceleratorCareerGoal> AcceleratorCareerGoals => Set<AcceleratorCareerGoal>();
+    public DbSet<AcceleratorBillingCycle> AcceleratorBillingCycles => Set<AcceleratorBillingCycle>();
+    public DbSet<AcceleratorAllowance> AcceleratorAllowances => Set<AcceleratorAllowance>();
+    public DbSet<AcceleratorUsageReservation> AcceleratorUsageReservations => Set<AcceleratorUsageReservation>();
+    public DbSet<AcceleratorUsageEvent> AcceleratorUsageEvents => Set<AcceleratorUsageEvent>();
+    public DbSet<AcceleratorAssessmentTemplate> AcceleratorAssessmentTemplates => Set<AcceleratorAssessmentTemplate>();
+    public DbSet<AcceleratorQuestion> AcceleratorQuestions => Set<AcceleratorQuestion>();
+    public DbSet<AcceleratorAssessmentAttempt> AcceleratorAssessmentAttempts => Set<AcceleratorAssessmentAttempt>();
+    public DbSet<AcceleratorAssessmentAnswer> AcceleratorAssessmentAnswers => Set<AcceleratorAssessmentAnswer>();
+    public DbSet<AcceleratorSkillEvidence> AcceleratorSkillEvidence => Set<AcceleratorSkillEvidence>();
+    public DbSet<AcceleratorRoadmap> AcceleratorRoadmaps => Set<AcceleratorRoadmap>();
+    public DbSet<AcceleratorRoadmapNode> AcceleratorRoadmapNodes => Set<AcceleratorRoadmapNode>();
+    public DbSet<AcceleratorRoadmapEdge> AcceleratorRoadmapEdges => Set<AcceleratorRoadmapEdge>();
+    public DbSet<AcceleratorLearningActivity> AcceleratorLearningActivities => Set<AcceleratorLearningActivity>();
+    public DbSet<AcceleratorProgressEvent> AcceleratorProgressEvents => Set<AcceleratorProgressEvent>();
+    public DbSet<AcceleratorRecommendation> AcceleratorRecommendations => Set<AcceleratorRecommendation>();
+    public DbSet<AcceleratorTutorConversation> AcceleratorTutorConversations => Set<AcceleratorTutorConversation>();
+    public DbSet<AcceleratorTutorMessage> AcceleratorTutorMessages => Set<AcceleratorTutorMessage>();
+    public DbSet<AcceleratorTutorContextSnapshot> AcceleratorTutorContextSnapshots => Set<AcceleratorTutorContextSnapshot>();
+    public DbSet<AcceleratorTutorMemorySummary> AcceleratorTutorMemorySummaries => Set<AcceleratorTutorMemorySummary>();
+    public DbSet<AcceleratorPracticeSession> AcceleratorPracticeSessions => Set<AcceleratorPracticeSession>();
+    public DbSet<AcceleratorPracticeQuestion> AcceleratorPracticeQuestions => Set<AcceleratorPracticeQuestion>();
+    public DbSet<AcceleratorPracticeAttempt> AcceleratorPracticeAttempts => Set<AcceleratorPracticeAttempt>();
+    public DbSet<AcceleratorPracticeEvaluation> AcceleratorPracticeEvaluations => Set<AcceleratorPracticeEvaluation>();
+    public DbSet<AcceleratorAiDispatchRecord> AcceleratorAiDispatchRecords => Set<AcceleratorAiDispatchRecord>();
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
+        AcceleratorPersistencePolicy.Enforce(ChangeTracker);
         EnsureFinancialHistory();
         EnsureTrustHistory();
         EnsureAuditLogsAreAppendOnly();
@@ -107,6 +141,7 @@ public sealed class JobPortalDbContext(DbContextOptions<JobPortalDbContext> opti
 
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
+        AcceleratorPersistencePolicy.Enforce(ChangeTracker);
         EnsureFinancialHistory();
         EnsureTrustHistory();
         EnsureAuditLogsAreAppendOnly();

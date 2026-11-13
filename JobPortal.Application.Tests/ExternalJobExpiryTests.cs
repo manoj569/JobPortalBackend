@@ -8,8 +8,10 @@ namespace JobPortal.Application.Tests;
 
 public sealed class ExternalJobExpiryTests
 {
+    private static readonly string[] ExpectedValues1 = new[] { "/v1/boards/acme/jobs?content=true", "/v1/boards/acme/jobs/123" };
+
     [Fact]
-    public async Task Greenhouse_RepeatUpdatesOwnedDeadlineWithoutCreatingDuplicate()
+    public async Task GreenhouseRepeatUpdatesOwnedDeadlineWithoutCreatingDuplicate()
     {
         using var fixture = new JobSourceFixture();
         fixture.Source.CareerPageUrl = "https://job-boards.greenhouse.io/acme";
@@ -47,26 +49,26 @@ public sealed class ExternalJobExpiryTests
     [InlineData("\"2026-12-01\"", null)]
     [InlineData("\"2026-12-01T12:00:00\"", null)]
     [InlineData("\"2026-12-01T12:00:00+25:00\"", null)]
-    public async Task Greenhouse_OnlyExplicitSourceInstantsBecomeUtc(string deadlineJson, string? expected)
+    public async Task GreenhouseOnlyExplicitSourceInstantsBecomeUtc(string deadlineJson, string? expected)
     {
         using var handler = new DeadlineHandler("{\"id\":123,\"application_deadline\":" + deadlineJson + "}");
         var job = Assert.Single(await FetchAsync(handler));
-        Assert.Equal(expected is null ? null : DateTimeOffset.Parse(expected).UtcDateTime, job.ExpiresAtUtc);
+        Assert.Equal(expected is null ? null : DateTimeOffset.Parse(expected, System.Globalization.CultureInfo.InvariantCulture).UtcDateTime, job.ExpiresAtUtc);
         if (job.ExpiresAtUtc.HasValue) Assert.Equal(DateTimeKind.Utc, job.ExpiresAtUtc.Value.Kind);
-        Assert.Equal(new[] { "/v1/boards/acme/jobs?content=true", "/v1/boards/acme/jobs/123" }, handler.Paths);
+        Assert.Equal(ExpectedValues1, handler.Paths);
     }
 
     [Theory]
     [InlineData("{\"id\":123,\"updated_at\":\"2030-01-01T00:00:00Z\",\"first_published\":\"2026-01-01T00:00:00Z\"}")]
     [InlineData("{\"id\":456,\"application_deadline\":\"2030-01-01T00:00:00Z\"}")]
-    public async Task Greenhouse_DoesNotInventExpiryOrUseAnotherPostsDeadline(string detail)
+    public async Task GreenhouseDoesNotInventExpiryOrUseAnotherPostsDeadline(string detail)
     {
         using var handler = new DeadlineHandler(detail);
         Assert.Null(Assert.Single(await FetchAsync(handler)).ExpiresAtUtc);
     }
 
     [Fact]
-    public async Task Greenhouse_DisappearedDetailHasNoExpiry()
+    public async Task GreenhouseDisappearedDetailHasNoExpiry()
     {
         using var handler = new DeadlineHandler("{}", HttpStatusCode.NotFound);
         Assert.Null(Assert.Single(await FetchAsync(handler)).ExpiresAtUtc);
@@ -76,7 +78,7 @@ public sealed class ExternalJobExpiryTests
     [InlineData(HttpStatusCode.TooManyRequests)]
     [InlineData(HttpStatusCode.InternalServerError)]
     [InlineData(HttpStatusCode.ServiceUnavailable)]
-    public async Task Greenhouse_DetailFailure_KeepsJobWithoutExpiry(
+    public async Task GreenhouseDetailFailureKeepsJobWithoutExpiry(
      HttpStatusCode status)
     {
         using var handler = new DeadlineHandler("{}", status);
@@ -86,16 +88,12 @@ public sealed class ExternalJobExpiryTests
         Assert.Null(job.ExpiresAtUtc);
 
         Assert.Equal(
-            new[]
-            {
-            "/v1/boards/acme/jobs?content=true",
-            "/v1/boards/acme/jobs/123"
-            },
+            ExpectedValues1,
             handler.Paths);
     }
 
     [Fact]
-    public async Task Greenhouse_CancellationDuringDetailIsPropagated()
+    public async Task GreenhouseCancellationDuringDetailIsPropagated()
     {
         using var cancellation = new CancellationTokenSource();
         using var handler = new DeadlineHandler("{}", cancel: cancellation);
@@ -104,7 +102,7 @@ public sealed class ExternalJobExpiryTests
     }
 
     [Fact]
-    public async Task Greenhouse_MalformedOptionalDetailDoesNotDiscardListing()
+    public async Task GreenhouseMalformedOptionalDetailDoesNotDiscardListing()
     {
         using var handler = new DeadlineHandler("not JSON");
         Assert.Null(Assert.Single(await FetchAsync(handler)).ExpiresAtUtc);
@@ -113,7 +111,7 @@ public sealed class ExternalJobExpiryTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task Greenhouse_ExhaustedTransportOrTimeoutDoesNotDiscardListing(bool timeout)
+    public async Task GreenhouseExhaustedTransportOrTimeoutDoesNotDiscardListing(bool timeout)
     {
         using var handler = new DeadlineHandler("{}", error: timeout
             ? new TaskCanceledException("timeout") : new HttpRequestException("transport"));
@@ -121,7 +119,7 @@ public sealed class ExternalJobExpiryTests
     }
 
     [Fact]
-    public async Task Ashby_PublicationDateDoesNotBecomeExpiry()
+    public async Task AshbyPublicationDateDoesNotBecomeExpiry()
     {
         using var handler = new DeadlineHandler("""
             {"jobs":[{"title":"Engineer","isListed":true,"publishedAt":"2026-10-01T00:00:00Z"}]}

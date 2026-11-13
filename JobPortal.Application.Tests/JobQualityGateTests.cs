@@ -15,7 +15,7 @@ public sealed class JobQualityGateTests
     private readonly JobQualityGate _gate = new();
 
     [Fact]
-    public void Evaluate_CompleteValidJob_ReturnsEligible()
+    public void EvaluateCompleteValidJobReturnsEligible()
     {
         var job = CreateValidJob();
 
@@ -27,7 +27,7 @@ public sealed class JobQualityGateTests
     }
 
     [Fact]
-    public void Evaluate_MissingLocationRequiresReview()
+    public void EvaluateMissingLocationRequiresReview()
     {
         var job = CreateValidJob();
         job.Location = null;
@@ -39,7 +39,7 @@ public sealed class JobQualityGateTests
     }
 
     [Fact]
-    public void Evaluate_MissingExpiry_ReturnsEligible()
+    public void EvaluateMissingExpiryReturnsEligible()
     {
         var job = CreateValidJob();
         job.ExpiresAtUtc = null;
@@ -51,7 +51,7 @@ public sealed class JobQualityGateTests
     }
 
     [Fact]
-    public void Evaluate_MissingWorkplaceType_ReturnsEligible()
+    public void EvaluateMissingWorkplaceTypeReturnsEligible()
     {
         var job = CreateValidJob();
         job.WorkplaceType = default;
@@ -63,7 +63,7 @@ public sealed class JobQualityGateTests
     }
 
     [Fact]
-    public void Evaluate_MissingEmploymentType_ReturnsEligible()
+    public void EvaluateMissingEmploymentTypeReturnsEligible()
     {
         var job = CreateValidJob();
         job.EmploymentType = default;
@@ -75,7 +75,7 @@ public sealed class JobQualityGateTests
     }
 
     [Fact]
-    public void Evaluate_MissingOptionalSalaryEducationAndExperience_RemainsEligible()
+    public void EvaluateMissingOptionalSalaryEducationAndExperienceRemainsEligible()
     {
         var job = CreateValidJob();
 
@@ -94,7 +94,7 @@ public sealed class JobQualityGateTests
     }
 
     [Fact]
-    public void Evaluate_InvalidApplicationUrl_ReturnsRejected()
+    public void EvaluateInvalidApplicationUrlReturnsRejected()
     {
         var job = CreateValidJob();
         job.ApplicationUrl = "not-a-valid-url";
@@ -110,7 +110,7 @@ public sealed class JobQualityGateTests
     }
 
     [Fact]
-    public void Evaluate_ExpiredJob_ReturnsRejected()
+    public void EvaluateExpiredJobReturnsRejected()
     {
         var job = CreateValidJob();
         job.ExpiresAtUtc = Now.AddMinutes(-1);
@@ -125,7 +125,7 @@ public sealed class JobQualityGateTests
     }
 
     [Fact]
-    public void Evaluate_InvalidSalaryRange_ReturnsRejected()
+    public void EvaluateInvalidSalaryRangeReturnsRejected()
     {
         var job = CreateValidJob();
 
@@ -142,7 +142,7 @@ public sealed class JobQualityGateTests
     }
 
     [Fact]
-    public void Evaluate_InvalidExperienceRange_ReturnsRejected()
+    public void EvaluateInvalidExperienceRangeReturnsRejected()
     {
         var job = CreateValidJob();
 
@@ -159,7 +159,7 @@ public sealed class JobQualityGateTests
     }
 
     [Fact]
-    public void Evaluate_MissingCoreData_ReturnsRejected()
+    public void EvaluateMissingCoreDataReturnsRejected()
     {
         var job = CreateValidJob();
 
@@ -179,7 +179,7 @@ public sealed class JobQualityGateTests
     }
 
     [Fact]
-    public void Evaluate_RejectedReason_TakesPriorityOverReviewReason()
+    public void EvaluateRejectedReasonTakesPriorityOverReviewReason()
     {
         var job = CreateValidJob();
 

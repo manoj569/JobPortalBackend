@@ -267,10 +267,11 @@ public sealed partial class JobSourceRunWorker(IServiceScopeFactory scopes, JobS
                 else
                 {
                     var row = await store.GetAsync(run.JobSourceId, run.Id, cleanup.Token);
-                    if (row is not null)
+                    if (row is not null && logger.IsEnabled(LogLevel.Information))
                     {
                         var recorded = JobSourceRunResponse.From(row).Diagnostics ?? progress.Snapshot.Counters;
-                        Summary(logger, row.Id, row.JobSourceId, row.Status.ToString(), row.ExecutionCount,
+                        var statusName = row.Status.ToString();
+                        Summary(logger, row.Id, row.JobSourceId, statusName, row.ExecutionCount,
                             recorded.StopReason ?? row.ErrorCode ?? "Unknown", recorded.ListingTotal, recorded.CheckpointCursor,
                             row.Created, row.Updated + row.Unchanged + row.Matched, row.Failed, row.Published,
                             recorded.ReconciliationSafe, recorded.DurationMilliseconds, row.NextAttemptAtUtc);

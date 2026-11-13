@@ -22,6 +22,8 @@ namespace JobPortal.Application.Tests;
 
 public sealed class SmartRecruitersProviderTests
 {
+    private static readonly int[] ExpectedValues1 = new[] { 0, 100, 200, 300 };
+
     [Theory]
     [InlineData(null)]
     [InlineData("ExampleCompany")]
@@ -91,7 +93,7 @@ public sealed class SmartRecruitersProviderTests
         Assert.True(snapshot.IsComplete);
         Assert.Equal(347, snapshot.ReportedListingTotal);
         Assert.Equal(347, snapshot.Jobs.Count);
-        Assert.Equal(new[] { 0, 100, 200, 300 }, handler.Offsets.Take(4));
+        Assert.Equal(ExpectedValues1, handler.Offsets.Take(4));
         Assert.All(handler.Requests.Take(4), uri => Assert.Contains("destination=PUBLIC&limit=100&offset=", uri.Query));
         Assert.All(handler.Requests, uri => Assert.Equal("api.smartrecruiters.com", uri.Host));
         var job = snapshot.Jobs.First();

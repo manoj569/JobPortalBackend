@@ -21,6 +21,8 @@ namespace JobPortal.Application.Tests;
 
 public sealed class GenericEmployerContentTests
 {
+    private static readonly string[] ExpectedValues1 = new[] { "Responsibilities", "Requirements", "Benefits" };
+
     [Theory]
     [InlineData(15792)]
     [InlineData(26734)]
@@ -57,7 +59,7 @@ public sealed class GenericEmployerContentTests
         {
             var alter = Assert.IsType<AlterColumnOperation>(operation);
             Assert.Equal("Jobs", alter.Table);
-            Assert.Contains(alter.Name, new[] { "Responsibilities", "Requirements", "Benefits" });
+            Assert.Contains(alter.Name, ExpectedValues1);
             Assert.Equal("text", alter.ColumnType);
             Assert.Null(alter.MaxLength);
             Assert.True(alter.IsNullable);

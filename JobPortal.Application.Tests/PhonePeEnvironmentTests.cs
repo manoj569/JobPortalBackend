@@ -17,6 +17,8 @@ namespace JobPortal.Application.Tests;
 
 public sealed class PhonePeEnvironmentTests
 {
+    private static readonly string[] ExpectedValues1 = new[] { "O-Bearer fixture-token-1", "O-Bearer fixture-token-2", "O-Bearer fixture-token-1", "O-Bearer fixture-token-3", "O-Bearer fixture-token-4", "O-Bearer fixture-token-5", "O-Bearer fixture-token-2" };
+
     [Theory]
     [InlineData("Sandbox", "https://api-preprod.phonepe.com/apis/pg-sandbox/", "https://api-preprod.phonepe.com/apis/pg-sandbox/")]
     [InlineData("sandbox", "https://api-preprod.phonepe.com/apis/pg-sandbox/", "https://api-preprod.phonepe.com/apis/pg-sandbox/")]
@@ -132,7 +134,7 @@ public sealed class PhonePeEnvironmentTests
         await Gateway(changedVersion).CreateCheckoutAsync("ch_six", 9900);
         await Gateway(production).CreateCheckoutAsync("ch_seven", 9900);
         Assert.Equal(5, handler.TokenCalls);
-        Assert.Equal(new[] { "O-Bearer fixture-token-1", "O-Bearer fixture-token-2", "O-Bearer fixture-token-1", "O-Bearer fixture-token-3", "O-Bearer fixture-token-4", "O-Bearer fixture-token-5", "O-Bearer fixture-token-2" },
+        Assert.Equal(ExpectedValues1,
             handler.Requests.Where(x => x.Uri.EndsWith("/pay", StringComparison.Ordinal)).Select(x => x.Authorization));
         Assert.DoesNotContain(handler.Requests, x => x.Uri.StartsWith("https://wrong-base.example", StringComparison.Ordinal));
     }

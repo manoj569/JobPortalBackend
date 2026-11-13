@@ -593,7 +593,7 @@ public sealed partial class PublicJobRepository(
 
     internal void LogSearch(PublicJobQuery query, int totalCount, long durationMs)
     {
-        if (logger is null) return;
+        if (logger is null || !logger.IsEnabled(LogLevel.Information)) return;
         // Search terms can contain personal data. Log only length, never raw free text.
         var activeFilters = new object?[] { query.Location, query.Locations, query.CompanyId, query.CompanyIds,
             query.CompanyName, query.CategoryId, query.CategoryName, query.EmploymentType, query.EmploymentTypes,
@@ -605,8 +605,10 @@ public sealed partial class PublicJobRepository(
             .Count(value => value switch { null => false, Array values => values.Length > 0,
                 string text => !string.IsNullOrWhiteSpace(text), _ => true });
         if (query.ReferralOnly) activeFilters++;
-        BrowseCompleted(logger, JobBrowseQueryPolicy.SearchText(query)?.Length ?? 0,
-            query.Location?.Length ?? 0, activeFilters, query.SortBy.ToString(), query.EffectivePageNumber,
+        var searchQueryLength = JobBrowseQueryPolicy.SearchText(query)?.Length ?? 0;
+        var sort = query.SortBy.ToString();
+        BrowseCompleted(logger, searchQueryLength,
+            query.Location?.Length ?? 0, activeFilters, sort, query.EffectivePageNumber,
             query.PageSize, totalCount, durationMs);
     }
 
