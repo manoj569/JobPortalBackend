@@ -56,20 +56,18 @@ public sealed class AcceleratorPhase3Service(IAcceleratorStore writes, IAccelera
         var provider = providers.FirstOrDefault(x => x.IsAvailable && x.Name == policy.Provider)
             ?? throw new TutorProviderUnavailableException();
         var reservation = await quota.ReserveAsync(actor, new ReserveAcceleratorUsageRequest(request.RequestKey, AcceleratorFeature.Tutor, requestHash, context.TokenEstimate, Encoding.UTF8.GetByteCount(request.Content)), ct);
-        var dispatch = await writes.WriteAsync(async () =>
-        {
+        var dispatch = await writes.WriteAsync(() => {
             var row = new AcceleratorAiDispatchRecord { UserId = actor, ConversationId = c.Id, RequestKey = request.RequestKey, ReservationId = reservation.Id, Operation = "TutorMessage", Provider = provider.Name, Model = policy.Model, Status = AcceleratorAiDispatchStatus.Reserved, RequestHash = requestHash };
-            store.Add(row); return row;
+            store.Add(row); return Task.FromResult(row);
         }, ct);
         await quota.MarkDispatchedAsync(actor, reservation.Id, ct);
-        await writes.WriteAsync(async () => { dispatch.Status = AcceleratorAiDispatchStatus.Dispatched; dispatch.Revision = Guid.NewGuid(); dispatch.NextReconciliationAtUtc = Now.AddMinutes(2); return 0; }, ct);
-        try
+        await writes.WriteAsync(() => { dispatch.Status = AcceleratorAiDispatchStatus.Dispatched; dispatch.Revision = Guid.NewGuid(); dispatch.NextReconciliationAtUtc = Now.AddMinutes(2); return Task.FromResult(0); }, ct); try
         {
             var result = await provider.SendAsync(new TutorProviderRequest(dispatch.Id, reservation.Id, request.RequestKey.ToString("N"), request.Mode, context, request.Content, policy.MaxOutputTokens), ct);
-            var response = await writes.WriteAsync(async () =>
+            var response = await writes.WriteAsync(() =>
             {
                 var message = new AcceleratorTutorMessage { ConversationId = c.Id, Role = AcceleratorTutorMessageRole.Assistant, Status = AcceleratorTutorMessageStatus.Delivered, Content = result.Content, MessageType = request.Mode.ToString(), Provider = provider.Name, Model = result.Model, InputTokens = result.InputTokens, OutputTokens = result.OutputTokens, EstimatedCostInr = result.EstimatedCostInr, DispatchId = dispatch.Id };
-                store.Add(message); c.LastMessageAtUtc = Now; c.Revision = Guid.NewGuid(); dispatch.Status = AcceleratorAiDispatchStatus.Succeeded; dispatch.ProviderRequestId = result.ProviderRequestId; dispatch.FinishedAtUtc = Now; dispatch.Revision = Guid.NewGuid(); return MessageDto(message);
+                store.Add(message); c.LastMessageAtUtc = Now; c.Revision = Guid.NewGuid(); dispatch.Status = AcceleratorAiDispatchStatus.Succeeded; dispatch.ProviderRequestId = result.ProviderRequestId; dispatch.FinishedAtUtc = Now; dispatch.Revision = Guid.NewGuid(); return Task.FromResult(MessageDto(message));
             }, ct);
             await quota.CompleteAsync(actor, reservation.Id, result.InputTokens, result.OutputTokens, result.EstimatedCostInr, ct); await Audit(actor, AuditAction.Confirm, "AcceleratorAiDispatchRecord", dispatch.Id, ct); return response;
         }
