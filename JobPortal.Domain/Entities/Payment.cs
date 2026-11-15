@@ -6,6 +6,13 @@ namespace JobPortal.Domain.Entities;
 public sealed class Payment : BaseEntity
 {
     public string? PlanCode { get; set; }
+    public string? PlanVersion { get; set; }
+    public Guid? PurchaseRequestKey { get; set; }
+    public string? ProviderCheckoutUrl { get; set; }
+    public DateTime? ProviderCheckoutExpiresAtUtc { get; set; }
+    public bool AcceleratorRefundReviewRequired { get; set; }
+    public string? AcceleratorRefundReviewReason { get; set; }
+    public DateTime? AcceleratorRefundReviewAtUtc { get; set; }
     // Null snapshots identify pre-GST transactions; never retroactively invent their tax breakdown.
     public string? PlanName { get; set; }
     public int? DurationDays { get; set; }

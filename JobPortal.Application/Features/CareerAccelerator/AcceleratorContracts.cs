@@ -93,6 +93,7 @@ public interface IAcceleratorPhase2Store
     Task<AcceleratorAssessmentAttempt?> AttemptAsync(Guid userId, Guid id, CancellationToken ct);
     Task<AcceleratorAssessmentAttempt?> AttemptByKeyAsync(Guid userId, Guid requestKey, CancellationToken ct);
     Task<IReadOnlyList<AcceleratorQuestion>> QuestionsAsync(Guid taxonomyId, IReadOnlyCollection<Guid> competencyIds, CancellationToken ct);
+    Task<IReadOnlyList<AcceleratorQuestion>> QuestionsByIdsAsync(Guid taxonomyId, IReadOnlyCollection<Guid> questionIds, CancellationToken ct);
     Task<IReadOnlyList<AcceleratorRoleRequirement>> RequirementsAsync(Guid roleId, CancellationToken ct);
     Task<IReadOnlyList<AcceleratorPrerequisite>> PrerequisitesAsync(Guid taxonomyId, CancellationToken ct);
     Task<IReadOnlyList<AcceleratorSkillEvidence>> EvidenceAsync(Guid userId, Guid goalId, CancellationToken ct);

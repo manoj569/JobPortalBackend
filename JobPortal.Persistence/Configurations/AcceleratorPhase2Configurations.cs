@@ -48,7 +48,18 @@ public sealed class AcceleratorSkillEvidenceConfiguration : IEntityTypeConfigura
     public void Configure(EntityTypeBuilder<AcceleratorSkillEvidence> builder)
     {
         builder.ToTable("AcceleratorSkillEvidence", t => t.HasCheckConstraint("CK_AcceleratorSkillEvidence_Confidence", "\"Confidence\" BETWEEN 0 AND 1")); builder.ConfigureBaseEntity(); builder.Property(x => x.Confidence).HasPrecision(5, 4); builder.Property(x => x.ScoringVersion).HasMaxLength(80).IsRequired();
+        builder.Property(x => x.Score).HasPrecision(9, 2);
         builder.HasIndex(x => new { x.UserId, x.GoalId, x.CompetencyId, x.EvaluatedAtUtc }); builder.HasIndex(x => x.AttemptId).IsUnique().HasFilter("\"AttemptId\" IS NOT NULL");
+        builder.HasIndex(x => new { x.ProjectEvaluationId, x.CompetencyId }).IsUnique().HasFilter("\"ProjectEvaluationId\" IS NOT NULL");
+        builder.HasIndex(x => new { x.InterviewEvaluationId, x.CompetencyId }).IsUnique().HasFilter("\"InterviewEvaluationId\" IS NOT NULL");
+        builder.HasOne<AcceleratorCandidateProject>().WithMany().HasForeignKey(x => x.CandidateProjectId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<AcceleratorProjectVersion>().WithMany().HasForeignKey(x => x.ProjectVersionId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<AcceleratorProjectAssignment>().WithMany().HasForeignKey(x => x.AssignmentId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<AcceleratorProjectSubmission>().WithMany().HasForeignKey(x => x.SubmissionId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<AcceleratorProjectEvaluation>().WithMany().HasForeignKey(x => x.ProjectEvaluationId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<AcceleratorInterviewSession>().WithMany().HasForeignKey(x => x.InterviewSessionId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<AcceleratorSessionQuestion>().WithMany().HasForeignKey(x => x.SessionQuestionId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<AcceleratorInterviewEvaluation>().WithMany().HasForeignKey(x => x.InterviewEvaluationId).OnDelete(DeleteBehavior.Restrict);
     }
 }
 public sealed class AcceleratorRoadmapConfiguration : IEntityTypeConfiguration<AcceleratorRoadmap>

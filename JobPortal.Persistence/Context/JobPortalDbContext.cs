@@ -9,6 +9,24 @@ namespace JobPortal.Persistence.Context;
 
 public sealed class JobPortalDbContext(DbContextOptions<JobPortalDbContext> options) : DbContext(options)
 {
+    public DbSet<TalentShareLink> TalentShareLinks => Set<TalentShareLink>();
+    public DbSet<TalentSubmission> TalentSubmissions => Set<TalentSubmission>();
+    public DbSet<TalentSubmissionEvent> TalentSubmissionEvents => Set<TalentSubmissionEvent>();
+    public DbSet<EmployerContact> EmployerContacts => Set<EmployerContact>();
+    public DbSet<TalentOutreachDraft> TalentOutreachDrafts => Set<TalentOutreachDraft>();
+    public DbSet<TalentOutreachRecipient> TalentOutreachRecipients => Set<TalentOutreachRecipient>();
+    public DbSet<CandidateMailboxConnection> CandidateMailboxConnections => Set<CandidateMailboxConnection>();
+    public DbSet<MarketSkill> MarketSkills => Set<MarketSkill>();
+    public DbSet<MarketSkillAlias> MarketSkillAliases => Set<MarketSkillAlias>();
+    public DbSet<MarketRole> MarketRoles => Set<MarketRole>();
+    public DbSet<MarketRoleAlias> MarketRoleAliases => Set<MarketRoleAlias>();
+    public DbSet<MarketJobSkill> MarketJobSkills => Set<MarketJobSkill>();
+    public DbSet<MarketJobRole> MarketJobRoles => Set<MarketJobRole>();
+    public DbSet<MarketSkillDiscovery> MarketSkillDiscoveries => Set<MarketSkillDiscovery>();
+    public DbSet<MarketRoleDiscovery> MarketRoleDiscoveries => Set<MarketRoleDiscovery>();
+    public DbSet<MarketDiscoveryObservation> MarketDiscoveryObservations => Set<MarketDiscoveryObservation>();
+    public DbSet<MarketJobProcessingState> MarketJobProcessingStates => Set<MarketJobProcessingState>();
+    public DbSet<MarketProcessingCheckpoint> MarketProcessingCheckpoints => Set<MarketProcessingCheckpoint>();
     public DbSet<HiringDrive> HiringDrives => Set<HiringDrive>();
     public DbSet<JobPromotion> JobPromotions => Set<JobPromotion>();
     public DbSet<SupportTicket> SupportTickets => Set<SupportTicket>();
@@ -127,10 +145,34 @@ public sealed class JobPortalDbContext(DbContextOptions<JobPortalDbContext> opti
     public DbSet<AcceleratorPracticeAttempt> AcceleratorPracticeAttempts => Set<AcceleratorPracticeAttempt>();
     public DbSet<AcceleratorPracticeEvaluation> AcceleratorPracticeEvaluations => Set<AcceleratorPracticeEvaluation>();
     public DbSet<AcceleratorAiDispatchRecord> AcceleratorAiDispatchRecords => Set<AcceleratorAiDispatchRecord>();
+    public DbSet<AcceleratorProjectDefinition> AcceleratorProjectDefinitions => Set<AcceleratorProjectDefinition>();
+    public DbSet<AcceleratorProjectVersion> AcceleratorProjectVersions => Set<AcceleratorProjectVersion>();
+    public DbSet<AcceleratorProjectCompetency> AcceleratorProjectCompetencies => Set<AcceleratorProjectCompetency>();
+    public DbSet<AcceleratorProjectMilestone> AcceleratorProjectMilestones => Set<AcceleratorProjectMilestone>();
+    public DbSet<AcceleratorProjectAssignment> AcceleratorProjectAssignments => Set<AcceleratorProjectAssignment>();
+    public DbSet<AcceleratorProjectRubric> AcceleratorProjectRubrics => Set<AcceleratorProjectRubric>();
+    public DbSet<AcceleratorProjectRubricCriterion> AcceleratorProjectRubricCriteria => Set<AcceleratorProjectRubricCriterion>();
+    public DbSet<AcceleratorCandidateProject> AcceleratorCandidateProjects => Set<AcceleratorCandidateProject>();
+    public DbSet<AcceleratorProjectSubmission> AcceleratorProjectSubmissions => Set<AcceleratorProjectSubmission>();
+    public DbSet<AcceleratorProjectEvaluation> AcceleratorProjectEvaluations => Set<AcceleratorProjectEvaluation>();
+    public DbSet<AcceleratorProjectEvaluationScore> AcceleratorProjectEvaluationScores => Set<AcceleratorProjectEvaluationScore>();
+    public DbSet<AcceleratorInterviewDefinition> AcceleratorInterviewDefinitions => Set<AcceleratorInterviewDefinition>();
+    public DbSet<AcceleratorInterviewVersion> AcceleratorInterviewVersions => Set<AcceleratorInterviewVersion>();
+    public DbSet<AcceleratorInterviewCompetency> AcceleratorInterviewCompetencies => Set<AcceleratorInterviewCompetency>();
+    public DbSet<AcceleratorInterviewSection> AcceleratorInterviewSections => Set<AcceleratorInterviewSection>();
+    public DbSet<AcceleratorInterviewQuestion> AcceleratorInterviewQuestions => Set<AcceleratorInterviewQuestion>();
+    public DbSet<AcceleratorInterviewRubricCriterion> AcceleratorInterviewRubricCriteria => Set<AcceleratorInterviewRubricCriterion>();
+    public DbSet<AcceleratorInterviewSession> AcceleratorInterviewSessions => Set<AcceleratorInterviewSession>();
+    public DbSet<AcceleratorSessionQuestion> AcceleratorSessionQuestions => Set<AcceleratorSessionQuestion>();
+    public DbSet<AcceleratorInterviewAnswer> AcceleratorInterviewAnswers => Set<AcceleratorInterviewAnswer>();
+    public DbSet<AcceleratorInterviewEvaluation> AcceleratorInterviewEvaluations => Set<AcceleratorInterviewEvaluation>();
+    public DbSet<AcceleratorInterviewCriterionScore> AcceleratorInterviewCriterionScores => Set<AcceleratorInterviewCriterionScore>();
+    public DbSet<AcceleratorReadinessSnapshot> AcceleratorReadinessSnapshots => Set<AcceleratorReadinessSnapshot>();
+    public DbSet<AcceleratorPassportShare> AcceleratorPassportShares => Set<AcceleratorPassportShare>();
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
-        AcceleratorPersistencePolicy.Enforce(ChangeTracker);
+        AcceleratorPersistencePolicy.Enforce(this);
         EnsureFinancialHistory();
         EnsureTrustHistory();
         EnsureAuditLogsAreAppendOnly();
@@ -141,7 +183,7 @@ public sealed class JobPortalDbContext(DbContextOptions<JobPortalDbContext> opti
 
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
-        AcceleratorPersistencePolicy.Enforce(ChangeTracker);
+        AcceleratorPersistencePolicy.Enforce(this);
         EnsureFinancialHistory();
         EnsureTrustHistory();
         EnsureAuditLogsAreAppendOnly();

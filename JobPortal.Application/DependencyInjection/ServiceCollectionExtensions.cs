@@ -137,13 +137,26 @@ public static class ServiceCollectionExtensions
             JobPortal.Application.Features.FresherAcquisition.FresherBulkImportService>();
 
         services.AddScoped<JobPortal.Application.Features.CareerAccelerator.AcceleratorService>();
+        services.AddScoped<JobPortal.Application.Features.CareerAccelerator.AcceleratorPhase6OperationsService>();
+        services.AddScoped<JobPortal.Application.Features.CareerAccelerator.MarketIntelligenceService>();
         services.AddScoped<JobPortal.Application.Features.CareerAccelerator.AcceleratorQuotaService>();
         services.AddScoped<JobPortal.Application.Features.CareerAccelerator.AcceleratorPhase2Service>();
         services.AddScoped<JobPortal.Application.Features.CareerAccelerator.AcceleratorPhase3Service>();
+        services.AddScoped<JobPortal.Application.Features.CareerAccelerator.AcceleratorPhase4Service>();
+        services.AddScoped<JobPortal.Application.Features.CareerAccelerator.AcceleratorInterviewCatalogService>();
+        services.AddScoped<JobPortal.Application.Features.CareerAccelerator.AcceleratorPhase5Service>();
+        services.AddScoped<JobPortal.Application.Features.CareerAccelerator.AcceleratorPassportService>();
+        services.AddScoped<JobPortal.Application.Features.CareerAccelerator.AcceleratorInterviewAiService>();
+        services.AddScoped<JobPortal.Application.Features.CareerAccelerator.AcceleratorProjectAiService>();
+        services.AddScoped<JobPortal.Application.Features.CareerAccelerator.IProjectDeterministicEvaluator,
+            JobPortal.Application.Features.CareerAccelerator.ProjectDeterministicEvaluator>();
+        services.AddScoped<JobPortal.Application.Features.CareerAccelerator.AcceleratorDispatchReconciliationService>();
         services.AddScoped<JobPortal.Application.Features.CareerAccelerator.ITutorContextBuilder, JobPortal.Application.Features.CareerAccelerator.TutorContextBuilder>();
         services.AddSingleton<JobPortal.Application.Features.CareerAccelerator.IAcceleratorAIProvider,
             JobPortal.Application.Features.CareerAccelerator.UnavailableAcceleratorAIProvider>();
         services.AddSingleton<JobPortal.Application.Features.CareerAccelerator.IAiTutorProvider,
+            JobPortal.Application.Features.CareerAccelerator.UnavailableAiTutorProvider>();
+        services.AddSingleton<JobPortal.Application.Features.CareerAccelerator.IAiTutorDispatchVerifier,
             JobPortal.Application.Features.CareerAccelerator.UnavailableAiTutorProvider>();
         return services;
     }

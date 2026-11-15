@@ -5,7 +5,7 @@ using JobPortal.Shared.Models;
 
 namespace JobPortal.Application.Features.Payments;
 
-public sealed record CreatePaymentOrderRequest(string PlanCode = "CareerHarborMembership");
+public sealed record CreatePaymentOrderRequest(string PlanCode = "CareerHarborMembership", Guid? RequestKey = null);
 public sealed record MembershipPlanResponse(string PlanCode, string DisplayName, decimal Price, string Currency, int DurationDays, bool CanUseStandardMembership, bool CanUseAIApply, bool CanUseAIApplyPro, MembershipPricing? Pricing = null);
 public sealed record PaymentOrderResponse(
     Guid PaymentId, Guid MembershipId, string ProviderOrderId, string KeyId,
@@ -38,6 +38,8 @@ public sealed record PhonePeReturnStatusResponse(
     DateTime? MembershipStartUtc = null, DateTime? MembershipEndUtc = null);
 public sealed record PhonePeWebhookRequest(ReadOnlyMemory<byte> RawBody, string Authorization);
 public sealed record PhonePeWebhookResponse(string Outcome);
+public sealed record AdminPhonePeReconcileRequest(string Reason);
+public sealed record AdminAcceleratorRefundReviewRequest(string Reason);
 [JsonConverter(typeof(JsonStringEnumConverter<MembershipCheckoutStatus>))]
 public enum MembershipCheckoutStatus { Created = 1, Pending, Failed, Cancelled, Completed }
 public sealed record PendingMembershipCheckoutResponse(

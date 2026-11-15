@@ -51,5 +51,33 @@ public sealed class AcceleratorPracticeEvaluationConfiguration : IEntityTypeConf
 }
 public sealed class AcceleratorAiDispatchRecordConfiguration : IEntityTypeConfiguration<AcceleratorAiDispatchRecord>
 {
-    public void Configure(EntityTypeBuilder<AcceleratorAiDispatchRecord> builder) { builder.ToTable("AcceleratorAiDispatchRecords", t => t.HasCheckConstraint("CK_AcceleratorAiDispatch_ReconciliationAttempts", "\"ReconciliationAttemptCount\" >= 0")); builder.ConfigureBaseEntity(); builder.Property(x => x.Operation).HasMaxLength(80).IsRequired(); builder.Property(x => x.Provider).HasMaxLength(80).IsRequired(); builder.Property(x => x.Model).HasMaxLength(120).IsRequired(); builder.Property(x => x.RequestHash).HasMaxLength(64).IsRequired(); builder.Property(x => x.ProviderRequestId).HasMaxLength(200); builder.Property(x => x.FailureCode).HasMaxLength(100); builder.Property(x => x.LastReconciliationError).HasMaxLength(1000); builder.Property(x => x.ManualReviewReason).HasMaxLength(2000); builder.Property(x => x.Revision).IsConcurrencyToken(); builder.HasIndex(x => new { x.UserId, x.RequestKey }).IsUnique(); builder.HasIndex(x => new { x.Status, x.NextReconciliationAtUtc }); builder.HasIndex(x => new { x.Status, x.ReconciliationClaimExpiresAtUtc }); builder.HasIndex(x => x.ReservationId).IsUnique(); }
+    public void Configure(EntityTypeBuilder<AcceleratorAiDispatchRecord> builder)
+    {
+        builder.ToTable("AcceleratorAiDispatchRecords", t => t.HasCheckConstraint("CK_AcceleratorAiDispatch_ReconciliationAttempts", "\"ReconciliationAttemptCount\" >= 0"));
+        builder.ConfigureBaseEntity();
+        builder.Property(x => x.Operation).HasMaxLength(80).IsRequired();
+        builder.Property(x => x.Provider).HasMaxLength(80).IsRequired();
+        builder.Property(x => x.Model).HasMaxLength(120).IsRequired();
+        builder.Property(x => x.RequestHash).HasMaxLength(64).IsRequired();
+        builder.Property(x => x.ProviderRequestId).HasMaxLength(200);
+        builder.Property(x => x.ResultJson).HasColumnType("jsonb");
+        builder.Property(x => x.ActualCostInr).HasPrecision(12, 6);
+        builder.Property(x => x.FailureCode).HasMaxLength(100);
+        builder.Property(x => x.LastReconciliationError).HasMaxLength(1000);
+        builder.Property(x => x.ManualReviewReason).HasMaxLength(2000);
+        builder.Property(x => x.Revision).IsConcurrencyToken();
+        builder.HasIndex(x => new { x.UserId, x.RequestKey }).IsUnique();
+        builder.HasIndex(x => new { x.Status, x.NextReconciliationAtUtc });
+        builder.HasIndex(x => new { x.Status, x.ReconciliationClaimExpiresAtUtc });
+        builder.HasIndex(x => x.ReservationId).IsUnique();
+        builder.HasIndex(x => x.ProjectSubmissionId).IsUnique().HasFilter("\"ProjectSubmissionId\" IS NOT NULL");
+        builder.HasIndex(x => x.InterviewAnswerId).IsUnique().HasFilter("\"InterviewAnswerId\" IS NOT NULL");
+        builder.HasIndex(x => new { x.InterviewSessionId, x.InterviewSectionId, x.GenerationSlot }).IsUnique()
+            .HasFilter("\"GenerationSlot\" IS NOT NULL");
+        builder.HasOne<AcceleratorCandidateProject>().WithMany().HasForeignKey(x => x.CandidateProjectId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<AcceleratorProjectSubmission>().WithMany().HasForeignKey(x => x.ProjectSubmissionId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<AcceleratorInterviewSession>().WithMany().HasForeignKey(x => x.InterviewSessionId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<AcceleratorInterviewAnswer>().WithMany().HasForeignKey(x => x.InterviewAnswerId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<AcceleratorInterviewSection>().WithMany().HasForeignKey(x => x.InterviewSectionId).OnDelete(DeleteBehavior.Restrict);
+    }
 }

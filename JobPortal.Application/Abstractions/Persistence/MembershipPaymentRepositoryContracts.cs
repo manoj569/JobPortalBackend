@@ -49,6 +49,8 @@ public interface IPaymentRepository
 {
     Task AddAsync(Payment payment, CancellationToken cancellationToken = default);
     Task<Payment?> GetOwnedAsync(Guid id, Guid userId, CancellationToken cancellationToken = default);
+    Task<Payment?> GetOwnedByPurchaseRequestKeyAsync(Guid userId, Guid requestKey,
+        CancellationToken cancellationToken = default) => Task.FromResult<Payment?>(null);
     Task<Payment?> GetByProviderOrderIdAsync(string providerOrderId, CancellationToken cancellationToken = default);
     Task<Payment?> GetOwnedByProviderOrderIdAsync(string providerOrderId, Guid userId, CancellationToken cancellationToken = default);
     Task<Payment?> GetLatestUnresolvedMembershipAsync(Guid userId, string? planCode = null, CancellationToken cancellationToken = default);

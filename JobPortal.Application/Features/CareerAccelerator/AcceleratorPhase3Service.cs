@@ -5,13 +5,14 @@ using JobPortal.Application.Abstractions.Auditing;
 using JobPortal.Application.Common.Exceptions;
 using JobPortal.Domain.Entities.CareerAccelerator;
 using JobPortal.Domain.Enums;
+using Microsoft.Extensions.Options;
 
 namespace JobPortal.Application.Features.CareerAccelerator;
 
 // The only tutor dispatch boundary. The default provider is unavailable and never fabricates an assistant reply.
 public sealed class AcceleratorPhase3Service(IAcceleratorStore writes, IAcceleratorPhase3Store store,
     IAcceleratorPhase2Store phase2, AcceleratorService access, ITutorContextBuilder contextBuilder, IEnumerable<IAiTutorProvider> providers,
-    AcceleratorQuotaService quota, IAuditWriter audit, TimeProvider clock)
+    AcceleratorQuotaService quota, IAuditWriter audit, TimeProvider clock, IOptions<AcceleratorOptions> options)
 {
     private DateTime Now => clock.GetUtcNow().UtcDateTime;
 
@@ -38,7 +39,6 @@ public sealed class AcceleratorPhase3Service(IAcceleratorStore writes, IAccelera
     {
         await access.Candidate(actor, ct); ValidateText(request.Content, 8000); if (request.RequestKey == Guid.Empty || !Enum.IsDefined(request.Mode)) throw Invalid("A request key and mode are required.");
         var c = await RequiredConversation(actor, conversationId, ct); if (c.Status != AcceleratorTutorConversationStatus.Active) throw new ConflictException("Conversation is archived.");
-        var provider = providers.FirstOrDefault(x => x.IsAvailable) ?? throw new TutorProviderUnavailableException();
         var context = await contextBuilder.BuildAsync(actor, c, request.Content, ct);
         var requestHash = Hash(request); var prior = await store.DispatchByKeyAsync(actor, request.RequestKey, ct);
         if (prior is not null)
@@ -49,17 +49,23 @@ public sealed class AcceleratorPhase3Service(IAcceleratorStore writes, IAccelera
             if (delivered is not null) return MessageDto(delivered);
             throw new ConflictException("Tutor request previously failed.", "accelerator_dispatch_failed");
         }
+        var settings = options.Value;
+        if (!settings.AIEnabled || !settings.OperationEnabled("TutorMessage") ||
+            !settings.Policies.TryGetValue(AcceleratorFeature.Tutor, out var policy) || !policy.Enabled)
+            throw new TutorProviderUnavailableException();
+        var provider = providers.FirstOrDefault(x => x.IsAvailable && x.Name == policy.Provider)
+            ?? throw new TutorProviderUnavailableException();
         var reservation = await quota.ReserveAsync(actor, new ReserveAcceleratorUsageRequest(request.RequestKey, AcceleratorFeature.Tutor, requestHash, context.TokenEstimate, Encoding.UTF8.GetByteCount(request.Content)), ct);
         var dispatch = await writes.WriteAsync(async () =>
         {
-            var row = new AcceleratorAiDispatchRecord { UserId = actor, RequestKey = request.RequestKey, ReservationId = reservation.Id, Operation = "TutorMessage", Provider = provider.Name, Model = "configured", Status = AcceleratorAiDispatchStatus.Reserved, RequestHash = requestHash };
+            var row = new AcceleratorAiDispatchRecord { UserId = actor, ConversationId = c.Id, RequestKey = request.RequestKey, ReservationId = reservation.Id, Operation = "TutorMessage", Provider = provider.Name, Model = policy.Model, Status = AcceleratorAiDispatchStatus.Reserved, RequestHash = requestHash };
             store.Add(row); return row;
         }, ct);
         await quota.MarkDispatchedAsync(actor, reservation.Id, ct);
-        dispatch.Status = AcceleratorAiDispatchStatus.Dispatched; dispatch.Revision = Guid.NewGuid();
+        await writes.WriteAsync(async () => { dispatch.Status = AcceleratorAiDispatchStatus.Dispatched; dispatch.Revision = Guid.NewGuid(); dispatch.NextReconciliationAtUtc = Now.AddMinutes(2); return 0; }, ct);
         try
         {
-            var result = await provider.SendAsync(new TutorProviderRequest(dispatch.Id, reservation.Id, request.RequestKey.ToString("N"), request.Mode, context, request.Content, 1024), ct);
+            var result = await provider.SendAsync(new TutorProviderRequest(dispatch.Id, reservation.Id, request.RequestKey.ToString("N"), request.Mode, context, request.Content, policy.MaxOutputTokens), ct);
             var response = await writes.WriteAsync(async () =>
             {
                 var message = new AcceleratorTutorMessage { ConversationId = c.Id, Role = AcceleratorTutorMessageRole.Assistant, Status = AcceleratorTutorMessageStatus.Delivered, Content = result.Content, MessageType = request.Mode.ToString(), Provider = provider.Name, Model = result.Model, InputTokens = result.InputTokens, OutputTokens = result.OutputTokens, EstimatedCostInr = result.EstimatedCostInr, DispatchId = dispatch.Id };
@@ -68,9 +74,66 @@ public sealed class AcceleratorPhase3Service(IAcceleratorStore writes, IAccelera
             await quota.CompleteAsync(actor, reservation.Id, result.InputTokens, result.OutputTokens, result.EstimatedCostInr, ct); await Audit(actor, AuditAction.Confirm, "AcceleratorAiDispatchRecord", dispatch.Id, ct); return response;
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-        { dispatch.Status = AcceleratorAiDispatchStatus.Uncertain; dispatch.FailureCode = "provider_timeout"; dispatch.Revision = Guid.NewGuid(); throw; }
+        { await MarkUncertainAsync(dispatch.Id, "provider_timeout"); throw; }
         catch
-        { dispatch.Status = AcceleratorAiDispatchStatus.Uncertain; dispatch.FailureCode = "provider_outcome_unknown"; dispatch.Revision = Guid.NewGuid(); throw; }
+        { await MarkUncertainAsync(dispatch.Id, "provider_outcome_unknown"); throw; }
+    }
+
+    private Task<int> MarkUncertainAsync(Guid dispatchId, string reason) => writes.WriteAsync(async () =>
+    {
+        var row = await store.DispatchAsync(dispatchId, CancellationToken.None);
+        if (row is not null && row.Status is not (AcceleratorAiDispatchStatus.Succeeded or AcceleratorAiDispatchStatus.Reconciled))
+        {
+            // Do not release the reservation: the external outcome may have been chargeable.
+            row.Status = AcceleratorAiDispatchStatus.Uncertain;
+            row.FailureCode = reason;
+            row.NextReconciliationAtUtc = Now.AddMinutes(2);
+            row.Revision = Guid.NewGuid();
+        }
+        return 0;
+    }, CancellationToken.None);
+
+    public async Task<PracticeSessionResponse> PracticeSessionAsync(Guid actor, Guid sessionId, CancellationToken ct)
+    {
+        await access.Candidate(actor, ct);
+        return PracticeDto(await store.PracticeSessionAsync(actor, sessionId, ct) ?? throw new NotFoundException("Practice session not found."));
+    }
+
+    public async Task<IReadOnlyList<PracticeSessionResponse>> PracticeHistoryAsync(Guid actor, int page, int pageSize, CancellationToken ct)
+    {
+        await access.Candidate(actor, ct); AcceleratorService.Page(page, pageSize);
+        var sessions = await store.PracticeSessionsAsync(actor, (page - 1) * pageSize, pageSize, ct);
+        // History intentionally does not return question answers or rubrics.
+        return sessions.Select(x => new PracticeSessionResponse(x.Id, x.Status, x.Difficulty, x.QuestionType, [])).ToArray();
+    }
+
+    public async Task<PracticeResultResponse> PracticeResultsAsync(Guid actor, Guid sessionId, CancellationToken ct)
+    {
+        await access.Candidate(actor, ct);
+        var session = await store.PracticeSessionAsync(actor, sessionId, ct) ?? throw new NotFoundException("Practice session not found.");
+        var evaluations = await store.PracticeEvaluationsAsync(actor, sessionId, ct);
+        var correct = evaluations.Count(x => x.Score == x.MaximumScore);
+        return new PracticeResultResponse(session.Id, session.Status, session.Questions.Count, evaluations.Count, correct,
+            evaluations.Count == 0 ? 0 : decimal.Round(evaluations.Sum(x => x.Score) * 100 / evaluations.Sum(x => x.MaximumScore), 2), evaluations.Select(EvaluationDto).ToArray());
+    }
+
+    public async Task<IReadOnlyList<PracticeRecommendationResponse>> PracticeRecommendationsAsync(Guid actor, CancellationToken ct)
+    {
+        await access.Candidate(actor, ct);
+        var sessions = await store.PracticeSessionsAsync(actor, 0, 100, ct);
+        var recommendations = new List<PracticeRecommendationResponse>();
+        foreach (var group in sessions.GroupBy(x => x.CompetencyId))
+        {
+            var recent = group.OrderByDescending(x => x.CreatedAtUtc).Take(5).ToArray();
+            var evaluations = new List<AcceleratorPracticeEvaluation>();
+            foreach (var session in recent) evaluations.AddRange(await store.PracticeEvaluationsAsync(actor, session.Id, ct));
+            var accuracy = evaluations.Count == 0 ? 0 : decimal.Round(evaluations.Count(x => x.Score == x.MaximumScore) * 100m / evaluations.Count, 2);
+            var difficulty = evaluations.Count >= 3 && accuracy >= 80 ? AcceleratorPracticeDifficulty.Advanced :
+                evaluations.Count >= 3 && accuracy >= 60 ? AcceleratorPracticeDifficulty.Intermediate : AcceleratorPracticeDifficulty.Beginner;
+            recommendations.Add(new PracticeRecommendationResponse(group.Key, difficulty,
+                evaluations.Count == 0 ? "Start with foundational practice." : accuracy < 60 ? "Review prerequisites and retry foundational questions." : accuracy < 80 ? "Continue practice to improve consistency." : "Try harder questions after sustained correct answers.", evaluations.Count, accuracy));
+        }
+        return recommendations;
     }
 
     public Task<int> EraseTutorDataAsync(Guid actor, CancellationToken ct) => writes.WriteAsync(async () =>

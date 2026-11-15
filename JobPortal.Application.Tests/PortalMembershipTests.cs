@@ -421,10 +421,10 @@ public sealed class PortalMembershipTests
     }
 
     [Fact]
-    public void CheckoutRequestAcceptsOnlyAPlanIdentifier()
+    public void CheckoutRequestAcceptsOnlyPlanAndIdempotencyKey()
     {
-        var property = Assert.Single(typeof(CreatePaymentOrderRequest).GetProperties());
-        Assert.Equal(nameof(CreatePaymentOrderRequest.PlanCode), property.Name);
+        Assert.Equal([nameof(CreatePaymentOrderRequest.PlanCode), nameof(CreatePaymentOrderRequest.RequestKey)],
+            typeof(CreatePaymentOrderRequest).GetProperties().Select(x => x.Name));
     }
 
     [Fact]

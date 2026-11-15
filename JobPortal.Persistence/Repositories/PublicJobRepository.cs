@@ -351,6 +351,15 @@ public sealed partial class PublicJobRepository(
         var keyword = JobBrowseQueryPolicy.SearchText(query);
         source = CandidateJobKeywordQuery.Apply(source, keyword);
 
+        if (query.MarketSkillId is { } marketSkillId)
+            source = source.Where(job => context.MarketJobSkills.Any(mapping => !mapping.IsDeleted &&
+                mapping.JobId == job.Id && mapping.MarketSkillId == marketSkillId &&
+                mapping.MarketSkill.Status == JobPortal.Domain.Entities.CareerAccelerator.MarketConceptStatus.Active));
+        if (query.MarketRoleId is { } marketRoleId)
+            source = source.Where(job => context.MarketJobRoles.Any(mapping => !mapping.IsDeleted &&
+                mapping.JobId == job.Id && mapping.MarketRoleId == marketRoleId && mapping.IsPrimary &&
+                mapping.MarketRole.Status == JobPortal.Domain.Entities.CareerAccelerator.MarketConceptStatus.Active));
+
         if (query.CategoryId.HasValue)
             source = source.Where(job => job.CategoryId == query.CategoryId.Value);
         var categoryName = FirstValue(query.CategoryName);

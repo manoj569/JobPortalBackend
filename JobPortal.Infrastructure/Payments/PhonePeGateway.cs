@@ -41,7 +41,13 @@ public sealed class PhonePeGateway(
 
     public async Task<PhonePeCheckout> CreateCheckoutAsync(
         string merchantOrderId, long amountInMinorUnits, string? returnTo,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        await CreateCheckoutAsync(merchantOrderId, amountInMinorUnits, returnTo,
+            "Career Harbor membership", cancellationToken);
+
+    public async Task<PhonePeCheckout> CreateCheckoutAsync(
+        string merchantOrderId, long amountInMinorUnits, string? returnTo,
+        string productName, CancellationToken cancellationToken = default)
     {
         returnTo = PaymentReturnPath.Validate(returnTo);
         var query = $"merchantOrderId={Uri.EscapeDataString(merchantOrderId)}";
@@ -62,7 +68,7 @@ public sealed class PhonePeGateway(
                 paymentFlow = new
                 {
                     type = "PG_CHECKOUT",
-                    message = "Career Harbor 30-day membership",
+                    message = productName,
                     merchantUrls = new { redirectUrl }
                 }
             }, options: JsonOptions)

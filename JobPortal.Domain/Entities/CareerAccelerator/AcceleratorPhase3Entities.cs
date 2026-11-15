@@ -114,6 +114,12 @@ public sealed class AcceleratorAiDispatchRecord : BaseEntity
 {
     public Guid UserId { get; set; }
     public Guid? ConversationId { get; set; }
+    public Guid? CandidateProjectId { get; set; }
+    public Guid? ProjectSubmissionId { get; set; }
+    public Guid? InterviewSessionId { get; set; }
+    public Guid? InterviewAnswerId { get; set; }
+    public Guid? InterviewSectionId { get; set; }
+    public int? GenerationSlot { get; set; }
     public Guid RequestKey { get; set; }
     public Guid ReservationId { get; set; }
     public string Operation { get; set; } = string.Empty;
@@ -122,6 +128,10 @@ public sealed class AcceleratorAiDispatchRecord : BaseEntity
     public AcceleratorAiDispatchStatus Status { get; set; }
     public string RequestHash { get; set; } = string.Empty;
     public string? ProviderRequestId { get; set; }
+    public string? ResultJson { get; set; }
+    public int? InputTokens { get; set; }
+    public int? OutputTokens { get; set; }
+    public decimal? ActualCostInr { get; set; }
     public string? FailureCode { get; set; }
     public DateTime? FinishedAtUtc { get; set; }
     public DateTime? NextReconciliationAtUtc { get; set; }

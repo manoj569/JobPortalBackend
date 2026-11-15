@@ -532,6 +532,9 @@ public sealed class PaymentConfiguration : IEntityTypeConfiguration<Payment>
         builder.Property(x => x.TaxRate).HasPrecision(7, 4);
         builder.Property(x => x.TaxAmount).HasPrecision(18, 2);
         builder.Property(x => x.PlanName).HasMaxLength(100);
+        builder.Property(x => x.PlanVersion).HasMaxLength(80);
+        builder.Property(x => x.ProviderCheckoutUrl).HasMaxLength(2048);
+        builder.Property(x => x.AcceleratorRefundReviewReason).HasMaxLength(1000);
         builder.Property(x => x.ReturnTo).HasMaxLength(256);
         builder.HasIndex(x => new { x.UserId, x.PlanCode })
             .IsUnique().HasDatabaseName("UX_Payments_UnresolvedUserPlan")
@@ -545,6 +548,8 @@ public sealed class PaymentConfiguration : IEntityTypeConfiguration<Payment>
         builder.Property(x => x.ProviderOrderId).HasMaxLength(200);
         builder.Property(x => x.ProviderReceipt).HasMaxLength(100);
         builder.HasIndex(x => x.ProviderPaymentId).IsUnique().HasFilter("\"ProviderPaymentId\" IS NOT NULL");
+        builder.HasIndex(x => new { x.UserId, x.PurchaseRequestKey }).IsUnique()
+            .HasFilter("\"PurchaseRequestKey\" IS NOT NULL");
         builder.HasIndex(x => x.ProviderOrderId).IsUnique().HasFilter("\"ProviderOrderId\" IS NOT NULL");
         builder.HasIndex(x => new { x.UserId, x.Status, x.CreatedAtUtc });
         builder.HasIndex(x => new { x.Status, x.PaidAtUtc, x.CurrencyCode });

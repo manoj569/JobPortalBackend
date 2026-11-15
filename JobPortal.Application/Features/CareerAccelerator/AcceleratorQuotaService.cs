@@ -12,11 +12,50 @@ public sealed class AcceleratorQuotaService(IAcceleratorStore store, Accelerator
     private DateTime Now => clock.GetUtcNow().UtcDateTime;
     private AcceleratorOptions Settings => options.Value;
 
+    // Non-AI outreach shares the immutable Phase 1 reservation/event ledger and
+    // cross-instance budget lock. Existing billing cycles without this allowance
+    // correctly have zero outreach quota until a new cycle allocates it.
+    public Task<AcceleratorReservationResponse> ReserveOutreachAsync(Guid actor, Guid requestKey,
+        string requestHash, CancellationToken ct) => store.WriteAsync(async () =>
+    {
+        await access.Candidate(actor, ct);
+        if (requestKey == Guid.Empty || requestHash is not { Length: 64 } ||
+            !requestHash.All(char.IsAsciiHexDigit))
+            throw new BadRequestException("Invalid outreach reservation.");
+        var previous = await store.ReservationByKeyAsync(actor, requestKey, ct);
+        if (previous is not null)
+        {
+            if (previous.Feature != AcceleratorFeature.EmployerOutreach ||
+                !string.Equals(previous.RequestHash, requestHash, StringComparison.OrdinalIgnoreCase))
+                throw new ConflictException("Idempotency key was used for a different operation.");
+            return Dto(previous);
+        }
+        var now = Now;
+        await Expire(now, ct);
+        var cycle = await RequiredCycle(actor, now, ct);
+        var allowance = cycle.Allowances.SingleOrDefault(x =>
+            x.Feature == AcceleratorFeature.EmployerOutreach)?.Allocated ?? 0;
+        var budget = await store.BudgetAsync(actor, cycle.Id, AcceleratorFeature.EmployerOutreach,
+            now, ct);
+        if (budget.FeatureUsed >= allowance)
+            throw Limit("accelerator_outreach_quota_exhausted", "Outreach allowance is exhausted.");
+        var reservation = new AcceleratorUsageReservation { UserId = actor, Cycle = cycle,
+            CycleId = cycle.Id, RequestKey = requestKey, RequestHash = requestHash.ToUpperInvariant(),
+            Feature = AcceleratorFeature.EmployerOutreach, State = AcceleratorUsageState.Reserved,
+            Provider = "CandidateMailbox", Model = "Send", ReservedAtUtc = now,
+            BudgetDayUtc = now.Date, LeaseExpiresAtUtc = now.AddSeconds(Settings.ReservationSeconds),
+            ReservedCostInr = 0, ReservedInputTokens = 0, ReservedOutputTokens = 0 };
+        store.Add(reservation);
+        await Event(reservation, ct);
+        return Dto(reservation);
+    }, ct);
+
     public Task<AcceleratorReservationResponse> ReserveAsync(Guid actor, ReserveAcceleratorUsageRequest request, CancellationToken ct) =>
         store.WriteAsync(async () =>
         {
             await access.Candidate(actor, ct);
-            if (request.RequestKey == Guid.Empty || !Enum.IsDefined(request.Feature) || request.RequestHash is not { Length: 64 } ||
+            if (request.RequestKey == Guid.Empty || !Enum.IsDefined(request.Feature) ||
+                request.Feature == AcceleratorFeature.EmployerOutreach || request.RequestHash is not { Length: 64 } ||
                 !request.RequestHash.All(char.IsAsciiHexDigit) || request.InputTokens < 0 || request.RequestBytes < 0)
                 throw new BadRequestException("Invalid Accelerator usage reservation.");
             var previous = await store.ReservationByKeyAsync(actor, request.RequestKey, ct);
@@ -28,7 +67,7 @@ public sealed class AcceleratorQuotaService(IAcceleratorStore store, Accelerator
                 return Dto(previous);
             }
             var o = Settings;
-            if (!o.AIEnabled || !o.Policies.TryGetValue(request.Feature, out var policy) ||
+            if (!o.AIEnabled || !o.Policies.TryGetValue(request.Feature, out var policy) || !policy.Enabled ||
                 !providers.Any(p => p.Name == policy.Provider && p.IsAvailable)) throw new AcceleratorProviderUnavailableException();
             if (request.InputTokens > policy.MaxInputTokens || request.RequestBytes > policy.MaxRequestBytes || request.RequestBytes == 0)
                 throw new BadRequestException("Request exceeds the configured AI input limits.", "accelerator_input_limit");
@@ -87,6 +126,43 @@ public sealed class AcceleratorQuotaService(IAcceleratorStore store, Accelerator
             await Event(row, ct);
             return Dto(row);
         }, ct);
+
+    public Task<AcceleratorReservationResponse> MarkOutreachUncertainAsync(Guid actor,
+        Guid reservationId, CancellationToken ct) => store.WriteAsync(async () =>
+    {
+        access.Enabled();
+        var row = await RequiredReservation(actor, reservationId, ct);
+        if (row.Feature != AcceleratorFeature.EmployerOutreach ||
+            row.State is not (AcceleratorUsageState.Dispatched or AcceleratorUsageState.Uncertain))
+            throw new ConflictException("Only an unresolved outreach dispatch may become uncertain.");
+        if (row.State == AcceleratorUsageState.Uncertain) return Dto(row);
+        row.State = AcceleratorUsageState.Uncertain;
+        row.Revision = Guid.NewGuid();
+        await Event(row, ct);
+        return Dto(row);
+    }, ct);
+
+    // Internal reconciliation only: provider evidence must confirm non-execution or non-chargeability.
+    public Task<AcceleratorReservationResponse> ResolveVerifiedNonChargeableAsync(Guid actor, Guid reservationId,
+        string providerRequestId, string evidenceReference, CancellationToken ct) => store.WriteAsync(async () =>
+    {
+        access.Enabled();
+        if (string.IsNullOrWhiteSpace(providerRequestId) || providerRequestId.Length > 200 ||
+            string.IsNullOrWhiteSpace(evidenceReference) || evidenceReference.Length > 500)
+            throw new BadRequestException("Verified provider failure evidence is required.");
+        var row = await RequiredReservation(actor, reservationId, ct);
+        if (row.State == AcceleratorUsageState.Released) return Dto(row);
+        if (row.State is not (AcceleratorUsageState.Dispatched or AcceleratorUsageState.Uncertain))
+            throw new ConflictException("Only an unresolved dispatched reservation may be reconciled.");
+        row.State = AcceleratorUsageState.Released;
+        row.ActualCostInr = 0;
+        row.FinishedAtUtc = Now;
+        row.Revision = Guid.NewGuid();
+        await Event(row, ct);
+        await audit.AppendAsync(new AuditEvent(AuditAction.Confirm, "AcceleratorUsageVerifiedFailure", row.Id.ToString(),
+            new Dictionary<string, string?> { ["providerRequestId"] = providerRequestId, ["evidenceReference"] = evidenceReference }), ct);
+        return Dto(row);
+    }, ct);
 
     // Trusted result accounting seam; no candidate-facing completion/billing endpoint exists.
     public Task<AcceleratorReservationResponse> CompleteAsync(Guid actor, Guid reservationId, int inputTokens,

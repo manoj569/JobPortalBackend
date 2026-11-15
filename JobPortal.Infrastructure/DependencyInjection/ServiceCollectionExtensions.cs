@@ -1,3 +1,4 @@
+using System.Globalization;
 using JobPortal.Application.Abstractions.Authentication;
 using JobPortal.Application.Abstractions.Candidates;
 using JobPortal.Application.Abstractions.Payments;
@@ -28,7 +29,21 @@ public static class ServiceCollectionExtensions
         ValidateGoogleConfiguration(configuration);
         services.AddOptions<JobPortal.Application.Features.CareerAccelerator.AcceleratorOptions>()
             .Bind(configuration.GetSection(JobPortal.Application.Features.CareerAccelerator.AcceleratorOptions.SectionName))
-            .Validate(value => value.IsValid(), "Invalid Career Accelerator limits.").ValidateOnStart();
+            .Validate(value => value.IsValid(), "Invalid Career Accelerator limits.")
+            .Validate(value => !value.Enabled ||
+                decimal.TryParse(configuration["Membership:Plans:CAREER_ACCELERATOR:Price"],
+                    NumberStyles.Number, CultureInfo.InvariantCulture, out var price) &&
+                price == value.BaseAmountInr &&
+                configuration["Membership:Plans:CAREER_ACCELERATOR:Currency"] == "INR" &&
+                configuration["Membership:Plans:CAREER_ACCELERATOR:DurationDays"] == "30" &&
+                bool.TryParse(configuration["Membership:Plans:CAREER_ACCELERATOR:IsActive"], out var active) && active,
+                "Career Accelerator plan and membership checkout configuration disagree.")
+            .ValidateOnStart();
+
+        services.AddOptions<JobPortal.Application.Features.CareerAccelerator.MarketIntelligenceOptions>()
+            .Bind(configuration.GetSection("CareerAccelerator:MarketIntelligence"))
+            .Validate(value => value.IsValid(), "Invalid market intelligence processing limits.")
+            .ValidateOnStart();
 
         services.AddSingleton<IPasswordHasher, Pbkdf2PasswordHasher>();
         services.AddHttpClient(CompanyLogoResolver.HttpClientName, client =>

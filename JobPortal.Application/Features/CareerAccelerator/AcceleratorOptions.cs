@@ -12,9 +12,11 @@ public sealed class AcceleratorOptions
     public Dictionary<AcceleratorFeature, int> Allowances { get; set; } = new()
     {
         [AcceleratorFeature.Tutor] = 900, [AcceleratorFeature.Review] = 15,
-        [AcceleratorFeature.Interview] = 8, [AcceleratorFeature.Roadmap] = 10, [AcceleratorFeature.Practice] = 100
+        [AcceleratorFeature.Interview] = 8, [AcceleratorFeature.Roadmap] = 10,
+        [AcceleratorFeature.Practice] = 100, [AcceleratorFeature.EmployerOutreach] = 30
     };
     public bool AIEnabled { get; set; }
+    public Dictionary<string, bool> AiOperationEnabled { get; set; } = [];
     public Dictionary<AcceleratorFeature, AcceleratorModelPolicy> Policies { get; set; } = [];
     public decimal PerRequestCostLimitInr { get; set; } = 2m;
     public decimal UserDailyCostLimitInr { get; set; } = 10m;
@@ -34,13 +36,18 @@ public sealed class AcceleratorOptions
         GlobalMonthlyCostLimitInr >= GlobalDailyCostLimitInr && RequestsPerMinute is >= 1 and <= 120 &&
         UserConcurrency is >= 1 and <= 10 && GlobalConcurrency >= UserConcurrency && GlobalConcurrency <= 100 &&
         ReservationSeconds is >= 10 and <= 300 && MaintenanceSeconds is >= 10 and <= 3600 &&
-        (!AIEnabled || Enum.GetValues<AcceleratorFeature>().All(f => Policies.TryGetValue(f, out var p) && p.IsValid()));
+        AiOperationEnabled.Keys.All(x => x is "TutorMessage" or "ProjectEvaluation" or
+            "InterviewEvaluation" or "InterviewQuestionGeneration") &&
+        (!AIEnabled || Enum.GetValues<AcceleratorFeature>().Where(f => f != AcceleratorFeature.EmployerOutreach)
+            .All(f => Policies.TryGetValue(f, out var p) && p.IsValid()));
+    public bool OperationEnabled(string operation) => !AiOperationEnabled.TryGetValue(operation, out var enabled) || enabled;
     internal static bool Identifier(string? value) => value is { Length: > 0 and <= 80 } &&
         value.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.');
 }
 
 public sealed class AcceleratorModelPolicy
 {
+    public bool Enabled { get; set; } = true;
     public string Provider { get; set; } = string.Empty;
     public string Model { get; set; } = string.Empty;
     public int MaxInputTokens { get; set; } = 2000;
@@ -50,7 +57,7 @@ public sealed class AcceleratorModelPolicy
     // Must be explicitly configured from the provider's price contract. No invented rates.
     public decimal InputInrPerMillionTokens { get; set; }
     public decimal OutputInrPerMillionTokens { get; set; }
-    public bool IsValid() => AcceleratorOptions.Identifier(Provider) && AcceleratorOptions.Identifier(Model) &&
+    public bool IsValid() => !Enabled || AcceleratorOptions.Identifier(Provider) && AcceleratorOptions.Identifier(Model) &&
         MaxInputTokens is >= 1 and <= 16000 && MaxOutputTokens is >= 1 and <= 8000 &&
         MaxRequestBytes is >= 100 and <= 128000 && TimeoutSeconds is >= 1 and <= 120 &&
         InputInrPerMillionTokens is > 0 and <= 100000 && OutputInrPerMillionTokens is > 0 and <= 100000;

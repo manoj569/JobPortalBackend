@@ -188,18 +188,20 @@ public sealed class ConfigurationMembershipPlanProvider(IConfiguration configura
                 bool.TryParse(x["AIApplyProEnabled"], out var pro) && pro))
             .ToList();
 
-        if (plans.Count != 4 ||
+        if (plans.Count is < 4 or > 5 ||
             plans.Any(x =>
-                string.IsNullOrWhiteSpace(x.Name) ||
+                string.IsNullOrWhiteSpace(x.Name) || x.Name.Length > 100 ||
                 !string.Equals(
                     x.CurrencyCode,
                     "INR",
                     StringComparison.OrdinalIgnoreCase) ||
-                x.DurationDays != 30) ||
+                x.DurationDays != 30 || x.Amount <= 0m ||
+                decimal.Round(x.Amount, 2) != x.Amount) ||
             GetConfiguredPlan(plans, CareerHarborMembershipPlanCode).Amount != 99m ||
             GetConfiguredPlan(plans, ReferralContactAccessPlanCode).Amount != 299m ||
             GetConfiguredPlan(plans, AIApplyPlanCode).Amount != 999m ||
-            GetConfiguredPlan(plans, AIApplyProPlanCode).Amount != 1499m)
+            GetConfiguredPlan(plans, AIApplyProPlanCode).Amount != 1499m ||
+            (plans.Count == 5 && !plans.Any(x => x.Code == "CAREER_ACCELERATOR")))
         {
             throw new InvalidOperationException(
                 "Membership plan configuration is invalid.");

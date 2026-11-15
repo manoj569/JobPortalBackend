@@ -2,7 +2,7 @@ using JobPortal.Domain.Common;
 
 namespace JobPortal.Domain.Entities.CareerAccelerator;
 
-public enum AcceleratorFeature { Tutor = 1, Review, Interview, Roadmap, Practice }
+public enum AcceleratorFeature { Tutor = 1, Review, Interview, Roadmap, Practice, EmployerOutreach }
 public enum AcceleratorGoalStatus { Active = 1, Paused, Archived }
 public enum AcceleratorUsageState { Reserved = 1, Dispatched, Completed, Released, Uncertain }
 

@@ -35,8 +35,30 @@ public static class ServiceCollectionExtensions
         services.AddScoped<JobPortal.Application.Features.JobPromotions.IJobPromotionRepository, JobPromotionRepository>();
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<JobPortal.Application.Features.CareerAccelerator.IAcceleratorStore, AcceleratorStore>();
+        services.AddScoped<AcceleratorTalentService>();
+        services.Configure<JobPortal.Application.Features.CareerAccelerator.TalentOutreachOptions>(settings =>
+        {
+            var section = configuration.GetSection("CareerAccelerator:TalentOutreach");
+            settings.EmployerOutreachEnabled = bool.TryParse(section["EmployerOutreachEnabled"], out var outreach) && outreach;
+            settings.ContactDiscoveryEnabled = bool.TryParse(section["ContactDiscoveryEnabled"], out var discovery) && discovery;
+            settings.GoogleMailboxEnabled = bool.TryParse(section["GoogleMailboxEnabled"], out var google) && google;
+            settings.MicrosoftMailboxEnabled = bool.TryParse(section["MicrosoftMailboxEnabled"], out var microsoft) && microsoft;
+            settings.RegisteredEmployerTalentInboxEnabled = !bool.TryParse(
+                section["RegisteredEmployerTalentInboxEnabled"], out var inbox) || inbox;
+            settings.OutreachAiDraftingEnabled = bool.TryParse(section["OutreachAiDraftingEnabled"], out var ai) && ai;
+            settings.OutreachReconciliationEnabled = bool.TryParse(section["OutreachReconciliationEnabled"], out var reconcile) && reconcile;
+            if (int.TryParse(section["DispatchRecoveryMinutes"], out var recovery)) settings.DispatchRecoveryMinutes = recovery;
+            if (int.TryParse(section["MaxRecommendedContacts"], out var contacts)) settings.MaxRecommendedContacts = contacts;
+            if (int.TryParse(section["MaxRecipientsPerDraft"], out var recipients)) settings.MaxRecipientsPerDraft = recipients;
+            if (int.TryParse(section["MaxSendsPerDay"], out var perDay)) settings.MaxSendsPerDay = perDay;
+            if (int.TryParse(section["MaxSendsPerMonth"], out var perMonth)) settings.MaxSendsPerMonth = perMonth;
+            if (int.TryParse(section["RecipientCooldownDays"], out var cooldown)) settings.RecipientCooldownDays = cooldown;
+        });
         services.AddScoped<JobPortal.Application.Features.CareerAccelerator.IAcceleratorPhase2Store, AcceleratorPhase2Store>();
         services.AddScoped<JobPortal.Application.Features.CareerAccelerator.IAcceleratorPhase3Store, AcceleratorPhase3Store>();
+        services.AddScoped<JobPortal.Application.Features.CareerAccelerator.IAcceleratorPhase4Store, AcceleratorPhase4Store>();
+        services.AddScoped<JobPortal.Application.Features.CareerAccelerator.IAcceleratorPhase5Store, AcceleratorPhase5Store>();
+        services.AddScoped<JobPortal.Application.Features.CareerAccelerator.IInterviewDispatchStore, AcceleratorPhase5Store>();
         services.AddScoped<JobPortal.Application.Features.AIResume.IAIResumeRepository, AIResumeRepository>();
         services.AddScoped<JobPortal.Application.Features.Support.ISupportTicketRepository, SupportTicketRepository>();
         services.AddScoped<JobPortal.Application.Features.Notifications.INotificationOutbox, NotificationOutboxRepository>();
@@ -88,6 +110,10 @@ public static class ServiceCollectionExtensions
         services.AddScoped<JobPortal.Application.Features.FresherAcquisition.IDurableFresherImportProcessor>(provider =>
             provider.GetRequiredService<JobPortal.Persistence.Repositories.FresherAcquisitionStore>());
         services.AddScoped<IUnitOfWork, UnitOfWork>();
+        services.AddScoped<JobPortal.Application.Features.CareerAccelerator.IAcceleratorPhase6OperationsStore,
+            JobPortal.Persistence.Repositories.AcceleratorPhase6OperationsStore>();
+        services.AddScoped<JobPortal.Application.Features.CareerAccelerator.IMarketIntelligenceStore,
+            JobPortal.Persistence.Repositories.MarketIntelligenceStore>();
         services.AddScoped<IAIApplyRepository, AIApplyRepository>();
         services.AddScoped<IAIApplyOperationalStore, AIApplyOperationalStore>();
         if (bool.TryParse(configuration["AIApply:ExternalSessions:Enabled"], out var externalSessionsEnabled) && externalSessionsEnabled)

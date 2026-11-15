@@ -5,7 +5,7 @@ namespace JobPortal.Domain.Entities.CareerAccelerator;
 public enum AcceleratorAssessmentStatus { Draft = 1, Ready, InProgress, Submitted, Evaluating, Completed, Failed, Retryable }
 public enum AcceleratorQuestionType { MultipleChoice = 1, MultipleSelect, TrueFalse, ShortAnswer, Scenario, TechnicalReasoning, SqlReasoning, CodingDescription, ProductCase }
 public enum AcceleratorProficiency { NotAssessed = 0, Beginner, Developing, Intermediate, Advanced }
-public enum AcceleratorEvidenceSource { SelfReported = 1, ResumeInferred, AssessmentDemonstrated, AssignmentDemonstrated }
+public enum AcceleratorEvidenceSource { SelfReported = 1, ResumeInferred, AssessmentDemonstrated, AssignmentDemonstrated, VirtualProject, MockInterview }
 public enum AcceleratorRoadmapStatus { Active = 1, Superseded, Completed, Archived }
 public enum AcceleratorNodeStatus { Locked = 1, Available, InProgress, Completed, NeedsPractice }
 public enum AcceleratorProgressKind { Started = 1, Completed, EvidenceSubmitted, MilestoneCompleted, Rescheduled }
@@ -82,6 +82,15 @@ public sealed class AcceleratorSkillEvidence : BaseEntity
     public decimal Confidence { get; set; }
     public string ScoringVersion { get; set; } = string.Empty;
     public Guid? AttemptId { get; set; }
+    public Guid? CandidateProjectId { get; set; }
+    public Guid? ProjectVersionId { get; set; }
+    public Guid? AssignmentId { get; set; }
+    public Guid? SubmissionId { get; set; }
+    public Guid? ProjectEvaluationId { get; set; }
+    public Guid? InterviewSessionId { get; set; }
+    public Guid? SessionQuestionId { get; set; }
+    public Guid? InterviewEvaluationId { get; set; }
+    public decimal? Score { get; set; }
     public DateTime EvaluatedAtUtc { get; set; }
 }
 

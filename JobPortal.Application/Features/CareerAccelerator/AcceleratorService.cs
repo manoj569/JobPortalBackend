@@ -23,11 +23,13 @@ public sealed class AcceleratorService(IAcceleratorStore store, IOptions<Acceler
     public AcceleratorPlanResponse Plan()
     {
         var o = Settings;
-        var plan = new MembershipPlan(AcceleratorOptions.PlanCode, "CareerHarbor AI Career Accelerator",
-            o.BaseAmountInr, "INR", 1, true, false, false);
+        var configured = pricing.GetPlans().SingleOrDefault(x => x.Code == AcceleratorOptions.PlanCode);
+        var plan = configured ?? new MembershipPlan(AcceleratorOptions.PlanCode, "CareerHarbor AI Career Accelerator",
+            o.BaseAmountInr, "INR", 30, false, false, false);
         var price = MembershipPricing.Calculate(plan, pricing.GetGstRate());
         return new(plan.Code, plan.Name, o.PlanVersion, price.BaseAmount, price.TaxRate, price.TaxAmount,
-            price.TotalAmount, "SubscriptionBillingCycleUtc", new Dictionary<AcceleratorFeature, int>(o.Allowances), false, false);
+            price.TotalAmount, "SubscriptionBillingCycleUtc", new Dictionary<AcceleratorFeature, int>(o.Allowances),
+            o.Enabled && plan.IsActive, o.Enabled && o.AIEnabled && configured is not null);
     }
 
     public async Task<IReadOnlyList<CanonicalAcceleratorSkill>> SkillsAsync(Guid actor, string? query, int page, int pageSize, CancellationToken ct)
@@ -231,19 +233,24 @@ public sealed class AcceleratorService(IAcceleratorStore store, IOptions<Acceler
             await Candidate(userId, ct);
             var payment = await store.PaymentAsync(paymentId, ct) ?? throw new NotFoundException("Verified payment not found.");
             if (payment.UserId != userId || payment.Status != PaymentStatus.Paid || payment.Provider == PaymentProvider.Unknown ||
-                payment.PlanCode != AcceleratorOptions.PlanCode || payment.MembershipId.HasValue || payment.PaidAtUtc is null ||
+                payment.PlanCode != AcceleratorOptions.PlanCode || payment.PaidAtUtc is null ||
                 payment.PaidAtUtc.Value.Kind != DateTimeKind.Utc || payment.PaidAtUtc > Now ||
                 string.IsNullOrWhiteSpace(payment.ProviderOrderId) || string.IsNullOrWhiteSpace(payment.ProviderPaymentId) ||
-                payment.CurrencyCode != "INR" || payment.BaseAmount != Settings.BaseAmountInr || payment.TaxRate is null)
+                payment.CurrencyCode != "INR" || payment.BaseAmount is not > 0 || payment.TaxRate is null ||
+                payment.DurationDays is < 1 or > 366)
                 throw new ConflictException("Payment does not establish Accelerator entitlement.", "accelerator_payment_unverified");
-            var amount = MembershipPricing.Calculate(new MembershipPlan("Accelerator", Settings.BaseAmountInr, "INR", 1), payment.TaxRate.Value);
+            var amount = MembershipPricing.Calculate(new MembershipPlan("Accelerator", payment.BaseAmount.Value,
+                "INR", payment.DurationDays ?? 30), payment.TaxRate.Value);
             if (payment.Amount != amount.TotalAmount || payment.TaxAmount != amount.TaxAmount) throw new ConflictException("Payment pricing evidence does not match.");
             var existing = await store.CycleForPaymentAsync(paymentId, ct);
             if (existing is not null) return existing.Id;
-            var start = payment.PaidAtUtc.Value;
-            var end = start.AddMonths(1);
+            var latest = await store.LatestCycleAsync(userId, ct);
+            var start = latest is not null && latest.EndsAtUtc > payment.PaidAtUtc.Value
+                ? latest.EndsAtUtc : payment.PaidAtUtc.Value;
+            var end = payment.DurationDays.HasValue ? start.AddDays(payment.DurationDays.Value) : start.AddMonths(1);
             if (await store.CycleOverlapsAsync(userId, start, end, ct)) throw new ConflictException("Accelerator billing cycles cannot overlap.");
-            var cycle = new AcceleratorBillingCycle { UserId = userId, PaymentId = paymentId, PlanVersion = Settings.PlanVersion,
+            var cycle = new AcceleratorBillingCycle { UserId = userId, PaymentId = paymentId,
+                PlanVersion = payment.PlanVersion ?? Settings.PlanVersion,
                 StartsAtUtc = start, EndsAtUtc = end };
             foreach (var (feature, allocation) in Settings.Allowances)
                 cycle.Allowances.Add(new AcceleratorAllowance { Cycle = cycle, CycleId = cycle.Id, Feature = feature, Allocated = allocation });
@@ -255,7 +262,7 @@ public sealed class AcceleratorService(IAcceleratorStore store, IOptions<Acceler
     public async Task<AcceleratorEntitlementResponse> EntitlementAsync(Guid actor, CancellationToken ct)
     {
         await Candidate(actor, ct);
-        var cycle = await store.LatestCycleAsync(actor, ct);
+        var cycle = await store.ActiveCycleAsync(actor, Now, ct) ?? await store.LatestCycleAsync(actor, ct);
         if (cycle is null) return new("NotSubscribed", null, null, []);
         var rows = await store.CycleUsageAsync(cycle.Id, ct);
         var status = cycle.Payment.Status != PaymentStatus.Paid || cycle.Payment.IsDeleted ? "Revoked" :

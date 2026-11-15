@@ -1,5 +1,7 @@
 using JobPortal.API.Extensions;
 using JobPortal.Application.Features.CareerAccelerator;
+using JobPortal.Application.Abstractions.Payments;
+using JobPortal.Application.Features.Payments;
 using JobPortal.Shared.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -11,7 +13,8 @@ namespace JobPortal.API.Controllers;
 [Route("api/accelerator/v1")]
 [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
 [RequestSizeLimit(131072), EnableRateLimiting("CareerAccelerator")]
-public sealed class AcceleratorController(AcceleratorService service, AcceleratorQuotaService usage, AcceleratorPhase2Service phase2) : ControllerBase
+public sealed class AcceleratorController(AcceleratorService service, AcceleratorQuotaService usage,
+    AcceleratorPhase2Service phase2, IPaymentService payments) : ControllerBase
 {
     [HttpGet("plan")]
     public ActionResult<ApiResponse<AcceleratorPlanResponse>> Plan() => Ok(new ApiResponse<AcceleratorPlanResponse>(service.Plan()));
@@ -63,6 +66,19 @@ public sealed class AcceleratorController(AcceleratorService service, Accelerato
     [HttpGet("subscription")]
     public async Task<ActionResult<ApiResponse<AcceleratorEntitlementResponse>>> Subscription(CancellationToken ct) =>
         Ok(new ApiResponse<AcceleratorEntitlementResponse>(await service.EntitlementAsync(User.GetRequiredUserId(), ct)));
+
+    [HttpPost("subscription/checkout")]
+    public async Task<ActionResult<ApiResponse<PhonePeCheckoutResponse>>> Checkout(
+        AcceleratorCheckoutRequest request, CancellationToken ct) =>
+        Ok(new ApiResponse<PhonePeCheckoutResponse>(await payments.CreatePhonePeCheckoutAsync(
+            User.GetRequiredUserId(), new CreatePaymentOrderRequest(AcceleratorOptions.PlanCode,
+                request.RequestKey), null, ct)));
+
+    [HttpGet("subscription/payments/{merchantOrderId}")]
+    public async Task<ActionResult<ApiResponse<PhonePeReturnStatusResponse>>> PaymentStatus(
+        string merchantOrderId, CancellationToken ct) =>
+        Ok(new ApiResponse<PhonePeReturnStatusResponse>(await payments.GetPhonePeStatusAsync(
+            User.GetRequiredUserId(), merchantOrderId, ct)));
 
     [HttpGet("usage")]
     public async Task<ActionResult<ApiResponse<IReadOnlyList<AcceleratorUsageHistoryItem>>>> Usage(

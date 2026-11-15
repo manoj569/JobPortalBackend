@@ -44,6 +44,8 @@ public sealed class PublicJobQueryValidator : AbstractValidator<PublicJobQuery>
             .Must(value => !value.HasValue || SupportedFreshnessDays.Contains(value.Value))
             .WithMessage("FreshnessDays must be one of: 1, 3, 7, 15, 30.");
         RuleFor(x => x.SortBy).IsInEnum();
+        RuleFor(x => x.MarketSkillId).Must(x => !x.HasValue || x.Value != Guid.Empty);
+        RuleFor(x => x.MarketRoleId).Must(x => !x.HasValue || x.Value != Guid.Empty);
         RuleFor(x => x.SortDirection)
             .Must(value => string.Equals(value, "asc", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(value, "desc", StringComparison.OrdinalIgnoreCase))

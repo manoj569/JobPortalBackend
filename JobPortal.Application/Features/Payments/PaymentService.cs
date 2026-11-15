@@ -9,6 +9,7 @@ using JobPortal.Application.Abstractions.Persistence;
 using JobPortal.Application.Common.Exceptions;
 using JobPortal.Application.Common.Validation;
 using JobPortal.Application.Features.Memberships;
+using JobPortal.Application.Features.CareerAccelerator;
 using JobPortal.Application.Features.Notifications;
 using JobPortal.Domain.Common;
 using JobPortal.Domain.Entities;
@@ -29,9 +30,15 @@ public sealed class PaymentService(
     IValidator<CreatePaymentOrderRequest> createOrderValidator,
     IValidator<ConfirmRazorpayPaymentRequest> confirmValidator,
     TimeProvider timeProvider,
-    NotificationOutbox outbox) : IPaymentService
+    NotificationOutbox outbox,
+    AcceleratorService? accelerator = null) : IPaymentService, IDisposable
 {
     private const int MaximumWebhookBytes = 1024 * 1024;
+    // Reduces duplicate transitions within one service instance. PostgreSQL xmin and unique identifiers
+    // remain the cross-instance protection; this gate is never the sole correctness boundary.
+    private readonly SemaphoreSlim phonePeStateGate = new(1, 1);
+
+    public void Dispose() => phonePeStateGate.Dispose();
 
     private const string CareerHarborMembershipPlanCode = "CareerHarborMembership";
     private const string ReferralContactAccessPlanCode = "ReferralContactAccess";
@@ -88,14 +95,39 @@ public sealed class PaymentService(
         returnTo = PaymentReturnPath.Validate(returnTo);
         await createOrderValidator.ValidateAndThrowAsync(request, cancellationToken);
         await RequiredCandidateAsync(userId, cancellationToken);
+        if (request.RequestKey is { } purchaseKey)
+        {
+            var previous = await payments.GetOwnedByPurchaseRequestKeyAsync(userId, purchaseKey, cancellationToken);
+            if (previous is not null)
+            {
+                if (previous.Provider != PaymentProvider.PhonePe ||
+                    !string.Equals(previous.PlanCode, request.PlanCode, StringComparison.OrdinalIgnoreCase) ||
+                    previous.ReturnTo != returnTo)
+                    throw new ConflictException("Purchase request key was reused with different checkout details.");
+                if (previous.ProviderCheckoutUrl is null || previous.ProviderOrderId is null ||
+                    previous.PlanName is null || !previous.DurationDays.HasValue)
+                    throw new ConflictException("Purchase initiation requires provider reconciliation.",
+                        "payment_checkout_pending");
+                return new(previous.ProviderOrderId, previous.ProviderCheckoutUrl,
+                    previous.ProviderCheckoutExpiresAtUtc, previous.PlanName, ToMinorUnits(previous.Amount),
+                    previous.CurrencyCode, previous.DurationDays.Value, previous.ReturnTo,
+                    previous.PlanCode!, Pricing(previous));
+            }
+        }
         var utcNow = UtcNow;
         var plan = plans.GetRequired(request.PlanCode);
+        if (plan.Code == AcceleratorOptions.PlanCode)
+        {
+            if (accelerator is null)
+                throw new InvalidOperationException("Accelerator payment activation is not configured.");
+            accelerator.Enabled();
+        }
         var membership = await GetMembershipForCheckoutAsync(
             userId,
             plan,
             cancellationToken);
         await ExpireMembershipIfNeededAsync(membership, userId, cancellationToken);
-        if (membership is { Status: MembershipStatus.Active } && membership.StartsAtUtc <= utcNow &&
+        if (plan.Code != AcceleratorOptions.PlanCode && membership is { Status: MembershipStatus.Active } && membership.StartsAtUtc <= utcNow &&
             (!membership.EndsAtUtc.HasValue || membership.EndsAtUtc > utcNow))
             throw new ConflictException("An active portal membership already exists.");
         await ThrowPendingCheckoutConflictAsync(userId, plan.Code, cancellationToken);
@@ -115,7 +147,7 @@ public sealed class PaymentService(
                 membership, null, MembershipStatus.Pending, userId, "Payment initiated."));
             await memberships.AddAsync(membership, cancellationToken);
         }
-        else
+        else if (membership.Status != MembershipStatus.Active)
         {
             membership.Status = MembershipStatus.Pending;
             membership.PlanName = plan.Name;
@@ -126,6 +158,7 @@ public sealed class PaymentService(
         var payment = new Payment
         {
             UserId = userId, Membership = membership, PlanCode = plan.Code, Amount = plan.Amount,
+            PurchaseRequestKey = request.RequestKey,
             CurrencyCode = plan.CurrencyCode.ToUpperInvariant(), Provider = PaymentProvider.PhonePe,
             Status = PaymentStatus.Created
         };
@@ -142,7 +175,10 @@ public sealed class PaymentService(
         try
         {
             var amount = ToMinorUnits(payment.Amount);
-            var checkout = await phonePe.CreateCheckoutAsync(merchantOrderId, amount, returnTo, cancellationToken);
+            var checkout = await phonePe.CreateCheckoutAsync(merchantOrderId, amount, returnTo,
+                plan.Name, cancellationToken);
+            payment.ProviderCheckoutUrl = checkout.RedirectUrl;
+            payment.ProviderCheckoutExpiresAtUtc = checkout.ExpiresAtUtc;
             payment.ProviderOrderCreatedAtUtc = UtcNow;
             payment.Status = PaymentStatus.Pending;
             payment.History.Add(NewPaymentHistory(
@@ -183,6 +219,7 @@ public sealed class PaymentService(
             throw new NotFoundException("Payment was not found.");
         if (payment.Status is not (PaymentStatus.Paid or PaymentStatus.Refunded))
             await ReconcilePhonePeAsync(payment, cancellationToken);
+        await EnsureAcceleratorActivatedAsync(payment, cancellationToken);
         var status = BrowserStatus(payment.Status);
         var membership = payment.Membership;
         var canReturn = status == PhonePeBrowserPaymentStatus.Completed &&
@@ -201,7 +238,11 @@ public sealed class PaymentService(
             throw new BadRequestException("Invalid PhonePe webhook authentication.", "invalid_webhook_authentication");
         var callback = phonePe.ParseCallback(request.RawBody);
         if (await payments.HasProcessedProviderEventAsync(callback.EventId, cancellationToken))
+        {
+            var replay = await payments.GetByProviderOrderIdAsync(callback.MerchantOrderId, cancellationToken);
+            if (replay is not null) await EnsureAcceleratorActivatedAsync(replay, cancellationToken);
             return new("Duplicate event acknowledged.");
+        }
         var payment = await payments.GetByProviderOrderIdAsync(callback.MerchantOrderId, cancellationToken);
         if (payment is null || payment.Provider != PaymentProvider.PhonePe)
             throw new NotFoundException("Payment order was not found.");
@@ -211,7 +252,91 @@ public sealed class PaymentService(
         payment.LastReconciledAtUtc = UtcNow;
         await ApplyPhonePeStateAsync(payment, verified, callback.EventId,
             new(null, "PhonePeWebhook"), "Webhook", cancellationToken);
+        await EnsureAcceleratorActivatedAsync(payment, cancellationToken);
         return new("Payment event processed.");
+    }
+
+    public async Task<PaymentResponse> ReconcileAcceleratorPhonePeForAdminAsync(Guid adminId,
+        string merchantOrderId, AdminPhonePeReconcileRequest request, CancellationToken cancellationToken = default)
+    {
+        var admin = await users.GetByIdWithRoleAsync(adminId, cancellationToken);
+        if (admin is null || admin.RoleId != SystemRoleIds.Administrator || admin.Status != UserStatus.Active)
+            throw new AppException("Administrator access required.", 403, "forbidden");
+        if (string.IsNullOrWhiteSpace(request.Reason) || request.Reason.Length > 1000 ||
+            string.IsNullOrWhiteSpace(merchantOrderId) || merchantOrderId.Length > 200)
+            throw new BadRequestException("A reason and merchant order ID are required.");
+        var payment = await payments.GetByProviderOrderIdAsync(merchantOrderId, cancellationToken)
+            ?? throw new NotFoundException("Accelerator payment was not found.");
+        if (payment.PlanCode != AcceleratorOptions.PlanCode || payment.Provider != PaymentProvider.PhonePe)
+            throw new NotFoundException("Accelerator payment was not found.");
+        if (payment.Status is not (PaymentStatus.Paid or PaymentStatus.Refunded))
+        {
+            var state = await phonePe.GetOrderStatusAsync(merchantOrderId, cancellationToken);
+            ValidatePhonePeState(payment, state);
+            payment.LastReconciledAtUtc = UtcNow;
+            await ApplyPhonePeStateAsync(payment, state, null,
+                new(adminId, "Administrator"), "AdminReconciliation", cancellationToken);
+        }
+        await EnsureAcceleratorActivatedAsync(payment, cancellationToken);
+        await auditWriter.AppendAsync(new(AuditAction.Update, "Payment", payment.Id.ToString(),
+            new Dictionary<string, string?> { ["operation"] = "AdminPhonePeReconciliation",
+                ["reason"] = request.Reason, ["status"] = payment.Status.ToString() },
+            new(adminId, "Administrator")), cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+        return ToResponse(payment);
+    }
+
+    // Trusted worker seam. Only server-side PhonePe verification can change payment state.
+    public async Task ReconcileAcceleratorPhonePeSystemAsync(string merchantOrderId,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(merchantOrderId) || merchantOrderId.Length > 200)
+            throw new BadRequestException("A merchant order ID is required.");
+        var payment = await payments.GetByProviderOrderIdAsync(merchantOrderId, cancellationToken)
+            ?? throw new NotFoundException("Accelerator payment was not found.");
+        if (payment.PlanCode != AcceleratorOptions.PlanCode || payment.Provider != PaymentProvider.PhonePe)
+            throw new NotFoundException("Accelerator payment was not found.");
+        if (payment.Status is not (PaymentStatus.Paid or PaymentStatus.Refunded))
+        {
+            var state = await phonePe.GetOrderStatusAsync(merchantOrderId, cancellationToken);
+            ValidatePhonePeState(payment, state);
+            payment.LastReconciledAtUtc = UtcNow;
+            await ApplyPhonePeStateAsync(payment, state, null,
+                new(null, "AcceleratorPaymentWorker"), "BackgroundReconciliation", cancellationToken);
+        }
+        await EnsureAcceleratorActivatedAsync(payment, cancellationToken);
+    }
+
+    public async Task<PaymentResponse> FlagAcceleratorRefundReviewAsync(Guid adminId,
+        string merchantOrderId, AdminAcceleratorRefundReviewRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var admin = await users.GetByIdWithRoleAsync(adminId, cancellationToken);
+        if (admin is null || admin.RoleId != SystemRoleIds.Administrator || admin.Status != UserStatus.Active)
+            throw new AppException("Administrator access required.", 403, "forbidden");
+        if (string.IsNullOrWhiteSpace(request.Reason) || request.Reason.Length > 1000 ||
+            string.IsNullOrWhiteSpace(merchantOrderId) || merchantOrderId.Length > 200)
+            throw new BadRequestException("A refund-review reason and merchant order ID are required.");
+        var payment = await payments.GetByProviderOrderIdAsync(merchantOrderId, cancellationToken)
+            ?? throw new NotFoundException("Accelerator payment was not found.");
+        if (payment.PlanCode != AcceleratorOptions.PlanCode || payment.Provider != PaymentProvider.PhonePe)
+            throw new NotFoundException("Accelerator payment was not found.");
+        if (payment.Status != PaymentStatus.Paid)
+            throw new ConflictException("Only a verified paid order can enter refund review.");
+        if (payment.AcceleratorRefundReviewRequired)
+        {
+            if (payment.AcceleratorRefundReviewReason != request.Reason)
+                throw new ConflictException("Refund review already has a different recorded reason.");
+            return ToResponse(payment);
+        }
+        payment.AcceleratorRefundReviewRequired = true;
+        payment.AcceleratorRefundReviewReason = request.Reason;
+        payment.AcceleratorRefundReviewAtUtc = UtcNow;
+        await auditWriter.AppendAsync(new(AuditAction.Update, "Payment", payment.Id.ToString(),
+            new Dictionary<string, string?> { ["operation"] = "AcceleratorRefundReviewRequested",
+                ["reason"] = request.Reason }, new(adminId, "Administrator")), cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+        return ToResponse(payment);
     }
 
     private async Task ReconcilePhonePeAsync(Payment payment, CancellationToken cancellationToken)
@@ -227,33 +352,48 @@ public sealed class PaymentService(
         Payment payment, PhonePeOrderState state, string? eventId,
         AuditActor actor, string source, CancellationToken cancellationToken)
     {
-        if (payment.Status == PaymentStatus.Refunded) return;
-        switch (state.State)
+        await phonePeStateGate.WaitAsync(cancellationToken);
+        try
         {
-            case PhonePeOrderStateKind.Completed:
-                if (string.IsNullOrWhiteSpace(state.TransactionId))
-                    throw new ConflictException("PhonePe verification did not include a transaction reference.");
-                if (payment.Status != PaymentStatus.Paid)
-                    await CompletePaymentAsync(payment, state.TransactionId,
-                        "PhonePe server verification confirmed completion.", eventId,
-                        AuditAction.WebhookSuccess, source, actor, cancellationToken);
-                break;
-            case PhonePeOrderStateKind.Failed:
-                if (payment.Status != PaymentStatus.Paid)
-                    await TransitionToTerminalAsync(payment, PaymentStatus.Failed, state.TransactionId,
-                        "PhonePe verification reported failure.", cancellationToken, eventId);
-                break;
-            case PhonePeOrderStateKind.Cancelled:
-                if (payment.Status != PaymentStatus.Paid)
-                    await TransitionToTerminalAsync(payment, PaymentStatus.Cancelled, state.TransactionId,
-                        "PhonePe verification reported cancellation.", cancellationToken, eventId);
-                break;
-            default:
-                if (eventId is not null)
-                    payment.History.Add(NewPaymentHistory(payment, payment.Status, payment.Status,
-                        payment.UserId, "Pending PhonePe event acknowledged.", eventId));
-                await unitOfWork.SaveChangesAsync(cancellationToken);
-                break;
+            if (payment.Status == PaymentStatus.Refunded) return;
+            switch (state.State)
+            {
+                case PhonePeOrderStateKind.Completed:
+                    if (string.IsNullOrWhiteSpace(state.TransactionId))
+                        throw new ConflictException("PhonePe verification did not include a transaction reference.");
+                    if (payment.Status != PaymentStatus.Paid)
+                        await CompletePaymentAsync(payment, state.TransactionId,
+                            "PhonePe server verification confirmed completion.", eventId,
+                            AuditAction.WebhookSuccess, source, actor, cancellationToken);
+                    break;
+                case PhonePeOrderStateKind.Failed:
+                    if (payment.Status != PaymentStatus.Paid)
+                        await TransitionToTerminalAsync(payment, PaymentStatus.Failed, state.TransactionId,
+                            "PhonePe verification reported failure.", cancellationToken, eventId);
+                    break;
+                case PhonePeOrderStateKind.Cancelled:
+                    if (payment.Status != PaymentStatus.Paid)
+                        await TransitionToTerminalAsync(payment, PaymentStatus.Cancelled, state.TransactionId,
+                            "PhonePe verification reported cancellation.", cancellationToken, eventId);
+                    break;
+                default:
+                    if (eventId is not null)
+                        payment.History.Add(NewPaymentHistory(payment, payment.Status, payment.Status,
+                            payment.UserId, "Pending PhonePe event acknowledged.", eventId));
+                    await unitOfWork.SaveChangesAsync(cancellationToken);
+                    break;
+            }
+        }
+        finally { phonePeStateGate.Release(); }
+    }
+
+    private async Task EnsureAcceleratorActivatedAsync(Payment payment, CancellationToken cancellationToken)
+    {
+        if (payment.PlanCode == AcceleratorOptions.PlanCode && payment.Status == PaymentStatus.Paid)
+        {
+            if (accelerator is null)
+                throw new InvalidOperationException("Accelerator payment activation is not configured.");
+            await accelerator.ActivateVerifiedPaymentAsync(payment.UserId, payment.Id, cancellationToken);
         }
     }
 
@@ -376,6 +516,8 @@ public sealed class PaymentService(
         await RequiredCandidateAsync(userId, cancellationToken);
         var utcNow = UtcNow;
         var plan = plans.GetRequired(request.PlanCode);
+        if (plan.Code == AcceleratorOptions.PlanCode)
+            throw new BadRequestException("Accelerator purchases use PhonePe checkout.");
         var membership = await GetMembershipForCheckoutAsync(
     userId,
     plan,
@@ -527,6 +669,7 @@ public sealed class PaymentService(
         {
             if (payment.Status is not (PaymentStatus.Paid or PaymentStatus.Refunded))
                 await ReconcilePhonePeAsync(payment, cancellationToken);
+            await EnsureAcceleratorActivatedAsync(payment, cancellationToken);
             return ToResponse(payment);
         }
         if (payment.Status is PaymentStatus.Paid or PaymentStatus.Failed or
@@ -947,6 +1090,9 @@ public sealed class PaymentService(
         payment.TaxRate = pricing.TaxRate;
         payment.TaxAmount = pricing.TaxAmount;
         payment.Amount = pricing.TotalAmount;
+        if (plan.Code == AcceleratorOptions.PlanCode)
+            payment.PlanVersion = accelerator?.Plan().Version
+                ?? throw new InvalidOperationException("Accelerator plan version is not configured.");
     }
 
     private static MembershipPricing? Pricing(Payment payment) =>

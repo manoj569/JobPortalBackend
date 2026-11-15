@@ -5,6 +5,7 @@ using JobPortal.Application.Common.Exceptions;
 using JobPortal.Application.Features.CareerAccelerator;
 using JobPortal.Domain.Entities;
 using JobPortal.Domain.Entities.CareerAccelerator;
+using JobPortal.Domain.Common;
 using JobPortal.Domain.Enums;
 using JobPortal.Persistence.Context;
 using JobPortal.Persistence.Repositories;
@@ -226,7 +227,7 @@ public sealed class AcceleratorFoundationTests
     }
 
     [Fact]
-    public async Task BillingCyclesArePaymentIdempotentSnapshotAllocationsAndExpireAtExclusiveEnd()
+    public async Task BillingCyclesArePaymentIdempotentSnapshotAllocationsAndRenewWithoutLosingAccess()
     {
         using var f = new AcceleratorFixture(); var payment = await f.Payment();
         var id = await f.Service.ActivateVerifiedPaymentAsync(f.Candidate.Id, payment.Id, default);
@@ -237,27 +238,33 @@ public sealed class AcceleratorFoundationTests
         f.Settings.Allowances[AcceleratorFeature.Tutor] = 1;
         Assert.Equal(900, (await f.Service.EntitlementAsync(f.Candidate.Id, default)).Usage.Single(x => x.Feature == AcceleratorFeature.Tutor).Allocated);
         var another = await f.Payment();
-        await Assert.ThrowsAsync<ConflictException>(() => f.Service.ActivateVerifiedPaymentAsync(f.Candidate.Id, another.Id, default));
+        var renewalId = await f.Service.ActivateVerifiedPaymentAsync(f.Candidate.Id, another.Id, default);
+        Assert.Equal(renewalId, await f.Service.ActivateVerifiedPaymentAsync(f.Candidate.Id, another.Id, default));
+        var renewal = await f.Db.AcceleratorBillingCycles.SingleAsync(x => x.Id == renewalId);
+        Assert.Equal(entitlement.EndsAtUtc, renewal.StartsAtUtc);
+        Assert.Equal(entitlement.EndsAtUtc!.Value.AddMonths(1), renewal.EndsAtUtc);
         f.Clock.Utc = entitlement.EndsAtUtc.Value;
+        Assert.Equal("Active", (await f.Service.EntitlementAsync(f.Candidate.Id, default)).Status);
+        f.Clock.Utc = renewal.EndsAtUtc;
         Assert.Equal("Expired", (await f.Service.EntitlementAsync(f.Candidate.Id, default)).Status);
-        await Assert.ThrowsAsync<AppException>(() => f.Quota.ReserveAsync(f.Candidate.Id, f.Reservation(), default));
+        await Assert.ThrowsAsync<AppException>(() => f.Quota.ReserveAsync(f.Candidate.Id, AcceleratorFixture.Reservation(), default));
     }
 
     [Fact]
     public async Task RefundedPaymentsImmediatelyRevokeReservationAndDispatchAccess()
     {
         using var f = new AcceleratorFixture(); var payment = await f.Activate();
-        var usage = await f.Quota.ReserveAsync(f.Candidate.Id, f.Reservation(), default);
+        var usage = await f.Quota.ReserveAsync(f.Candidate.Id, AcceleratorFixture.Reservation(), default);
         payment.Status = PaymentStatus.Refunded; await f.Db.SaveChangesAsync();
         Assert.Equal("Revoked", (await f.Service.EntitlementAsync(f.Candidate.Id, default)).Status);
         await Assert.ThrowsAsync<AppException>(() => f.Quota.MarkDispatchedAsync(f.Candidate.Id, usage.Id, default));
-        await Assert.ThrowsAsync<AppException>(() => f.Quota.ReserveAsync(f.Candidate.Id, f.Reservation(), default));
+        await Assert.ThrowsAsync<AppException>(() => f.Quota.ReserveAsync(f.Candidate.Id, AcceleratorFixture.Reservation(), default));
     }
 
     [Fact]
     public async Task ReservationReplayIsPayloadBoundAndConsumesOneUnit()
     {
-        using var f = new AcceleratorFixture(); await f.Activate(); var request = f.Reservation();
+        using var f = new AcceleratorFixture(); await f.Activate(); var request = AcceleratorFixture.Reservation();
         var first = await f.Quota.ReserveAsync(f.Candidate.Id, request, default);
         Assert.Equal(first.Id, (await f.Quota.ReserveAsync(f.Candidate.Id, request, default)).Id);
         Assert.Single(await f.Db.Set<AcceleratorUsageReservation>().ToArrayAsync());
@@ -274,7 +281,7 @@ public sealed class AcceleratorFoundationTests
         using var f = new AcceleratorFixture(); f.Settings.Allowances[AcceleratorFeature.Tutor] = 2; await f.Activate();
         var outcomes = await Task.WhenAll(Enumerable.Range(0, 10).Select(async _ =>
         {
-            try { await f.Quota.ReserveAsync(f.Candidate.Id, f.Reservation(), default); return true; }
+            try { await f.Quota.ReserveAsync(f.Candidate.Id, AcceleratorFixture.Reservation(), default); return true; }
             catch (AppException ex) when (ex.Code == "accelerator_quota_exhausted") { return false; }
         }));
         Assert.Equal(2, outcomes.Count(x => x));
@@ -285,7 +292,7 @@ public sealed class AcceleratorFoundationTests
     public async Task UnusedReleaseIsIdempotentAndCrossCandidateAccessIsRejected()
     {
         using var f = new AcceleratorFixture(); await f.Activate();
-        var row = await f.Quota.ReserveAsync(f.Candidate.Id, f.Reservation(), default);
+        var row = await f.Quota.ReserveAsync(f.Candidate.Id, AcceleratorFixture.Reservation(), default);
         await Assert.ThrowsAsync<NotFoundException>(() => f.Quota.ReleaseUnusedAsync(f.Other.Id, row.Id, default));
         Assert.Empty(await f.Quota.HistoryAsync(f.Other.Id, 1, 20, default));
         await f.Quota.ReleaseUnusedAsync(f.Candidate.Id, row.Id, default);
@@ -297,7 +304,7 @@ public sealed class AcceleratorFoundationTests
     [Fact]
     public async Task DispatchedTimeoutNeverFreesQuotaOrPermitsDuplicateDispatch()
     {
-        using var f = new AcceleratorFixture(); await f.Activate(); var request = f.Reservation();
+        using var f = new AcceleratorFixture(); await f.Activate(); var request = AcceleratorFixture.Reservation();
         var row = await f.Quota.ReserveAsync(f.Candidate.Id, request, default);
         await f.Quota.MarkDispatchedAsync(f.Candidate.Id, row.Id, default);
         await Assert.ThrowsAsync<ConflictException>(() => f.Quota.MarkDispatchedAsync(f.Candidate.Id, row.Id, default));
@@ -318,7 +325,7 @@ public sealed class AcceleratorFoundationTests
     {
         using var f = new AcceleratorFixture(); await f.Activate();
         f.Clock.Utc = f.Clock.Utc.Date.AddHours(23).AddMinutes(59).AddSeconds(50);
-        var row = await f.Quota.ReserveAsync(f.Candidate.Id, f.Reservation(), default);
+        var row = await f.Quota.ReserveAsync(f.Candidate.Id, AcceleratorFixture.Reservation(), default);
         f.Clock.Utc = f.Clock.Utc.AddSeconds(20);
         await Assert.ThrowsAsync<ConflictException>(() => f.Quota.MarkDispatchedAsync(f.Candidate.Id, row.Id, default));
         f.Clock.Utc = f.Clock.Utc.AddSeconds(121);
@@ -334,11 +341,11 @@ public sealed class AcceleratorFoundationTests
         f.Settings.UserCycleCostLimitInr = .6m; f.Settings.GlobalDailyCostLimitInr = .4m; f.Settings.GlobalMonthlyCostLimitInr = .8m;
         await f.Activate();
         await f.Consume(); await f.Consume();
-        var daily = await Assert.ThrowsAsync<AppException>(() => f.Quota.ReserveAsync(f.Candidate.Id, f.Reservation(), default));
+        var daily = await Assert.ThrowsAsync<AppException>(() => f.Quota.ReserveAsync(f.Candidate.Id, AcceleratorFixture.Reservation(), default));
         Assert.Equal("accelerator_cost_limit", daily.Code);
         f.Clock.Utc = f.Clock.Utc.AddDays(1); // Jan 31 -> Feb 1; still the same subscription cycle.
         await f.Consume();
-        var cycle = await Assert.ThrowsAsync<AppException>(() => f.Quota.ReserveAsync(f.Candidate.Id, f.Reservation(), default));
+        var cycle = await Assert.ThrowsAsync<AppException>(() => f.Quota.ReserveAsync(f.Candidate.Id, AcceleratorFixture.Reservation(), default));
         Assert.Equal("accelerator_cost_limit", cycle.Code);
     }
 
@@ -346,11 +353,11 @@ public sealed class AcceleratorFoundationTests
     public async Task ActualOverrunsAreRecordedAndBlockFutureSpendRatherThanErasingCharges()
     {
         using var f = new AcceleratorFixture(); await f.Activate();
-        var row = await f.Quota.ReserveAsync(f.Candidate.Id, f.Reservation(), default);
+        var row = await f.Quota.ReserveAsync(f.Candidate.Id, AcceleratorFixture.Reservation(), default);
         await f.Quota.MarkDispatchedAsync(f.Candidate.Id, row.Id, default);
         var final = await f.Quota.CompleteAsync(f.Candidate.Id, row.Id, 100, 101, 60m, default);
         Assert.True(final.PolicyViolation); Assert.Equal(60m, final.ActualCostInr);
-        var error = await Assert.ThrowsAsync<AppException>(() => f.Quota.ReserveAsync(f.Candidate.Id, f.Reservation(), default));
+        var error = await Assert.ThrowsAsync<AppException>(() => f.Quota.ReserveAsync(f.Candidate.Id, AcceleratorFixture.Reservation(), default));
         Assert.Equal("accelerator_cost_limit", error.Code);
     }
 
@@ -358,12 +365,12 @@ public sealed class AcceleratorFoundationTests
     public async Task RateAndConcurrencyLimitsAreEnforcedEvenWhenAnUnusedCallIsReleased()
     {
         using var f = new AcceleratorFixture(); f.Settings.UserConcurrency = 1; await f.Activate();
-        var first = await f.Quota.ReserveAsync(f.Candidate.Id, f.Reservation(), default);
-        var busy = await Assert.ThrowsAsync<AppException>(() => f.Quota.ReserveAsync(f.Candidate.Id, f.Reservation(), default));
+        var first = await f.Quota.ReserveAsync(f.Candidate.Id, AcceleratorFixture.Reservation(), default);
+        var busy = await Assert.ThrowsAsync<AppException>(() => f.Quota.ReserveAsync(f.Candidate.Id, AcceleratorFixture.Reservation(), default));
         Assert.Equal("accelerator_concurrency_limit", busy.Code);
         await f.Quota.ReleaseUnusedAsync(f.Candidate.Id, first.Id, default);
         f.Settings.RequestsPerMinute = 1;
-        var rate = await Assert.ThrowsAsync<AppException>(() => f.Quota.ReserveAsync(f.Candidate.Id, f.Reservation(), default));
+        var rate = await Assert.ThrowsAsync<AppException>(() => f.Quota.ReserveAsync(f.Candidate.Id, AcceleratorFixture.Reservation(), default));
         Assert.Equal("accelerator_rate_limit", rate.Code);
     }
 
@@ -372,9 +379,9 @@ public sealed class AcceleratorFoundationTests
     {
         using var f = new AcceleratorFixture(); await f.Activate();
         var unavailable = new AcceleratorQuotaService(f.Store, f.Service, Options.Create(f.Settings), f.Clock, f.Audit, [new UnavailableAcceleratorAIProvider()]);
-        await Assert.ThrowsAsync<AcceleratorProviderUnavailableException>(() => unavailable.ReserveAsync(f.Candidate.Id, f.Reservation(), default));
-        await Assert.ThrowsAsync<BadRequestException>(() => f.Quota.ReserveAsync(f.Candidate.Id, f.Reservation() with { InputTokens = 101 }, default));
-        await Assert.ThrowsAsync<BadRequestException>(() => f.Quota.ReserveAsync(f.Candidate.Id, f.Reservation() with { RequestBytes = 1001 }, default));
+        await Assert.ThrowsAsync<AcceleratorProviderUnavailableException>(() => unavailable.ReserveAsync(f.Candidate.Id, AcceleratorFixture.Reservation(), default));
+        await Assert.ThrowsAsync<BadRequestException>(() => f.Quota.ReserveAsync(f.Candidate.Id, AcceleratorFixture.Reservation() with { InputTokens = 101 }, default));
+        await Assert.ThrowsAsync<BadRequestException>(() => f.Quota.ReserveAsync(f.Candidate.Id, AcceleratorFixture.Reservation() with { RequestBytes = 1001 }, default));
         Assert.Empty(await f.Db.Set<AcceleratorUsageReservation>().ToArrayAsync());
         Assert.Equal(0, f.Provider.Calls);
     }
@@ -383,7 +390,7 @@ public sealed class AcceleratorFoundationTests
     public async Task PublishedTaxonomyAndUsageLedgerRejectMutation()
     {
         using var f = new AcceleratorFixture(); await f.Activate();
-        var reservation = await f.Quota.ReserveAsync(f.Candidate.Id, f.Reservation(), default);
+        var reservation = await f.Quota.ReserveAsync(f.Candidate.Id, AcceleratorFixture.Reservation(), default);
         var entry = await f.Db.Set<AcceleratorUsageEvent>().SingleAsync(); entry.CostInr++;
         await Assert.ThrowsAsync<InvalidOperationException>(() => f.Db.SaveChangesAsync());
         f.Db.ChangeTracker.Clear();
@@ -418,8 +425,8 @@ internal sealed class AcceleratorFixture : IDisposable
     public AcceleratorFixture()
     {
         Db = new(DbOptions);
-        var candidateRole = new Role { Name = "Candidate", NormalizedName = "CANDIDATE" };
-        var adminRole = new Role { Name = "Administrator", NormalizedName = "ADMINISTRATOR" };
+        var candidateRole = new Role { Id = SystemRoleIds.Candidate, Name = "Candidate", NormalizedName = "CANDIDATE" };
+        var adminRole = new Role { Id = SystemRoleIds.Administrator, Name = "Administrator", NormalizedName = "ADMINISTRATOR" };
         Candidate.Role = Other.Role = candidateRole; Candidate.RoleId = Other.RoleId = candidateRole.Id;
         Admin.Role = adminRole; Admin.RoleId = adminRole.Id;
         Candidate.ResumeUploadedAtUtc = Clock.Utc;
@@ -438,7 +445,7 @@ internal sealed class AcceleratorFixture : IDisposable
          new("product", "Product Manager", "Discover valuable products", [new(ProductSkill.Id, 3)])]);
     public SaveAcceleratorProfileRequest Profile() => new(null, 2, "Candidate-supplied education", 300, true, [new(CodeSkill.Id, 2)]);
     public CreateCareerGoalRequest Goal(Guid roleId) => new(Guid.NewGuid(), roleId, 300, Clock.Utc.AddMonths(3));
-    public ReserveAcceleratorUsageRequest Reservation() => new(Guid.NewGuid(), AcceleratorFeature.Tutor, new string('A', 64), 100, 100);
+    public static ReserveAcceleratorUsageRequest Reservation() => new(Guid.NewGuid(), AcceleratorFeature.Tutor, new string('A', 64), 100, 100);
     public async Task<Payment> Payment(Guid? userId = null)
     {
         var payment = new Payment { UserId = userId ?? Candidate.Id, PlanCode = AcceleratorOptions.PlanCode, Status = PaymentStatus.Paid,

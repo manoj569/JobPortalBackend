@@ -6,6 +6,7 @@ using JobPortal.Shared.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace JobPortal.API.Controllers;
 
@@ -31,6 +32,7 @@ public sealed class PaymentsController(IPaymentService paymentService,
         Ok(new ApiResponse<IReadOnlyList<MembershipPlanResponse>>(paymentService.GetPlans()));
 
     [HttpPost("phonepe/checkout")]
+    [EnableRateLimiting("CareerAccelerator")]
     [ProducesResponseType(typeof(ApiResponse<PhonePeCheckoutResponse>), StatusCodes.Status201Created)]
     public async Task<ActionResult<ApiResponse<PhonePeCheckoutResponse>>> CreatePhonePeCheckout(
         [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] CreatePaymentOrderRequest? request,

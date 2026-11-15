@@ -2,6 +2,7 @@ using FluentValidation.TestHelper;
 using JobPortal.API.Controllers;
 using JobPortal.Application.Features.PublicJobs;
 using JobPortal.Domain.Entities;
+using JobPortal.Domain.Entities.CareerAccelerator;
 using JobPortal.Domain.Enums;
 using JobPortal.Persistence.Context;
 using JobPortal.Persistence.Repositories;
@@ -16,6 +17,30 @@ public sealed class PublicJobSearchTests
 {
     private static readonly DateTime Now =
         new(2026, 8, 2, 6, 0, 0, DateTimeKind.Utc);
+
+    [Fact]
+    public async Task CanonicalMarketFiltersUseActiveMappingsWithinExistingPublicJobSearch()
+    {
+        await using var fixture = await SearchFixture.CreateAsync();
+        var skill = fixture.Context.Skills.Single();
+        var marketSkill = new MarketSkill { Skill = skill, SkillId = skill.Id,
+            Slug = "c-sharp", Category = "Engineering" };
+        var marketRole = new MarketRole { Name = "Backend Developer",
+            NormalizedName = "BACKEND DEVELOPER", Slug = "backend-developer", Family = "Engineering" };
+        fixture.Context.MarketSkills.Add(marketSkill);
+        fixture.Context.MarketRoles.Add(marketRole);
+        fixture.Context.MarketJobSkills.AddRange(
+            new MarketJobSkill { JobId = fixture.Featured.Id, MarketSkill = marketSkill },
+            new MarketJobSkill { JobId = fixture.Latest.Id, MarketSkill = marketSkill,
+                IsDeleted = true, DeletedAtUtc = Now });
+        fixture.Context.MarketJobRoles.Add(new MarketJobRole { JobId = fixture.Featured.Id,
+            MarketRole = marketRole, IsPrimary = true });
+        await fixture.Context.SaveChangesAsync();
+        var bySkill = await fixture.Repository.SearchAsync(new(MarketSkillId: marketSkill.Id));
+        var byRole = await fixture.Repository.SearchAsync(new(MarketRoleId: marketRole.Id));
+        Assert.Equal(fixture.Featured.Id, Assert.Single(bySkill.Items).Id);
+        Assert.Equal(fixture.Featured.Id, Assert.Single(byRole.Items).Id);
+    }
 
     [Theory]
     [InlineData("Frontend Developer")]

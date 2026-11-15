@@ -10,6 +10,10 @@ public sealed record TutorContext(string Version, string Json, int TokenEstimate
 public sealed record TutorProviderRequest(Guid DispatchId, Guid ReservationId, string IdempotencyKey, AcceleratorTutorMode Mode, TutorContext Context, string CandidateContent, int MaxOutputTokens);
 public sealed record TutorProviderResult(string Content, string ProviderRequestId, string Model, int InputTokens, int OutputTokens, decimal EstimatedCostInr);
 public sealed record TutorDispatchVerification(AcceleratorDispatchVerificationStatus Status, string? ProviderRequestId, string? Content, string? Model, int? InputTokens, int? OutputTokens, decimal? EstimatedCostInr, string? ErrorCode);
+public sealed record PracticeResultResponse(Guid SessionId, AcceleratorPracticeStatus Status, int QuestionCount, int AnsweredCount, int CorrectCount, decimal ScorePercent, IReadOnlyList<PracticeEvaluationResponse> Evaluations);
+public sealed record PracticeRecommendationResponse(Guid CompetencyId, AcceleratorPracticeDifficulty RecommendedDifficulty, string Reason, int AttemptCount, decimal AccuracyPercent);
+public sealed record ReconciliationBatchResult(int Examined, int Resolved, int Pending, int ManualReview);
+public sealed record DispatchAdminResponse(Guid Id, Guid UserId, Guid ReservationId, AcceleratorAiDispatchStatus Status, int Attempts, bool RequiresManualReview, string? ManualReviewReason, DateTime? NextReconciliationAtUtc);
 public sealed record StartPracticeSessionRequest(Guid RequestKey, Guid GoalId, Guid CompetencyId, Guid? RoadmapNodeId, AcceleratorPracticeDifficulty Difficulty, AcceleratorPracticeQuestionType QuestionType);
 public sealed record PracticeQuestionResponse(Guid Id, int Sequence, string Prompt, string PublicOptionsJson, AcceleratorPracticeQuestionType Type, AcceleratorPracticeDifficulty Difficulty);
 public sealed record PracticeSessionResponse(Guid Id, AcceleratorPracticeStatus Status, AcceleratorPracticeDifficulty Difficulty, AcceleratorPracticeQuestionType QuestionType, IReadOnlyList<PracticeQuestionResponse> Questions);
@@ -37,6 +41,9 @@ public interface IAcceleratorPhase3Store
     Task<AcceleratorTutorConversation?> ConversationByKeyAsync(Guid userId, Guid requestKey, CancellationToken ct);
     Task<IReadOnlyList<AcceleratorTutorConversation>> ConversationsAsync(Guid userId, int skip, int take, CancellationToken ct);
     Task<IReadOnlyList<AcceleratorTutorMessage>> MessagesAsync(Guid userId, Guid conversationId, int take, CancellationToken ct);
+    Task<IReadOnlyList<AcceleratorPracticeSession>> PracticeSessionsAsync(Guid userId, int skip, int take, CancellationToken ct);
+    Task<AcceleratorAiDispatchRecord?> DispatchAsync(Guid id, CancellationToken ct);
+    Task<bool> UpdateClaimedDispatchAsync(AcceleratorAiDispatchRecord record, Guid claimId, CancellationToken ct);
     Task<AcceleratorPracticeSession?> PracticeSessionAsync(Guid userId, Guid id, CancellationToken ct);
     Task<AcceleratorPracticeSession?> PracticeSessionByKeyAsync(Guid userId, Guid requestKey, CancellationToken ct);
     Task<AcceleratorPracticeQuestion?> PracticeQuestionAsync(Guid userId, Guid sessionId, Guid questionId, CancellationToken ct);

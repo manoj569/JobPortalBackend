@@ -142,6 +142,10 @@ builder.Services.AddOutputCache(options =>
 });
 builder.Services.AddHostedService<JobExpiryHostedService>();
 builder.Services.AddHostedService<AcceleratorMaintenanceHostedService>();
+builder.Services.AddHostedService<AcceleratorReconciliationHostedService>();
+builder.Services.AddHostedService<AcceleratorPaymentReconciliationHostedService>();
+builder.Services.AddHostedService<AcceleratorMarketHostedService>();
+builder.Services.AddHostedService<AcceleratorOutreachReconciliationHostedService>();
 builder.Services.AddOptions<JobAggregationOptions>()
     .Bind(builder.Configuration.GetSection(JobAggregationOptions.SectionName))
     .Validate(o => o.Workday.IsValid() && o.Scheduler.MaxConcurrentSources is >= 1 and <= 8,
@@ -342,6 +346,8 @@ builder.Services.AddRateLimiter(options =>
 builder.Services.AddHealthChecks()
     .AddCheck("self", () => HealthCheckResult.Healthy(), tags: ["live"])
     .AddCheck<DatabaseHealthCheck>("database", tags: ["ready"])
+    .AddCheck<AcceleratorConfigurationHealthCheck>("accelerator-configuration", tags: ["ready"])
+    .AddCheck<AcceleratorSchemaHealthCheck>("accelerator-schema", tags: ["ready"])
     .AddCheck<AIApplyWorkerHealthCheck>("ai-apply-worker", tags: ["ready"])
     .AddCheck<AIApplyBrowserHealthCheck>("ai-apply-browser", tags: ["ready"])
     .AddCheck<AIApplyExternalSessionHealthCheck>("ai-apply-external-sessions", tags: ["ready"])

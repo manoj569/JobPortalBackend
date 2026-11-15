@@ -145,6 +145,10 @@ public sealed class MembershipRepository(
 
 public sealed class PaymentRepository(JobPortalDbContext context) : IPaymentRepository
 {
+    public Task<Payment?> GetOwnedByPurchaseRequestKeyAsync(Guid userId, Guid requestKey,
+        CancellationToken cancellationToken = default) => context.Payments
+        .SingleOrDefaultAsync(x => x.UserId == userId && x.PurchaseRequestKey == requestKey,
+            cancellationToken);
     public Task AddAsync(
         Payment payment,
         CancellationToken cancellationToken = default) =>
