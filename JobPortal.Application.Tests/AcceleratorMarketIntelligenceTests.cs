@@ -122,7 +122,8 @@ public sealed class AcceleratorMarketIntelligenceTests
         var taxonomy = Assert.Single(db.AcceleratorTaxonomies);
         Assert.Equal(MarketFoundationTaxonomyPolicy.Version, taxonomy.Version);
         Assert.Equal(2, db.AcceleratorCompetencies.Count());
-        var role = Assert.Single(db.MarketRoles);
+        Assert.Equal(MarketFoundationTaxonomyPolicy.Definitions.Count, db.MarketRoles.Count());
+        var role = db.MarketRoles.Single(x => x.Name == "Data Engineer");
         Assert.Equal("Data Engineer", role.Name);
         Assert.Contains(await store.SkillsAsync(default), x => x.Name == "SQL");
         Assert.Contains(await store.RolesAsync(default), x => x.Id == role.Id);
@@ -169,6 +170,91 @@ public sealed class AcceleratorMarketIntelligenceTests
     }
 
     [Fact]
+    public async Task AcceleratorMarketIntelligenceRepairsSkillsOnlyFoundationWithPolicyRoles()
+    {
+        await using var db = Database();
+        var skill = new Skill { Name = "SQL", NormalizedName = "SQL" };
+        var taxonomy = new AcceleratorTaxonomy { Version = MarketFoundationTaxonomyPolicy.Version,
+            ContentHash = "partial-foundation", PublishedAtUtc = DateTime.UtcNow.AddDays(-1) };
+        var competency = new AcceleratorCompetency { Taxonomy = taxonomy, TaxonomyId = taxonomy.Id,
+            Skill = skill, SkillId = skill.Id, SkillNameSnapshot = skill.Name, Description = "Existing",
+            Category = "Market demand", Difficulty = 1, AssessmentMethodsJson = "[\"mcq\"]" };
+        taxonomy.Competencies.Add(competency);
+        var existingMarketSkill = new MarketSkill { Skill = skill, SkillId = skill.Id,
+            Competency = competency, CompetencyId = competency.Id, Slug = "sql-existing",
+            Category = "Market demand", Description = "Existing" };
+        db.AddRange(taxonomy, existingMarketSkill);
+        await db.SaveChangesAsync();
+
+        var store = new MarketIntelligenceStore(db);
+        await store.BootstrapTaxonomyAsync(DateTime.UtcNow, default);
+
+        Assert.Single(db.AcceleratorTaxonomies);
+        Assert.Empty(db.AcceleratorCareerRoles);
+        Assert.Equal(1, db.MarketSkills.Count());
+        Assert.Equal(MarketFoundationTaxonomyPolicy.Definitions.Count, db.MarketRoles.Count());
+        Assert.Contains(await store.RolesAsync(default), x => x.Name == "Data Engineer");
+        Assert.Equal(1, Assert.Single(db.MarketProcessingCheckpoints).TaxonomyRevision);
+
+        await store.BootstrapTaxonomyAsync(DateTime.UtcNow.AddMinutes(5), default);
+        Assert.Equal(MarketFoundationTaxonomyPolicy.Definitions.Count, db.MarketRoles.Count());
+        Assert.Equal(1, Assert.Single(db.MarketProcessingCheckpoints).TaxonomyRevision);
+    }
+
+    [Fact]
+    public async Task AcceleratorMarketIntelligenceAddsOnlyMissingFoundationRoles()
+    {
+        await using var db = Database();
+        var skill = new Skill { Name = "SQL", NormalizedName = "SQL" };
+        var taxonomy = new AcceleratorTaxonomy { Version = MarketFoundationTaxonomyPolicy.Version,
+            ContentHash = "partial-role-foundation", PublishedAtUtc = DateTime.UtcNow.AddDays(-1) };
+        var competency = new AcceleratorCompetency { Taxonomy = taxonomy, TaxonomyId = taxonomy.Id,
+            Skill = skill, SkillId = skill.Id, SkillNameSnapshot = skill.Name, Description = "Existing",
+            Category = "Market demand", Difficulty = 1, AssessmentMethodsJson = "[\"mcq\"]" };
+        taxonomy.Competencies.Add(competency);
+        var existingRole = new MarketRole { Name = "Data Engineer", NormalizedName = "DATA ENGINEER",
+            Slug = "data-engineer-existing", Family = "Data & AI", Description = "Existing" };
+        db.AddRange(taxonomy, existingRole);
+        await db.SaveChangesAsync();
+
+        await new MarketIntelligenceStore(db).BootstrapTaxonomyAsync(DateTime.UtcNow, default);
+
+        Assert.Equal(MarketFoundationTaxonomyPolicy.Definitions.Count, db.MarketRoles.Count());
+        Assert.Same(existingRole, db.MarketRoles.Single(x => x.Name == "Data Engineer"));
+        Assert.Equal(1, Assert.Single(db.MarketProcessingCheckpoints).TaxonomyRevision);
+    }
+
+    [Fact]
+    public async Task AcceleratorMarketIntelligenceReconciledRoleProducesCareerPathFromActualDemand()
+    {
+        await using var db = Database();
+        var now = DateTime.UtcNow;
+        var company = Company(db, "CareerHarbor");
+        var skill = new Skill { Name = "SQL", NormalizedName = "SQL" };
+        var job = FoundationJob(company, skill, "Data Engineer", JobStatus.Published,
+            now.AddMinutes(-1), null);
+        db.AddRange(skill, job);
+        await db.SaveChangesAsync();
+
+        var store = new MarketIntelligenceStore(db);
+        await store.BootstrapTaxonomyAsync(now, default);
+        var marketSkill = db.MarketSkills.Single(x => x.SkillId == skill.Id);
+        var role = db.MarketRoles.Single(x => x.Name == "Data Engineer");
+        db.MarketJobSkills.Add(new MarketJobSkill { JobId = job.Id, Job = job,
+            MarketSkillId = marketSkill.Id, MarketSkill = marketSkill,
+            Source = MarketMappingSource.StructuredSource, Confidence = 1m,
+            FirstObservedAtUtc = now, LastObservedAtUtc = now });
+        db.MarketJobRoles.Add(new MarketJobRole { JobId = job.Id, Job = job,
+            MarketRoleId = role.Id, MarketRole = role, Source = MarketMappingSource.Alias,
+            Confidence = 1m, IsPrimary = true, ObservedAtUtc = now });
+        await db.SaveChangesAsync();
+
+        var path = Assert.Single(await store.PathsAsync(true, "Data Engineer", null, null,
+            null, null, "MostJobs", 0, 10, now, default), x => x.Id == role.Id);
+        Assert.Equal(1, path.Demand.ActiveJobCount);
+    }
+
+    [Fact]
     public void AcceleratorMarketIntelligenceFoundationRolesPreferPrecisionOverBroadTechnologyTitles()
     {
         Assert.True(MarketFoundationTaxonomyPolicy.TryResolveRole("Senior Data Engineer", out var data));
@@ -189,11 +275,11 @@ public sealed class AcceleratorMarketIntelligenceTests
     public void AcceleratorMarketIntelligenceFoundationAliasPlanDeduplicatesNormalizationVariants()
     {
         var skill = Guid.NewGuid();
-        var plan = MarketFoundationTaxonomyPolicy.PlanSkillAliases(
+        var plan = MarketFoundationTaxonomyPolicy.PlanAliases(
             [new(skill, "ASP.NET Core", ["asp net core", " ASP.NET   Core ", "ASP.NET Core"])], []);
 
         var alias = Assert.Single(plan.Selections);
-        Assert.Equal(skill, alias.SkillId);
+        Assert.Equal(skill, alias.Id);
         Assert.Equal("ASP NET CORE", alias.NormalizedText);
     }
 
@@ -202,12 +288,12 @@ public sealed class AcceleratorMarketIntelligenceTests
     {
         var csharp = Guid.NewGuid();
         var c = Guid.NewGuid();
-        var collision = MarketFoundationTaxonomyPolicy.PlanSkillAliases(
+        var collision = MarketFoundationTaxonomyPolicy.PlanAliases(
             [new(csharp, "C#", []), new(c, "C", [])], []);
         Assert.Empty(collision.Selections);
         Assert.Equal(2, collision.AmbiguousAliasesSkipped);
 
-        var existing = MarketFoundationTaxonomyPolicy.PlanSkillAliases(
+        var existing = MarketFoundationTaxonomyPolicy.PlanAliases(
             [new(csharp, "C#", [])], ["C"]);
         Assert.Empty(existing.Selections);
         Assert.Equal(1, existing.DuplicateAliasesSkipped);
@@ -327,7 +413,8 @@ public sealed class AcceleratorMarketIntelligenceTests
         Assert.Equal("existing-v1", Assert.Single(db.AcceleratorTaxonomies).Version);
         Assert.Equal(competency.Id, Assert.Single(db.AcceleratorCompetencies).Id);
         Assert.DoesNotContain(db.AcceleratorTaxonomies, x => x.Version == MarketFoundationTaxonomyPolicy.Version);
-        Assert.Equal(role.Id, Assert.Single(db.MarketRoles).AcceleratorRoleId);
+        Assert.Equal(MarketFoundationTaxonomyPolicy.Definitions.Count + 1, db.MarketRoles.Count());
+        Assert.Contains(db.MarketRoles, x => x.AcceleratorRoleId == role.Id);
         var revision = Assert.Single(db.MarketProcessingCheckpoints).TaxonomyRevision;
         await new MarketIntelligenceStore(db).BootstrapTaxonomyAsync(DateTime.UtcNow.AddMinutes(5), default);
         Assert.Equal(revision, Assert.Single(db.MarketProcessingCheckpoints).TaxonomyRevision);
@@ -878,7 +965,7 @@ public sealed class AcceleratorMarketIntelligencePostgresTests(WorkdayCheckpoint
             MarketFoundationTaxonomyPolicy.Version).ToArrayAsync());
         Assert.Equal(2, await check.MarketSkills.CountAsync());
         Assert.Equal(0, await check.MarketSkillAliases.CountAsync());
-        Assert.Equal(1, await check.MarketRoles.CountAsync());
+        Assert.Equal(MarketFoundationTaxonomyPolicy.Definitions.Count, await check.MarketRoles.CountAsync());
         Assert.Equal(1, (await check.MarketProcessingCheckpoints.SingleAsync(x =>
             x.Name == "career-accelerator-market-v1")).TaxonomyRevision);
     }

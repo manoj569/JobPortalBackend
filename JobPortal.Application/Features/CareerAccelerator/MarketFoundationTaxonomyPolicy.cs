@@ -54,23 +54,23 @@ public static class MarketFoundationTaxonomyPolicy
         return false;
     }
 
-    public static FoundationSkillAliasPlan PlanSkillAliases(
-        IEnumerable<FoundationSkillAliasCandidate> candidates,
+    public static FoundationAliasPlan PlanAliases(
+        IEnumerable<FoundationAliasCandidate> candidates,
         IEnumerable<string> persistedNormalizedAliases)
     {
         var occupied = persistedNormalizedAliases.ToHashSet(StringComparer.Ordinal);
         var normalized = candidates.SelectMany(candidate => candidate.Aliases
             .Append(candidate.CanonicalName)
-            .Select(text => new AliasCandidate(candidate.SkillId, text,
+            .Select(text => new AliasCandidate(candidate.Id, text,
                 MarketExtractionPolicy.Normalize(text),
                 string.Equals(text, candidate.CanonicalName, StringComparison.Ordinal))))
             .Where(x => x.NormalizedText.Length > 0)
-            .GroupBy(x => new { x.SkillId, x.NormalizedText })
+            .GroupBy(x => new { x.Id, x.NormalizedText })
             .Select(group => group.OrderByDescending(x => x.IsCanonical).ThenBy(x => x.Text,
                 StringComparer.Ordinal).First())
             .ToArray();
 
-        var selected = new List<FoundationSkillAliasSelection>();
+        var selected = new List<FoundationAliasSelection>();
         var duplicateSkipped = 0;
         var ambiguousSkipped = 0;
         foreach (var group in normalized.GroupBy(x => x.NormalizedText, StringComparer.Ordinal))
@@ -89,18 +89,18 @@ public static class MarketFoundationTaxonomyPolicy
                 continue;
             }
             var owner = owners[0];
-            selected.Add(new FoundationSkillAliasSelection(owner.SkillId, owner.Text, owner.NormalizedText));
+            selected.Add(new FoundationAliasSelection(owner.Id, owner.Text, owner.NormalizedText));
         }
         return new(selected, duplicateSkipped, ambiguousSkipped);
     }
 
-    private sealed record AliasCandidate(Guid SkillId, string Text, string NormalizedText, bool IsCanonical);
+    private sealed record AliasCandidate(Guid Id, string Text, string NormalizedText, bool IsCanonical);
 }
 
 public sealed record FoundationRole(string Code, string Name, string Family,
     IReadOnlyList<string> Aliases);
-public sealed record FoundationSkillAliasCandidate(Guid SkillId, string CanonicalName,
+public sealed record FoundationAliasCandidate(Guid Id, string CanonicalName,
     IReadOnlyList<string> Aliases);
-public sealed record FoundationSkillAliasSelection(Guid SkillId, string Text, string NormalizedText);
-public sealed record FoundationSkillAliasPlan(IReadOnlyList<FoundationSkillAliasSelection> Selections,
+public sealed record FoundationAliasSelection(Guid Id, string Text, string NormalizedText);
+public sealed record FoundationAliasPlan(IReadOnlyList<FoundationAliasSelection> Selections,
     int DuplicateAliasesSkipped, int AmbiguousAliasesSkipped);

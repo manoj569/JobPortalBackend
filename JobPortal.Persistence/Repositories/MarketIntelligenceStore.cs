@@ -73,7 +73,7 @@ public sealed partial class MarketIntelligenceStore(JobPortalDbContext db,
             { market.CompetencyId = current.Id; market.Revision = Guid.NewGuid(); }
         }
         var proposedSkills = competencies.Where(x => !knownSkills.Contains(x.SkillId)).ToArray();
-        var candidateAliases = proposedSkills.Select(x => new FoundationSkillAliasCandidate(x.SkillId,
+        var candidateAliases = proposedSkills.Select(x => new FoundationAliasCandidate(x.SkillId,
             x.Skill.Name, Array.Empty<string>())).ToArray();
         var candidateNormalized = candidateAliases.SelectMany(x => x.Aliases.Append(x.CanonicalName))
             .Select(MarketExtractionPolicy.Normalize).Where(x => x.Length > 0).Distinct(StringComparer.Ordinal)
@@ -81,8 +81,8 @@ public sealed partial class MarketIntelligenceStore(JobPortalDbContext db,
         var persistedAliases = candidateNormalized.Length == 0 ? [] : await db.MarketSkillAliases.AsNoTracking()
             .Where(x => !x.IsDeleted && candidateNormalized.Contains(x.NormalizedText))
             .Select(x => x.NormalizedText).ToArrayAsync(ct);
-        var aliasPlan = MarketFoundationTaxonomyPolicy.PlanSkillAliases(candidateAliases, persistedAliases);
-        var aliasesBySkill = aliasPlan.Selections.ToLookup(x => x.SkillId);
+        var aliasPlan = MarketFoundationTaxonomyPolicy.PlanAliases(candidateAliases, persistedAliases);
+        var aliasesBySkill = aliasPlan.Selections.ToLookup(x => x.Id);
         foreach (var competency in proposedSkills)
         {
             var market = new MarketSkill { SkillId = competency.SkillId, CompetencyId = competency.Id,
@@ -96,9 +96,15 @@ public sealed partial class MarketIntelligenceStore(JobPortalDbContext db,
         if (logger is not null && proposedSkills.Length > 0)
             FoundationAliasesReconciled(logger, proposedSkills.Length, aliasPlan.Selections.Count,
                 aliasPlan.DuplicateAliasesSkipped, aliasPlan.AmbiguousAliasesSkipped);
-        var roleNames = roles.Select(x => MarketExtractionPolicy.Normalize(x.Name)).ToArray();
-        var existingRoles = await db.MarketRoles.Where(x => roleNames.Contains(x.NormalizedName)).ToArrayAsync(ct);
+        var foundationsByCode = MarketFoundationTaxonomyPolicy.Definitions
+            .ToDictionary(x => x.Code, StringComparer.Ordinal);
+        var roleNames = roles.Select(x => MarketExtractionPolicy.Normalize(x.Name))
+            .Concat(MarketFoundationTaxonomyPolicy.Definitions.Select(x =>
+                MarketExtractionPolicy.Normalize(x.Name))).Distinct(StringComparer.Ordinal).ToArray();
+        var existingRoles = await db.MarketRoles.Where(x => !x.IsDeleted &&
+            roleNames.Contains(x.NormalizedName)).ToArrayAsync(ct);
         var rolesByName = existingRoles.ToDictionary(x => x.NormalizedName, StringComparer.Ordinal);
+        var proposedRoles = new List<(MarketRole Role, FoundationRole? Foundation)>();
         foreach (var role in roles)
         {
             var normalizedName = MarketExtractionPolicy.Normalize(role.Name);
@@ -108,21 +114,48 @@ public sealed partial class MarketIntelligenceStore(JobPortalDbContext db,
                 { existing.AcceleratorRoleId = role.Id; existing.Revision = Guid.NewGuid(); }
                 continue;
             }
-            var foundation = MarketFoundationTaxonomyPolicy.Definitions
-                .SingleOrDefault(x => x.Code == role.Code);
+            foundationsByCode.TryGetValue(role.Code, out var foundation);
             var market = new MarketRole { AcceleratorRoleId = role.Id, Name = role.Name,
                 NormalizedName = normalizedName, Slug = Slug(role.Name, role.Id),
                 Family = foundation?.Family ?? "Other", Description = role.Description, CreatedAtUtc = nowUtc };
             db.MarketRoles.Add(market);
             rolesByName.Add(normalizedName, market);
-            db.MarketRoleAliases.Add(new MarketRoleAlias { MarketRole = market, Text = role.Name,
-                NormalizedText = market.NormalizedName, CreatedAtUtc = nowUtc });
-            if (foundation is not null)
-                foreach (var alias in foundation.Aliases.Where(x =>
-                    MarketExtractionPolicy.Normalize(x) != market.NormalizedName))
-                    db.MarketRoleAliases.Add(new MarketRoleAlias { MarketRole = market, Text = alias,
-                        NormalizedText = MarketExtractionPolicy.Normalize(alias), CreatedAtUtc = nowUtc });
+            proposedRoles.Add((market, foundation));
         }
+        // Market roles are an approved policy catalog. They can safely exist without an
+        // Accelerator career-role link; real job mappings, not catalog creation, supply
+        // demand. This repairs foundations created during an earlier skills-only cycle.
+        foreach (var foundation in MarketFoundationTaxonomyPolicy.Definitions.Where(x =>
+            !roles.Any(role => role.Code == x.Code)))
+        {
+            var normalizedName = MarketExtractionPolicy.Normalize(foundation.Name);
+            if (rolesByName.ContainsKey(normalizedName)) continue;
+            var market = new MarketRole { Name = foundation.Name, NormalizedName = normalizedName,
+                Family = foundation.Family,
+                Description = "Canonical role governed by the approved Market Intelligence policy.",
+                CreatedAtUtc = nowUtc };
+            market.Slug = Slug(foundation.Name, market.Id);
+            db.MarketRoles.Add(market);
+            rolesByName.Add(normalizedName, market);
+            proposedRoles.Add((market, foundation));
+        }
+        var roleAliasCandidates = proposedRoles.Select(x => new FoundationAliasCandidate(x.Role.Id,
+            x.Role.Name, x.Foundation?.Aliases ?? Array.Empty<string>())).ToArray();
+        var roleAliasNormalized = roleAliasCandidates.SelectMany(x => x.Aliases.Append(x.CanonicalName))
+            .Select(MarketExtractionPolicy.Normalize).Where(x => x.Length > 0).Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var persistedRoleAliases = roleAliasNormalized.Length == 0 ? [] : await db.MarketRoleAliases.AsNoTracking()
+            .Where(x => !x.IsDeleted && roleAliasNormalized.Contains(x.NormalizedText))
+            .Select(x => x.NormalizedText).ToArrayAsync(ct);
+        var roleAliasPlan = MarketFoundationTaxonomyPolicy.PlanAliases(roleAliasCandidates, persistedRoleAliases);
+        var aliasesByRole = roleAliasPlan.Selections.ToLookup(x => x.Id);
+        foreach (var proposed in proposedRoles)
+            foreach (var alias in aliasesByRole[proposed.Role.Id])
+                db.MarketRoleAliases.Add(new MarketRoleAlias { MarketRole = proposed.Role,
+                    Text = alias.Text, NormalizedText = alias.NormalizedText, CreatedAtUtc = nowUtc });
+        if (logger is not null && proposedRoles.Count > 0)
+            FoundationRolesReconciled(logger, proposedRoles.Count, roleAliasPlan.Selections.Count,
+                roleAliasPlan.DuplicateAliasesSkipped, roleAliasPlan.AmbiguousAliasesSkipped);
         if (db.ChangeTracker.HasChanges())
         {
             var checkpoint = await db.MarketProcessingCheckpoints.SingleOrDefaultAsync(
@@ -477,5 +510,9 @@ public sealed partial class MarketIntelligenceStore(JobPortalDbContext db,
     [LoggerMessage(8856, LogLevel.Information,
         "Market foundation reconciled {SkillsCreated} skills and {AliasesCreated} aliases; skipped {DuplicateAliasesSkipped} existing aliases and {AmbiguousAliasesSkipped} ambiguous aliases.")]
     private static partial void FoundationAliasesReconciled(ILogger logger, int skillsCreated,
+        int aliasesCreated, int duplicateAliasesSkipped, int ambiguousAliasesSkipped);
+    [LoggerMessage(8857, LogLevel.Information,
+        "Market foundation reconciled {RolesCreated} roles and {AliasesCreated} role aliases; skipped {DuplicateAliasesSkipped} existing aliases and {AmbiguousAliasesSkipped} ambiguous aliases.")]
+    private static partial void FoundationRolesReconciled(ILogger logger, int rolesCreated,
         int aliasesCreated, int duplicateAliasesSkipped, int ambiguousAliasesSkipped);
 }
