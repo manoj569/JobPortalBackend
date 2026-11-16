@@ -23,15 +23,27 @@ public sealed partial class MarketIntelligenceService(IMarketIntelligenceStore s
         if (!settings.IsValid()) throw new InvalidOperationException("Invalid market intelligence configuration.");
         var timer = Stopwatch.StartNew();
         var limit = Math.Clamp(batchSize ?? settings.BatchSize, 1, 200);
+        // Taxonomy must be available before a checkpoint lease is acquired. Otherwise a
+        // fresh installation could mark real jobs as processed without any public paths.
+        await store.BootstrapTaxonomyAsync(Now, ct);
+        var skills = await store.SkillsAsync(ct);
+        var roles = await store.RolesAsync(ct);
+        if (skills.Count == 0)
+        {
+            NoCanonicalTerms(logger, roles.Count);
+            return new(0, 0, 0, 0, 0);
+        }
         var batch = await store.NextJobsAsync(limit, ct);
-        if (batch.Count == 0) return new(0, 0, 0, 0, 0);
+        if (batch.Count == 0)
+        {
+            NoJobsSelected(logger, skills.Count, roles.Count);
+            return new(0, 0, 0, 0, 0);
+        }
+        BatchSelected(logger, batch.Count, skills.Count, roles.Count);
         var processed = 0; var skillsMapped = 0; var rolesMapped = 0;
         var unknownSkills = 0; var unknownRoles = 0;
         try
         {
-            await store.BootstrapTaxonomyAsync(Now, ct);
-            var skills = await store.SkillsAsync(ct);
-            var roles = await store.RolesAsync(ct);
             foreach (var job in batch)
             {
                 ct.ThrowIfCancellationRequested();
@@ -247,4 +259,13 @@ public sealed partial class MarketIntelligenceService(IMarketIntelligenceStore s
         "Market batch processed {Jobs} jobs, {Skills} skills, {Roles} roles, {UnknownSkills} skill candidates and {UnknownRoles} role candidates in {ElapsedMilliseconds} ms.")]
     private static partial void BatchProcessed(ILogger logger, int jobs, int skills, int roles,
         int unknownSkills, int unknownRoles, long elapsedMilliseconds);
+    [LoggerMessage(8853, LogLevel.Information,
+        "Market batch selected {Jobs} jobs using {Skills} canonical skills and {Roles} canonical roles.")]
+    private static partial void BatchSelected(ILogger logger, int jobs, int skills, int roles);
+    [LoggerMessage(8854, LogLevel.Warning,
+        "Market processing skipped because no canonical skills are available; {Roles} canonical roles exist.")]
+    private static partial void NoCanonicalTerms(ILogger logger, int roles);
+    [LoggerMessage(8855, LogLevel.Information,
+        "Market processing selected no jobs; {Skills} canonical skills and {Roles} canonical roles are available.")]
+    private static partial void NoJobsSelected(ILogger logger, int skills, int roles);
 }
