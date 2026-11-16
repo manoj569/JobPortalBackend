@@ -8,12 +8,14 @@ using JobPortal.Domain.Entities.CareerAccelerator;
 using JobPortal.Domain.Enums;
 using JobPortal.Persistence.Context;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace JobPortal.Persistence.Repositories;
 
 public sealed partial class MarketIntelligenceStore(JobPortalDbContext db,
-    IOptions<MarketIntelligenceOptions>? options = null) : IMarketIntelligenceStore
+    IOptions<MarketIntelligenceOptions>? options = null,
+    ILogger<MarketIntelligenceStore>? logger = null) : IMarketIntelligenceStore
 {
     private readonly Guid owner = Guid.NewGuid();
     private readonly MarketIntelligenceOptions settings = options?.Value ?? new();
@@ -70,16 +72,30 @@ public sealed partial class MarketIntelligenceStore(JobPortalDbContext db,
             if (market.CompetencyId != current.Id)
             { market.CompetencyId = current.Id; market.Revision = Guid.NewGuid(); }
         }
-        foreach (var competency in competencies.Where(x => !knownSkills.Contains(x.SkillId)))
+        var proposedSkills = competencies.Where(x => !knownSkills.Contains(x.SkillId)).ToArray();
+        var candidateAliases = proposedSkills.Select(x => new FoundationSkillAliasCandidate(x.SkillId,
+            x.Skill.Name, Array.Empty<string>())).ToArray();
+        var candidateNormalized = candidateAliases.SelectMany(x => x.Aliases.Append(x.CanonicalName))
+            .Select(MarketExtractionPolicy.Normalize).Where(x => x.Length > 0).Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var persistedAliases = candidateNormalized.Length == 0 ? [] : await db.MarketSkillAliases.AsNoTracking()
+            .Where(x => !x.IsDeleted && candidateNormalized.Contains(x.NormalizedText))
+            .Select(x => x.NormalizedText).ToArrayAsync(ct);
+        var aliasPlan = MarketFoundationTaxonomyPolicy.PlanSkillAliases(candidateAliases, persistedAliases);
+        var aliasesBySkill = aliasPlan.Selections.ToLookup(x => x.SkillId);
+        foreach (var competency in proposedSkills)
         {
             var market = new MarketSkill { SkillId = competency.SkillId, CompetencyId = competency.Id,
                 Slug = Slug(competency.Skill.Name, competency.SkillId), Category = competency.Category,
                 Description = competency.Description, CreatedAtUtc = nowUtc };
             db.MarketSkills.Add(market);
-            db.MarketSkillAliases.Add(new MarketSkillAlias { MarketSkill = market,
-                Text = competency.Skill.Name, NormalizedText = MarketExtractionPolicy.Normalize(competency.Skill.Name),
-                CreatedAtUtc = nowUtc });
+            foreach (var alias in aliasesBySkill[competency.SkillId])
+                db.MarketSkillAliases.Add(new MarketSkillAlias { MarketSkill = market,
+                    Text = alias.Text, NormalizedText = alias.NormalizedText, CreatedAtUtc = nowUtc });
         }
+        if (logger is not null && proposedSkills.Length > 0)
+            FoundationAliasesReconciled(logger, proposedSkills.Length, aliasPlan.Selections.Count,
+                aliasPlan.DuplicateAliasesSkipped, aliasPlan.AmbiguousAliasesSkipped);
         var roleNames = roles.Select(x => MarketExtractionPolicy.Normalize(x.Name)).ToArray();
         var existingRoles = await db.MarketRoles.Where(x => roleNames.Contains(x.NormalizedName)).ToArrayAsync(ct);
         var rolesByName = existingRoles.ToDictionary(x => x.NormalizedName, StringComparer.Ordinal);
@@ -457,4 +473,9 @@ public sealed partial class MarketIntelligenceStore(JobPortalDbContext db,
 
     private static string Slug(string text, Guid id) =>
         $"{MarketExtractionPolicy.Normalize(text).Replace(' ', '-').ToLowerInvariant()}-{id.ToString("N")[..8]}";
+
+    [LoggerMessage(8856, LogLevel.Information,
+        "Market foundation reconciled {SkillsCreated} skills and {AliasesCreated} aliases; skipped {DuplicateAliasesSkipped} existing aliases and {AmbiguousAliasesSkipped} ambiguous aliases.")]
+    private static partial void FoundationAliasesReconciled(ILogger logger, int skillsCreated,
+        int aliasesCreated, int duplicateAliasesSkipped, int ambiguousAliasesSkipped);
 }

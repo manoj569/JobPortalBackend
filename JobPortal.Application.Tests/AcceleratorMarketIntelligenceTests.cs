@@ -186,6 +186,76 @@ public sealed class AcceleratorMarketIntelligenceTests
     }
 
     [Fact]
+    public void AcceleratorMarketIntelligenceFoundationAliasPlanDeduplicatesNormalizationVariants()
+    {
+        var skill = Guid.NewGuid();
+        var plan = MarketFoundationTaxonomyPolicy.PlanSkillAliases(
+            [new(skill, "ASP.NET Core", ["asp net core", " ASP.NET   Core ", "ASP.NET Core"])], []);
+
+        var alias = Assert.Single(plan.Selections);
+        Assert.Equal(skill, alias.SkillId);
+        Assert.Equal("ASP NET CORE", alias.NormalizedText);
+    }
+
+    [Fact]
+    public void AcceleratorMarketIntelligenceFoundationAliasPlanSkipsAmbiguousAndPersistedOwnership()
+    {
+        var csharp = Guid.NewGuid();
+        var c = Guid.NewGuid();
+        var collision = MarketFoundationTaxonomyPolicy.PlanSkillAliases(
+            [new(csharp, "C#", []), new(c, "C", [])], []);
+        Assert.Empty(collision.Selections);
+        Assert.Equal(2, collision.AmbiguousAliasesSkipped);
+
+        var existing = MarketFoundationTaxonomyPolicy.PlanSkillAliases(
+            [new(csharp, "C#", [])], ["C"]);
+        Assert.Empty(existing.Selections);
+        Assert.Equal(1, existing.DuplicateAliasesSkipped);
+    }
+
+    [Fact]
+    public async Task AcceleratorMarketIntelligenceBootstrapSkipsPunctuationCollisionInsteadOfViolatingAliasIndex()
+    {
+        await using var db = Database();
+        var company = Company(db, "CareerHarbor");
+        var csharp = new Skill { Name = "C#", NormalizedName = "C#" };
+        var c = new Skill { Name = "C", NormalizedName = "C" };
+        var job = new Job { Title = "Data Engineer", Company = company, CompanyId = company.Id,
+            Status = JobStatus.Published, PublishedAtUtc = DateTime.UtcNow.AddMinutes(-1) };
+        job.JobSkills.Add(new JobSkill { Job = job, JobId = job.Id, Skill = csharp, SkillId = csharp.Id });
+        job.JobSkills.Add(new JobSkill { Job = job, JobId = job.Id, Skill = c, SkillId = c.Id });
+        db.AddRange(csharp, c, job);
+        await db.SaveChangesAsync();
+
+        await new MarketIntelligenceStore(db).BootstrapTaxonomyAsync(DateTime.UtcNow, default);
+
+        Assert.Equal(2, db.MarketSkills.Count());
+        Assert.Empty(db.MarketSkillAliases);
+    }
+
+    [Fact]
+    public async Task AcceleratorMarketIntelligenceBootstrapDoesNotTakeAnExistingAliasFromAnotherSkill()
+    {
+        await using var db = Database();
+        var company = Company(db, "CareerHarbor");
+        var existingSkill = new Skill { Name = "Existing C", NormalizedName = "EXISTING C" };
+        var existingMarket = new MarketSkill { Skill = existingSkill, SkillId = existingSkill.Id,
+            Slug = "existing-c", Category = "Existing", Description = "Existing" };
+        db.MarketSkillAliases.Add(new MarketSkillAlias { MarketSkill = existingMarket,
+            Text = "C", NormalizedText = "C" });
+        var csharp = new Skill { Name = "C#", NormalizedName = "C#" };
+        var job = FoundationJob(company, csharp, "Data Engineer", JobStatus.Published,
+            DateTime.UtcNow.AddMinutes(-1), null);
+        db.AddRange(existingSkill, csharp, job);
+        await db.SaveChangesAsync();
+
+        await new MarketIntelligenceStore(db).BootstrapTaxonomyAsync(DateTime.UtcNow, default);
+
+        Assert.Equal(existingMarket.Id, Assert.Single(db.MarketSkillAliases).MarketSkillId);
+        Assert.Contains(db.MarketSkills, x => x.SkillId == csharp.Id);
+    }
+
+    [Fact]
     public async Task AcceleratorMarketIntelligenceBootstrapRequiresActivePublishedDemand()
     {
         await using var db = Database();
@@ -773,7 +843,11 @@ public sealed class AcceleratorMarketIntelligencePostgresTests(WorkdayCheckpoint
         {
             var company = new Company { Name = "Market bootstrap " + Guid.NewGuid().ToString("N"),
                 NormalizedName = "MARKET BOOTSTRAP " + Guid.NewGuid().ToString("N") };
-            var skill = new Skill { Name = "Bootstrap SQL", NormalizedName = "BOOTSTRAP SQL" };
+            // The market normalizer deliberately collapses both names to "C". This
+            // exercises the actual PostgreSQL unique alias index under concurrent,
+            // retry-enabled bootstrap callers.
+            var csharp = new Skill { Name = "C#", NormalizedName = "C#" };
+            var c = new Skill { Name = "C", NormalizedName = "C" };
             var job = new Job
             {
                 ReferenceNumber = "market-bootstrap-" + Guid.NewGuid().ToString("N"),
@@ -782,8 +856,9 @@ public sealed class AcceleratorMarketIntelligencePostgresTests(WorkdayCheckpoint
                 Company = company, CompanyId = company.Id, Status = JobStatus.Published,
                 PublishedAtUtc = now.AddMinutes(-1)
             };
-            job.JobSkills.Add(new JobSkill { Job = job, JobId = job.Id, Skill = skill, SkillId = skill.Id });
-            setup.AddRange(company, skill, job);
+            job.JobSkills.Add(new JobSkill { Job = job, JobId = job.Id, Skill = csharp, SkillId = csharp.Id });
+            job.JobSkills.Add(new JobSkill { Job = job, JobId = job.Id, Skill = c, SkillId = c.Id });
+            setup.AddRange(company, csharp, c, job);
             await setup.SaveChangesAsync();
         }
 
@@ -801,7 +876,8 @@ public sealed class AcceleratorMarketIntelligencePostgresTests(WorkdayCheckpoint
         await using var check = database.Open();
         Assert.Single(await check.AcceleratorTaxonomies.Where(x => x.Version ==
             MarketFoundationTaxonomyPolicy.Version).ToArrayAsync());
-        Assert.Equal(1, await check.MarketSkills.CountAsync());
+        Assert.Equal(2, await check.MarketSkills.CountAsync());
+        Assert.Equal(0, await check.MarketSkillAliases.CountAsync());
         Assert.Equal(1, await check.MarketRoles.CountAsync());
         Assert.Equal(1, (await check.MarketProcessingCheckpoints.SingleAsync(x =>
             x.Name == "career-accelerator-market-v1")).TaxonomyRevision);
