@@ -30,10 +30,17 @@ public sealed partial class MarketIntelligenceStore(JobPortalDbContext db,
             await BootstrapTaxonomyCoreAsync(nowUtc, ct);
             return;
         }
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
-        await db.Database.ExecuteSqlRawAsync("SELECT pg_advisory_xact_lock(82419731)", ct);
-        await BootstrapTaxonomyCoreAsync(nowUtc, ct);
-        await transaction.CommitAsync(ct);
+        await db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            // A transient error can cause this delegate to run again. Detaching state
+            // left by a failed attempt makes the database rows, protected by the lock,
+            // the sole source of truth for the next idempotent attempt.
+            db.ChangeTracker.Clear();
+            await using var transaction = await db.Database.BeginTransactionAsync(ct);
+            await db.Database.ExecuteSqlRawAsync("SELECT pg_advisory_xact_lock(82419731)", ct);
+            await BootstrapTaxonomyCoreAsync(nowUtc, ct);
+            await transaction.CommitAsync(ct);
+        });
     }
 
     private async Task BootstrapTaxonomyCoreAsync(DateTime nowUtc, CancellationToken ct)

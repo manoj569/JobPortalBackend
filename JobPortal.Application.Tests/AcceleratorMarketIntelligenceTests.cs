@@ -761,3 +761,58 @@ public sealed class AcceleratorMarketIntelligenceTests
         return job;
     }
 }
+
+public sealed class AcceleratorMarketIntelligencePostgresTests(WorkdayCheckpointDatabase database)
+    : IClassFixture<WorkdayCheckpointDatabase>
+{
+    [MarketLocalPostgresFact]
+    public async Task ConcurrentBootstrapWithRetryStrategyCreatesOneFoundationAndOneRevision()
+    {
+        var now = DateTime.UtcNow;
+        await using (var setup = database.Open())
+        {
+            var company = new Company { Name = "Market bootstrap " + Guid.NewGuid().ToString("N"),
+                NormalizedName = "MARKET BOOTSTRAP " + Guid.NewGuid().ToString("N") };
+            var skill = new Skill { Name = "Bootstrap SQL", NormalizedName = "BOOTSTRAP SQL" };
+            var job = new Job
+            {
+                ReferenceNumber = "market-bootstrap-" + Guid.NewGuid().ToString("N"),
+                Title = "Data Engineer", Slug = "market-bootstrap-" + Guid.NewGuid().ToString("N"),
+                Description = "Disposable market bootstrap fixture", ApplicationUrl = "https://example.test/apply",
+                Company = company, CompanyId = company.Id, Status = JobStatus.Published,
+                PublishedAtUtc = now.AddMinutes(-1)
+            };
+            job.JobSkills.Add(new JobSkill { Job = job, JobId = job.Id, Skill = skill, SkillId = skill.Id });
+            setup.AddRange(company, skill, job);
+            await setup.SaveChangesAsync();
+        }
+
+        Task BootstrapAsync() => Task.Run(async () =>
+        {
+            var options = new DbContextOptionsBuilder<JobPortalDbContext>().UseNpgsql(database.Connection,
+                postgres => postgres.EnableRetryOnFailure(3)).Options;
+            await using var context = new JobPortalDbContext(options);
+            Assert.True(context.Database.CreateExecutionStrategy().RetriesOnFailure);
+            await new MarketIntelligenceStore(context).BootstrapTaxonomyAsync(now, default);
+        });
+
+        await Task.WhenAll(BootstrapAsync(), BootstrapAsync());
+
+        await using var check = database.Open();
+        Assert.Single(await check.AcceleratorTaxonomies.Where(x => x.Version ==
+            MarketFoundationTaxonomyPolicy.Version).ToArrayAsync());
+        Assert.Equal(1, await check.MarketSkills.CountAsync());
+        Assert.Equal(1, await check.MarketRoles.CountAsync());
+        Assert.Equal(1, (await check.MarketProcessingCheckpoints.SingleAsync(x =>
+            x.Name == "career-accelerator-market-v1")).TaxonomyRevision);
+    }
+
+    private sealed class MarketLocalPostgresFactAttribute : FactAttribute
+    {
+        public MarketLocalPostgresFactAttribute()
+        {
+            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("WORKDAY_CHECKPOINT_TEST_POSTGRES")))
+                Skip = "Requires explicitly disposable localhost careerharbor_workday_test PostgreSQL; never uses API/Neon configuration.";
+        }
+    }
+}
