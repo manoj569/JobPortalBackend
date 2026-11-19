@@ -1,42 +1,62 @@
 using FluentValidation;
 using JobPortal.Application.Abstractions.AdminApplications;
-using JobPortal.Application.Abstractions.AIApply;
 using JobPortal.Application.Abstractions.AdminDashboard;
 using JobPortal.Application.Abstractions.AdminImports;
 using JobPortal.Application.Abstractions.AdminManagement;
+using JobPortal.Application.Abstractions.AIApply;
 using JobPortal.Application.Abstractions.Auditing;
 using JobPortal.Application.Abstractions.Authentication;
-using JobPortal.Application.Abstractions.Candidates;
 using JobPortal.Application.Abstractions.CandidateCompanies;
+using JobPortal.Application.Abstractions.CandidateRecruiterVisibility;
+using JobPortal.Application.Abstractions.Candidates;
 using JobPortal.Application.Abstractions.Dashboard;
-using JobPortal.Application.Abstractions.Jobs;
+using JobPortal.Application.Abstractions.EmployerApplications;
+using JobPortal.Application.Abstractions.EmployerCandidateFinder;
+using JobPortal.Application.Abstractions.EmployerCompanies;
+using JobPortal.Application.Abstractions.EmployerInterviews;
+using JobPortal.Application.Abstractions.EmployerJobs;
+using JobPortal.Application.Abstractions.EmployerOffers;
+using JobPortal.Application.Abstractions.EmployerPipeline;
+using JobPortal.Application.Abstractions.EmployerTalentPool;
+using JobPortal.Application.Abstractions.HiringMessaging;
 using JobPortal.Application.Abstractions.InterviewInsights;
+using JobPortal.Application.Abstractions.Jobs;
 using JobPortal.Application.Abstractions.Memberships;
 using JobPortal.Application.Abstractions.Payments;
 using JobPortal.Application.Abstractions.Portfolios;
 using JobPortal.Application.Abstractions.Referrals;
 using JobPortal.Application.Abstractions.Settings;
 using JobPortal.Application.Features.AdminApplications;
-using JobPortal.Application.Features.AIApply;
 using JobPortal.Application.Features.AdminDashboard;
 using JobPortal.Application.Features.AdminImports;
 using JobPortal.Application.Features.AdminManagement;
+using JobPortal.Application.Features.AIApply;
 using JobPortal.Application.Features.Auditing;
 using JobPortal.Application.Features.Authentication;
-using JobPortal.Application.Features.Candidates;
 using JobPortal.Application.Features.CandidateCompanies;
+using JobPortal.Application.Features.CandidateRecruiterVisibility;
+using JobPortal.Application.Features.Candidates;
 using JobPortal.Application.Features.Dashboard;
-using JobPortal.Application.Features.Jobs;
+using JobPortal.Application.Features.EmployerApplications;
+using JobPortal.Application.Features.EmployerCandidateFinder;
+using JobPortal.Application.Features.EmployerCompanies;
+using JobPortal.Application.Features.EmployerInterviews;
+using JobPortal.Application.Features.EmployerJobs;
+using JobPortal.Application.Features.EmployerOffers;
+using JobPortal.Application.Features.EmployerPipeline;
+using JobPortal.Application.Features.EmployerTalentPool;
+using JobPortal.Application.Features.HiringMessaging;
 using JobPortal.Application.Features.InterviewInsights;
+using JobPortal.Application.Features.JobAggregation;
 using JobPortal.Application.Features.JobDiscovery;
+using JobPortal.Application.Features.Jobs;
 using JobPortal.Application.Features.Memberships;
 using JobPortal.Application.Features.Payments;
 using JobPortal.Application.Features.Portfolios;
-using JobPortal.Application.Features.Referrals;
 using JobPortal.Application.Features.PublicJobs;
+using JobPortal.Application.Features.Referrals;
 using JobPortal.Application.Features.Settings;
 using JobPortal.Application.Services;
-using JobPortal.Application.Features.JobAggregation;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace JobPortal.Application;
@@ -141,6 +161,10 @@ public static class ServiceCollectionExtensions
         services.AddScoped<JobPortal.Application.Features.CareerAccelerator.MarketIntelligenceService>();
         services.AddScoped<JobPortal.Application.Features.CareerAccelerator.AcceleratorQuotaService>();
         services.AddScoped<JobPortal.Application.Features.CareerAccelerator.AcceleratorPhase2Service>();
+        services.AddScoped<JobPortal.Application.Features.CareerAccelerator.AcceleratorRecognitionService>();
+        services.AddScoped<JobPortal.Application.Features.CareerAccelerator.AcceleratorJourneyContextService>();
+        services.AddScoped<JobPortal.Application.Features.CareerAccelerator.IAcceleratorRequirementResolver>(provider => provider.GetRequiredService<JobPortal.Application.Features.CareerAccelerator.AcceleratorJourneyContextService>());
+        services.AddScoped<JobPortal.Application.Features.CareerAccelerator.AcceleratorLearningPathService>();
         services.AddScoped<JobPortal.Application.Features.CareerAccelerator.AcceleratorPhase3Service>();
         services.AddScoped<JobPortal.Application.Features.CareerAccelerator.AcceleratorPhase4Service>();
         services.AddScoped<JobPortal.Application.Features.CareerAccelerator.AcceleratorInterviewCatalogService>();
@@ -158,6 +182,40 @@ public static class ServiceCollectionExtensions
             JobPortal.Application.Features.CareerAccelerator.UnavailableAiTutorProvider>();
         services.AddSingleton<JobPortal.Application.Features.CareerAccelerator.IAiTutorDispatchVerifier,
             JobPortal.Application.Features.CareerAccelerator.UnavailableAiTutorProvider>();
+        services.AddScoped<IEmployerCompanyService, EmployerCompanyService>();
+        services.AddScoped<IEmployerJobService, EmployerJobService>();
+        services.AddScoped<
+    IEmployerApplicationService,
+    EmployerApplicationService>();
+        services.AddScoped<
+    IEmployerPipelineService,
+    EmployerPipelineService>();
+        services.AddScoped<
+    IEmployerInterviewService,
+    EmployerInterviewService>();
+        services.AddScoped<
+    IEmployerOfferService,
+    EmployerOfferService>();
+        services.AddScoped<
+    IHiringMessagingService,
+    HiringMessagingService>();
+        services.AddScoped<IEmployerCandidateFinderService, EmployerCandidateFinderService>();
+        services.AddScoped<IValidator<EmployerCandidateFinderQuery>, EmployerCandidateFinderQueryValidator>();
+        services.AddScoped<IEmployerTalentPoolService, EmployerTalentPoolService>();
+
+        services.AddScoped<
+            IValidator<EmployerTalentPoolQuery>,
+            EmployerTalentPoolQueryValidator>();
+
+        services.AddScoped<
+            IValidator<AddEmployerTalentPoolCandidateRequest>,
+            AddEmployerTalentPoolCandidateRequestValidator>();
+
+        services.AddScoped<
+            IValidator<UpdateEmployerTalentPoolNotesRequest>,
+            UpdateEmployerTalentPoolNotesRequestValidator>();
+
+        services.AddScoped<ICandidateRecruiterVisibilityService, CandidateRecruiterVisibilityService>();
         return services;
     }
 }

@@ -23,7 +23,12 @@ public enum EmploymentType { Unknown = 0, FullTime = 1, PartTime, Contract, Inte
 public enum WorkplaceType { Unknown = 0, OnSite = 1, Remote, Hybrid }
 public enum ExperienceLevel { Unknown = 0, Entry = 1, Junior, Mid, Senior, Lead, Executive }
 public enum CompanyType { Startup = 1, Corporate, IndianMnc, ForeignMnc, Consultant }
-public enum CompanySubmissionSource { Administrative = 0, CandidateSubmitted = 1 }
+public enum CompanySubmissionSource
+{
+    Administrative = 0,
+    CandidateSubmitted = 1,
+    EmployerSubmitted = 2
+}
 public enum PostedByType { Company = 1, Consultant }
 public enum PublicJobSort
 {

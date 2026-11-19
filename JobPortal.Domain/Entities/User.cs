@@ -49,6 +49,9 @@ public sealed class User : BaseEntity
     public int? GraduationYear { get; set; }
     public decimal? YearsOfExperience { get; set; }
     public DateTime? OnboardingCompletedAtUtc { get; set; }
+
+    public bool IsRecruiterVisible { get; set; }
+
     public string? ResumeStorageKey { get; set; }
     public string? ResumeFileName { get; set; }
     public string? ResumeContentType { get; set; }

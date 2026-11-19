@@ -16,7 +16,10 @@ public enum AcceleratorDispatchVerificationStatus { VerifiedSuccess = 1, Verifie
 public sealed class AcceleratorTutorConversation : BaseEntity
 {
     public Guid UserId { get; set; }
-    public Guid GoalId { get; set; }
+    public Guid? GoalId { get; set; }
+    public Guid? JourneyContextId { get; set; }
+    public Guid? ModuleId { get; set; }
+    public Guid? LessonId { get; set; }
     public Guid? RoadmapNodeId { get; set; }
     public Guid CompetencyId { get; set; }
     public Guid RequestKey { get; set; }
@@ -63,7 +66,10 @@ public sealed class AcceleratorTutorMemorySummary : BaseEntity
 public sealed class AcceleratorPracticeSession : BaseEntity
 {
     public Guid UserId { get; set; }
-    public Guid GoalId { get; set; }
+    public Guid? GoalId { get; set; }
+    public Guid? JourneyContextId { get; set; }
+    public Guid? ModuleId { get; set; }
+    public Guid? LessonId { get; set; }
     public Guid CompetencyId { get; set; }
     public Guid? RoadmapNodeId { get; set; }
     public Guid RequestKey { get; set; }

@@ -2,9 +2,9 @@ using JobPortal.Domain.Entities.CareerAccelerator;
 
 namespace JobPortal.Application.Features.CareerAccelerator;
 
-public sealed record StartTutorConversationRequest(Guid RequestKey, Guid GoalId, Guid CompetencyId, Guid? RoadmapNodeId, string Topic, string Title);
+public sealed record StartTutorConversationRequest(Guid RequestKey, Guid GoalId, Guid CompetencyId, Guid? RoadmapNodeId, string Topic, string Title, Guid? EnrollmentId = null, Guid? ModuleId = null, Guid? LessonId = null);
 public sealed record SendTutorMessageRequest(Guid RequestKey, AcceleratorTutorMode Mode, string Content);
-public sealed record TutorConversationResponse(Guid Id, Guid GoalId, Guid CompetencyId, Guid? RoadmapNodeId, string Topic, string Title, AcceleratorTutorConversationStatus Status, DateTime LastMessageAtUtc, Guid Revision);
+public sealed record TutorConversationResponse(Guid Id, Guid? GoalId, Guid CompetencyId, Guid? RoadmapNodeId, string Topic, string Title, AcceleratorTutorConversationStatus Status, DateTime LastMessageAtUtc, Guid Revision, Guid? JourneyContextId = null, Guid? ModuleId = null, Guid? LessonId = null);
 public sealed record TutorMessageResponse(Guid Id, AcceleratorTutorMessageRole Role, AcceleratorTutorMessageStatus Status, string Content, string MessageType, DateTime CreatedAtUtc);
 public sealed record TutorContext(string Version, string Json, int TokenEstimate);
 public sealed record TutorProviderRequest(Guid DispatchId, Guid ReservationId, string IdempotencyKey, AcceleratorTutorMode Mode, TutorContext Context, string CandidateContent, int MaxOutputTokens);
@@ -14,9 +14,9 @@ public sealed record PracticeResultResponse(Guid SessionId, AcceleratorPracticeS
 public sealed record PracticeRecommendationResponse(Guid CompetencyId, AcceleratorPracticeDifficulty RecommendedDifficulty, string Reason, int AttemptCount, decimal AccuracyPercent);
 public sealed record ReconciliationBatchResult(int Examined, int Resolved, int Pending, int ManualReview);
 public sealed record DispatchAdminResponse(Guid Id, Guid UserId, Guid ReservationId, AcceleratorAiDispatchStatus Status, int Attempts, bool RequiresManualReview, string? ManualReviewReason, DateTime? NextReconciliationAtUtc);
-public sealed record StartPracticeSessionRequest(Guid RequestKey, Guid GoalId, Guid CompetencyId, Guid? RoadmapNodeId, AcceleratorPracticeDifficulty Difficulty, AcceleratorPracticeQuestionType QuestionType);
+public sealed record StartPracticeSessionRequest(Guid RequestKey, Guid GoalId, Guid CompetencyId, Guid? RoadmapNodeId, AcceleratorPracticeDifficulty Difficulty, AcceleratorPracticeQuestionType QuestionType, Guid? EnrollmentId = null, Guid? ModuleId = null, Guid? LessonId = null);
 public sealed record PracticeQuestionResponse(Guid Id, int Sequence, string Prompt, string PublicOptionsJson, AcceleratorPracticeQuestionType Type, AcceleratorPracticeDifficulty Difficulty);
-public sealed record PracticeSessionResponse(Guid Id, AcceleratorPracticeStatus Status, AcceleratorPracticeDifficulty Difficulty, AcceleratorPracticeQuestionType QuestionType, IReadOnlyList<PracticeQuestionResponse> Questions);
+public sealed record PracticeSessionResponse(Guid Id, AcceleratorPracticeStatus Status, AcceleratorPracticeDifficulty Difficulty, AcceleratorPracticeQuestionType QuestionType, IReadOnlyList<PracticeQuestionResponse> Questions, Guid? JourneyContextId = null, Guid? GoalId = null, Guid? ModuleId = null, Guid? LessonId = null);
 public sealed record SubmitPracticeAnswerRequest(Guid RequestKey, Guid QuestionId, string AnswerJson);
 public sealed record PracticeEvaluationResponse(Guid Id, decimal Score, decimal MaximumScore, string Classification, string Explanation, string SuggestedImprovement, AcceleratorPracticeEvaluationMethod Method, decimal Confidence);
 

@@ -9,11 +9,24 @@ public enum AcceleratorEvidenceSource { SelfReported = 1, ResumeInferred, Assess
 public enum AcceleratorRoadmapStatus { Active = 1, Superseded, Completed, Archived }
 public enum AcceleratorNodeStatus { Locked = 1, Available, InProgress, Completed, NeedsPractice }
 public enum AcceleratorProgressKind { Started = 1, Completed, EvidenceSubmitted, MilestoneCompleted, Rescheduled }
+public enum AcceleratorJourneyScopeType { CareerGoal = 1, LearningPathEnrollment }
+public enum AcceleratorLearningPathAssessmentPurpose { Baseline = 1, Final }
+
+public sealed class AcceleratorJourneyContext : BaseEntity
+{
+    public Guid UserId { get; set; }
+    public AcceleratorJourneyScopeType ScopeType { get; set; }
+    public Guid? CareerGoalId { get; set; }
+    public Guid? LearningPathEnrollmentId { get; set; }
+    public Guid TaxonomyId { get; set; }
+    public Guid Revision { get; set; } = Guid.NewGuid();
+}
 
 public sealed class AcceleratorAssessmentTemplate : BaseEntity
 {
-    public Guid RoleId { get; set; }
-    public AcceleratorCareerRole Role { get; set; } = null!;
+    public Guid? RoleId { get; set; }
+    public AcceleratorCareerRole? Role { get; set; }
+    public Guid? TaxonomyId { get; set; }
     public string Version { get; set; } = string.Empty;
     public string SelectionStrategy { get; set; } = "deterministic-v1";
     public int TimeLimitMinutes { get; set; }
@@ -41,8 +54,9 @@ public sealed class AcceleratorQuestion : BaseEntity
 public sealed class AcceleratorAssessmentAttempt : BaseEntity
 {
     public Guid UserId { get; set; }
-    public Guid GoalId { get; set; }
-    public AcceleratorCareerGoal Goal { get; set; } = null!;
+    public Guid? GoalId { get; set; }
+    public AcceleratorCareerGoal? Goal { get; set; }
+    public Guid? JourneyContextId { get; set; }
     public Guid TemplateId { get; set; }
     public string TemplateVersion { get; set; } = string.Empty;
     public Guid TaxonomyId { get; set; }
@@ -75,7 +89,8 @@ public sealed class AcceleratorAssessmentAnswer : BaseEntity
 public sealed class AcceleratorSkillEvidence : BaseEntity
 {
     public Guid UserId { get; set; }
-    public Guid GoalId { get; set; }
+    public Guid? GoalId { get; set; }
+    public Guid? JourneyContextId { get; set; }
     public Guid CompetencyId { get; set; }
     public AcceleratorEvidenceSource Source { get; set; }
     public AcceleratorProficiency Proficiency { get; set; }
@@ -97,7 +112,8 @@ public sealed class AcceleratorSkillEvidence : BaseEntity
 public sealed class AcceleratorRoadmap : BaseEntity
 {
     public Guid UserId { get; set; }
-    public Guid GoalId { get; set; }
+    public Guid? GoalId { get; set; }
+    public Guid? JourneyContextId { get; set; }
     public int Version { get; set; }
     public AcceleratorRoadmapStatus Status { get; set; }
     public string GenerationStrategy { get; set; } = "deterministic-v1";
@@ -153,11 +169,28 @@ public sealed class AcceleratorProgressEvent : BaseEntity
 public sealed class AcceleratorRecommendation : BaseEntity
 {
     public Guid UserId { get; set; }
-    public Guid GoalId { get; set; }
+    public Guid? GoalId { get; set; }
+    public Guid? JourneyContextId { get; set; }
     public Guid? RoadmapNodeId { get; set; }
     public string Type { get; set; } = string.Empty;
     public string Reason { get; set; } = string.Empty;
     public int Priority { get; set; }
     public string EvidenceJson { get; set; } = "[]";
     public DateTime GeneratedAtUtc { get; set; }
+}
+
+public sealed class AcceleratorLearningPathCompetencyRequirement : BaseEntity
+{
+    public Guid LearningPathId { get; set; }
+    public Guid CompetencyId { get; set; }
+    public int TargetProficiency { get; set; }
+    public decimal Weight { get; set; }
+    public bool IsRequired { get; set; }
+}
+
+public sealed class AcceleratorLearningPathAssessment : BaseEntity
+{
+    public Guid LearningPathId { get; set; }
+    public Guid AssessmentTemplateId { get; set; }
+    public AcceleratorLearningPathAssessmentPurpose Purpose { get; set; }
 }

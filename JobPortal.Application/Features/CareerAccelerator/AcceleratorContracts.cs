@@ -44,12 +44,12 @@ public sealed record CreateAssessmentAttemptRequest(Guid RequestKey, Guid GoalId
 public sealed record SubmitAssessmentAnswerRequest(Guid QuestionId, string AnswerJson);
 public sealed record FinalizeAssessmentRequest(Guid ExpectedRevision);
 public sealed record AssessmentQuestionResponse(Guid Id, int Sequence, string Prompt, string OptionsJson, AcceleratorQuestionType Type, int Difficulty);
-public sealed record AssessmentAttemptResponse(Guid Id, Guid GoalId, AcceleratorAssessmentStatus Status, Guid Revision, DateTime ExpiresAtUtc, decimal? Score, IReadOnlyList<AssessmentQuestionResponse> Questions);
+public sealed record AssessmentAttemptResponse(Guid Id, Guid? GoalId, AcceleratorAssessmentStatus Status, Guid Revision, DateTime ExpiresAtUtc, decimal? Score, IReadOnlyList<AssessmentQuestionResponse> Questions);
 public sealed record SkillGapResponse(Guid CompetencyId, string SkillName, AcceleratorProficiency Current, int Required, int Gap, decimal Confidence);
 public sealed record RoadmapNodeResponse(Guid Id, Guid CompetencyId, string StableKey, int Sequence, AcceleratorNodeStatus Status, int EstimatedMinutes, int ProgressPercent);
 public sealed record RoadmapEdgeResponse(Guid FromNodeId, Guid ToNodeId);
 public sealed record LearningActivityResponse(Guid Id, Guid RoadmapNodeId, string Title, int EstimatedMinutes, DateTime ScheduledAtUtc, AcceleratorNodeStatus Status, Guid Revision);
-public sealed record RoadmapResponse(Guid Id, Guid GoalId, int Version, AcceleratorRoadmapStatus Status, DateTime TargetAtUtc, int EstimatedMinutes, string Explanation, bool TimelineFeasible, IReadOnlyList<RoadmapNodeResponse> Nodes, IReadOnlyList<RoadmapEdgeResponse> Edges, IReadOnlyList<LearningActivityResponse> Schedule);
+public sealed record RoadmapResponse(Guid Id, Guid? GoalId, int Version, AcceleratorRoadmapStatus Status, DateTime TargetAtUtc, int EstimatedMinutes, string Explanation, bool TimelineFeasible, IReadOnlyList<RoadmapNodeResponse> Nodes, IReadOnlyList<RoadmapEdgeResponse> Edges, IReadOnlyList<LearningActivityResponse> Schedule);
 public sealed record GenerateRoadmapRequest(Guid RequestKey, Guid GoalId);
 public sealed record RecordLearningProgressRequest(Guid RequestKey, AcceleratorProgressKind Kind, string EvidenceJson, Guid ExpectedRevision);
 public sealed record RecoverMissedScheduleRequest(Guid RequestKey);

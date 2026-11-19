@@ -141,6 +141,7 @@ builder.Services.AddOutputCache(options =>
         .Tag("public-jobs"));
 });
 builder.Services.AddHostedService<JobExpiryHostedService>();
+builder.Services.AddHostedService<EmployerOfferExpiryHostedService>();
 builder.Services.AddHostedService<AcceleratorMaintenanceHostedService>();
 builder.Services.AddHostedService<AcceleratorReconciliationHostedService>();
 builder.Services.AddHostedService<AcceleratorPaymentReconciliationHostedService>();

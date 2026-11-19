@@ -1,0 +1,66 @@
+using JobPortal.Domain.Enums;
+
+namespace JobPortal.Application.Features.EmployerJobs;
+
+public sealed record EmployerJobSearchQuery(
+    string? Search = null,
+    JobStatus? Status = null,
+    EmploymentType? EmploymentType = null,
+    WorkplaceType? WorkplaceType = null,
+    ExperienceLevel? ExperienceLevel = null,
+    int Page = 1,
+    int PageSize = 20);
+
+public sealed record EmployerCreateJobRequest(
+    string Title,
+    string Description,
+    Guid? CategoryId,
+    string ApplicationUrl,
+    string? Responsibilities,
+    string? Requirements,
+    string? Benefits,
+    string? Location,
+    decimal? MinimumSalary,
+    decimal? MaximumSalary,
+    string? CurrencyCode,
+    EmploymentType EmploymentType,
+    WorkplaceType WorkplaceType,
+    ExperienceLevel ExperienceLevel,
+    DateTime? ExpiresAtUtc,
+    int? MinimumExperienceYears = null,
+    int? MaximumExperienceYears = null,
+    int? InternshipDurationMonths = null,
+    bool IsFlexibleDuration = false,
+    string? Department = null,
+    string? RoleCategory = null,
+    string? EducationRequirement = null,
+    PostedByType? PostedByType = null,
+    SalaryPeriod? SalaryPeriod = null,
+    string[]? ManualOverrideFields = null);
+
+public sealed record EmployerUpdateJobRequest(
+    string Title,
+    string Description,
+    Guid? CategoryId,
+    string ApplicationUrl,
+    string? Responsibilities,
+    string? Requirements,
+    string? Benefits,
+    string? Location,
+    decimal? MinimumSalary,
+    decimal? MaximumSalary,
+    string? CurrencyCode,
+    EmploymentType EmploymentType,
+    WorkplaceType WorkplaceType,
+    ExperienceLevel ExperienceLevel,
+    DateTime? ExpiresAtUtc,
+    int? MinimumExperienceYears = null,
+    int? MaximumExperienceYears = null,
+    int? InternshipDurationMonths = null,
+    bool IsFlexibleDuration = false,
+    string? Department = null,
+    string? RoleCategory = null,
+    string? EducationRequirement = null,
+    PostedByType? PostedByType = null,
+    SalaryPeriod? SalaryPeriod = null,
+    string[]? ManualOverrideFields = null);

@@ -28,7 +28,23 @@ public sealed class AuthController(
         var response = await authService.RegisterAsync(request, cancellationToken);
         return Ok(response);
     }
+    [HttpPost("employer/register")]
+    [AllowAnonymous]
+    [ProducesResponseType(
+    typeof(RegistrationResponse),
+    StatusCodes.Status200OK)]
+    public async Task<ActionResult<RegistrationResponse>>
+    RegisterEmployer(
+        RegisterRequest request,
+        CancellationToken cancellationToken)
+    {
+        var response =
+            await authService.RegisterEmployerAsync(
+                request,
+                cancellationToken);
 
+        return Ok(response);
+    }
     [HttpPost("verify-email")]
     [AllowAnonymous]
     [ProducesResponseType(typeof(MessageResponse), StatusCodes.Status200OK)]
@@ -43,6 +59,35 @@ public sealed class AuthController(
     public async Task<ActionResult<AuthenticationResponse>> Login(LoginRequest request, CancellationToken cancellationToken) =>
         Ok(await authService.LoginAsync(request, HttpContext.Connection.RemoteIpAddress?.ToString(), cancellationToken));
 
+    [HttpPost("employer/login")]
+    [AllowAnonymous]
+    [ProducesResponseType(
+    typeof(AuthenticationResponse),
+    StatusCodes.Status200OK)]
+    [ProducesResponseType(
+    typeof(ApiError),
+    StatusCodes.Status403Forbidden)]
+    public async Task<ActionResult<AuthenticationResponse>>
+    LoginEmployer(
+        LoginRequest request,
+        CancellationToken cancellationToken)
+    {
+        return Ok(
+            await authService.LoginEmployerAsync(
+                request,
+                HttpContext.Connection
+                    .RemoteIpAddress?
+                    .ToString(),
+                cancellationToken));
+    }
+
+    [Authorize(Roles = "Employer")]
+    [HttpGet("employer/health")]
+    public IActionResult EmployerHealth() =>
+    Ok(new
+    {
+        message = "Employer access granted."
+    });
     [HttpPost("google")]
     [AllowAnonymous]
     [ProducesResponseType(typeof(AuthenticationResponse), StatusCodes.Status200OK)]

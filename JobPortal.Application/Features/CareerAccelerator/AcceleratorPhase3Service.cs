@@ -12,21 +12,26 @@ namespace JobPortal.Application.Features.CareerAccelerator;
 // The only tutor dispatch boundary. The default provider is unavailable and never fabricates an assistant reply.
 public sealed class AcceleratorPhase3Service(IAcceleratorStore writes, IAcceleratorPhase3Store store,
     IAcceleratorPhase2Store phase2, AcceleratorService access, ITutorContextBuilder contextBuilder, IEnumerable<IAiTutorProvider> providers,
-    AcceleratorQuotaService quota, IAuditWriter audit, TimeProvider clock, IOptions<AcceleratorOptions> options)
+    AcceleratorQuotaService quota, IAuditWriter audit, TimeProvider clock, IOptions<AcceleratorOptions> options,
+    AcceleratorJourneyContextService contexts, IAcceleratorLearningPathStore learning)
 {
     private DateTime Now => clock.GetUtcNow().UtcDateTime;
 
-    public Task<TutorConversationResponse> StartConversationAsync(Guid actor, StartTutorConversationRequest request, CancellationToken ct) => writes.WriteAsync(async () =>
+    public async Task<TutorConversationResponse> StartConversationAsync(Guid actor, StartTutorConversationRequest request, CancellationToken ct)
+    {
+        var context = await ResolveScope(actor, request.GoalId, request.EnrollmentId, ct);
+        return await writes.WriteAsync(async () =>
     {
         await access.Candidate(actor, ct); ValidateText(request.Topic, 500); ValidateText(request.Title, 500);
-        if (request.RequestKey == Guid.Empty || request.GoalId == Guid.Empty || request.CompetencyId == Guid.Empty) throw Invalid("A request key, goal and competency are required.");
+        if (request.RequestKey == Guid.Empty || request.CompetencyId == Guid.Empty) throw Invalid("A request key and competency are required.");
+        await ValidateAttribution(actor, context, request.CompetencyId, request.RoadmapNodeId, request.ModuleId, request.LessonId, ct);
         var existing = await store.ConversationByKeyAsync(actor, request.RequestKey, ct);
         var hash = Hash(request);
         if (existing is not null) { if (existing.RequestHash != hash) throw new ConflictException("Idempotency key was used for a different conversation."); return ConversationDto(existing); }
-        var goal = await writes.GoalAsync(actor, request.GoalId, ct) ?? throw new NotFoundException("Career goal not found.");
-        var conversation = new AcceleratorTutorConversation { UserId = actor, GoalId = goal.Id, CompetencyId = request.CompetencyId, RoadmapNodeId = request.RoadmapNodeId, RequestKey = request.RequestKey, RequestHash = hash, Topic = request.Topic.Trim(), Title = request.Title.Trim(), LastMessageAtUtc = Now };
+        var conversation = new AcceleratorTutorConversation { UserId = actor, GoalId = context.CareerGoalId, JourneyContextId = context.Id, ModuleId = request.ModuleId, LessonId = request.LessonId, CompetencyId = request.CompetencyId, RoadmapNodeId = request.RoadmapNodeId, RequestKey = request.RequestKey, RequestHash = hash, Topic = request.Topic.Trim(), Title = request.Title.Trim(), LastMessageAtUtc = Now };
         store.Add(conversation); await Audit(actor, AuditAction.Create, "AcceleratorTutorConversation", conversation.Id, ct); return ConversationDto(conversation);
     }, ct);
+    }
 
     public async Task<IReadOnlyList<TutorConversationResponse>> ConversationsAsync(Guid actor, int page, int pageSize, CancellationToken ct)
     { await access.Candidate(actor, ct); AcceleratorService.Page(page, pageSize); return (await store.ConversationsAsync(actor, (page - 1) * pageSize, pageSize, ct)).Select(ConversationDto).ToArray(); }
@@ -43,7 +48,7 @@ public sealed class AcceleratorPhase3Service(IAcceleratorStore writes, IAccelera
         var requestHash = Hash(request); var prior = await store.DispatchByKeyAsync(actor, request.RequestKey, ct);
         if (prior is not null)
         {
-            if (prior.RequestHash != requestHash) throw new ConflictException("Idempotency key was used for a different tutor request.");
+            if (prior.ConversationId != c.Id || prior.RequestHash != requestHash) throw new ConflictException("Idempotency key was used for a different tutor request.");
             if (prior.Status is AcceleratorAiDispatchStatus.Uncertain or AcceleratorAiDispatchStatus.Dispatched) throw new ConflictException("Tutor request outcome is pending reconciliation.", "accelerator_dispatch_pending");
             var history = await store.MessagesAsync(actor, c.Id, 100, ct); var delivered = history.LastOrDefault(x => x.DispatchId == prior.Id && x.Role == AcceleratorTutorMessageRole.Assistant);
             if (delivered is not null) return MessageDto(delivered);
@@ -102,7 +107,7 @@ public sealed class AcceleratorPhase3Service(IAcceleratorStore writes, IAccelera
         await access.Candidate(actor, ct); AcceleratorService.Page(page, pageSize);
         var sessions = await store.PracticeSessionsAsync(actor, (page - 1) * pageSize, pageSize, ct);
         // History intentionally does not return question answers or rubrics.
-        return sessions.Select(x => new PracticeSessionResponse(x.Id, x.Status, x.Difficulty, x.QuestionType, [])).ToArray();
+        return sessions.Select(x => new PracticeSessionResponse(x.Id, x.Status, x.Difficulty, x.QuestionType, [], x.JourneyContextId, x.GoalId, x.ModuleId, x.LessonId)).ToArray();
     }
 
     public async Task<PracticeResultResponse> PracticeResultsAsync(Guid actor, Guid sessionId, CancellationToken ct)
@@ -139,36 +144,72 @@ public sealed class AcceleratorPhase3Service(IAcceleratorStore writes, IAccelera
         await access.Candidate(actor, ct); var conversations = await store.ConversationsAsync(actor, 0, 100, ct); foreach (var c in conversations) { c.Status = AcceleratorTutorConversationStatus.Erased; c.Topic = string.Empty; c.Title = "Erased"; c.Revision = Guid.NewGuid(); } await Audit(actor, AuditAction.Delete, "AcceleratorTutorConversation", actor, ct); return conversations.Count;
     }, ct);
 
-    public Task<PracticeSessionResponse> StartPracticeAsync(Guid actor, StartPracticeSessionRequest request, CancellationToken ct) => writes.WriteAsync(async () =>
+    public async Task<PracticeSessionResponse> StartPracticeAsync(Guid actor, StartPracticeSessionRequest request, CancellationToken ct)
     {
-        await access.Candidate(actor, ct); if (request.RequestKey == Guid.Empty || request.GoalId == Guid.Empty || request.CompetencyId == Guid.Empty || !Enum.IsDefined(request.Difficulty) || !Enum.IsDefined(request.QuestionType)) throw Invalid("Invalid practice request.");
+        var context = await ResolveScope(actor, request.GoalId, request.EnrollmentId, ct);
+        return await writes.WriteAsync(async () =>
+    {
+        await access.Candidate(actor, ct); if (request.RequestKey == Guid.Empty || request.CompetencyId == Guid.Empty || !Enum.IsDefined(request.Difficulty) || !Enum.IsDefined(request.QuestionType)) throw Invalid("Invalid practice request.");
+        await ValidateAttribution(actor, context, request.CompetencyId, request.RoadmapNodeId, request.ModuleId, request.LessonId, ct);
         var previous = await store.PracticeSessionByKeyAsync(actor, request.RequestKey, ct); var hash = Hash(request);
         if (previous is not null) { if (previous.RequestHash != hash) throw new ConflictException("Idempotency key was used for different practice."); return PracticeDto(previous); }
-        var goal = await writes.GoalAsync(actor, request.GoalId, ct) ?? throw new NotFoundException("Career goal not found.");
-        var questions = await phase2.QuestionsAsync(goal.TaxonomyId, [request.CompetencyId], ct);
+        var questions = await phase2.QuestionsAsync(context.TaxonomyId, [request.CompetencyId], ct);
         var selected = questions.Where(x => x.IsActive && ObjectiveType(x.Type) == request.QuestionType).OrderBy(x => x.Difficulty).ThenBy(x => x.Id).Take(5).ToArray();
         if (selected.Length == 0) throw new ConflictException("No validated deterministic practice questions are available.", "accelerator_practice_unavailable");
-        var session = new AcceleratorPracticeSession { UserId = actor, GoalId = goal.Id, CompetencyId = request.CompetencyId, RoadmapNodeId = request.RoadmapNodeId, RequestKey = request.RequestKey, RequestHash = hash, Difficulty = request.Difficulty, QuestionType = request.QuestionType, Status = AcceleratorPracticeStatus.Ready };
+        var session = new AcceleratorPracticeSession { UserId = actor, GoalId = context.CareerGoalId, JourneyContextId = context.Id, ModuleId = request.ModuleId, LessonId = request.LessonId, CompetencyId = request.CompetencyId, RoadmapNodeId = request.RoadmapNodeId, RequestKey = request.RequestKey, RequestHash = hash, Difficulty = request.Difficulty, QuestionType = request.QuestionType, Status = AcceleratorPracticeStatus.Ready };
         foreach (var (question, sequence) in selected.Select((q, i) => (q, i + 1))) session.Questions.Add(new AcceleratorPracticeQuestion { Session = session, SessionId = session.Id, Sequence = sequence, Prompt = question.Prompt, PublicOptionsJson = question.OptionsJson, AnswerKeyJson = question.AnswerKeyJson, RubricJson = question.RubricJson, GenerationVersion = question.Version, IsQualityApproved = true });
         store.Add(session); await Audit(actor, AuditAction.Create, "AcceleratorPracticeSession", session.Id, ct); return PracticeDto(session);
     }, ct);
+    }
 
     public Task<PracticeEvaluationResponse> SubmitPracticeAnswerAsync(Guid actor, Guid sessionId, SubmitPracticeAnswerRequest request, CancellationToken ct) => writes.WriteAsync(async () =>
     {
         await access.Candidate(actor, ct); ValidateJson(request.AnswerJson); if (request.RequestKey == Guid.Empty) throw Invalid("A request key is required.");
-        var prior = await store.PracticeAttemptByKeyAsync(actor, request.RequestKey, ct); if (prior is not null) return EvaluationDto((await store.PracticeEvaluationsAsync(actor, prior.SessionId, ct)).Single(x => x.AttemptId == prior.Id));
+        var prior = await store.PracticeAttemptByKeyAsync(actor, request.RequestKey, ct);
+        if (prior is not null)
+        {
+            if (prior.SessionId != sessionId || prior.QuestionId != request.QuestionId || !JsonEquals(prior.AnswerJson, request.AnswerJson))
+                throw new ConflictException("Idempotency key was used for a different practice answer.");
+            return EvaluationDto((await store.PracticeEvaluationsAsync(actor, prior.SessionId, ct)).Single(x => x.AttemptId == prior.Id));
+        }
         var session = await store.PracticeSessionAsync(actor, sessionId, ct) ?? throw new NotFoundException("Practice session not found."); var question = await store.PracticeQuestionAsync(actor, sessionId, request.QuestionId, ct) ?? throw new NotFoundException("Practice question not found.");
         var attempt = new AcceleratorPracticeAttempt { UserId = actor, SessionId = session.Id, QuestionId = question.Id, RequestKey = request.RequestKey, AnswerJson = request.AnswerJson, SubmittedAtUtc = Now };
         var correct = JsonEquals(question.AnswerKeyJson, request.AnswerJson); var evaluation = new AcceleratorPracticeEvaluation { AttemptId = attempt.Id, Score = correct ? 1 : 0, MaximumScore = 1, Classification = correct ? "Correct" : "Incorrect", StrengthsJson = correct ? "[\"Objective answer matched\"]" : "[]", WeaknessesJson = correct ? "[]" : "[\"Review the concept and explanation\"]", Explanation = correct ? "Your answer matched the validated key." : "Your answer did not match the validated key.", SuggestedImprovement = correct ? "Try a higher-difficulty variation." : "Review prerequisites before another attempt.", Method = AcceleratorPracticeEvaluationMethod.Deterministic, Confidence = 1, RubricVersion = question.GenerationVersion };
         store.Add(attempt); store.Add(evaluation); session.Status = AcceleratorPracticeStatus.Evaluated; session.Revision = Guid.NewGuid();
-        if (correct) store.Add(new AcceleratorSkillEvidence { UserId = actor, GoalId = session.GoalId, CompetencyId = session.CompetencyId, Source = AcceleratorEvidenceSource.AssignmentDemonstrated, Proficiency = AcceleratorProficiency.Developing, Confidence = .25m, ScoringVersion = "practice-objective-v1", EvaluatedAtUtc = Now });
+        if (correct) store.Add(new AcceleratorSkillEvidence { UserId = actor, GoalId = session.GoalId, JourneyContextId = session.JourneyContextId, CompetencyId = session.CompetencyId, Source = AcceleratorEvidenceSource.AssignmentDemonstrated, Proficiency = AcceleratorProficiency.Developing, Confidence = .25m, ScoringVersion = "practice-objective-v1", EvaluatedAtUtc = Now });
         await Audit(actor, AuditAction.Confirm, "AcceleratorPracticeAttempt", attempt.Id, ct); return EvaluationDto(evaluation);
     }, ct);
 
     private async Task<AcceleratorTutorConversation> RequiredConversation(Guid actor, Guid id, CancellationToken ct) => await store.ConversationAsync(actor, id, ct) ?? throw new NotFoundException("Tutor conversation not found.");
-    private static TutorConversationResponse ConversationDto(AcceleratorTutorConversation c) => new(c.Id, c.GoalId, c.CompetencyId, c.RoadmapNodeId, c.Topic, c.Title, c.Status, c.LastMessageAtUtc, c.Revision);
+    private static TutorConversationResponse ConversationDto(AcceleratorTutorConversation c) => new(c.Id, c.GoalId, c.CompetencyId, c.RoadmapNodeId, c.Topic, c.Title, c.Status, c.LastMessageAtUtc, c.Revision, c.JourneyContextId, c.ModuleId, c.LessonId);
     private static TutorMessageResponse MessageDto(AcceleratorTutorMessage m) => new(m.Id, m.Role, m.Status, m.Content, m.MessageType, m.CreatedAtUtc);
-    private static PracticeSessionResponse PracticeDto(AcceleratorPracticeSession s) => new(s.Id, s.Status, s.Difficulty, s.QuestionType, s.Questions.OrderBy(x => x.Sequence).Select(x => new PracticeQuestionResponse(x.Id, x.Sequence, x.Prompt, x.PublicOptionsJson, s.QuestionType, s.Difficulty)).ToArray());
+    private static PracticeSessionResponse PracticeDto(AcceleratorPracticeSession s) => new(s.Id, s.Status, s.Difficulty, s.QuestionType, s.Questions.OrderBy(x => x.Sequence).Select(x => new PracticeQuestionResponse(x.Id, x.Sequence, x.Prompt, x.PublicOptionsJson, s.QuestionType, s.Difficulty)).ToArray(), s.JourneyContextId, s.GoalId, s.ModuleId, s.LessonId);
+
+    private Task<AcceleratorJourneyContext> ResolveScope(Guid actor, Guid goalId, Guid? enrollmentId, CancellationToken ct)
+    {
+        if ((goalId != Guid.Empty) == enrollmentId.HasValue) throw Invalid("Specify exactly one career goal or learning enrollment.");
+        return enrollmentId.HasValue ? contexts.GetOrCreateForEnrollmentAsync(actor, enrollmentId.Value, ct) : contexts.GetOrCreateForCareerGoalAsync(actor, goalId, ct);
+    }
+
+    private async Task ValidateAttribution(Guid actor, AcceleratorJourneyContext context, Guid competencyId, Guid? nodeId, Guid? moduleId, Guid? lessonId, CancellationToken ct)
+    {
+        if (!(await contexts.ResolveAsync(actor, context.Id, ct)).Any(x => x.CompetencyId == competencyId))
+            throw Invalid("Competency is not a requirement of this journey.");
+        if (nodeId.HasValue)
+        {
+            var node = await phase2.NodeAsync(nodeId.Value, ct) ?? throw new NotFoundException("Roadmap node not found.");
+            var roadmap = await phase2.RoadmapAsync(actor, node.RoadmapId, ct);
+            if (roadmap is null || roadmap.JourneyContextId != context.Id || node.CompetencyId != competencyId)
+                throw new NotFoundException("Roadmap node not found in this journey.");
+        }
+        if (!moduleId.HasValue && !lessonId.HasValue) return;
+        if (!context.LearningPathEnrollmentId.HasValue || !moduleId.HasValue) throw Invalid("Module attribution requires an enrollment; lessons require a module.");
+        var enrollment = await learning.EnrollmentAsync(actor, context.LearningPathEnrollmentId.Value, ct) ?? throw new NotFoundException("Learning enrollment not found.");
+        var module = enrollment.LearningPath.Modules.SingleOrDefault(x => x.Id == moduleId && !x.IsDeleted && x.Status == AcceleratorLearningCatalogStatus.Published)
+            ?? throw new NotFoundException("Published module not found in this journey.");
+        if (lessonId.HasValue && !module.Lessons.Any(x => x.Id == lessonId && !x.IsDeleted && x.Status == AcceleratorLearningCatalogStatus.Published))
+            throw new NotFoundException("Published lesson not found in this module.");
+    }
     private static PracticeEvaluationResponse EvaluationDto(AcceleratorPracticeEvaluation e) => new(e.Id, e.Score, e.MaximumScore, e.Classification, e.Explanation, e.SuggestedImprovement, e.Method, e.Confidence);
     private static AcceleratorPracticeQuestionType ObjectiveType(AcceleratorQuestionType type) => type == AcceleratorQuestionType.MultipleSelect ? AcceleratorPracticeQuestionType.MultipleSelect : AcceleratorPracticeQuestionType.MultipleChoice;
     private static void ValidateJson(string text) { try { using var _ = JsonDocument.Parse(text); } catch (JsonException) { throw Invalid("Answer must be valid JSON."); } }

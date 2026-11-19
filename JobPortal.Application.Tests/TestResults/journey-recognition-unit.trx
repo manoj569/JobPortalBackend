@@ -1,0 +1,76 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="e12ccb80-e9cf-490b-8971-dbbf84f55fbc" name="Ashish@LAPTOP-SH2NN93A 2026-11-17 22:09:10" runUser="LAPTOP-SH2NN93A\Ashish" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Times creation="2026-11-17T22:09:10.2882623+05:30" queuing="2026-11-17T22:09:10.2882631+05:30" start="2026-11-17T22:08:47.5943565+05:30" finish="2026-11-17T22:09:12.0393606+05:30" />
+  <TestSettings name="default" id="6523485d-25bc-4a29-a79f-cfee800ed521">
+    <Deployment runDeploymentRoot="Ashish_LAPTOP-SH2NN93A_2026-11-17_22_09_10" />
+  </TestSettings>
+  <Results>
+    <UnitTestResult executionId="a8d92143-1dc5-4f1d-a89e-140acad8e411" testId="87f6aa40-18a0-463f-c54c-ef1f0bb359b7" testName="JobPortal.Application.Tests.AcceleratorRecognitionTests.ConfiguredAssessmentPolicyResolvesBoundaryScoresAndReplays(score: 100, expectedBand: &quot;Advanced&quot;)" computerName="LAPTOP-SH2NN93A" duration="00:00:00.0948293" startTime="2026-11-17T22:09:11.1781888+05:30" endTime="2026-11-17T22:09:11.1781894+05:30" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="a8d92143-1dc5-4f1d-a89e-140acad8e411" />
+    <UnitTestResult executionId="feb5a919-7759-4f7d-bf51-a9b3b0a8a940" testId="1abe9084-b4b3-a5dd-e6d8-b46784f39b08" testName="JobPortal.Application.Tests.AcceleratorRecognitionTests.ConfiguredAssessmentPolicyResolvesBoundaryScoresAndReplays(score: 0, expectedBand: &quot;Developing&quot;)" computerName="LAPTOP-SH2NN93A" duration="00:00:00.0589272" startTime="2026-11-17T22:09:11.0830419+05:30" endTime="2026-11-17T22:09:11.0830422+05:30" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="feb5a919-7759-4f7d-bf51-a9b3b0a8a940" />
+    <UnitTestResult executionId="4d817d25-161d-4c04-b3c2-5c4af2e3765e" testId="56b3368d-fdae-e4d3-9041-86477814d79f" testName="JobPortal.Application.Tests.AcceleratorRecognitionTests.ConfiguredAssessmentPolicyResolvesBoundaryScoresAndReplays(score: 70, expectedBand: &quot;Advanced&quot;)" computerName="LAPTOP-SH2NN93A" duration="00:00:00.5545612" startTime="2026-11-17T22:09:11.0239022+05:30" endTime="2026-11-17T22:09:11.0239027+05:30" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="4d817d25-161d-4c04-b3c2-5c4af2e3765e" />
+    <UnitTestResult executionId="73b7e407-39dd-4a69-ae5f-6c22448d1d70" testId="4c96abf4-ba70-2c23-019c-68f4076390c3" testName="JobPortal.Application.Tests.AcceleratorRecognitionTests.EnrollmentRecognitionUsesOwnedPathAndPersistedCompletion(type: Career)" computerName="LAPTOP-SH2NN93A" duration="00:00:00.2710343" startTime="2026-11-17T22:09:10.4597913+05:30" endTime="2026-11-17T22:09:10.4597919+05:30" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="73b7e407-39dd-4a69-ae5f-6c22448d1d70" />
+    <UnitTestResult executionId="3db7e958-d0bb-444f-a9dd-92a61dacc13b" testId="9d73200f-02d5-c62b-e006-7f9cd1138ccb" testName="JobPortal.Application.Tests.AcceleratorRecognitionTests.EnrollmentRecognitionUsesOwnedPathAndPersistedCompletion(type: Skill)" computerName="LAPTOP-SH2NN93A" duration="00:00:15.8084830" startTime="2026-11-17T22:09:10.1900466+05:30" endTime="2026-11-17T22:09:10.1901000+05:30" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="3db7e958-d0bb-444f-a9dd-92a61dacc13b" />
+    <UnitTestResult executionId="ed2b65ba-1e6f-49f8-ae05-0d07322ae771" testId="7da8d3b5-9343-d533-b7e2-a765a2b79924" testName="JobPortal.Application.Tests.AcceleratorRecognitionTests.AwardsAndCertificateAreServerDerivedIdempotentAndCandidateOwned" computerName="LAPTOP-SH2NN93A" duration="00:00:00.5507799" startTime="2026-11-17T22:09:11.8006039+05:30" endTime="2026-11-17T22:09:11.8006048+05:30" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="ed2b65ba-1e6f-49f8-ae05-0d07322ae771" />
+    <UnitTestResult executionId="12bb27f3-200e-4fc2-8638-8a08a7c9df12" testId="6bd10305-0d19-d300-7a93-8e845eec787d" testName="JobPortal.Application.Tests.AcceleratorRecognitionTests.UnavailableRequiredPracticeDoesNotManufactureProficiency" computerName="LAPTOP-SH2NN93A" duration="00:00:00.0703078" startTime="2026-11-17T22:09:11.2493538+05:30" endTime="2026-11-17T22:09:11.2493546+05:30" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="12bb27f3-200e-4fc2-8638-8a08a7c9df12" />
+    <UnitTestResult executionId="f96ebee7-959f-438e-8c35-ac89be6984a3" testId="88872bc3-af29-16c0-9485-f5571c0f4315" testName="JobPortal.Application.Tests.AcceleratorRecognitionTests.OverlappingAndInvalidWeightsAreRejected" computerName="LAPTOP-SH2NN93A" duration="00:00:00.0068550" startTime="2026-11-17T22:09:10.4690329+05:30" endTime="2026-11-17T22:09:10.4690337+05:30" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="f96ebee7-959f-438e-8c35-ac89be6984a3" />
+  </Results>
+  <TestDefinitions>
+    <UnitTest name="JobPortal.Application.Tests.AcceleratorRecognitionTests.ConfiguredAssessmentPolicyResolvesBoundaryScoresAndReplays(score: 70, expectedBand: &quot;Advanced&quot;)" storage="c:\users\ashish\source\repos\jobportalbackend\jobportal.application.tests\bin\debug\net9.0\jobportal.application.tests.dll" id="56b3368d-fdae-e4d3-9041-86477814d79f">
+      <Execution id="4d817d25-161d-4c04-b3c2-5c4af2e3765e" />
+      <TestMethod codeBase="C:\Users\Ashish\source\repos\JobPortalBackend\JobPortal.Application.Tests\bin\Debug\net9.0\JobPortal.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="JobPortal.Application.Tests.AcceleratorRecognitionTests" name="ConfiguredAssessmentPolicyResolvesBoundaryScoresAndReplays" />
+    </UnitTest>
+    <UnitTest name="JobPortal.Application.Tests.AcceleratorRecognitionTests.ConfiguredAssessmentPolicyResolvesBoundaryScoresAndReplays(score: 100, expectedBand: &quot;Advanced&quot;)" storage="c:\users\ashish\source\repos\jobportalbackend\jobportal.application.tests\bin\debug\net9.0\jobportal.application.tests.dll" id="87f6aa40-18a0-463f-c54c-ef1f0bb359b7">
+      <Execution id="a8d92143-1dc5-4f1d-a89e-140acad8e411" />
+      <TestMethod codeBase="C:\Users\Ashish\source\repos\JobPortalBackend\JobPortal.Application.Tests\bin\Debug\net9.0\JobPortal.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="JobPortal.Application.Tests.AcceleratorRecognitionTests" name="ConfiguredAssessmentPolicyResolvesBoundaryScoresAndReplays" />
+    </UnitTest>
+    <UnitTest name="JobPortal.Application.Tests.AcceleratorRecognitionTests.UnavailableRequiredPracticeDoesNotManufactureProficiency" storage="c:\users\ashish\source\repos\jobportalbackend\jobportal.application.tests\bin\debug\net9.0\jobportal.application.tests.dll" id="6bd10305-0d19-d300-7a93-8e845eec787d">
+      <Execution id="12bb27f3-200e-4fc2-8638-8a08a7c9df12" />
+      <TestMethod codeBase="C:\Users\Ashish\source\repos\JobPortalBackend\JobPortal.Application.Tests\bin\Debug\net9.0\JobPortal.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="JobPortal.Application.Tests.AcceleratorRecognitionTests" name="UnavailableRequiredPracticeDoesNotManufactureProficiency" />
+    </UnitTest>
+    <UnitTest name="JobPortal.Application.Tests.AcceleratorRecognitionTests.EnrollmentRecognitionUsesOwnedPathAndPersistedCompletion(type: Career)" storage="c:\users\ashish\source\repos\jobportalbackend\jobportal.application.tests\bin\debug\net9.0\jobportal.application.tests.dll" id="4c96abf4-ba70-2c23-019c-68f4076390c3">
+      <Execution id="73b7e407-39dd-4a69-ae5f-6c22448d1d70" />
+      <TestMethod codeBase="C:\Users\Ashish\source\repos\JobPortalBackend\JobPortal.Application.Tests\bin\Debug\net9.0\JobPortal.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="JobPortal.Application.Tests.AcceleratorRecognitionTests" name="EnrollmentRecognitionUsesOwnedPathAndPersistedCompletion" />
+    </UnitTest>
+    <UnitTest name="JobPortal.Application.Tests.AcceleratorRecognitionTests.AwardsAndCertificateAreServerDerivedIdempotentAndCandidateOwned" storage="c:\users\ashish\source\repos\jobportalbackend\jobportal.application.tests\bin\debug\net9.0\jobportal.application.tests.dll" id="7da8d3b5-9343-d533-b7e2-a765a2b79924">
+      <Execution id="ed2b65ba-1e6f-49f8-ae05-0d07322ae771" />
+      <TestMethod codeBase="C:\Users\Ashish\source\repos\JobPortalBackend\JobPortal.Application.Tests\bin\Debug\net9.0\JobPortal.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="JobPortal.Application.Tests.AcceleratorRecognitionTests" name="AwardsAndCertificateAreServerDerivedIdempotentAndCandidateOwned" />
+    </UnitTest>
+    <UnitTest name="JobPortal.Application.Tests.AcceleratorRecognitionTests.OverlappingAndInvalidWeightsAreRejected" storage="c:\users\ashish\source\repos\jobportalbackend\jobportal.application.tests\bin\debug\net9.0\jobportal.application.tests.dll" id="88872bc3-af29-16c0-9485-f5571c0f4315">
+      <Execution id="f96ebee7-959f-438e-8c35-ac89be6984a3" />
+      <TestMethod codeBase="C:\Users\Ashish\source\repos\JobPortalBackend\JobPortal.Application.Tests\bin\Debug\net9.0\JobPortal.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="JobPortal.Application.Tests.AcceleratorRecognitionTests" name="OverlappingAndInvalidWeightsAreRejected" />
+    </UnitTest>
+    <UnitTest name="JobPortal.Application.Tests.AcceleratorRecognitionTests.EnrollmentRecognitionUsesOwnedPathAndPersistedCompletion(type: Skill)" storage="c:\users\ashish\source\repos\jobportalbackend\jobportal.application.tests\bin\debug\net9.0\jobportal.application.tests.dll" id="9d73200f-02d5-c62b-e006-7f9cd1138ccb">
+      <Execution id="3db7e958-d0bb-444f-a9dd-92a61dacc13b" />
+      <TestMethod codeBase="C:\Users\Ashish\source\repos\JobPortalBackend\JobPortal.Application.Tests\bin\Debug\net9.0\JobPortal.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="JobPortal.Application.Tests.AcceleratorRecognitionTests" name="EnrollmentRecognitionUsesOwnedPathAndPersistedCompletion" />
+    </UnitTest>
+    <UnitTest name="JobPortal.Application.Tests.AcceleratorRecognitionTests.ConfiguredAssessmentPolicyResolvesBoundaryScoresAndReplays(score: 0, expectedBand: &quot;Developing&quot;)" storage="c:\users\ashish\source\repos\jobportalbackend\jobportal.application.tests\bin\debug\net9.0\jobportal.application.tests.dll" id="1abe9084-b4b3-a5dd-e6d8-b46784f39b08">
+      <Execution id="feb5a919-7759-4f7d-bf51-a9b3b0a8a940" />
+      <TestMethod codeBase="C:\Users\Ashish\source\repos\JobPortalBackend\JobPortal.Application.Tests\bin\Debug\net9.0\JobPortal.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="JobPortal.Application.Tests.AcceleratorRecognitionTests" name="ConfiguredAssessmentPolicyResolvesBoundaryScoresAndReplays" />
+    </UnitTest>
+  </TestDefinitions>
+  <TestEntries>
+    <TestEntry testId="87f6aa40-18a0-463f-c54c-ef1f0bb359b7" executionId="a8d92143-1dc5-4f1d-a89e-140acad8e411" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="1abe9084-b4b3-a5dd-e6d8-b46784f39b08" executionId="feb5a919-7759-4f7d-bf51-a9b3b0a8a940" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="56b3368d-fdae-e4d3-9041-86477814d79f" executionId="4d817d25-161d-4c04-b3c2-5c4af2e3765e" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="4c96abf4-ba70-2c23-019c-68f4076390c3" executionId="73b7e407-39dd-4a69-ae5f-6c22448d1d70" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="9d73200f-02d5-c62b-e006-7f9cd1138ccb" executionId="3db7e958-d0bb-444f-a9dd-92a61dacc13b" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="7da8d3b5-9343-d533-b7e2-a765a2b79924" executionId="ed2b65ba-1e6f-49f8-ae05-0d07322ae771" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="6bd10305-0d19-d300-7a93-8e845eec787d" executionId="12bb27f3-200e-4fc2-8638-8a08a7c9df12" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="88872bc3-af29-16c0-9485-f5571c0f4315" executionId="f96ebee7-959f-438e-8c35-ac89be6984a3" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+  </TestEntries>
+  <TestLists>
+    <TestList name="Results Not in a List" id="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestList name="All Loaded Results" id="19431567-8539-422a-85d7-44ee4e166bda" />
+  </TestLists>
+  <ResultSummary outcome="Completed">
+    <Counters total="8" executed="8" passed="8" failed="0" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notRunnable="0" notExecuted="0" disconnected="0" warning="0" completed="0" inProgress="0" pending="0" />
+    <Output>
+      <StdOut>[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v2.8.2+699d445a1a (64-bit .NET 9.0.7)&#xD;
+[xUnit.net 00:00:04.68]   Discovering: JobPortal.Application.Tests&#xD;
+[xUnit.net 00:00:05.47]   Discovered:  JobPortal.Application.Tests&#xD;
+[xUnit.net 00:00:05.48]   Starting:    JobPortal.Application.Tests&#xD;
+[xUnit.net 00:00:22.98]   Finished:    JobPortal.Application.Tests&#xD;
+</StdOut>
+    </Output>
+  </ResultSummary>
+</TestRun>

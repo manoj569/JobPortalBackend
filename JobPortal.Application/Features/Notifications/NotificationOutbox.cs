@@ -41,9 +41,28 @@ public sealed class NotificationOutbox(INotificationOutbox repository, TimeProvi
         }).ToArray();
     }
 
-    public static bool IsSafeActionUrl(string? url) => url is null ||
-        url is "/dashboard/interview-insights" or "/dashboard/referrals" or "/dashboard/referral-requests" or "/dashboard/my-referral-requests" ||
-        JobPortal.Application.Features.Referrals.ReferralNotifications.IsAdminPath(url);
+    public static bool IsSafeActionUrl(string? url)
+    {
+        if (url is null)
+            return true;
+
+        if (url is
+            "/dashboard/interview-insights" or
+            "/dashboard/referrals" or
+            "/dashboard/referral-requests" or
+            "/dashboard/my-referral-requests" or
+            "/dashboard/messages" or
+            "/employers/messages" or
+            "/dashboard/applications" or
+            "/employers/interviews" or
+            "/employers/pipeline")
+        {
+            return true;
+        }
+
+        return JobPortal.Application.Features.Referrals
+            .ReferralNotifications.IsAdminPath(url);
+    }
 
     private static Guid DeterministicId(string key) => new(SHA256.HashData(Encoding.UTF8.GetBytes(key)).AsSpan(0, 16));
 }

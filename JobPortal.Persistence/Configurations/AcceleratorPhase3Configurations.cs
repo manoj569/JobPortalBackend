@@ -14,6 +14,11 @@ public sealed class AcceleratorTutorConversationConfiguration : IEntityTypeConfi
         builder.HasOne<AcceleratorCareerGoal>().WithMany().HasForeignKey(x => x.GoalId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne<AcceleratorRoadmapNode>().WithMany().HasForeignKey(x => x.RoadmapNodeId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne<AcceleratorCompetency>().WithMany().HasForeignKey(x => x.CompetencyId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<AcceleratorJourneyContext>().WithMany().HasForeignKey(x => x.JourneyContextId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<AcceleratorLearningModule>().WithMany().HasForeignKey(x => x.ModuleId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<AcceleratorLesson>().WithMany().HasForeignKey(x => x.LessonId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasIndex(x => new { x.UserId, x.JourneyContextId, x.CreatedAtUtc });
+        builder.ToTable(t => t.HasCheckConstraint("CK_AcceleratorTutorConversation_Journey", "\"JourneyContextId\" IS NOT NULL"));
     }
 }
 public sealed class AcceleratorTutorMessageConfiguration : IEntityTypeConfiguration<AcceleratorTutorMessage>
@@ -35,7 +40,15 @@ public sealed class AcceleratorTutorMemorySummaryConfiguration : IEntityTypeConf
 }
 public sealed class AcceleratorPracticeSessionConfiguration : IEntityTypeConfiguration<AcceleratorPracticeSession>
 {
-    public void Configure(EntityTypeBuilder<AcceleratorPracticeSession> builder) { builder.ToTable("AcceleratorPracticeSessions"); builder.ConfigureBaseEntity(); builder.Property(x => x.RequestHash).HasMaxLength(64).IsRequired(); builder.Property(x => x.GenerationStrategy).HasMaxLength(80).IsRequired(); builder.Property(x => x.Revision).IsConcurrencyToken(); builder.HasIndex(x => new { x.UserId, x.RequestKey }).IsUnique(); builder.HasIndex(x => new { x.UserId, x.CompetencyId, x.CreatedAtUtc }); builder.HasOne<AcceleratorCareerGoal>().WithMany().HasForeignKey(x => x.GoalId).OnDelete(DeleteBehavior.Restrict); builder.HasOne<AcceleratorRoadmapNode>().WithMany().HasForeignKey(x => x.RoadmapNodeId).OnDelete(DeleteBehavior.Restrict); }
+    public void Configure(EntityTypeBuilder<AcceleratorPracticeSession> builder)
+    {
+        builder.ToTable("AcceleratorPracticeSessions", t => t.HasCheckConstraint("CK_AcceleratorPracticeSession_Journey", "\"JourneyContextId\" IS NOT NULL"));
+        builder.ConfigureBaseEntity(); builder.Property(x => x.RequestHash).HasMaxLength(64).IsRequired(); builder.Property(x => x.GenerationStrategy).HasMaxLength(80).IsRequired(); builder.Property(x => x.Revision).IsConcurrencyToken(); builder.HasIndex(x => new { x.UserId, x.RequestKey }).IsUnique(); builder.HasIndex(x => new { x.UserId, x.CompetencyId, x.CreatedAtUtc }); builder.HasOne<AcceleratorCareerGoal>().WithMany().HasForeignKey(x => x.GoalId).OnDelete(DeleteBehavior.Restrict); builder.HasOne<AcceleratorRoadmapNode>().WithMany().HasForeignKey(x => x.RoadmapNodeId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<AcceleratorJourneyContext>().WithMany().HasForeignKey(x => x.JourneyContextId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<AcceleratorLearningModule>().WithMany().HasForeignKey(x => x.ModuleId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<AcceleratorLesson>().WithMany().HasForeignKey(x => x.LessonId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasIndex(x => new { x.UserId, x.JourneyContextId, x.CreatedAtUtc });
+    }
 }
 public sealed class AcceleratorPracticeQuestionConfiguration : IEntityTypeConfiguration<AcceleratorPracticeQuestion>
 {

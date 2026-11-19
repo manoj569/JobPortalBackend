@@ -6,6 +6,15 @@ public interface IAuthService
 {
     Task<RegistrationResponse> RegisterAsync(
         RegisterRequest request, CancellationToken cancellationToken = default);
+
+    Task<RegistrationResponse> RegisterEmployerAsync(
+    RegisterRequest request,
+    CancellationToken cancellationToken = default);
+
+    Task<AuthenticationResponse> LoginEmployerAsync(
+        LoginRequest request,
+        string? ipAddress,
+        CancellationToken cancellationToken = default);
     Task<MessageResponse> VerifyEmailAsync(
         VerifyEmailRequest request, CancellationToken cancellationToken = default);
     Task<AuthenticationResponse> LoginAsync(LoginRequest request, string? ipAddress, CancellationToken cancellationToken = default);

@@ -171,7 +171,190 @@ public sealed class AuthService(
         LogRegistrationTiming("total", totalStarted);
         return new(RegistrationSuccessMessage, authentication);
     }
+    public async Task<RegistrationResponse> RegisterEmployerAsync(
+    RegisterRequest request,
+    CancellationToken cancellationToken = default)
+    {
+        var totalStarted = Stopwatch.GetTimestamp();
 
+        request = request with
+        {
+            FullName = request.FullName?.Trim() ?? string.Empty,
+            Email = request.Email?.Trim() ?? string.Empty
+        };
+
+        var stageStarted = Stopwatch.GetTimestamp();
+
+        await registerValidator.ValidateAndThrowAsync(
+            request,
+            cancellationToken);
+
+        LogRegistrationTiming(
+            "employer_validation",
+            stageStarted);
+
+        _ = PersonalName.TrySplit(
+            request.FullName,
+            out var firstName,
+            out var lastName);
+
+        var normalizedEmail = NormalizeEmail(request.Email);
+
+        _ = IndianMobileNumber.TryNormalizeTenDigit(
+            request.PhoneNumber,
+            out var normalizedPhoneNumber);
+
+        stageStarted = Stopwatch.GetTimestamp();
+
+        var existingEmailUser =
+            await users.GetByNormalizedEmailAsync(
+                normalizedEmail,
+                cancellationToken);
+
+        var existingPhoneUser =
+            await users.GetByNormalizedPhoneAsync(
+                normalizedPhoneNumber,
+                cancellationToken);
+
+        LogRegistrationTiming(
+            "employer_duplicate_identity_lookup",
+            stageStarted);
+
+        await ThrowRegistrationIdentityConflictAsync(
+            existingEmailUser,
+            existingPhoneUser is not null,
+            cancellationToken);
+
+        stageStarted = Stopwatch.GetTimestamp();
+
+        var passwordHash =
+            passwordHasher.Hash(request.Password);
+
+        LogRegistrationTiming(
+            "employer_password_hash",
+            stageStarted);
+
+        var user = new User
+        {
+            Id = Guid.NewGuid(),
+
+            Email = request.Email,
+            NormalizedEmail = normalizedEmail,
+
+            FirstName = firstName,
+            LastName = lastName,
+
+            PasswordHash = passwordHash,
+
+            PhoneNumber = normalizedPhoneNumber,
+            NormalizedPhoneNumber = normalizedPhoneNumber,
+
+            PhoneConfirmed = true,
+
+            TermsAndPrivacyAcceptedAtUtc = UtcNow,
+            TermsAndPrivacyVersion =
+                LegalDocumentCatalog.CurrentVersion,
+
+            Status = UserStatus.Active,
+
+            // Keep behavior consistent with current registration.
+            EmailConfirmed = true,
+
+            EmailVerificationTokenHash = null,
+            EmailVerificationTokenExpiresAtUtc = null,
+            EmailVerificationSentAtUtc = null,
+
+            // Employer does not use candidate onboarding.
+            CareerSnapshotRequired = false,
+
+            RoleId = SystemRoleIds.Employer,
+
+            Role = new Role
+            {
+                Id = SystemRoleIds.Employer,
+                Name = "Employer",
+                NormalizedName = "EMPLOYER"
+            }
+        };
+
+        await users.AddAsync(
+            user,
+            cancellationToken);
+
+        await auditWriter.AppendAsync(
+            new(
+                AuditAction.Create,
+                "User",
+                user.Id.ToString(),
+                new Dictionary<string, string?>
+                {
+                    ["source"] = "employerPasswordRegistration"
+                },
+                new(user.Id, "Employer")),
+            cancellationToken);
+
+        var authentication =
+            await IssueTokensAsync(
+                user,
+                null,
+                cancellationToken);
+
+        try
+        {
+            stageStarted = Stopwatch.GetTimestamp();
+
+            await unitOfWork.SaveChangesAsync(
+                cancellationToken);
+
+            LogRegistrationTiming(
+                "employer_database_transaction",
+                stageStarted);
+        }
+        catch (UniqueConstraintException exception)
+        {
+            LogAuthenticationEvent(
+                "employer_registration_identity_checked",
+                "uniqueness_conflict",
+                exception);
+
+            unitOfWork.ResetAfterFailure();
+
+            var raceEmailUser =
+                await users.GetByNormalizedEmailAsync(
+                    normalizedEmail,
+                    cancellationToken);
+
+            var racePhoneUser =
+                await users.GetByNormalizedPhoneAsync(
+                    normalizedPhoneNumber,
+                    cancellationToken);
+
+            LogRegistrationTiming(
+                "employer_total",
+                totalStarted);
+
+            await ThrowRegistrationIdentityConflictAsync(
+                raceEmailUser,
+                racePhoneUser is not null,
+                cancellationToken);
+
+            throw new ConflictException(
+                "An account with these details already exists.",
+                "registration_identity_exists");
+        }
+
+        LogAuthenticationEvent(
+            "employer_registration_completed",
+            "created");
+
+        LogRegistrationTiming(
+            "employer_total",
+            totalStarted);
+
+        return new(
+            "Employer registration successful.",
+            authentication);
+    }
     public async Task<MessageResponse> VerifyEmailAsync(
         VerifyEmailRequest request, CancellationToken cancellationToken = default)
     {
@@ -251,7 +434,85 @@ public sealed class AuthService(
             LogLoginTiming("total", totalStarted);
         }
     }
+    public async Task<AuthenticationResponse> LoginEmployerAsync(
+    LoginRequest request,
+    string? ipAddress,
+    CancellationToken cancellationToken = default)
+    {
+        request = request with
+        {
+            Identifier = request.Identifier?.Trim() ?? string.Empty
+        };
 
+        await loginValidator.ValidateAndThrowAsync(
+            request,
+            cancellationToken);
+
+        User? user;
+
+        if (request.Identifier.Contains(
+            '@',
+            StringComparison.Ordinal))
+        {
+            user =
+                await users.GetByNormalizedEmailAsync(
+                    NormalizeEmail(request.Identifier),
+                    cancellationToken);
+        }
+        else
+        {
+            _ = IndianMobileNumber.TryNormalize(
+                request.Identifier,
+                out var normalizedPhoneNumber);
+
+            user =
+                await users.GetByNormalizedPhoneAsync(
+                    normalizedPhoneNumber,
+                    cancellationToken);
+        }
+
+        /*
+         * Do not reveal whether the account exists but belongs
+         * to another CareerHarbor role.
+         */
+        if (user is null ||
+            user.Status != UserStatus.Active ||
+            user.RoleId != SystemRoleIds.Employer ||
+            string.IsNullOrWhiteSpace(user.PasswordHash))
+        {
+            throw InvalidCredentials();
+        }
+
+        if (!passwordHasher.Verify(
+                request.Password,
+                user.PasswordHash))
+        {
+            throw InvalidCredentials();
+        }
+
+        if (!user.EmailConfirmed)
+        {
+            throw new AuthenticationFlowException(
+                "Verify your email before signing in.",
+                403,
+                "email_verification_required");
+        }
+
+        user.LastLoginAtUtc = UtcNow;
+
+        users.Update(user);
+
+        var response =
+            await IssueTokensAsync(
+                user,
+                ipAddress,
+                cancellationToken);
+
+        await unitOfWork.SaveChangesAsync(
+            cancellationToken);
+
+        return response;
+    }
     public async Task<MessageResponse> RequestPasswordResetAsync(
         RequestPasswordResetRequest request,
         CancellationToken cancellationToken = default)

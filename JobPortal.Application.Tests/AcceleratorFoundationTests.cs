@@ -436,7 +436,11 @@ internal sealed class AcceleratorFixture : IDisposable
             MaxRequestBytes = 1000, InputInrPerMillionTokens = 1000, OutputInrPerMillionTokens = 1000 };
         Store = new(Db); Service = new(Store, Options.Create(Settings), Clock, Audit, Pricing);
         Quota = new(Store, Service, Options.Create(Settings), Clock, Audit, [Provider]);
-        Phase2Store = new(Db); Phase2 = new(Store, Phase2Store, Service, Audit, Clock);
+        Phase2Store = new(Db);
+        var journeys = new AcceleratorJourneyStore(Db);
+        var learning = new AcceleratorLearningPathStore(Db);
+        var contexts = new AcceleratorJourneyContextService(Store, journeys, learning, Phase2Store, Service);
+        Phase2 = new(Store, Phase2Store, Service, Audit, Clock, contexts, journeys, learning);
     }
     public PublishTaxonomyRequest Taxonomy(string version = "v1") => new(version,
         [new(CodeSkill.Id, "Build applications", "Engineering", 2, null, [], ["coding"], []),

@@ -1,15 +1,19 @@
-using JobPortal.Application.Abstractions.Persistence;
-using JobPortal.Application.Abstractions.Candidates;
+using JobPortal.Application.Abstractions.AIApply;
 using JobPortal.Application.Abstractions.CandidateCompanies;
+using JobPortal.Application.Abstractions.CandidateRecruiterVisibility;
+using JobPortal.Application.Abstractions.Candidates;
+using JobPortal.Application.Abstractions.EmployerCandidateFinder;
+using JobPortal.Application.Abstractions.EmployerCompanies;
+using JobPortal.Application.Abstractions.EmployerJobs;
+using JobPortal.Application.Abstractions.EmployerTalentPool;
 using JobPortal.Application.Abstractions.InterviewInsights;
+using JobPortal.Application.Abstractions.Persistence;
 using JobPortal.Application.Abstractions.Referrals;
 using JobPortal.Persistence.Context;
 using JobPortal.Persistence.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using JobPortal.Application.Abstractions.AIApply;
-
 namespace JobPortal.Persistence;
 
 public static class ServiceCollectionExtensions
@@ -55,6 +59,9 @@ public static class ServiceCollectionExtensions
             if (int.TryParse(section["RecipientCooldownDays"], out var cooldown)) settings.RecipientCooldownDays = cooldown;
         });
         services.AddScoped<JobPortal.Application.Features.CareerAccelerator.IAcceleratorPhase2Store, AcceleratorPhase2Store>();
+        services.AddScoped<JobPortal.Application.Features.CareerAccelerator.IAcceleratorRecognitionStore, AcceleratorRecognitionStore>();
+        services.AddScoped<JobPortal.Application.Features.CareerAccelerator.IAcceleratorJourneyStore, AcceleratorJourneyStore>();
+        services.AddScoped<JobPortal.Application.Features.CareerAccelerator.IAcceleratorLearningPathStore, AcceleratorLearningPathStore>();
         services.AddScoped<JobPortal.Application.Features.CareerAccelerator.IAcceleratorPhase3Store, AcceleratorPhase3Store>();
         services.AddScoped<JobPortal.Application.Features.CareerAccelerator.IAcceleratorPhase4Store, AcceleratorPhase4Store>();
         services.AddScoped<JobPortal.Application.Features.CareerAccelerator.IAcceleratorPhase5Store, AcceleratorPhase5Store>();
@@ -93,6 +100,30 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IAdminApplicationRepository, AdminApplicationRepository>();
         services.AddScoped<ICandidateRepository, CandidateRepository>();
         services.AddScoped<ICandidateCompanyRepository, CandidateCompanyRepository>();
+        services.AddScoped<IEmployerCompanyRepository, EmployerCompanyRepository>();
+        services.AddScoped<IJobRepository, JobRepository>();
+        services.AddScoped<IEmployerJobRepository, EmployerJobRepository>();
+        services.AddScoped<
+    IEmployerApplicationRepository,
+    EmployerApplicationRepository>();
+        services.AddScoped<
+    IEmployerPipelineRepository,
+    EmployerPipelineRepository>();
+
+        services.AddScoped<
+    IEmployerInterviewRepository,
+    EmployerInterviewRepository>();
+        services.AddScoped<IEmployerCandidateFinderRepository, EmployerCandidateFinderRepository>();
+        services.AddScoped<ICandidateRecruiterVisibilityRepository, CandidateRecruiterVisibilityRepository>();
+        services.AddScoped<
+    IEmployerOfferRepository,
+    EmployerOfferRepository>();
+        services.AddScoped<
+    IEmployerTalentPoolRepository,
+    EmployerTalentPoolRepository>();
+        services.AddScoped<
+    IHiringMessagingRepository,
+    HiringMessagingRepository>();
         services.AddScoped<IProfilePhotoStorage, PostgresProfilePhotoStorage>();
         services.AddScoped<PostgresResumeStorage>(provider => new PostgresResumeStorage(
             provider.GetRequiredService<IDbContextFactory<JobPortalDbContext>>(), configuration["ResumeStorage:RootPath"]));

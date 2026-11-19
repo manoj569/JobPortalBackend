@@ -169,7 +169,35 @@ public sealed class JobPortalDbContext(DbContextOptions<JobPortalDbContext> opti
     public DbSet<AcceleratorInterviewCriterionScore> AcceleratorInterviewCriterionScores => Set<AcceleratorInterviewCriterionScore>();
     public DbSet<AcceleratorReadinessSnapshot> AcceleratorReadinessSnapshots => Set<AcceleratorReadinessSnapshot>();
     public DbSet<AcceleratorPassportShare> AcceleratorPassportShares => Set<AcceleratorPassportShare>();
+    public DbSet<AcceleratorJourneyContext> AcceleratorJourneyContexts => Set<AcceleratorJourneyContext>();
+    public DbSet<AcceleratorSkillProficiencyPolicy> AcceleratorSkillProficiencyPolicies => Set<AcceleratorSkillProficiencyPolicy>();
+    public DbSet<AcceleratorProficiencyBand> AcceleratorProficiencyBands => Set<AcceleratorProficiencyBand>();
+    public DbSet<AcceleratorAchievementDefinition> AcceleratorAchievementDefinitions => Set<AcceleratorAchievementDefinition>();
+    public DbSet<CandidateAcceleratorAchievement> CandidateAcceleratorAchievements => Set<CandidateAcceleratorAchievement>();
+    public DbSet<AcceleratorEnrollmentCertificate> AcceleratorEnrollmentCertificates => Set<AcceleratorEnrollmentCertificate>();
+    public DbSet<AcceleratorLearningPathCompetencyRequirement> AcceleratorLearningPathCompetencyRequirements => Set<AcceleratorLearningPathCompetencyRequirement>();
+    public DbSet<AcceleratorLearningPathAssessment> AcceleratorLearningPathAssessments => Set<AcceleratorLearningPathAssessment>();
+    public DbSet<AcceleratorLearningPath> AcceleratorLearningPaths => Set<AcceleratorLearningPath>();
+    public DbSet<AcceleratorLearningModule> AcceleratorLearningModules => Set<AcceleratorLearningModule>();
+    public DbSet<AcceleratorLearningModulePrerequisite> AcceleratorLearningModulePrerequisites => Set<AcceleratorLearningModulePrerequisite>();
+    public DbSet<AcceleratorLesson> AcceleratorLessons => Set<AcceleratorLesson>();
+    public DbSet<AcceleratorLessonResource> AcceleratorLessonResources => Set<AcceleratorLessonResource>();
+    public DbSet<AcceleratorPathEnrollment> AcceleratorPathEnrollments => Set<AcceleratorPathEnrollment>();
+    public DbSet<AcceleratorLessonProgress> AcceleratorLessonProgress => Set<AcceleratorLessonProgress>();
+    public DbSet<AcceleratorEnrollmentProgressEvent> AcceleratorEnrollmentProgressEvents => Set<AcceleratorEnrollmentProgressEvent>();
+    public DbSet<EmployerHiringPipeline> EmployerHiringPipelines =>
+    Set<EmployerHiringPipeline>();
+    public DbSet<EmployerInterview> EmployerInterviews =>
+    Set<EmployerInterview>();
+    public DbSet<EmployerOffer> EmployerOffers =>
+    Set<EmployerOffer>();
 
+    public DbSet<HiringConversation> HiringConversations =>
+    Set<HiringConversation>();
+
+    public DbSet<HiringMessage> HiringMessages =>
+        Set<HiringMessage>();
+    public DbSet<EmployerTalentPool> EmployerTalentPools => Set<EmployerTalentPool>();
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         AcceleratorPersistencePolicy.Enforce(this);
@@ -195,9 +223,20 @@ public sealed class JobPortalDbContext(DbContextOptions<JobPortalDbContext> opti
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(JobPortalDbContext).Assembly);
+        ConfigureJourneyReference<AcceleratorAssessmentAttempt>(modelBuilder);
+        ConfigureJourneyReference<AcceleratorSkillEvidence>(modelBuilder);
+        ConfigureJourneyReference<AcceleratorRoadmap>(modelBuilder);
+        ConfigureJourneyReference<AcceleratorRecommendation>(modelBuilder);
         if (Database.IsNpgsql()) modelBuilder.HasPostgresExtension("btree_gist");
 
         base.OnModelCreating(modelBuilder);
+    }
+
+    private static void ConfigureJourneyReference<TEntity>(ModelBuilder modelBuilder) where TEntity : BaseEntity
+    {
+        var builder = modelBuilder.Entity<TEntity>();
+        builder.HasOne<AcceleratorJourneyContext>().WithMany().HasForeignKey("JourneyContextId").OnDelete(DeleteBehavior.Restrict);
+        builder.HasIndex("UserId", "JourneyContextId");
     }
 
     private void ApplyAuditAndSoftDelete()

@@ -43,7 +43,8 @@ internal static class AcceleratorPersistencePolicy
                 if (addedInterviewVersionId != Guid.Empty) EnsureInterviewDraftUnreferenced(context, addedInterviewVersionId);
                 continue;
             }
-            if (entry.Entity is AcceleratorTaxonomy or AcceleratorCareerRole or AcceleratorCompetency or AcceleratorPrerequisite or
+            if (entry.Entity is CandidateAcceleratorAchievement or AcceleratorSkillProficiencyPolicy or AcceleratorProficiencyBand or AcceleratorAchievementDefinition or
+                AcceleratorTaxonomy or AcceleratorCareerRole or AcceleratorCompetency or AcceleratorPrerequisite or
                 AcceleratorRoleRequirement or AcceleratorBillingCycle or AcceleratorAllowance or AcceleratorUsageEvent or
                 AcceleratorProgressEvent or AcceleratorSkillEvidence or AcceleratorTutorMessage or AcceleratorPracticeAttempt or
                 AcceleratorPracticeEvaluation or AcceleratorProjectSubmission or AcceleratorProjectEvaluation or AcceleratorProjectEvaluationScore or

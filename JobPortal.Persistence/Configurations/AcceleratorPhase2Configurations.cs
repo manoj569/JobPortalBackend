@@ -4,6 +4,17 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace JobPortal.Persistence.Configurations;
 
+public sealed class AcceleratorJourneyContextConfiguration : IEntityTypeConfiguration<AcceleratorJourneyContext>
+{
+    public void Configure(EntityTypeBuilder<AcceleratorJourneyContext> builder)
+    {
+        builder.ToTable("AcceleratorJourneyContexts", t => t.HasCheckConstraint("CK_AcceleratorJourneyContext_Scope", "(\"ScopeType\" = 1 AND \"CareerGoalId\" IS NOT NULL AND \"LearningPathEnrollmentId\" IS NULL) OR (\"ScopeType\" = 2 AND \"CareerGoalId\" IS NULL AND \"LearningPathEnrollmentId\" IS NOT NULL)")); builder.ConfigureBaseEntity(); builder.Property(x => x.Revision).IsConcurrencyToken();
+        builder.HasIndex(x => x.CareerGoalId).IsUnique().HasFilter("\"CareerGoalId\" IS NOT NULL AND \"IsDeleted\" = false"); builder.HasIndex(x => x.LearningPathEnrollmentId).IsUnique().HasFilter("\"LearningPathEnrollmentId\" IS NOT NULL AND \"IsDeleted\" = false"); builder.HasIndex(x => new { x.UserId, x.ScopeType });
+        builder.HasOne<AcceleratorCareerGoal>().WithMany().HasForeignKey(x => x.CareerGoalId).OnDelete(DeleteBehavior.Restrict); builder.HasOne<AcceleratorPathEnrollment>().WithMany().HasForeignKey(x => x.LearningPathEnrollmentId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<AcceleratorTaxonomy>().WithMany().HasForeignKey(x => x.TaxonomyId).OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
 public sealed class AcceleratorAssessmentTemplateConfiguration : IEntityTypeConfiguration<AcceleratorAssessmentTemplate>
 {
     public void Configure(EntityTypeBuilder<AcceleratorAssessmentTemplate> builder)
@@ -12,6 +23,8 @@ public sealed class AcceleratorAssessmentTemplateConfiguration : IEntityTypeConf
         builder.Property(x => x.Version).HasMaxLength(80).IsRequired(); builder.Property(x => x.SelectionStrategy).HasMaxLength(80).IsRequired();
         builder.HasIndex(x => new { x.RoleId, x.Version }).IsUnique(); builder.HasIndex(x => new { x.RoleId, x.IsActive });
         builder.HasOne(x => x.Role).WithMany().HasForeignKey(x => x.RoleId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<AcceleratorTaxonomy>().WithMany().HasForeignKey(x => x.TaxonomyId).OnDelete(DeleteBehavior.Restrict);
+        builder.ToTable("AcceleratorAssessmentTemplates", t => t.HasCheckConstraint("CK_AcceleratorAssessmentTemplate_Applicability", "\"RoleId\" IS NOT NULL OR \"TaxonomyId\" IS NOT NULL"));
     }
 }
 public sealed class AcceleratorQuestionConfiguration : IEntityTypeConfiguration<AcceleratorQuestion>
@@ -66,6 +79,7 @@ public sealed class AcceleratorRoadmapConfiguration : IEntityTypeConfiguration<A
 {
     public void Configure(EntityTypeBuilder<AcceleratorRoadmap> builder)
     {
+        builder.HasIndex(x => new { x.JourneyContextId, x.Version }).IsUnique().HasFilter("\"JourneyContextId\" IS NOT NULL");
         builder.ToTable("AcceleratorRoadmaps", t => t.HasCheckConstraint("CK_AcceleratorRoadmap_Timeline", "\"TargetAtUtc\" > \"PlannedStartAtUtc\" AND \"EstimatedMinutes\" >= 0")); builder.ConfigureBaseEntity(); builder.Property(x => x.GenerationStrategy).HasMaxLength(80).IsRequired(); builder.Property(x => x.Explanation).HasMaxLength(8000).IsRequired();
         builder.HasIndex(x => new { x.GoalId, x.Version }).IsUnique(); builder.HasIndex(x => new { x.UserId, x.Status }); builder.HasMany(x => x.Nodes).WithOne(x => x.Roadmap).HasForeignKey(x => x.RoadmapId).OnDelete(DeleteBehavior.Restrict);
     }

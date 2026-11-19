@@ -146,6 +146,42 @@ public sealed class NotificationDeliveryRepository(JobPortalDbContext db) : INot
                     r.ReferrerUserId == delivery.UserId &&
                     r.ApprovalStatus == decision, ct);
 
+            case NotificationSource.HiringMessage:
+                return await db.HiringMessages
+                    .AsNoTracking()
+                    .AnyAsync(m =>
+                        m.Id == delivery.SourceId &&
+                        m.SenderUserId != delivery.UserId &&
+                        (m.Conversation.CandidateUserId == delivery.UserId ||
+                         m.Conversation.EmployerUserId == delivery.UserId),
+                        ct);
+
+            case NotificationSource.EmployerInterview:
+                return await db.EmployerInterviews
+                    .AsNoTracking()
+                    .AnyAsync(x =>
+                        x.Id == delivery.SourceId &&
+                        x.JobApplication.UserId == delivery.UserId,
+                        ct);
+
+            case NotificationSource.EmployerOffer:
+                return await db.EmployerOffers
+                    .AsNoTracking()
+                    .AnyAsync(x =>
+                        x.Id == delivery.SourceId &&
+                        x.JobApplication.UserId == delivery.UserId,
+                        ct);
+
+            case NotificationSource.CandidateHired:
+                return await db.EmployerHiringPipelines
+                    .AsNoTracking()
+                    .AnyAsync(x =>
+                        x.Id == delivery.SourceId &&
+                        x.JobApplication.UserId == delivery.UserId &&
+                        x.Stage == EmployerPipelineStage.Hired &&
+                        x.HiredAtUtc != null,
+                        ct);
+
             default:
                 return false;
         }

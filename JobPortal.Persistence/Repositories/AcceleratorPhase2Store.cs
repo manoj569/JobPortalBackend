@@ -7,7 +7,7 @@ namespace JobPortal.Persistence.Repositories;
 
 public sealed class AcceleratorPhase2Store(JobPortalDbContext context) : IAcceleratorPhase2Store
 {
-    public Task<AcceleratorAssessmentTemplate?> TemplateAsync(Guid id, CancellationToken ct) => context.AcceleratorAssessmentTemplates.Include(x => x.Role).ThenInclude(x => x.Taxonomy).SingleOrDefaultAsync(x => x.Id == id && !x.IsDeleted, ct);
+    public Task<AcceleratorAssessmentTemplate?> TemplateAsync(Guid id, CancellationToken ct) => context.AcceleratorAssessmentTemplates.Include(x => x.Role).ThenInclude(x => x!.Taxonomy).SingleOrDefaultAsync(x => x.Id == id && !x.IsDeleted, ct);
     public Task<AcceleratorAssessmentTemplate?> TemplateAsync(Guid roleId, string version, CancellationToken ct) => context.AcceleratorAssessmentTemplates.SingleOrDefaultAsync(x => x.RoleId == roleId && x.Version == version && !x.IsDeleted, ct);
     public Task<AcceleratorQuestion?> QuestionAsync(Guid competencyId, string version, CancellationToken ct) => context.AcceleratorQuestions.SingleOrDefaultAsync(x => x.CompetencyId == competencyId && x.Version == version && !x.IsDeleted, ct);
     public Task<AcceleratorAssessmentAttempt?> AttemptAsync(Guid userId, Guid id, CancellationToken ct) => context.AcceleratorAssessmentAttempts.Include(x => x.Answers).SingleOrDefaultAsync(x => x.UserId == userId && x.Id == id && !x.IsDeleted, ct);
