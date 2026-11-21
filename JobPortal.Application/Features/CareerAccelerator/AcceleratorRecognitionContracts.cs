@@ -16,14 +16,14 @@ public sealed record DemonstratedCompetencyResponse(Guid CompetencyId, string Na
 public sealed record JourneyAchievementResponse(Guid Id, Guid DefinitionId, DateTime AwardedAtUtc, string Code, string Title, string Description);
 public sealed record JourneyCertificateResponse(Guid? Id, AcceleratorCertificateState State, DateTime? EvaluatedAtUtc,
     DateTime? IssuedAtUtc, string? CertificateIdentifier);
-public sealed record RecognitionSignals(decimal? AssessmentScore, int Assessments, int CompletedModules, int TotalModules, decimal? PracticeScore = null);
+public sealed record RecognitionSignals(decimal? AssessmentScore, int Assessments, int CompletedModules, int TotalModules, decimal? PracticeScore = null, decimal? ProjectScore = null, decimal? InterviewScore = null);
 public sealed record EnrollmentRecognitionResponse(Guid LearningPathId, string Title, JourneyProficiencyResponse Proficiency,
     IReadOnlyList<JourneyAchievementResponse> Achievements, JourneyCertificateResponse Certificate);
 
 public interface IAcceleratorRecognitionStore
 {
     Task<AcceleratorSkillProficiencyPolicy?> PolicyAsync(Guid? pathId, CancellationToken ct);
-    Task<RecognitionSignals> SignalsAsync(AcceleratorJourneyContext context, CancellationToken ct);
+    Task<RecognitionSignals> SignalsAsync(AcceleratorJourneyContext context, CancellationToken ct, decimal minimumConfidence = 0);
     Task<IReadOnlyList<AcceleratorAchievementDefinition>> DefinitionsAsync(CancellationToken ct);
     Task<IReadOnlyList<AcceleratorAchievementDefinition>> DefinitionsByIdsAsync(IReadOnlyCollection<Guid> ids, CancellationToken ct);
     Task<IReadOnlyList<CandidateAcceleratorAchievement>> AwardsAsync(Guid actor, Guid contextId, CancellationToken ct);

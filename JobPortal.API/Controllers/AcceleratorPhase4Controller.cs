@@ -13,6 +13,9 @@ namespace JobPortal.API.Controllers;
 [RequestSizeLimit(65536), EnableRateLimiting("CareerAccelerator")]
 public sealed class AcceleratorPhase4Controller(AcceleratorPhase4Service service, AcceleratorProjectAiService projectAi) : ControllerBase
 {
+    [HttpGet("~/api/accelerator/v1/learning/enrollments/{enrollmentId:guid}/projects/recommended")]
+    public async Task<ActionResult<ApiResponse<IReadOnlyList<AcceleratorProjectRecommendation>>>> EnrollmentRecommendations(Guid enrollmentId, CancellationToken ct) =>
+        Ok(new ApiResponse<IReadOnlyList<AcceleratorProjectRecommendation>>(await service.RecommendAsync(User.GetRequiredUserId(),Guid.Empty,ct,enrollmentId)));
     [HttpGet("recommended")]
     public async Task<ActionResult<ApiResponse<IReadOnlyList<AcceleratorProjectRecommendation>>>> Recommended([FromQuery] Guid goalId, CancellationToken ct) =>
         Ok(new ApiResponse<IReadOnlyList<AcceleratorProjectRecommendation>>(await service.RecommendAsync(User.GetRequiredUserId(), goalId, ct)));
@@ -26,8 +29,8 @@ public sealed class AcceleratorPhase4Controller(AcceleratorPhase4Service service
         Ok(new ApiResponse<CandidateAcceleratorProjectResponse>(await service.StartProjectAsync(User.GetRequiredUserId(), request with { ProjectVersionId = versionId }, ct)));
 
     [HttpGet("mine")]
-    public async Task<ActionResult<ApiResponse<IReadOnlyList<CandidateAcceleratorProjectResponse>>>> Mine([FromQuery] int page = 1, [FromQuery] int pageSize = 20, CancellationToken ct = default) =>
-        Ok(new ApiResponse<IReadOnlyList<CandidateAcceleratorProjectResponse>>(await service.ProjectsAsync(User.GetRequiredUserId(), page, pageSize, ct)));
+    public async Task<ActionResult<ApiResponse<IReadOnlyList<CandidateAcceleratorProjectResponse>>>> Mine([FromQuery] int page = 1, [FromQuery] int pageSize = 20, [FromQuery] Guid? journeyContextId=null, CancellationToken ct = default) =>
+        Ok(new ApiResponse<IReadOnlyList<CandidateAcceleratorProjectResponse>>(await service.ProjectsAsync(User.GetRequiredUserId(), page, pageSize, ct,journeyContextId)));
 
     [HttpGet("mine/{projectId:guid}")]
     public async Task<ActionResult<ApiResponse<CandidateAcceleratorProjectResponse>>> MineDetail(Guid projectId, CancellationToken ct) =>

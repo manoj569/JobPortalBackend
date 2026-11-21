@@ -14,12 +14,14 @@ namespace JobPortal.Application.Tests;
 
 public sealed class AcceleratorRecognitionPostgresTests
 {
+    private static readonly string[] AllowedDatabases = ["accelerator_2b_verify", "accelerator_phase3_verify", "accelerator_phase45_verify"];
     private static readonly Guid Owner=Guid.Parse("2a000000-0000-0000-0000-000000000001");
     private static readonly Guid Context=Guid.Parse("2a000000-0000-0000-0000-000000000006");
     private static JobPortalDbContext Open()
     {
         var connection=new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("ACCELERATOR_RECOGNITION_TEST_POSTGRES"));
-        Assert.Equal("127.0.0.1",connection.Host); Assert.Equal(55439,connection.Port); Assert.Equal("accelerator_2b_verify",connection.Database);
+        Assert.Equal("127.0.0.1",connection.Host); Assert.Equal(55439,connection.Port);
+        Assert.Contains(connection.Database, AllowedDatabases);
         return new(new DbContextOptionsBuilder<JobPortalDbContext>().UseNpgsql(connection.ConnectionString,pg=> { pg.MigrationsAssembly(typeof(PostgresMigrationMarker).Assembly.FullName); pg.EnableRetryOnFailure(3); }).Options);
     }
     private static AcceleratorRecognitionService Service(JobPortalDbContext db)

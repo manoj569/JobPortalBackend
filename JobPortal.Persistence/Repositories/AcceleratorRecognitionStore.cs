@@ -10,7 +10,7 @@ public sealed class AcceleratorRecognitionStore(JobPortalDbContext db) : IAccele
     public Task<AcceleratorSkillProficiencyPolicy?> PolicyAsync(Guid? pathId, CancellationToken ct) =>
         db.AcceleratorSkillProficiencyPolicies.AsNoTracking().Include(x => x.Bands).Where(x => !x.IsDeleted && x.IsActive && (x.LearningPathId == pathId || x.LearningPathId == null))
             .OrderByDescending(x => x.LearningPathId != null).ThenByDescending(x => x.Version).ThenBy(x => x.Code).FirstOrDefaultAsync(ct);
-    public async Task<RecognitionSignals> SignalsAsync(AcceleratorJourneyContext context, CancellationToken ct)
+    public async Task<RecognitionSignals> SignalsAsync(AcceleratorJourneyContext context, CancellationToken ct, decimal minimumConfidence = 0)
     {
         var scores = await db.AcceleratorAssessmentAttempts.AsNoTracking().Where(x => !x.IsDeleted && x.UserId == context.UserId && x.JourneyContextId == context.Id && x.Status == AcceleratorAssessmentStatus.Completed && x.Score != null)
             .Select(x => x.Score!.Value).ToArrayAsync(ct);
@@ -38,7 +38,14 @@ public sealed class AcceleratorRecognitionStore(JobPortalDbContext db) : IAccele
                 !evaluation.IsDeleted && evaluation.Method == AcceleratorPracticeEvaluationMethod.Deterministic && evaluation.Confidence == 1 && evaluation.MaximumScore > 0
             select new { evaluation.Score, evaluation.MaximumScore }).ToArrayAsync(ct);
         decimal? practiceScore = practice.Length == 0 ? null : decimal.Round(practice.Sum(x => x.Score) * 100m / practice.Sum(x => x.MaximumScore), 2);
-        return new(scores.Length == 0 ? null : decimal.Round(scores.Average(),2), scores.Length, complete, total, practiceScore);
+        var projects = await db.AcceleratorCandidateProjects.AsNoTracking().Where(p => p.UserId == context.UserId && p.JourneyContextId == context.Id && !p.IsDeleted &&
+            p.Status == AcceleratorCandidateProjectStatus.Completed && p.FinalScore.HasValue && db.AcceleratorSkillEvidence.Any(e => e.UserId == context.UserId && e.JourneyContextId == context.Id &&
+                e.CandidateProjectId == p.Id && !e.IsDeleted && e.Confidence >= minimumConfidence)).Select(p => p.FinalScore!.Value).ToArrayAsync(ct);
+        var interviews = await db.AcceleratorInterviewSessions.AsNoTracking().Where(s => s.UserId == context.UserId && s.JourneyContextId == context.Id && !s.IsDeleted &&
+            s.Status == AcceleratorInterviewSessionStatus.Completed && s.OverallScore.HasValue && db.AcceleratorSkillEvidence.Any(e => e.UserId == context.UserId && e.JourneyContextId == context.Id &&
+                e.InterviewSessionId == s.Id && !e.IsDeleted && e.Confidence >= minimumConfidence)).Select(s => s.OverallScore!.Value).ToArrayAsync(ct);
+        return new(scores.Length == 0 ? null : decimal.Round(scores.Average(),2), scores.Length, complete, total, practiceScore,
+            projects.Length == 0 ? null : decimal.Round(projects.Average(),2), interviews.Length == 0 ? null : decimal.Round(interviews.Average(),2));
     }
     public async Task<IReadOnlyList<AcceleratorAchievementDefinition>> DefinitionsAsync(CancellationToken ct) => await db.AcceleratorAchievementDefinitions.AsNoTracking().Where(x => x.IsActive && !x.IsDeleted).OrderBy(x => x.Code).ToArrayAsync(ct);
     public async Task<IReadOnlyList<AcceleratorAchievementDefinition>> DefinitionsByIdsAsync(IReadOnlyCollection<Guid> ids, CancellationToken ct) =>

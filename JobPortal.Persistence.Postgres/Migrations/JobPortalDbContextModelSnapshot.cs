@@ -2620,11 +2620,14 @@ namespace JobPortal.Persistence.Postgres.Migrations
                         .HasPrecision(9, 2)
                         .HasColumnType("numeric(9,2)");
 
-                    b.Property<Guid>("GoalId")
+                    b.Property<Guid?>("GoalId")
                         .HasColumnType("uuid");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
+
+                    b.Property<Guid?>("JourneyContextId")
+                        .HasColumnType("uuid");
 
                     b.Property<int>("ProgressPercent")
                         .HasColumnType("integer");
@@ -2667,11 +2670,15 @@ namespace JobPortal.Persistence.Postgres.Migrations
 
                     b.HasIndex("IsDeleted");
 
+                    b.HasIndex("JourneyContextId");
+
                     b.HasIndex("ProjectVersionId");
 
                     b.HasIndex("RequiredRevisionAssignmentId");
 
                     b.HasIndex("UserId", "CreatedAtUtc");
+
+                    b.HasIndex("UserId", "JourneyContextId");
 
                     b.HasIndex("UserId", "RequestKey")
                         .IsUnique();
@@ -2679,6 +2686,8 @@ namespace JobPortal.Persistence.Postgres.Migrations
                     b.ToTable("AcceleratorCandidateProjects", null, t =>
                         {
                             t.HasCheckConstraint("CK_AcceleratorCandidateProject_Progress", "\"ProgressPercent\" BETWEEN 0 AND 100");
+
+                            t.HasCheckConstraint("CK_CandidateProject_Journey", "\"JourneyContextId\" IS NOT NULL");
                         });
                 });
 
@@ -3430,7 +3439,7 @@ namespace JobPortal.Persistence.Postgres.Migrations
                     b.Property<DateTime?>("DeletedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<Guid>("GoalId")
+                    b.Property<Guid?>("GoalId")
                         .HasColumnType("uuid");
 
                     b.Property<Guid>("InterviewVersionId")
@@ -3438,6 +3447,9 @@ namespace JobPortal.Persistence.Postgres.Migrations
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
+
+                    b.Property<Guid?>("JourneyContextId")
+                        .HasColumnType("uuid");
 
                     b.Property<decimal?>("OverallScore")
                         .HasPrecision(9, 2)
@@ -3482,6 +3494,10 @@ namespace JobPortal.Persistence.Postgres.Migrations
 
                     b.HasIndex("IsDeleted");
 
+                    b.HasIndex("JourneyContextId");
+
+                    b.HasIndex("UserId", "JourneyContextId");
+
                     b.HasIndex("UserId", "RequestKey")
                         .IsUnique();
 
@@ -3489,6 +3505,8 @@ namespace JobPortal.Persistence.Postgres.Migrations
 
                     b.ToTable("AcceleratorInterviewSessions", null, t =>
                         {
+                            t.HasCheckConstraint("CK_InterviewSession_Journey", "\"JourneyContextId\" IS NOT NULL");
+
                             t.HasCheckConstraint("CK_InterviewSession_Score", "\"OverallScore\" IS NULL OR (\"OverallScore\" BETWEEN 0 AND 100)");
                         });
                 });
@@ -5455,7 +5473,7 @@ namespace JobPortal.Persistence.Postgres.Migrations
                         .HasMaxLength(4000)
                         .HasColumnType("character varying(4000)");
 
-                    b.Property<Guid>("GoalId")
+                    b.Property<Guid?>("GoalId")
                         .HasColumnType("uuid");
 
                     b.Property<decimal>("InterviewPerformance")
@@ -5464,6 +5482,9 @@ namespace JobPortal.Persistence.Postgres.Migrations
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
+
+                    b.Property<Guid?>("JourneyContextId")
+                        .HasColumnType("uuid");
 
                     b.Property<decimal>("PracticePerformance")
                         .HasPrecision(9, 2)
@@ -5496,14 +5517,20 @@ namespace JobPortal.Persistence.Postgres.Migrations
 
                     b.HasIndex("IsDeleted");
 
+                    b.HasIndex("JourneyContextId");
+
                     b.HasIndex("TriggerInterviewSessionId")
                         .IsUnique()
                         .HasFilter("\"TriggerInterviewSessionId\" IS NOT NULL");
 
                     b.HasIndex("UserId", "GoalId", "CalculatedAtUtc");
 
+                    b.HasIndex("UserId", "JourneyContextId", "CalculatedAtUtc");
+
                     b.ToTable("AcceleratorReadinessSnapshots", null, t =>
                         {
+                            t.HasCheckConstraint("CK_ReadinessSnapshot_Journey", "\"JourneyContextId\" IS NOT NULL");
+
                             t.HasCheckConstraint("CK_Readiness_Bounds", "\"Total\" BETWEEN 0 AND 100 AND \"SkillCoverage\" BETWEEN 0 AND 100 AND \"PracticePerformance\" BETWEEN 0 AND 100 AND \"ProjectPerformance\" BETWEEN 0 AND 100 AND \"InterviewPerformance\" BETWEEN 0 AND 100");
                         });
                 });
@@ -13871,8 +13898,12 @@ namespace JobPortal.Persistence.Postgres.Migrations
                     b.HasOne("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorCareerGoal", null)
                         .WithMany()
                         .HasForeignKey("GoalId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorJourneyContext", null)
+                        .WithMany()
+                        .HasForeignKey("JourneyContextId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorProjectVersion", null)
                         .WithMany()
@@ -14091,14 +14122,18 @@ namespace JobPortal.Persistence.Postgres.Migrations
                     b.HasOne("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorCareerGoal", null)
                         .WithMany()
                         .HasForeignKey("GoalId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorInterviewVersion", null)
                         .WithMany()
                         .HasForeignKey("InterviewVersionId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorJourneyContext", null)
+                        .WithMany()
+                        .HasForeignKey("JourneyContextId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorInterviewVersion", b =>
@@ -14568,8 +14603,12 @@ namespace JobPortal.Persistence.Postgres.Migrations
                     b.HasOne("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorCareerGoal", null)
                         .WithMany()
                         .HasForeignKey("GoalId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorJourneyContext", null)
+                        .WithMany()
+                        .HasForeignKey("JourneyContextId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorInterviewSession", null)
                         .WithMany()

@@ -95,6 +95,28 @@ public sealed class AcceleratorRecognitionTests
         await Assert.ThrowsAsync<AppException>(()=>service.CreatePolicyAsync(f.Candidate.Id,Policy() with { Code="forbidden" },default));
     }
 
+    [Fact]
+    public async Task RealPracticeContributesConfiguredWeightWithoutGrantingMastery()
+    {
+        using var f = new AcceleratorFixture();
+        var setup = await AcceleratorPhase3JourneyTests.Setup(f, 2);
+        var practice = AcceleratorPhase3JourneyTests.Create(f);
+        var session = await practice.StartPracticeAsync(f.Candidate.Id, AcceleratorPhase3JourneyTests.Practice(setup), default);
+        var journeys = new AcceleratorJourneyStore(f.Db); var learning = new AcceleratorLearningPathStore(f.Db);
+        var contexts = new AcceleratorJourneyContextService(f.Store, journeys, learning, f.Phase2Store, f.Service);
+        var context = await contexts.GetOwnedContextAsync(f.Candidate.Id, session.JourneyContextId!.Value, default);
+        var service = new AcceleratorRecognitionService(f.Store, new AcceleratorRecognitionStore(f.Db), contexts, journeys, learning, f.Service, f.Audit, f.Clock);
+        await service.CreatePolicyAsync(f.Admin.Id, Policy() with { Components = [new(AcceleratorProficiencyComponent.Assessment, 50, true), new(AcceleratorProficiencyComponent.Practice, 50, true)] }, default);
+        await Evidence(f, context, 80);
+        Assert.Null((await service.ProficiencyAsync(f.Candidate.Id, context.Id, default)).Score);
+        await practice.SubmitPracticeAnswerAsync(f.Candidate.Id, session.Id, new(Guid.NewGuid(), session.Questions[0].Id, "{\"answer\":\"A\"}"), default);
+        var result = await service.ProficiencyAsync(f.Candidate.Id, context.Id, default);
+        Assert.Equal(90m, result.Score);
+        Assert.Contains(result.Components, x => x.Component == AcceleratorProficiencyComponent.Practice && x.Score == 100 && x.Status == "Available");
+        Assert.Single(result.EvidenceIds);
+        Assert.DoesNotContain(await f.Db.AcceleratorSkillEvidence.ToArrayAsync(), x => x.ScoringVersion == "practice-objective-v1" && x.Confidence >= .5m);
+    }
+
     internal static CreateProficiencyPolicyRequest Policy() => new(null,"verification-policy",1,[new(AcceleratorProficiencyComponent.Assessment,100,true)],
         [new("Developing",0,70,1),new("Advanced",70,100,2)],0.5m,1,60,false);
 

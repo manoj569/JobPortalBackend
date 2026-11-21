@@ -61,6 +61,19 @@ public static class ServiceCollectionExtensions
         services.AddScoped<JobPortal.Application.Features.CareerAccelerator.IAcceleratorPhase2Store, AcceleratorPhase2Store>();
         services.AddScoped<JobPortal.Application.Features.CareerAccelerator.IAcceleratorRecognitionStore, AcceleratorRecognitionStore>();
         services.AddScoped<JobPortal.Application.Features.CareerAccelerator.IAcceleratorJourneyStore, AcceleratorJourneyStore>();
+        services.AddScoped<JobPortal.Application.Features.CareerAccelerator.IAcceleratorJourneySummaryStore, AcceleratorJourneySummaryStore>();
+        services.AddOptions<JobPortal.Application.Features.CareerAccelerator.AcceleratorJourneySummaryOptions>()
+            .Configure(x =>
+            {
+                var raw=configuration["CareerAccelerator:JourneySummary:MinimumJobReadyScore"];
+                if (raw is not null)
+                {
+                    if (!decimal.TryParse(raw,System.Globalization.NumberStyles.Number,System.Globalization.CultureInfo.InvariantCulture,out var score))
+                        throw new InvalidOperationException("Journey readiness threshold must be numeric.");
+                    x.MinimumJobReadyScore=score;
+                }
+            })
+            .Validate(x=>x.MinimumJobReadyScore is >=0 and <=100,"Journey readiness threshold must be a percentage.").ValidateOnStart();
         services.AddScoped<JobPortal.Application.Features.CareerAccelerator.IAcceleratorLearningPathStore, AcceleratorLearningPathStore>();
         services.AddScoped<JobPortal.Application.Features.CareerAccelerator.IAcceleratorPhase3Store, AcceleratorPhase3Store>();
         services.AddScoped<JobPortal.Application.Features.CareerAccelerator.IAcceleratorPhase4Store, AcceleratorPhase4Store>();

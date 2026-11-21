@@ -11,6 +11,15 @@ public sealed class AcceleratorPhase2Store(JobPortalDbContext context) : IAccele
     public Task<AcceleratorAssessmentTemplate?> TemplateAsync(Guid roleId, string version, CancellationToken ct) => context.AcceleratorAssessmentTemplates.SingleOrDefaultAsync(x => x.RoleId == roleId && x.Version == version && !x.IsDeleted, ct);
     public Task<AcceleratorQuestion?> QuestionAsync(Guid competencyId, string version, CancellationToken ct) => context.AcceleratorQuestions.SingleOrDefaultAsync(x => x.CompetencyId == competencyId && x.Version == version && !x.IsDeleted, ct);
     public Task<AcceleratorAssessmentAttempt?> AttemptAsync(Guid userId, Guid id, CancellationToken ct) => context.AcceleratorAssessmentAttempts.Include(x => x.Answers).SingleOrDefaultAsync(x => x.UserId == userId && x.Id == id && !x.IsDeleted, ct);
+    public Task<AcceleratorAssessmentAttempt?> ReadAttemptAsync(Guid userId, Guid id, CancellationToken ct) => context.AcceleratorAssessmentAttempts.AsNoTracking().Include(x=>x.Answers)
+        .SingleOrDefaultAsync(x=>x.UserId==userId && x.Id==id && !x.IsDeleted,ct);
+    public Task<AcceleratorAssessmentAttempt?> CurrentAttemptAsync(Guid userId, Guid contextId, Guid? goalId, DateTime now, CancellationToken ct) => context.AcceleratorAssessmentAttempts.AsNoTracking().Include(x=>x.Answers)
+        .Where(x=>x.UserId==userId && !x.IsDeleted && (x.JourneyContextId==contextId || (goalId.HasValue && x.JourneyContextId==null && x.GoalId==goalId)) &&
+            x.Status==AcceleratorAssessmentStatus.InProgress && x.ExpiresAtUtc>now)
+        .OrderByDescending(x=>x.CreatedAtUtc).ThenByDescending(x=>x.Id).FirstOrDefaultAsync(ct);
+    public Task<AcceleratorAssessmentTemplate?> ActiveTemplateAsync(Guid roleId, Guid taxonomyId, CancellationToken ct) => context.AcceleratorAssessmentTemplates.Include(x=>x.Role)
+        .Where(x=>x.RoleId==roleId && !x.IsDeleted && x.IsActive && x.Role!=null && x.Role.TaxonomyId==taxonomyId && (!x.TaxonomyId.HasValue || x.TaxonomyId==taxonomyId))
+        .OrderByDescending(x=>x.CreatedAtUtc).ThenByDescending(x=>x.Id).FirstOrDefaultAsync(ct);
     public Task<AcceleratorAssessmentAttempt?> AttemptByKeyAsync(Guid userId, Guid requestKey, CancellationToken ct) => context.AcceleratorAssessmentAttempts.Include(x => x.Answers).SingleOrDefaultAsync(x => x.UserId == userId && x.RequestKey == requestKey && !x.IsDeleted, ct);
     public async Task<IReadOnlyList<AcceleratorQuestion>> QuestionsAsync(Guid taxonomyId, IReadOnlyCollection<Guid> competencyIds, CancellationToken ct) => await context.AcceleratorQuestions.Where(x => x.TaxonomyId == taxonomyId && x.IsActive && competencyIds.Contains(x.CompetencyId) && !x.IsDeleted).OrderBy(x => x.CompetencyId).ThenBy(x => x.Difficulty).ThenBy(x => x.Id).ToListAsync(ct);
     public async Task<IReadOnlyList<AcceleratorQuestion>> QuestionsByIdsAsync(Guid taxonomyId, IReadOnlyCollection<Guid> questionIds, CancellationToken ct) => await context.AcceleratorQuestions.Where(x => x.TaxonomyId == taxonomyId && questionIds.Contains(x.Id) && !x.IsDeleted).OrderBy(x => x.Id).ToListAsync(ct);

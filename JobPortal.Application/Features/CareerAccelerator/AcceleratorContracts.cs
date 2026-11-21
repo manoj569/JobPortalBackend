@@ -43,8 +43,11 @@ public sealed record AcceleratorBudgetSnapshot(int FeatureUsed, int RecentReques
 public sealed record CreateAssessmentAttemptRequest(Guid RequestKey, Guid GoalId, Guid TemplateId);
 public sealed record SubmitAssessmentAnswerRequest(Guid QuestionId, string AnswerJson);
 public sealed record FinalizeAssessmentRequest(Guid ExpectedRevision);
-public sealed record AssessmentQuestionResponse(Guid Id, int Sequence, string Prompt, string OptionsJson, AcceleratorQuestionType Type, int Difficulty);
-public sealed record AssessmentAttemptResponse(Guid Id, Guid? GoalId, AcceleratorAssessmentStatus Status, Guid Revision, DateTime ExpiresAtUtc, decimal? Score, IReadOnlyList<AssessmentQuestionResponse> Questions);
+public sealed record AssessmentQuestionResponse(Guid Id, int Sequence, string Prompt, string OptionsJson, AcceleratorQuestionType Type, int Difficulty,
+    bool IsAnswered = false, string? SubmittedAnswerJson = null, bool AnswerIsImmutable = false);
+public sealed record AssessmentAttemptResponse(Guid Id, Guid? GoalId, AcceleratorAssessmentStatus Status, Guid Revision, DateTime ExpiresAtUtc, decimal? Score, IReadOnlyList<AssessmentQuestionResponse> Questions,
+    DateTime? StartedAtUtc = null, Guid? JourneyContextId = null, bool CanResume = false);
+public sealed record StartResolvedAssessmentRequest(Guid RequestKey);
 public sealed record SkillGapResponse(Guid CompetencyId, string SkillName, AcceleratorProficiency Current, int Required, int Gap, decimal Confidence);
 public sealed record RoadmapNodeResponse(Guid Id, Guid CompetencyId, string StableKey, int Sequence, AcceleratorNodeStatus Status, int EstimatedMinutes, int ProgressPercent);
 public sealed record RoadmapEdgeResponse(Guid FromNodeId, Guid ToNodeId);
@@ -91,6 +94,9 @@ public interface IAcceleratorPhase2Store
     Task<AcceleratorAssessmentTemplate?> TemplateAsync(Guid roleId, string version, CancellationToken ct);
     Task<AcceleratorQuestion?> QuestionAsync(Guid competencyId, string version, CancellationToken ct);
     Task<AcceleratorAssessmentAttempt?> AttemptAsync(Guid userId, Guid id, CancellationToken ct);
+    Task<AcceleratorAssessmentAttempt?> ReadAttemptAsync(Guid userId, Guid id, CancellationToken ct);
+    Task<AcceleratorAssessmentAttempt?> CurrentAttemptAsync(Guid userId, Guid contextId, Guid? goalId, DateTime now, CancellationToken ct);
+    Task<AcceleratorAssessmentTemplate?> ActiveTemplateAsync(Guid roleId, Guid taxonomyId, CancellationToken ct);
     Task<AcceleratorAssessmentAttempt?> AttemptByKeyAsync(Guid userId, Guid requestKey, CancellationToken ct);
     Task<IReadOnlyList<AcceleratorQuestion>> QuestionsAsync(Guid taxonomyId, IReadOnlyCollection<Guid> competencyIds, CancellationToken ct);
     Task<IReadOnlyList<AcceleratorQuestion>> QuestionsByIdsAsync(Guid taxonomyId, IReadOnlyCollection<Guid> questionIds, CancellationToken ct);

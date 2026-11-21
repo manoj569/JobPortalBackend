@@ -166,6 +166,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<JobPortal.Application.Features.CareerAccelerator.IAcceleratorRequirementResolver>(provider => provider.GetRequiredService<JobPortal.Application.Features.CareerAccelerator.AcceleratorJourneyContextService>());
         services.AddScoped<JobPortal.Application.Features.CareerAccelerator.AcceleratorLearningPathService>();
         services.AddScoped<JobPortal.Application.Features.CareerAccelerator.AcceleratorPhase3Service>();
+        services.AddScoped<JobPortal.Application.Features.CareerAccelerator.AcceleratorJourneyWorkService>();
+        services.AddScoped<JobPortal.Application.Features.CareerAccelerator.AcceleratorJourneySummaryService>();
         services.AddScoped<JobPortal.Application.Features.CareerAccelerator.AcceleratorPhase4Service>();
         services.AddScoped<JobPortal.Application.Features.CareerAccelerator.AcceleratorInterviewCatalogService>();
         services.AddScoped<JobPortal.Application.Features.CareerAccelerator.AcceleratorPhase5Service>();

@@ -76,6 +76,9 @@ public sealed class AcceleratorCandidateProjectConfiguration : IEntityTypeConfig
         builder.ToTable("AcceleratorCandidateProjects", t => t.HasCheckConstraint("CK_AcceleratorCandidateProject_Progress", "\"ProgressPercent\" BETWEEN 0 AND 100")); builder.ConfigureBaseEntity(); builder.Property(x => x.Revision).IsConcurrencyToken(); builder.Property(x => x.RequestHash).HasMaxLength(64).IsRequired(); builder.Property(x => x.FinalScore).HasPrecision(9, 2);
         builder.HasIndex(x => new { x.UserId, x.RequestKey }).IsUnique(); builder.HasIndex(x => new { x.UserId, x.CreatedAtUtc }); builder.HasOne<AcceleratorCareerGoal>().WithMany().HasForeignKey(x => x.GoalId).OnDelete(DeleteBehavior.Restrict); builder.HasOne<AcceleratorProjectVersion>().WithMany().HasForeignKey(x => x.ProjectVersionId).OnDelete(DeleteBehavior.Restrict); builder.HasOne<AcceleratorProjectMilestone>().WithMany().HasForeignKey(x => x.CurrentMilestoneId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne<AcceleratorProjectAssignment>().WithMany().HasForeignKey(x => x.RequiredRevisionAssignmentId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<AcceleratorJourneyContext>().WithMany().HasForeignKey(x => x.JourneyContextId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasIndex(x => new { x.UserId, x.JourneyContextId });
+        builder.ToTable(t => t.HasCheckConstraint("CK_CandidateProject_Journey", "\"JourneyContextId\" IS NOT NULL"));
     }
 }
 public sealed class AcceleratorProjectSubmissionConfiguration : IEntityTypeConfiguration<AcceleratorProjectSubmission>

@@ -95,7 +95,8 @@ public sealed class AcceleratorInterviewRubricCriterion : BaseEntity
 public sealed class AcceleratorInterviewSession : BaseEntity
 {
     public Guid UserId { get; set; }
-    public Guid GoalId { get; set; }
+    public Guid? GoalId { get; set; }
+    public Guid? JourneyContextId { get; set; }
     public Guid InterviewVersionId { get; set; }
     public Guid RequestKey { get; set; }
     public string RequestHash { get; set; } = string.Empty;
@@ -162,7 +163,8 @@ public sealed class AcceleratorInterviewCriterionScore : BaseEntity
 public sealed class AcceleratorReadinessSnapshot : BaseEntity
 {
     public Guid UserId { get; set; }
-    public Guid GoalId { get; set; }
+    public Guid? GoalId { get; set; }
+    public Guid? JourneyContextId { get; set; }
     public Guid? TriggerInterviewSessionId { get; set; }
     public string CalculationVersion { get; set; } = "readiness-v1";
     public decimal SkillCoverage { get; set; }

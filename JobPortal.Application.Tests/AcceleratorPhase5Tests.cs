@@ -200,7 +200,7 @@ public sealed class AcceleratorPhase5Tests
 
         var service = new AcceleratorPhase5Service(fixture.Store, fixture.Phase2Store,
             new AcceleratorPhase5Store(fixture.Db), new AcceleratorPhase3Store(fixture.Db),
-            new AcceleratorPhase4Store(fixture.Db), fixture.Service, fixture.Audit, fixture.Clock);
+            new AcceleratorPhase4Store(fixture.Db), fixture.Service, fixture.Audit, fixture.Clock, fixture.Work, new AcceleratorJourneyStore(fixture.Db));
         var key = Guid.NewGuid();
         var started = await service.StartAsync(fixture.Candidate.Id, new StartInterviewRequest(key, goal.Id, version.Id), default);
         var replay = await service.StartAsync(fixture.Candidate.Id, new StartInterviewRequest(key, goal.Id, version.Id), default);
@@ -291,7 +291,7 @@ public sealed class AcceleratorPhase5Tests
         var phase5Store = new AcceleratorPhase5Store(fixture.Db);
         var phase3Store = new AcceleratorPhase3Store(fixture.Db);
         var interviews = new AcceleratorPhase5Service(fixture.Store, fixture.Phase2Store, phase5Store,
-            phase3Store, new AcceleratorPhase4Store(fixture.Db), fixture.Service, fixture.Audit, fixture.Clock);
+            phase3Store, new AcceleratorPhase4Store(fixture.Db), fixture.Service, fixture.Audit, fixture.Clock, fixture.Work, new AcceleratorJourneyStore(fixture.Db));
         var session = await interviews.StartAsync(fixture.Candidate.Id,
             new StartInterviewRequest(Guid.NewGuid(), goal.Id, version.Id), default);
         var answer = await interviews.SubmitAnswerAsync(fixture.Candidate.Id, session.Id,
@@ -375,7 +375,7 @@ public sealed class AcceleratorPhase5Tests
         version.Status = AcceleratorInterviewCatalogStatus.Published; await fixture.Db.SaveChangesAsync();
         var service = new AcceleratorPhase5Service(fixture.Store, fixture.Phase2Store,
             new AcceleratorPhase5Store(fixture.Db), new AcceleratorPhase3Store(fixture.Db),
-            new AcceleratorPhase4Store(fixture.Db), fixture.Service, fixture.Audit, fixture.Clock);
+            new AcceleratorPhase4Store(fixture.Db), fixture.Service, fixture.Audit, fixture.Clock, fixture.Work, new AcceleratorJourneyStore(fixture.Db));
         var started = await service.StartAsync(fixture.Candidate.Id,
             new StartInterviewRequest(Guid.NewGuid(), goal.Id, version.Id), default);
         var root = Assert.Single(started.Questions);
@@ -452,7 +452,7 @@ public sealed class AcceleratorPhase5Tests
         await catalog.PublishAsync(fixture.Admin.Id, draft.Id, default);
         var service = new AcceleratorPhase5Service(fixture.Store, fixture.Phase2Store,
             new AcceleratorPhase5Store(fixture.Db), new AcceleratorPhase3Store(fixture.Db),
-            new AcceleratorPhase4Store(fixture.Db), fixture.Service, fixture.Audit, fixture.Clock);
+            new AcceleratorPhase4Store(fixture.Db), fixture.Service, fixture.Audit, fixture.Clock, fixture.Work, new AcceleratorJourneyStore(fixture.Db));
         var recommendation = Assert.Single(await service.RecommendationsAsync(fixture.Candidate.Id, goal.Id, default));
         Assert.Contains("C#", recommendation.Reason, StringComparison.Ordinal);
         await Assert.ThrowsAsync<ConflictException>(() => catalog.EditDraftAsync(fixture.Admin.Id, draft.Id,

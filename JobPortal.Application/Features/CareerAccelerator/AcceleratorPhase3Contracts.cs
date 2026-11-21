@@ -4,6 +4,8 @@ namespace JobPortal.Application.Features.CareerAccelerator;
 
 public sealed record StartTutorConversationRequest(Guid RequestKey, Guid GoalId, Guid CompetencyId, Guid? RoadmapNodeId, string Topic, string Title, Guid? EnrollmentId = null, Guid? ModuleId = null, Guid? LessonId = null);
 public sealed record SendTutorMessageRequest(Guid RequestKey, AcceleratorTutorMode Mode, string Content);
+public sealed record StartEnrollmentTutorRequest(Guid RequestKey, Guid CompetencyId, Guid? RoadmapNodeId, string Topic, string Title, Guid? ModuleId = null, Guid? LessonId = null);
+public sealed record StartEnrollmentPracticeRequest(Guid RequestKey, Guid CompetencyId, Guid? RoadmapNodeId, AcceleratorPracticeDifficulty Difficulty, AcceleratorPracticeQuestionType QuestionType, Guid? ModuleId = null, Guid? LessonId = null);
 public sealed record TutorConversationResponse(Guid Id, Guid? GoalId, Guid CompetencyId, Guid? RoadmapNodeId, string Topic, string Title, AcceleratorTutorConversationStatus Status, DateTime LastMessageAtUtc, Guid Revision, Guid? JourneyContextId = null, Guid? ModuleId = null, Guid? LessonId = null);
 public sealed record TutorMessageResponse(Guid Id, AcceleratorTutorMessageRole Role, AcceleratorTutorMessageStatus Status, string Content, string MessageType, DateTime CreatedAtUtc);
 public sealed record TutorContext(string Version, string Json, int TokenEstimate);
@@ -39,9 +41,9 @@ public interface IAcceleratorPhase3Store
 {
     Task<AcceleratorTutorConversation?> ConversationAsync(Guid userId, Guid id, CancellationToken ct);
     Task<AcceleratorTutorConversation?> ConversationByKeyAsync(Guid userId, Guid requestKey, CancellationToken ct);
-    Task<IReadOnlyList<AcceleratorTutorConversation>> ConversationsAsync(Guid userId, int skip, int take, CancellationToken ct);
+    Task<IReadOnlyList<AcceleratorTutorConversation>> ConversationsAsync(Guid userId, int skip, int take, CancellationToken ct, Guid? contextId = null);
     Task<IReadOnlyList<AcceleratorTutorMessage>> MessagesAsync(Guid userId, Guid conversationId, int take, CancellationToken ct);
-    Task<IReadOnlyList<AcceleratorPracticeSession>> PracticeSessionsAsync(Guid userId, int skip, int take, CancellationToken ct);
+    Task<IReadOnlyList<AcceleratorPracticeSession>> PracticeSessionsAsync(Guid userId, int skip, int take, CancellationToken ct, Guid? contextId = null);
     Task<AcceleratorAiDispatchRecord?> DispatchAsync(Guid id, CancellationToken ct);
     Task<bool> UpdateClaimedDispatchAsync(AcceleratorAiDispatchRecord record, Guid claimId, CancellationToken ct);
     Task<AcceleratorPracticeSession?> PracticeSessionAsync(Guid userId, Guid id, CancellationToken ct);

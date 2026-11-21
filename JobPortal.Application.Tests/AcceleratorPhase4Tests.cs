@@ -239,8 +239,8 @@ public sealed class AcceleratorPhase4Tests
         await fixture.Db.SaveChangesAsync();
 
         var projectStore = new AcceleratorPhase4Store(fixture.Db);
-        var phase4 = new AcceleratorPhase4Service(fixture.Store, fixture.Phase2Store, fixture.Phase2,
-            projectStore, fixture.Service, new ProjectDeterministicEvaluator(), fixture.Audit, fixture.Clock);
+        var phase4 = new AcceleratorPhase4Service(fixture.Store, fixture.Phase2,
+            projectStore, fixture.Service, new ProjectDeterministicEvaluator(), fixture.Audit, fixture.Clock, fixture.Work);
         var ai = new AcceleratorProjectAiService(fixture.Store, projectStore, new AcceleratorPhase3Store(fixture.Db),
             phase4, fixture.Quota, fixture.Service, Options.Create(new AcceleratorOptions { Enabled = true, AIEnabled = false }),
             [new UnavailableAcceleratorAIProvider()], [], fixture.Audit, fixture.Clock);
@@ -324,8 +324,8 @@ public sealed class AcceleratorPhase4Tests
         var quota = new AcceleratorQuotaService(fixture.Store, fixture.Service,
             Options.Create(fixture.Settings), fixture.Clock, fixture.Audit, [provider]);
         var projectStore = new AcceleratorPhase4Store(fixture.Db);
-        var phase4 = new AcceleratorPhase4Service(fixture.Store, fixture.Phase2Store, fixture.Phase2,
-            projectStore, fixture.Service, new ProjectDeterministicEvaluator(), fixture.Audit, fixture.Clock);
+        var phase4 = new AcceleratorPhase4Service(fixture.Store, fixture.Phase2,
+            projectStore, fixture.Service, new ProjectDeterministicEvaluator(), fixture.Audit, fixture.Clock, fixture.Work);
         var ai = new AcceleratorProjectAiService(fixture.Store, projectStore, new AcceleratorPhase3Store(fixture.Db),
             phase4, quota, fixture.Service, Options.Create(fixture.Settings), [provider], [], fixture.Audit, fixture.Clock);
 

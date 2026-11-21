@@ -422,6 +422,7 @@ internal sealed class AcceleratorFixture : IDisposable
     public AcceleratorQuotaService Quota { get; }
     public AcceleratorPhase2Store Phase2Store { get; }
     public AcceleratorPhase2Service Phase2 { get; }
+    public AcceleratorJourneyWorkService Work { get; }
     public AcceleratorFixture()
     {
         Db = new(DbOptions);
@@ -440,6 +441,7 @@ internal sealed class AcceleratorFixture : IDisposable
         var journeys = new AcceleratorJourneyStore(Db);
         var learning = new AcceleratorLearningPathStore(Db);
         var contexts = new AcceleratorJourneyContextService(Store, journeys, learning, Phase2Store, Service);
+        Work = new(contexts, journeys, Store, learning);
         Phase2 = new(Store, Phase2Store, Service, Audit, Clock, contexts, journeys, learning);
     }
     public PublishTaxonomyRequest Taxonomy(string version = "v1") => new(version,

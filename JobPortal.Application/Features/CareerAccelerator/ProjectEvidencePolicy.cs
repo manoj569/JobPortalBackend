@@ -40,6 +40,7 @@ public static class ProjectEvidencePolicy
                 {
                     UserId = project.UserId,
                     GoalId = project.GoalId,
+                    JourneyContextId = project.JourneyContextId,
                     CompetencyId = group.Key,
                     Source = AcceleratorEvidenceSource.VirtualProject,
                     Proficiency = proficiency,

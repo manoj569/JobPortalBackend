@@ -90,7 +90,8 @@ public sealed class AcceleratorProjectRubricCriterion : BaseEntity
 public sealed class AcceleratorCandidateProject : BaseEntity
 {
     public Guid UserId { get; set; }
-    public Guid GoalId { get; set; }
+    public Guid? GoalId { get; set; }
+    public Guid? JourneyContextId { get; set; }
     public Guid ProjectVersionId { get; set; }
     public Guid RequestKey { get; set; }
     public string RequestHash { get; set; } = string.Empty;

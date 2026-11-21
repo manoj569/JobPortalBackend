@@ -63,6 +63,9 @@ namespace JobPortal.Persistence.Postgres.Migrations
                 type: "uuid",
                 nullable: true);
 
+            // Phase 3 columns were originally scaffolded with this migration. Backfill must precede its NOT NULL checks.
+            migrationBuilder.Sql(Phase3JourneyBackfillSql.Up);
+
             migrationBuilder.CreateTable(
                 name: "EmployerHiringPipelines",
                 columns: table => new
@@ -226,6 +229,8 @@ namespace JobPortal.Persistence.Postgres.Migrations
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.Sql(Phase3JourneyBackfillSql.AssertLegacyOnly);
+
             migrationBuilder.DropForeignKey(
                 name: "FK_AcceleratorPracticeSessions_AcceleratorJourneyContexts_Jour~",
                 table: "AcceleratorPracticeSessions");
@@ -322,7 +327,6 @@ namespace JobPortal.Persistence.Postgres.Migrations
                 table: "AcceleratorTutorConversations",
                 type: "uuid",
                 nullable: false,
-                defaultValue: new Guid("00000000-0000-0000-0000-000000000000"),
                 oldClrType: typeof(Guid),
                 oldType: "uuid",
                 oldNullable: true);
@@ -332,7 +336,6 @@ namespace JobPortal.Persistence.Postgres.Migrations
                 table: "AcceleratorPracticeSessions",
                 type: "uuid",
                 nullable: false,
-                defaultValue: new Guid("00000000-0000-0000-0000-000000000000"),
                 oldClrType: typeof(Guid),
                 oldType: "uuid",
                 oldNullable: true);

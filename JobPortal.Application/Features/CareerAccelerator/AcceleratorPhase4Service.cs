@@ -8,8 +8,9 @@ using JobPortal.Domain.Enums;
 
 namespace JobPortal.Application.Features.CareerAccelerator;
 
-public sealed class AcceleratorPhase4Service(IAcceleratorStore writes, IAcceleratorPhase2Store phase2, AcceleratorPhase2Service phase2Service,
-    IAcceleratorPhase4Store store, AcceleratorService access, IProjectDeterministicEvaluator checker, IAuditWriter audit, TimeProvider clock)
+public sealed class AcceleratorPhase4Service(IAcceleratorStore writes, AcceleratorPhase2Service phase2Service,
+    IAcceleratorPhase4Store store, AcceleratorService access, IProjectDeterministicEvaluator checker, IAuditWriter audit, TimeProvider clock,
+    AcceleratorJourneyWorkService work)
 {
     private DateTime Now => clock.GetUtcNow().UtcDateTime;
 
@@ -394,16 +395,16 @@ public sealed class AcceleratorPhase4Service(IAcceleratorStore writes, IAccelera
         return version.Id;
     }, ct);
 
-    public async Task<IReadOnlyList<AcceleratorProjectRecommendation>> RecommendAsync(Guid actor, Guid goalId, CancellationToken ct)
+    public async Task<IReadOnlyList<AcceleratorProjectRecommendation>> RecommendAsync(Guid actor, Guid goalId, CancellationToken ct, Guid? enrollmentId = null)
     {
         await access.Candidate(actor, ct);
-        var goal = await writes.GoalAsync(actor, goalId, ct) ?? throw new NotFoundException("Career goal not found.");
-        var versions = await store.ActiveVersionsAsync(goal.RoleId, 100, ct);
-        var evidence = await phase2.EvidenceAsync(actor, goalId, ct);
+        var scope = await work.ResolveAsync(actor, goalId, enrollmentId, ct);
+        var versions = (await store.ActiveVersionsAsync(scope.RoleId, 100, ct, scope.Requirements.Select(x=>x.CompetencyId).ToArray())).Where(v => AcceleratorJourneyWorkService.Compatible(scope, v.TargetRoleId, v.Competencies.Select(x => x.CompetencyId))).ToArray();
+        var evidence = scope.Evidence;
         var existing = await store.CandidateProjectsAsync(actor, 0, 100, ct);
-        var roadmap = await phase2.ActiveRoadmapAsync(actor, goalId, ct);
+        var roadmap = scope.Roadmap;
         var proficiency = evidence.GroupBy(x => x.CompetencyId).ToDictionary(x => x.Key, x => x.OrderByDescending(e => e.Confidence).ThenByDescending(e => e.EvaluatedAtUtc).First().Proficiency);
-        var completedVersions = existing.Where(x => x.Status == AcceleratorCandidateProjectStatus.Completed).Select(x => x.ProjectVersionId).ToHashSet();
+        var completedVersions = existing.Where(x => x.JourneyContextId == scope.Context.Id && x.Status == AcceleratorCandidateProjectStatus.Completed).Select(x => x.ProjectVersionId).ToHashSet();
         return versions.Where(v => !completedVersions.Contains(v.Id) &&
                 v.Competencies.Where(x => x.IsPrerequisite).All(x => (int)proficiency.GetValueOrDefault(x.CompetencyId) >= x.RequiredProficiency))
             .Select(v => new { Version = v, Priority = v.Competencies.Count(x => !x.IsPrerequisite && roadmap?.Nodes.Any(n => n.CompetencyId == x.CompetencyId && n.Status != AcceleratorNodeStatus.Completed) == true) })
@@ -413,37 +414,46 @@ public sealed class AcceleratorPhase4Service(IAcceleratorStore writes, IAccelera
             .ToArray();
     }
 
-    public Task<CandidateAcceleratorProjectResponse> StartProjectAsync(Guid actor, StartAcceleratorProjectRequest request, CancellationToken ct) => writes.WriteAsync(async () =>
+    public async Task<CandidateAcceleratorProjectResponse> StartProjectAsync(Guid actor, StartAcceleratorProjectRequest request, CancellationToken ct)
+    {
+        var resolved = await work.ResolveAsync(actor, request.GoalId, request.EnrollmentId, ct);
+        return await writes.WriteAsync(async () =>
     {
         await access.Candidate(actor, ct);
-        if (request.RequestKey == Guid.Empty || request.GoalId == Guid.Empty || request.ProjectVersionId == Guid.Empty) throw Invalid("Project start identifiers are required.");
-        var hash = Hash(request);
+        if (request.RequestKey == Guid.Empty || request.ProjectVersionId == Guid.Empty) throw Invalid("Project start identifiers are required.");
+        var hash = request.EnrollmentId.HasValue ? Hash(request) : Hash(new { request.RequestKey, request.GoalId, request.ProjectVersionId });
         var previous = await store.CandidateProjectByKeyAsync(actor, request.RequestKey, ct);
         if (previous is not null)
         {
             if (previous.RequestHash != hash) throw new ConflictException("Project start key was used for a different request.");
             return ProjectDto(previous);
         }
-        var goal = await writes.GoalAsync(actor, request.GoalId, ct) ?? throw new NotFoundException("Career goal not found.");
+        var scope = await work.OwnedAsync(actor, resolved.Context.Id, ct);
         var version = await store.VersionAsync(request.ProjectVersionId, ct) ?? throw new NotFoundException("Project version not found.");
-        if (!version.IsActive || version.CatalogStatus != AcceleratorProjectCatalogStatus.Published || !version.Definition.IsActive || version.TargetRoleId != goal.RoleId) throw new ConflictException("Project version is unavailable for this career goal.");
-        var evidence = await phase2.EvidenceAsync(actor, goal.Id, ct);
+        if (!version.IsActive || version.CatalogStatus != AcceleratorProjectCatalogStatus.Published || !version.Definition.IsActive ||
+            !AcceleratorJourneyWorkService.Compatible(scope, version.TargetRoleId, version.Competencies.Select(x => x.CompetencyId))) throw new ConflictException("Project version is unavailable for this journey.");
+        var evidence = scope.Evidence;
         foreach (var prerequisite in version.Competencies.Where(x => x.IsPrerequisite))
             if (!evidence.Any(x => x.CompetencyId == prerequisite.CompetencyId && (int)x.Proficiency >= prerequisite.RequiredProficiency))
                 throw new ConflictException("Project prerequisites are not yet demonstrated.", "accelerator_project_prerequisite");
         var first = version.Milestones.Where(x => x.IsRequired).OrderBy(x => x.Sequence).FirstOrDefault()
             ?? throw new ConflictException("Project version has no required milestones.");
-        var project = new AcceleratorCandidateProject { UserId = actor, GoalId = goal.Id, ProjectVersionId = version.Id,
+        var project = new AcceleratorCandidateProject { UserId = actor, GoalId = scope.Context.CareerGoalId, JourneyContextId = scope.Context.Id, ProjectVersionId = version.Id,
             RequestKey = request.RequestKey, RequestHash = hash, StartedAtUtc = Now, Status = AcceleratorCandidateProjectStatus.InProgress, CurrentMilestoneId = first.Id };
         store.Add(project); await Audit(actor, AuditAction.Create, "AcceleratorCandidateProject", project.Id, ct);
         return ProjectDto(project);
     }, ct);
+    }
 
     public async Task<CandidateAcceleratorProjectResponse> ProjectAsync(Guid actor, Guid id, CancellationToken ct)
     { await access.Candidate(actor, ct); return ProjectDto(await store.CandidateProjectAsync(actor, id, ct) ?? throw new NotFoundException("Candidate project not found.")); }
 
-    public async Task<IReadOnlyList<CandidateAcceleratorProjectResponse>> ProjectsAsync(Guid actor, int page, int pageSize, CancellationToken ct)
-    { await access.Candidate(actor, ct); AcceleratorService.Page(page, pageSize); return (await store.CandidateProjectsAsync(actor, (page - 1) * pageSize, pageSize, ct)).Select(ProjectDto).ToArray(); }
+    public async Task<IReadOnlyList<CandidateAcceleratorProjectResponse>> ProjectsAsync(Guid actor, int page, int pageSize, CancellationToken ct, Guid? contextId = null)
+    {
+        await access.Candidate(actor, ct); AcceleratorService.Page(page, pageSize);
+        if (contextId.HasValue) await work.OwnedAsync(actor,contextId.Value,ct);
+        return (await store.CandidateProjectsAsync(actor,(page-1)*pageSize,pageSize,ct,contextId)).Select(ProjectDto).ToArray();
+    }
 
     public Task<CandidateAcceleratorProjectResponse> ChangeStatusAsync(Guid actor, Guid projectId,
         ChangeAcceleratorProjectStatusRequest request, CancellationToken ct) => writes.WriteAsync(async () =>
@@ -744,7 +754,7 @@ public sealed class AcceleratorPhase4Service(IAcceleratorStore writes, IAccelera
             project.FinalScore, project.CompletedAtUtc, project.Revision);
 
     private static CandidateAcceleratorProjectResponse ProjectDto(AcceleratorCandidateProject project) =>
-        new(project.Id, project.ProjectVersionId, project.Status, project.ProgressPercent, project.Revision);
+        new(project.Id, project.ProjectVersionId, project.Status, project.ProgressPercent, project.Revision, project.JourneyContextId, project.GoalId);
     private static AcceleratorProjectSubmissionResponse SubmissionDto(AcceleratorProjectSubmission submission) =>
         new(submission.Id, submission.AssignmentId, submission.AttemptNumber, submission.Status, submission.SubmittedAtUtc);
     private Task Audit(Guid actor, AuditAction action, string type, Guid id, CancellationToken ct) =>

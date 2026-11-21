@@ -20,47 +20,59 @@ public sealed class AcceleratorPhase5Store(JobPortalDbContext context) : IAccele
             x.Version == version && !x.IsDeleted, ct);
     public Task<bool> VersionUsedAsync(Guid versionId, CancellationToken ct) =>
         context.AcceleratorInterviewSessions.AnyAsync(x => x.InterviewVersionId == versionId, ct);
-    public async Task<IReadOnlyList<AcceleratorInterviewVersion>> PublishedVersionsAsync(Guid roleId, int take, CancellationToken ct) =>
-        await context.AcceleratorInterviewVersions.Include(x => x.Definition).Include(x => x.Competencies)
-            .Where(x => x.Definition.TargetRoleId == roleId && x.Definition.IsActive &&
-                x.Status == AcceleratorInterviewCatalogStatus.Published && !x.IsDeleted)
-            .OrderBy(x => x.Difficulty).ThenBy(x => x.Definition.StableKey).ThenByDescending(x => x.Version)
-            .Take(take).ToListAsync(ct);
+    public async Task<IReadOnlyList<AcceleratorInterviewVersion>> PublishedVersionsAsync(Guid? roleId, int take, CancellationToken ct, IReadOnlyCollection<Guid>? competencyIds = null)
+    {
+        var query=context.AcceleratorInterviewVersions.Include(x=>x.Definition).Include(x=>x.Competencies)
+            .Where(x=>x.Definition.IsActive && !x.Definition.IsDeleted && x.Status==AcceleratorInterviewCatalogStatus.Published && !x.IsDeleted);
+        if (roleId.HasValue) query=query.Where(x=>x.Definition.TargetRoleId==roleId);
+        else if (competencyIds is not null)
+        {
+            var ids=competencyIds.ToArray();
+            query=query.Where(x=>x.Competencies.Any() && x.Competencies.All(c=>ids.Contains(c.CompetencyId)));
+        }
+        return await query.OrderBy(x=>x.Difficulty).ThenBy(x=>x.Definition.StableKey).ThenByDescending(x=>x.Version).Take(take).ToListAsync(ct);
+    }
+    public async Task<IReadOnlyList<AcceleratorInterviewSession>> JourneySessionsAsync(Guid userId, Guid contextId, int skip, int take, CancellationToken ct) =>
+        await Owned(userId).Include(x => x.Questions).Where(x => x.UserId == userId && x.JourneyContextId == contextId && !x.IsDeleted)
+            .OrderByDescending(x => x.StartedAtUtc).ThenBy(x => x.Id).Skip(skip).Take(take).ToArrayAsync(ct);
+    public async Task<IReadOnlyList<AcceleratorReadinessSnapshot>> JourneyReadinessHistoryAsync(Guid userId, Guid contextId, int skip, int take, CancellationToken ct) =>
+        await context.AcceleratorReadinessSnapshots.Where(x => x.UserId == userId && x.JourneyContextId == contextId && !x.IsDeleted)
+            .OrderByDescending(x => x.CalculatedAtUtc).ThenBy(x => x.Id).Skip(skip).Take(take).ToArrayAsync(ct);
     public Task<AcceleratorInterviewSession?> SessionAsync(Guid userId, Guid id, CancellationToken ct) =>
-        context.AcceleratorInterviewSessions.Include(x => x.Questions)
+        Owned(userId).Include(x => x.Questions)
             .SingleOrDefaultAsync(x => x.UserId == userId && x.Id == id && !x.IsDeleted, ct);
     public Task<AcceleratorInterviewSession?> SessionByKeyAsync(Guid userId, Guid requestKey, CancellationToken ct) =>
-        context.AcceleratorInterviewSessions.Include(x => x.Questions)
+        Owned(userId).Include(x => x.Questions)
             .SingleOrDefaultAsync(x => x.UserId == userId && x.RequestKey == requestKey && !x.IsDeleted, ct);
     public async Task<IReadOnlyList<AcceleratorInterviewSession>> SessionsAsync(Guid userId, Guid goalId, int skip, int take, CancellationToken ct) =>
-        await context.AcceleratorInterviewSessions.Include(x => x.Questions)
+        await Owned(userId).Include(x => x.Questions)
             .Where(x => x.UserId == userId && x.GoalId == goalId && !x.IsDeleted)
             .OrderByDescending(x => x.StartedAtUtc).ThenBy(x => x.Id).Skip(skip).Take(take).ToListAsync(ct);
     public Task<AcceleratorInterviewAnswer?> AnswerByKeyAsync(Guid userId, Guid sessionId, Guid requestKey, CancellationToken ct) =>
-        context.AcceleratorInterviewAnswers.Join(context.AcceleratorInterviewSessions, a => a.SessionId, s => s.Id,
+        context.AcceleratorInterviewAnswers.Join(Owned(userId), a => a.SessionId, s => s.Id,
                 (a, s) => new { a, s })
             .Where(x => x.s.UserId == userId && x.s.Id == sessionId && x.a.RequestKey == requestKey && !x.a.IsDeleted)
             .Select(x => x.a).SingleOrDefaultAsync(ct);
     public Task<AcceleratorInterviewAnswer?> AnswerAsync(Guid userId, Guid sessionId, Guid questionId, CancellationToken ct) =>
-        context.AcceleratorInterviewAnswers.Join(context.AcceleratorInterviewSessions, a => a.SessionId, s => s.Id,
+        context.AcceleratorInterviewAnswers.Join(Owned(userId), a => a.SessionId, s => s.Id,
                 (a, s) => new { a, s })
             .Where(x => x.s.UserId == userId && x.s.Id == sessionId && x.a.SessionQuestionId == questionId && !x.a.IsDeleted)
             .Select(x => x.a).SingleOrDefaultAsync(ct);
     public async Task<IReadOnlyList<AcceleratorInterviewAnswer>> AnswersAsync(Guid userId, Guid sessionId, CancellationToken ct) =>
-        await context.AcceleratorInterviewAnswers.Join(context.AcceleratorInterviewSessions, a => a.SessionId, s => s.Id,
+        await context.AcceleratorInterviewAnswers.Join(Owned(userId), a => a.SessionId, s => s.Id,
                 (a, s) => new { a, s })
             .Where(x => x.s.UserId == userId && x.s.Id == sessionId && !x.a.IsDeleted)
             .OrderBy(x => x.a.SubmittedAtUtc).Select(x => x.a).ToListAsync(ct);
     public Task<AcceleratorInterviewEvaluation?> EvaluationAsync(Guid userId, Guid answerId, CancellationToken ct) =>
         context.AcceleratorInterviewEvaluations.Include(x => x.CriterionScores)
             .Join(context.AcceleratorInterviewAnswers, e => e.AnswerId, a => a.Id, (e, a) => new { e, a })
-            .Join(context.AcceleratorInterviewSessions, x => x.a.SessionId, s => s.Id, (x, s) => new { x.e, s })
+            .Join(Owned(userId), x => x.a.SessionId, s => s.Id, (x, s) => new { x.e, s })
             .Where(x => x.s.UserId == userId && x.e.AnswerId == answerId && !x.e.IsDeleted)
             .Select(x => x.e).SingleOrDefaultAsync(ct);
     public async Task<IReadOnlyList<AcceleratorInterviewEvaluation>> EvaluationsAsync(Guid userId, Guid sessionId, CancellationToken ct) =>
         await context.AcceleratorInterviewEvaluations.Include(x => x.CriterionScores)
             .Join(context.AcceleratorInterviewAnswers, e => e.AnswerId, a => a.Id, (e, a) => new { e, a })
-            .Join(context.AcceleratorInterviewSessions, x => x.a.SessionId, s => s.Id, (x, s) => new { x.e, s })
+            .Join(Owned(userId), x => x.a.SessionId, s => s.Id, (x, s) => new { x.e, s })
             .Where(x => x.s.UserId == userId && x.s.Id == sessionId && !x.e.IsDeleted)
             .OrderBy(x => x.e.EvaluatedAtUtc).Select(x => x.e).ToListAsync(ct);
     public async Task<IReadOnlyList<AcceleratorReadinessSnapshot>> ReadinessHistoryAsync(Guid userId, Guid goalId, int skip, int take, CancellationToken ct) =>
@@ -149,4 +161,6 @@ public sealed class AcceleratorPhase5Store(JobPortalDbContext context) : IAccele
             x.Status != AcceleratorAiDispatchStatus.Reconciled && x.Status != AcceleratorAiDispatchStatus.Failed && !x.IsDeleted)
             .OrderByDescending(x => x.CreatedAtUtc).ThenBy(x => x.Id).Skip(skip).Take(take).ToListAsync(ct);
     public void Add(object entity) => context.Add(entity);
+    private IQueryable<AcceleratorInterviewSession> Owned(Guid userId) => context.AcceleratorInterviewSessions.Where(x => x.UserId == userId && !x.IsDeleted &&
+        (!x.JourneyContextId.HasValue || context.AcceleratorJourneyContexts.Any(j => j.Id == x.JourneyContextId && j.UserId == userId && !j.IsDeleted && j.CareerGoalId == x.GoalId)));
 }

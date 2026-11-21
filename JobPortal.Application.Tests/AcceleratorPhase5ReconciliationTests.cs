@@ -134,7 +134,7 @@ public sealed class AcceleratorPhase5ReconciliationTests
         var verifier = new InterviewVerificationTestDouble(criterion.Id);
         var phase3Store = new AcceleratorPhase3Store(fixture.Db);
         var phase5 = new AcceleratorPhase5Service(fixture.Store, fixture.Phase2Store, phase5Store,
-            phase3Store, new AcceleratorPhase4Store(fixture.Db), fixture.Service, fixture.Audit, fixture.Clock);
+            phase3Store, new AcceleratorPhase4Store(fixture.Db), fixture.Service, fixture.Audit, fixture.Clock, fixture.Work, new AcceleratorJourneyStore(fixture.Db));
         var ai = new AcceleratorInterviewAiService(fixture.Store, phase3Store, phase5Store,
             claims, phase5, fixture.Quota, fixture.Service, Options.Create(fixture.Settings),
             [fixture.Provider], [verifier], fixture.Audit, fixture.Clock);

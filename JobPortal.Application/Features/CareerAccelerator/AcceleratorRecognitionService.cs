@@ -23,8 +23,8 @@ public sealed class AcceleratorRecognitionService(IAcceleratorStore writes, IAcc
         Guid? pathId = null;
         if (context.LearningPathEnrollmentId.HasValue)
             pathId = (await learning.EnrollmentAsync(actor, context.LearningPathEnrollmentId.Value, ct) ?? throw new NotFoundException("Enrollment not found.")).LearningPathId;
-        var signals = await store.SignalsAsync(context,ct);
         var policy = await store.PolicyAsync(pathId,ct);
+        var signals = await store.SignalsAsync(context,ct,policy?.MinimumEvidenceConfidence ?? 0);
         if (policy is null) return new(contextId,null,"PolicyUnavailable",null,null,signals.Assessments,signals.CompletedModules,signals.TotalModules,[],[]);
         var verified = (await journeys.EvidenceAsync(actor,contextId,ct)).Where(x => x.Confidence >= policy.MinimumEvidenceConfidence && x.Source != AcceleratorEvidenceSource.SelfReported && x.Source != AcceleratorEvidenceSource.ResumeInferred).ToArray();
         var canonical = (await journeys.CompetenciesAsync(verified.Select(x=>x.CompetencyId).Distinct().ToArray(),ct)).ToDictionary(x=>x.Id,x=>x.SkillNameSnapshot);
@@ -39,6 +39,8 @@ public sealed class AcceleratorRecognitionService(IAcceleratorStore writes, IAcc
             {
                 AcceleratorProficiencyComponent.Assessment => signals.AssessmentScore,
                 AcceleratorProficiencyComponent.Practice => signals.PracticeScore,
+                AcceleratorProficiencyComponent.Project => signals.ProjectScore,
+                AcceleratorProficiencyComponent.Interview => signals.InterviewScore,
                 AcceleratorProficiencyComponent.ModuleCompletion when signals.TotalModules > 0 => decimal.Round(signals.CompletedModules * 100m / signals.TotalModules,2),
                 _ => null
             };

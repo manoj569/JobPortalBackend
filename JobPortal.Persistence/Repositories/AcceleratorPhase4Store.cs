@@ -63,10 +63,18 @@ public sealed class AcceleratorPhase4Store(JobPortalDbContext context) : IAccele
         await context.AcceleratorAiDispatchRecords.AsNoTracking().Where(x => x.Operation == "ProjectEvaluation" &&
             x.Status != AcceleratorAiDispatchStatus.Reconciled && x.Status != AcceleratorAiDispatchStatus.Failed && !x.IsDeleted)
             .OrderByDescending(x => x.CreatedAtUtc).ThenBy(x => x.Id).Skip(skip).Take(take).ToListAsync(ct);
-    public async Task<IReadOnlyList<AcceleratorProjectVersion>> ActiveVersionsAsync(Guid roleId, int take, CancellationToken ct) =>
-        await context.AcceleratorProjectVersions.Include(x => x.Definition).Include(x => x.Competencies)
-            .Where(x => x.TargetRoleId == roleId && x.CatalogStatus == AcceleratorProjectCatalogStatus.Published && x.IsActive && x.Definition.IsActive && !x.IsDeleted)
-            .OrderBy(x => x.Difficulty).ThenBy(x => x.Definition.StableKey).ThenByDescending(x => x.Version).Take(take).ToListAsync(ct);
+    public async Task<IReadOnlyList<AcceleratorProjectVersion>> ActiveVersionsAsync(Guid? roleId, int take, CancellationToken ct, IReadOnlyCollection<Guid>? competencyIds = null)
+    {
+        var query=context.AcceleratorProjectVersions.Include(x=>x.Definition).Include(x=>x.Competencies)
+            .Where(x=>x.CatalogStatus==AcceleratorProjectCatalogStatus.Published && x.IsActive && x.Definition.IsActive && !x.Definition.IsDeleted && !x.IsDeleted);
+        if (roleId.HasValue) query=query.Where(x=>x.TargetRoleId==roleId);
+        else if (competencyIds is not null)
+        {
+            var ids=competencyIds.ToArray();
+            query=query.Where(x=>x.Competencies.Any() && x.Competencies.All(c=>ids.Contains(c.CompetencyId)));
+        }
+        return await query.OrderBy(x=>x.Difficulty).ThenBy(x=>x.Definition.StableKey).ThenByDescending(x=>x.Version).Take(take).ToListAsync(ct);
+    }
 
     public Task<AcceleratorProjectVersion?> VersionAsync(Guid id, CancellationToken ct) =>
         context.AcceleratorProjectVersions.Include(x => x.Definition).Include(x => x.Competencies)
@@ -74,35 +82,35 @@ public sealed class AcceleratorPhase4Store(JobPortalDbContext context) : IAccele
             .SingleOrDefaultAsync(x => x.Id == id && !x.IsDeleted, ct);
 
     public Task<AcceleratorCandidateProject?> CandidateProjectAsync(Guid userId, Guid id, CancellationToken ct) =>
-        context.AcceleratorCandidateProjects.SingleOrDefaultAsync(x => x.UserId == userId && x.Id == id && !x.IsDeleted, ct);
+        Owned(userId).SingleOrDefaultAsync(x => x.UserId == userId && x.Id == id && !x.IsDeleted, ct);
     public Task<AcceleratorCandidateProject?> CandidateProjectByKeyAsync(Guid userId, Guid requestKey, CancellationToken ct) =>
-        context.AcceleratorCandidateProjects.SingleOrDefaultAsync(x => x.UserId == userId && x.RequestKey == requestKey && !x.IsDeleted, ct);
-    public async Task<IReadOnlyList<AcceleratorCandidateProject>> CandidateProjectsAsync(Guid userId, int skip, int take, CancellationToken ct) =>
-        await context.AcceleratorCandidateProjects.Where(x => x.UserId == userId && !x.IsDeleted).OrderByDescending(x => x.StartedAtUtc).ThenBy(x => x.Id).Skip(skip).Take(take).ToListAsync(ct);
+        Owned(userId).SingleOrDefaultAsync(x => x.UserId == userId && x.RequestKey == requestKey && !x.IsDeleted, ct);
+    public async Task<IReadOnlyList<AcceleratorCandidateProject>> CandidateProjectsAsync(Guid userId, int skip, int take, CancellationToken ct, Guid? contextId = null) =>
+        await Owned(userId).Where(x => !contextId.HasValue || x.JourneyContextId == contextId).OrderByDescending(x => x.StartedAtUtc).ThenBy(x => x.Id).Skip(skip).Take(take).ToListAsync(ct);
     public Task<AcceleratorProjectAssignment?> AssignmentAsync(Guid projectVersionId, Guid assignmentId, CancellationToken ct) =>
         context.AcceleratorProjectAssignments.Include(x => x.Milestone).SingleOrDefaultAsync(x => x.Id == assignmentId && x.Milestone.ProjectVersionId == projectVersionId && !x.IsDeleted, ct);
     public Task<AcceleratorProjectSubmission?> SubmissionByKeyAsync(Guid userId, Guid projectId, Guid requestKey, CancellationToken ct) =>
-        context.AcceleratorProjectSubmissions.Join(context.AcceleratorCandidateProjects, x => x.CandidateProjectId, p => p.Id, (x, p) => new { x, p })
+        context.AcceleratorProjectSubmissions.Join(Owned(userId), x => x.CandidateProjectId, p => p.Id, (x, p) => new { x, p })
             .Where(row => row.p.UserId == userId && row.p.Id == projectId && row.x.RequestKey == requestKey && !row.x.IsDeleted).Select(row => row.x).SingleOrDefaultAsync(ct);
     public Task<AcceleratorProjectSubmission?> SubmissionAsync(Guid userId, Guid projectId, Guid submissionId, CancellationToken ct) =>
-        context.AcceleratorProjectSubmissions.Join(context.AcceleratorCandidateProjects, x => x.CandidateProjectId, p => p.Id, (x, p) => new { x, p })
+        context.AcceleratorProjectSubmissions.Join(Owned(userId), x => x.CandidateProjectId, p => p.Id, (x, p) => new { x, p })
             .Where(row => row.p.UserId == userId && row.p.Id == projectId && row.x.Id == submissionId && !row.x.IsDeleted).Select(row => row.x).SingleOrDefaultAsync(ct);
     public async Task<IReadOnlyList<AcceleratorProjectSubmission>> SubmissionsAsync(Guid userId, Guid projectId, Guid assignmentId, CancellationToken ct) =>
-        await context.AcceleratorProjectSubmissions.Join(context.AcceleratorCandidateProjects, x => x.CandidateProjectId, p => p.Id, (x, p) => new { x, p })
+        await context.AcceleratorProjectSubmissions.Join(Owned(userId), x => x.CandidateProjectId, p => p.Id, (x, p) => new { x, p })
             .Where(row => row.p.UserId == userId && row.p.Id == projectId && row.x.AssignmentId == assignmentId && !row.x.IsDeleted)
             .OrderBy(row => row.x.AttemptNumber).Select(row => row.x).ToListAsync(ct);
     public async Task<IReadOnlyList<AcceleratorProjectSubmission>> ProjectSubmissionsAsync(Guid userId, Guid projectId, int skip, int take, CancellationToken ct) =>
-        await context.AcceleratorProjectSubmissions.Join(context.AcceleratorCandidateProjects, x => x.CandidateProjectId, p => p.Id, (x, p) => new { x, p })
+        await context.AcceleratorProjectSubmissions.Join(Owned(userId), x => x.CandidateProjectId, p => p.Id, (x, p) => new { x, p })
             .Where(row => row.p.UserId == userId && row.p.Id == projectId && !row.x.IsDeleted)
             .OrderByDescending(row => row.x.SubmittedAtUtc).ThenBy(row => row.x.Id)
             .Skip(skip).Take(take).Select(row => row.x).ToListAsync(ct);
     public Task<AcceleratorProjectEvaluation?> EvaluationAsync(Guid userId, Guid submissionId, CancellationToken ct) =>
         context.AcceleratorProjectEvaluations.Join(context.AcceleratorProjectSubmissions, e => e.SubmissionId, s => s.Id, (e, s) => new { e, s })
-            .Join(context.AcceleratorCandidateProjects, row => row.s.CandidateProjectId, p => p.Id, (row, p) => new { row.e, p })
+            .Join(Owned(userId), row => row.s.CandidateProjectId, p => p.Id, (row, p) => new { row.e, p })
             .Where(row => row.p.UserId == userId && row.e.SubmissionId == submissionId && !row.e.IsDeleted).Select(row => row.e).SingleOrDefaultAsync(ct);
     public async Task<IReadOnlyList<AcceleratorEvaluatedAssignment>> EvaluatedAssignmentsAsync(Guid userId, Guid projectId, CancellationToken ct) =>
         await context.AcceleratorProjectEvaluations.Join(context.AcceleratorProjectSubmissions, e => e.SubmissionId, s => s.Id, (e, s) => new { e, s })
-            .Join(context.AcceleratorCandidateProjects, row => row.s.CandidateProjectId, p => p.Id, (row, p) => new { row.e, row.s, p })
+            .Join(Owned(userId), row => row.s.CandidateProjectId, p => p.Id, (row, p) => new { row.e, row.s, p })
             .Where(row => row.p.UserId == userId && row.p.Id == projectId && !row.e.IsDeleted && !row.s.IsDeleted)
             .Select(row => new AcceleratorEvaluatedAssignment(row.s.AssignmentId, row.s.AttemptNumber, row.e.Score)).ToListAsync(ct);
     public Task<AcceleratorProjectRubric?> ActiveRubricAsync(Guid projectVersionId, CancellationToken ct) =>
@@ -110,4 +118,6 @@ public sealed class AcceleratorPhase4Store(JobPortalDbContext context) : IAccele
             .OrderByDescending(x => x.Version).FirstOrDefaultAsync(ct);
     public void Add(object entity) => context.Add(entity);
     public void Remove(object entity) => context.Remove(entity);
+    private IQueryable<AcceleratorCandidateProject> Owned(Guid userId) => context.AcceleratorCandidateProjects.Where(x => x.UserId == userId && !x.IsDeleted &&
+        (!x.JourneyContextId.HasValue || context.AcceleratorJourneyContexts.Any(j => j.Id == x.JourneyContextId && j.UserId == userId && !j.IsDeleted && j.CareerGoalId == x.GoalId)));
 }

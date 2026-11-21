@@ -26,7 +26,7 @@ public sealed partial class AcceleratorPhase2Service(IAcceleratorStore writes, I
         var existing = await store.AttemptByKeyAsync(actor, request.RequestKey, ct);
         if (existing is not null)
         {
-            if (existing.GoalId != request.GoalId || existing.TemplateId != request.TemplateId) throw new ConflictException("Idempotency key was used for a different assessment.");
+            if (existing.GoalId != request.GoalId || existing.TemplateId != request.TemplateId || existing.JourneyContextId.HasValue && existing.JourneyContextId!=journey.Id) throw new ConflictException("Idempotency key was used for a different assessment.");
             return await AttemptDto(existing, ct);
         }
         var goal = await RequiredGoal(actor, request.GoalId, ct);
@@ -49,7 +49,12 @@ public sealed partial class AcceleratorPhase2Service(IAcceleratorStore writes, I
         var attempt = await RequiredAttempt(actor, attemptId, ct);
         if (attempt.Status != AcceleratorAssessmentStatus.InProgress || attempt.ExpiresAtUtc <= Now) throw new ConflictException("Assessment attempt is no longer accepting answers.");
         var answer = attempt.Answers.SingleOrDefault(x => x.QuestionId == request.QuestionId) ?? throw new NotFoundException("Question is not part of this attempt.");
-        if (answer.SubmittedAnswerJson != "{}" && answer.SubmittedAnswerJson != request.AnswerJson) throw new ConflictException("An answer for this question has already been submitted.");
+        if (AcceleratorAssessmentRecoveryPolicy.IsAnswered(answer.SubmittedAnswerJson))
+        {
+            if (answer.SubmittedAnswerJson != request.AnswerJson) throw new ConflictException("An answer for this question has already been submitted.");
+            return await AttemptDto(attempt,ct);
+        }
+        if (request.AnswerJson=="{}") return await AttemptDto(attempt,ct);
         answer.SubmittedAnswerJson = request.AnswerJson; attempt.Revision = Guid.NewGuid(); return await AttemptDto(attempt, ct);
     }, ct);
 
@@ -178,12 +183,12 @@ public sealed partial class AcceleratorPhase2Service(IAcceleratorStore writes, I
         AcceleratorProjectRubric rubric, CancellationToken ct)
     {
         var evidence = ProjectEvidencePolicy.Create(project, submission, evaluation, rubric);
-        var previousEvidence = await store.EvidenceAsync(project.UserId, project.GoalId, ct);
+        var previousEvidence = project.JourneyContextId.HasValue ? await journeys!.EvidenceAsync(project.UserId, project.JourneyContextId.Value, ct) : await store.EvidenceAsync(project.UserId, project.GoalId ?? throw Invalid("Project journey missing."), ct);
         ProjectEvidencePolicy.PreserveStrongerVerifiedProficiency(evidence, previousEvidence);
         foreach (var item in evidence) store.Add(item);
         if (evidence.Count == 0) return;
 
-        var roadmap = await store.ActiveRoadmapAsync(project.UserId, project.GoalId, ct);
+        var roadmap = project.JourneyContextId.HasValue ? await journeys!.ActiveRoadmapAsync(project.UserId, project.JourneyContextId.Value, ct) : await store.ActiveRoadmapAsync(project.UserId, project.GoalId!.Value, ct);
         if (roadmap is null) return;
         var activities = await store.ActivitiesAsync(project.UserId, roadmap.Id, ct);
         foreach (var item in evidence)
@@ -240,12 +245,24 @@ public sealed partial class AcceleratorPhase2Service(IAcceleratorStore writes, I
     private async Task<AcceleratorAssessmentAttempt> RequiredAttempt(Guid actor, Guid id, CancellationToken ct)
     {
         var attempt = await store.AttemptAsync(actor, id, ct) ?? throw new NotFoundException("Assessment attempt not found.");
-        if (attempt.JourneyContextId.HasValue && journeyContexts is not null)
-            await journeyContexts.GetOwnedContextAsync(actor, attempt.JourneyContextId.Value, ct);
-        else if (!attempt.GoalId.HasValue) throw new ConflictException("Assessment ownership context is missing.");
+        await ValidateAttemptOwnership(actor,attempt,ct);
         return attempt;
     }
-    private async Task<AssessmentAttemptResponse> AttemptDto(AcceleratorAssessmentAttempt a, CancellationToken ct) { var questions = await store.QuestionsByIdsAsync(a.TaxonomyId, a.Answers.Select(x => x.QuestionId).ToArray(), ct); return new(a.Id, a.GoalId, a.Status, a.Revision, a.ExpiresAtUtc, a.Score, a.Answers.OrderBy(x => x.Sequence).Select(x => { var q = questions.SingleOrDefault(q => q.Id == x.QuestionId) ?? throw new ConflictException("Assessment question is no longer available.", "accelerator_question_unavailable"); return new AssessmentQuestionResponse(q.Id, x.Sequence, q.Prompt, q.OptionsJson, q.Type, q.Difficulty); }).ToArray()); }
+    private async Task<AssessmentAttemptResponse> AttemptDto(AcceleratorAssessmentAttempt attempt, CancellationToken ct)
+    {
+        var questions=(await store.QuestionsByIdsAsync(attempt.TaxonomyId,attempt.Answers.Select(x=>x.QuestionId).ToArray(),ct)).ToDictionary(x=>x.Id);
+        var items=attempt.Answers.OrderBy(x=>x.Sequence).Select(answer=>
+        {
+            if (!questions.TryGetValue(answer.QuestionId,out var question))
+                throw new ConflictException("Assessment question is no longer available.","accelerator_question_unavailable");
+            var submitted=AcceleratorAssessmentRecoveryPolicy.IsAnswered(answer.SubmittedAnswerJson);
+            return new AssessmentQuestionResponse(question.Id,answer.Sequence,question.Prompt,question.OptionsJson,question.Type,question.Difficulty,
+                submitted,submitted ? answer.SubmittedAnswerJson : null,submitted);
+        }).ToArray();
+        return new(attempt.Id,attempt.GoalId,attempt.Status,attempt.Revision,attempt.ExpiresAtUtc,
+            attempt.Status==AcceleratorAssessmentStatus.Completed ? attempt.Score : null,items,attempt.StartedAtUtc,attempt.JourneyContextId,
+            AcceleratorAssessmentRecoveryPolicy.CanResume(attempt.Status,attempt.ExpiresAtUtc,Now));
+    }
     private static bool IsObjectivelyCorrect(AcceleratorQuestion q, string answer) => q.Type is AcceleratorQuestionType.MultipleChoice or AcceleratorQuestionType.MultipleSelect or AcceleratorQuestionType.TrueFalse && JsonEquals(q.AnswerKeyJson, answer);
     private static string CanonicalJson(string json) { using var doc = JsonDocument.Parse(json); return JsonSerializer.Serialize(doc.RootElement); }
     private static bool JsonEquals(string left, string right) => CanonicalJson(left) == CanonicalJson(right);

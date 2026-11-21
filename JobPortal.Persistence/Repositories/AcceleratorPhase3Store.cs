@@ -7,11 +7,11 @@ namespace JobPortal.Persistence.Repositories;
 
 public sealed class AcceleratorPhase3Store(JobPortalDbContext context) : IAcceleratorPhase3Store
 {
-    public Task<AcceleratorTutorConversation?> ConversationAsync(Guid userId, Guid id, CancellationToken ct) => context.AcceleratorTutorConversations.Include(x => x.Messages).SingleOrDefaultAsync(x => x.UserId == userId && x.Id == id && !x.IsDeleted, ct);
-    public Task<AcceleratorTutorConversation?> ConversationByKeyAsync(Guid userId, Guid requestKey, CancellationToken ct) => context.AcceleratorTutorConversations.SingleOrDefaultAsync(x => x.UserId == userId && x.RequestKey == requestKey && !x.IsDeleted, ct);
-    public async Task<IReadOnlyList<AcceleratorTutorConversation>> ConversationsAsync(Guid userId, int skip, int take, CancellationToken ct) => await context.AcceleratorTutorConversations.Where(x => x.UserId == userId && !x.IsDeleted).OrderByDescending(x => x.LastMessageAtUtc).Skip(skip).Take(take).ToListAsync(ct);
+    public Task<AcceleratorTutorConversation?> ConversationAsync(Guid userId, Guid id, CancellationToken ct) => OwnedConversations(userId).Include(x => x.Messages).SingleOrDefaultAsync(x => x.Id == id, ct);
+    public Task<AcceleratorTutorConversation?> ConversationByKeyAsync(Guid userId, Guid requestKey, CancellationToken ct) => OwnedConversations(userId).SingleOrDefaultAsync(x => x.RequestKey == requestKey, ct);
+    public async Task<IReadOnlyList<AcceleratorTutorConversation>> ConversationsAsync(Guid userId, int skip, int take, CancellationToken ct, Guid? contextId = null) => await OwnedConversations(userId).Where(x => !contextId.HasValue || x.JourneyContextId == contextId).OrderByDescending(x => x.LastMessageAtUtc).ThenBy(x => x.Id).Skip(skip).Take(take).ToListAsync(ct);
     public async Task<IReadOnlyList<AcceleratorTutorMessage>> MessagesAsync(Guid userId, Guid conversationId, int take, CancellationToken ct) => await context.AcceleratorTutorMessages.Where(x => x.ConversationId == conversationId && x.Conversation.UserId == userId && !x.IsDeleted).OrderByDescending(x => x.CreatedAtUtc).Take(take).OrderBy(x => x.CreatedAtUtc).ToListAsync(ct);
-    public async Task<IReadOnlyList<AcceleratorPracticeSession>> PracticeSessionsAsync(Guid userId, int skip, int take, CancellationToken ct) => await context.AcceleratorPracticeSessions.Where(x => x.UserId == userId && !x.IsDeleted).OrderByDescending(x => x.CreatedAtUtc).Skip(skip).Take(take).ToListAsync(ct);
+    public async Task<IReadOnlyList<AcceleratorPracticeSession>> PracticeSessionsAsync(Guid userId, int skip, int take, CancellationToken ct, Guid? contextId = null) => await OwnedPractice(userId).Where(x => !contextId.HasValue || x.JourneyContextId == contextId).OrderByDescending(x => x.CreatedAtUtc).ThenBy(x => x.Id).Skip(skip).Take(take).ToListAsync(ct);
     public Task<AcceleratorAiDispatchRecord?> DispatchAsync(Guid id, CancellationToken ct) => context.AcceleratorAiDispatchRecords.SingleOrDefaultAsync(x => x.Id == id && !x.IsDeleted, ct);
     public async Task<bool> UpdateClaimedDispatchAsync(AcceleratorAiDispatchRecord record, Guid claimId, CancellationToken ct)
     {
@@ -33,8 +33,8 @@ public sealed class AcceleratorPhase3Store(JobPortalDbContext context) : IAccele
                 .SetProperty(x => x.Revision, Guid.NewGuid()), ct);
         return updated == 1;
     }
-    public Task<AcceleratorPracticeSession?> PracticeSessionAsync(Guid userId, Guid id, CancellationToken ct) => context.AcceleratorPracticeSessions.Include(x => x.Questions).SingleOrDefaultAsync(x => x.UserId == userId && x.Id == id && !x.IsDeleted, ct);
-    public Task<AcceleratorPracticeSession?> PracticeSessionByKeyAsync(Guid userId, Guid requestKey, CancellationToken ct) => context.AcceleratorPracticeSessions.Include(x => x.Questions).SingleOrDefaultAsync(x => x.UserId == userId && x.RequestKey == requestKey && !x.IsDeleted, ct);
+    public Task<AcceleratorPracticeSession?> PracticeSessionAsync(Guid userId, Guid id, CancellationToken ct) => OwnedPractice(userId).Include(x => x.Questions).SingleOrDefaultAsync(x => x.Id == id, ct);
+    public Task<AcceleratorPracticeSession?> PracticeSessionByKeyAsync(Guid userId, Guid requestKey, CancellationToken ct) => OwnedPractice(userId).Include(x => x.Questions).SingleOrDefaultAsync(x => x.RequestKey == requestKey, ct);
     public Task<AcceleratorPracticeQuestion?> PracticeQuestionAsync(Guid userId, Guid sessionId, Guid questionId, CancellationToken ct) => context.AcceleratorPracticeQuestions.SingleOrDefaultAsync(x => x.SessionId == sessionId && x.Id == questionId && x.Session.UserId == userId && !x.IsDeleted, ct);
     public Task<AcceleratorPracticeAttempt?> PracticeAttemptByKeyAsync(Guid userId, Guid requestKey, CancellationToken ct) => context.AcceleratorPracticeAttempts.SingleOrDefaultAsync(x => x.UserId == userId && x.RequestKey == requestKey && !x.IsDeleted, ct);
     public async Task<IReadOnlyList<AcceleratorPracticeEvaluation>> PracticeEvaluationsAsync(Guid userId, Guid sessionId, CancellationToken ct) => await context.AcceleratorPracticeEvaluations.Join(context.AcceleratorPracticeAttempts, evaluation => evaluation.AttemptId, attempt => attempt.Id, (evaluation, attempt) => new { evaluation, attempt }).Where(x => x.attempt.UserId == userId && x.attempt.SessionId == sessionId && !x.evaluation.IsDeleted && !x.attempt.IsDeleted).OrderBy(x => x.evaluation.CreatedAtUtc).Select(x => x.evaluation).ToListAsync(ct);
@@ -47,4 +47,8 @@ public sealed class AcceleratorPhase3Store(JobPortalDbContext context) : IAccele
     }
     public Task<AcceleratorAiDispatchRecord?> DispatchByKeyAsync(Guid userId, Guid requestKey, CancellationToken ct) => context.AcceleratorAiDispatchRecords.SingleOrDefaultAsync(x => x.UserId == userId && x.RequestKey == requestKey && !x.IsDeleted, ct);
     public void Add(object entity) => context.Add(entity);
+    private IQueryable<AcceleratorTutorConversation> OwnedConversations(Guid userId) => context.AcceleratorTutorConversations.Where(x => x.UserId == userId && !x.IsDeleted &&
+        context.AcceleratorJourneyContexts.Any(j => j.Id == x.JourneyContextId && j.UserId == userId && !j.IsDeleted && j.CareerGoalId == x.GoalId));
+    private IQueryable<AcceleratorPracticeSession> OwnedPractice(Guid userId) => context.AcceleratorPracticeSessions.Where(x => x.UserId == userId && !x.IsDeleted &&
+        context.AcceleratorJourneyContexts.Any(j => j.Id == x.JourneyContextId && j.UserId == userId && !j.IsDeleted && j.CareerGoalId == x.GoalId));
 }

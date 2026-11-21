@@ -13,6 +13,12 @@ namespace JobPortal.API.Controllers;
 [RequestSizeLimit(65536), EnableRateLimiting("CareerAccelerator")]
 public sealed class AcceleratorPhase5Controller(AcceleratorPhase5Service service, AcceleratorInterviewAiService ai) : ControllerBase
 {
+    [HttpGet("~/api/accelerator/v1/learning/enrollments/{enrollmentId:guid}/interviews/recommended")]
+    public async Task<ActionResult<ApiResponse<IReadOnlyList<InterviewRecommendationResponse>>>> EnrollmentRecommendations(Guid enrollmentId, CancellationToken ct) =>
+        Ok(new ApiResponse<IReadOnlyList<InterviewRecommendationResponse>>(await service.RecommendationsAsync(User.GetRequiredUserId(),Guid.Empty,ct,enrollmentId)));
+    [HttpGet("~/api/accelerator/v1/learning/enrollments/{enrollmentId:guid}/interviews/sessions")]
+    public async Task<ActionResult<ApiResponse<IReadOnlyList<InterviewSessionResponse>>>> EnrollmentHistory(Guid enrollmentId, [FromQuery] int page=1, [FromQuery] int pageSize=20, CancellationToken ct=default) =>
+        Ok(new ApiResponse<IReadOnlyList<InterviewSessionResponse>>(await service.EnrollmentHistoryAsync(User.GetRequiredUserId(),enrollmentId,page,pageSize,ct)));
     [HttpGet("recommended")]
     public async Task<ActionResult<ApiResponse<IReadOnlyList<InterviewRecommendationResponse>>>> Recommended(
         [FromQuery] Guid goalId, CancellationToken ct) =>

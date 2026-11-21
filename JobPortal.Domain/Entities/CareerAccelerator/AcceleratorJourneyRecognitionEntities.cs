@@ -2,7 +2,7 @@ using JobPortal.Domain.Common;
 
 namespace JobPortal.Domain.Entities.CareerAccelerator;
 
-public enum AcceleratorProficiencyComponent { Assessment = 1, Practice, Assignment, Project, ModuleCompletion, VerifiedEvidence }
+public enum AcceleratorProficiencyComponent { Assessment = 1, Practice, Assignment, Project, ModuleCompletion, VerifiedEvidence, Interview }
 public enum AcceleratorAchievementRule { MinimumProficiency = 1, CompletedModules, CompletedJourney }
 public enum AcceleratorCertificateState { NotEligible = 1, Eligible, GenerationPending, Available, GenerationFailed }
 

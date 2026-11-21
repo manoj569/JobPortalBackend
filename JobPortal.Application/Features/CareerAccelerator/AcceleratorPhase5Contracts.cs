@@ -4,21 +4,24 @@ namespace JobPortal.Application.Features.CareerAccelerator;
 
 public sealed record InterviewRecommendationResponse(Guid VersionId, string Title, AcceleratorInterviewType Type,
     AcceleratorPracticeDifficulty Difficulty, string Reason);
+public enum InterviewAnswerRecoveryStatus { Unanswered, Submitted, Evaluated }
 public sealed record InterviewQuestionResponse(Guid Id, Guid SectionId, Guid? ParentQuestionId, int Sequence,
-    AcceleratorInterviewQuestionType Type, string Prompt, bool Answered, bool Evaluated);
+    AcceleratorInterviewQuestionType Type, string Prompt, bool Answered, bool Evaluated, Guid? AnswerId = null,
+    DateTime? SubmittedAtUtc = null, Guid? EvaluationId = null, InterviewAnswerRecoveryStatus AnswerStatus = InterviewAnswerRecoveryStatus.Unanswered);
 public sealed record InterviewSectionResponse(Guid Id, int Sequence, string Title, AcceleratorInterviewType Type,
     bool IsRequired, IReadOnlyList<InterviewQuestionResponse> Questions,
     bool AiQuestionAvailable = false, bool StaticFallbackAvailable = false);
 public sealed record InterviewVersionResponse(Guid Id, string Name, string Description, AcceleratorInterviewType Type,
     AcceleratorPracticeDifficulty Difficulty, int EstimatedMinutes, IReadOnlyList<InterviewSectionResponse> Sections);
-public sealed record StartInterviewRequest(Guid RequestKey, Guid GoalId, Guid VersionId, bool UseAiQuestions = false);
+public sealed record StartInterviewRequest(Guid RequestKey, Guid GoalId, Guid VersionId, bool UseAiQuestions = false, Guid? EnrollmentId = null);
 public sealed record GenerateInterviewQuestionRequest(Guid RequestKey, Guid ExpectedRevision);
 public sealed record GeneratedInterviewQuestionPayload(string QuestionText, AcceleratorInterviewQuestionType QuestionType,
     AcceleratorPracticeDifficulty Difficulty, IReadOnlyList<Guid> CompetencyIds, bool FollowUpEligible,
     string GenerationMetadata);
 public sealed record InterviewSessionResponse(Guid Id, Guid VersionId, AcceleratorInterviewSessionStatus Status,
     Guid Revision, decimal? OverallScore, DateTime StartedAtUtc, DateTime? CompletedAtUtc,
-    IReadOnlyList<InterviewQuestionResponse> Questions);
+    IReadOnlyList<InterviewQuestionResponse> Questions, Guid? JourneyContextId = null, Guid? GoalId = null,
+    Guid? CurrentQuestionId = null, Guid? CurrentSectionId = null, bool CanResume = false);
 public sealed record SubmitInterviewAnswerRequest(Guid RequestKey, Guid QuestionId, string Content, Guid ExpectedRevision);
 public sealed record InterviewAnswerResponse(Guid Id, Guid QuestionId, DateTime SubmittedAtUtc);
 public sealed record InterviewAdminAnswerResponse(Guid Id, Guid SessionId, Guid QuestionId,
@@ -91,7 +94,9 @@ public interface IAcceleratorPhase5Store
     Task<AcceleratorInterviewVersion?> VersionAsync(Guid id, CancellationToken ct);
     Task<AcceleratorInterviewVersion?> VersionByNumberAsync(Guid definitionId, int version, CancellationToken ct);
     Task<bool> VersionUsedAsync(Guid versionId, CancellationToken ct);
-    Task<IReadOnlyList<AcceleratorInterviewVersion>> PublishedVersionsAsync(Guid roleId, int take, CancellationToken ct);
+    Task<IReadOnlyList<AcceleratorInterviewVersion>> PublishedVersionsAsync(Guid? roleId, int take, CancellationToken ct, IReadOnlyCollection<Guid>? competencyIds = null);
+    Task<IReadOnlyList<AcceleratorInterviewSession>> JourneySessionsAsync(Guid userId, Guid contextId, int skip, int take, CancellationToken ct);
+    Task<IReadOnlyList<AcceleratorReadinessSnapshot>> JourneyReadinessHistoryAsync(Guid userId, Guid contextId, int skip, int take, CancellationToken ct);
     Task<AcceleratorInterviewSession?> SessionAsync(Guid userId, Guid id, CancellationToken ct);
     Task<AcceleratorInterviewSession?> SessionByKeyAsync(Guid userId, Guid requestKey, CancellationToken ct);
     Task<IReadOnlyList<AcceleratorInterviewSession>> SessionsAsync(Guid userId, Guid goalId, int skip, int take, CancellationToken ct);

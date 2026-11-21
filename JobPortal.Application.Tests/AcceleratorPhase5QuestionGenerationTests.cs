@@ -276,7 +276,7 @@ public sealed class AcceleratorPhase5QuestionGenerationTests
         var store = new AcceleratorPhase5Store(fixture.Db);
         var service = new AcceleratorPhase5Service(fixture.Store, fixture.Phase2Store, store,
             new AcceleratorPhase3Store(fixture.Db), new AcceleratorPhase4Store(fixture.Db),
-            fixture.Service, fixture.Audit, fixture.Clock);
+            fixture.Service, fixture.Audit, fixture.Clock, fixture.Work, new AcceleratorJourneyStore(fixture.Db));
         var started = await service.StartAsync(fixture.Candidate.Id,
             new StartInterviewRequest(Guid.NewGuid(), goal.Id, version.Id, true), default);
         Assert.Empty(started.Questions);

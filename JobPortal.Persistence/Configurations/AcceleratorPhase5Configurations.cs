@@ -100,6 +100,9 @@ public sealed class AcceleratorInterviewSessionConfiguration : IEntityTypeConfig
         builder.HasIndex(x => new { x.UserId, x.StartedAtUtc });
         builder.HasOne<AcceleratorCareerGoal>().WithMany().HasForeignKey(x => x.GoalId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne<AcceleratorInterviewVersion>().WithMany().HasForeignKey(x => x.InterviewVersionId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<AcceleratorJourneyContext>().WithMany().HasForeignKey(x => x.JourneyContextId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasIndex(x => new { x.UserId, x.JourneyContextId });
+        builder.ToTable(t => t.HasCheckConstraint("CK_InterviewSession_Journey", "\"JourneyContextId\" IS NOT NULL"));
     }
 }
 
@@ -181,6 +184,9 @@ public sealed class AcceleratorReadinessSnapshotConfiguration : IEntityTypeConfi
         builder.HasIndex(x => x.TriggerInterviewSessionId).IsUnique().HasFilter("\"TriggerInterviewSessionId\" IS NOT NULL");
         builder.HasOne<AcceleratorCareerGoal>().WithMany().HasForeignKey(x => x.GoalId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne<AcceleratorInterviewSession>().WithMany().HasForeignKey(x => x.TriggerInterviewSessionId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<AcceleratorJourneyContext>().WithMany().HasForeignKey(x => x.JourneyContextId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasIndex(x => new { x.UserId, x.JourneyContextId, x.CalculatedAtUtc });
+        builder.ToTable(t => t.HasCheckConstraint("CK_ReadinessSnapshot_Journey", "\"JourneyContextId\" IS NOT NULL"));
     }
 }
 

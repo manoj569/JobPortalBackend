@@ -2,11 +2,11 @@ using JobPortal.Domain.Entities.CareerAccelerator;
 
 namespace JobPortal.Application.Features.CareerAccelerator;
 
-public sealed record StartAcceleratorProjectRequest(Guid RequestKey, Guid GoalId, Guid ProjectVersionId);
+public sealed record StartAcceleratorProjectRequest(Guid RequestKey, Guid GoalId, Guid ProjectVersionId, Guid? EnrollmentId = null);
 public sealed record SubmitAcceleratorAssignmentRequest(Guid RequestKey, Guid AssignmentId, string Content, Guid ExpectedRevision);
 public sealed record ChangeAcceleratorProjectStatusRequest(Guid ExpectedRevision, AcceleratorCandidateProjectStatus Status);
 public sealed record AcceleratorProjectRecommendation(Guid ProjectVersionId, string Title, AcceleratorPracticeDifficulty Difficulty, string Reason);
-public sealed record CandidateAcceleratorProjectResponse(Guid Id, Guid ProjectVersionId, AcceleratorCandidateProjectStatus Status, int ProgressPercent, Guid Revision);
+public sealed record CandidateAcceleratorProjectResponse(Guid Id, Guid ProjectVersionId, AcceleratorCandidateProjectStatus Status, int ProgressPercent, Guid Revision, Guid? JourneyContextId = null, Guid? GoalId = null);
 public sealed record AcceleratorProjectProgressResponse(Guid ProjectId, AcceleratorCandidateProjectStatus Status,
     int ProgressPercent, Guid? CurrentMilestoneId, decimal? FinalScore, DateTime? CompletedAtUtc, Guid Revision);
 public sealed record AcceleratorProjectSubmissionResponse(Guid Id, Guid AssignmentId, int AttemptNumber, AcceleratorSubmissionStatus Status, DateTime SubmittedAtUtc);
@@ -61,11 +61,11 @@ public interface IAcceleratorPhase4Store
     Task<AcceleratorAiDispatchRecord?> ClaimProjectDispatchAsync(Guid dispatchId, Guid claimId, DateTime now, DateTime expiresAt, CancellationToken ct);
     Task<bool> UpdateClaimedProjectDispatchAsync(AcceleratorAiDispatchRecord record, Guid claimId, CancellationToken ct);
     Task<IReadOnlyList<AcceleratorAiDispatchRecord>> UnresolvedProjectDispatchesAsync(int skip, int take, CancellationToken ct);
-    Task<IReadOnlyList<AcceleratorProjectVersion>> ActiveVersionsAsync(Guid roleId, int take, CancellationToken ct);
+    Task<IReadOnlyList<AcceleratorProjectVersion>> ActiveVersionsAsync(Guid? roleId, int take, CancellationToken ct, IReadOnlyCollection<Guid>? competencyIds = null);
     Task<AcceleratorProjectVersion?> VersionAsync(Guid id, CancellationToken ct);
     Task<AcceleratorCandidateProject?> CandidateProjectAsync(Guid userId, Guid id, CancellationToken ct);
     Task<AcceleratorCandidateProject?> CandidateProjectByKeyAsync(Guid userId, Guid requestKey, CancellationToken ct);
-    Task<IReadOnlyList<AcceleratorCandidateProject>> CandidateProjectsAsync(Guid userId, int skip, int take, CancellationToken ct);
+    Task<IReadOnlyList<AcceleratorCandidateProject>> CandidateProjectsAsync(Guid userId, int skip, int take, CancellationToken ct, Guid? contextId = null);
     Task<AcceleratorProjectAssignment?> AssignmentAsync(Guid projectVersionId, Guid assignmentId, CancellationToken ct);
     Task<AcceleratorProjectSubmission?> SubmissionByKeyAsync(Guid userId, Guid projectId, Guid requestKey, CancellationToken ct);
     Task<AcceleratorProjectSubmission?> SubmissionAsync(Guid userId, Guid projectId, Guid submissionId, CancellationToken ct);

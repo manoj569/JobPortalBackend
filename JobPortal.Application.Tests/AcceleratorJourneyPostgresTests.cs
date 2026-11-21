@@ -13,6 +13,7 @@ namespace JobPortal.Application.Tests;
 // Run only against the dedicated Docker database prepared through the real migration chain.
 public sealed class AcceleratorJourneyPostgresTests
 {
+    private static readonly string[] AllowedDatabases = ["accelerator_2a_verify", "accelerator_phase3_verify", "accelerator_phase45_verify"];
     private static readonly Guid Owner = Guid.Parse("2a000000-0000-0000-0000-000000000001");
     private static readonly Guid Skill = Guid.Parse("2a000000-0000-0000-0000-000000000002");
     private static readonly Guid Taxonomy = Guid.Parse("2a000000-0000-0000-0000-000000000003");
@@ -25,7 +26,7 @@ public sealed class AcceleratorJourneyPostgresTests
         var connection = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("ACCELERATOR_JOURNEY_TEST_POSTGRES"));
         Assert.Equal("127.0.0.1", connection.Host);
         Assert.Equal(55439, connection.Port);
-        Assert.Equal("accelerator_2a_verify", connection.Database);
+        Assert.Contains(connection.Database, AllowedDatabases);
         return new(new DbContextOptionsBuilder<JobPortalDbContext>().UseNpgsql(connection.ConnectionString,
             pg => { pg.MigrationsAssembly(typeof(PostgresMigrationMarker).Assembly.FullName); pg.EnableRetryOnFailure(3); }).Options);
     }

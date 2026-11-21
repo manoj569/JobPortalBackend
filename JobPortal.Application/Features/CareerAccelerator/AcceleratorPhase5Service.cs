@@ -10,19 +10,19 @@ namespace JobPortal.Application.Features.CareerAccelerator;
 
 public sealed class AcceleratorPhase5Service(IAcceleratorStore writes, IAcceleratorPhase2Store phase2,
     IAcceleratorPhase5Store store, IAcceleratorPhase3Store practice, IAcceleratorPhase4Store projects,
-    AcceleratorService access, IAuditWriter audit, TimeProvider clock)
+    AcceleratorService access, IAuditWriter audit, TimeProvider clock, AcceleratorJourneyWorkService work, IAcceleratorJourneyStore journeys)
 {
     private DateTime Now => clock.GetUtcNow().UtcDateTime;
 
-    public async Task<IReadOnlyList<InterviewRecommendationResponse>> RecommendationsAsync(Guid actor, Guid goalId, CancellationToken ct)
+    public async Task<IReadOnlyList<InterviewRecommendationResponse>> RecommendationsAsync(Guid actor, Guid goalId, CancellationToken ct, Guid? enrollmentId = null)
     {
         await access.Candidate(actor, ct);
-        var goal = await Goal(actor, goalId, ct);
-        var versions = await store.PublishedVersionsAsync(goal.RoleId, 50, ct);
-        var evidence = await phase2.EvidenceAsync(actor, goalId, ct);
-        var history = await store.SessionsAsync(actor, goalId, 0, 100, ct);
+        var scope = await work.ResolveAsync(actor, goalId, enrollmentId, ct);
+        var versions = (await store.PublishedVersionsAsync(scope.RoleId, 50, ct, scope.Requirements.Select(x=>x.CompetencyId).ToArray())).Where(v => AcceleratorJourneyWorkService.Compatible(scope, v.Definition.TargetRoleId, v.Competencies.Select(x => x.CompetencyId))).ToArray();
+        var evidence = scope.Evidence;
+        var history = await store.JourneySessionsAsync(actor, scope.Context.Id, 0, 100, ct);
         var completedProjects = (await projects.CandidateProjectsAsync(actor, 0, 100, ct))
-            .Count(x => x.GoalId == goalId && x.FinalScore.HasValue);
+            .Count(x => x.JourneyContextId == scope.Context.Id && x.Status == AcceleratorCandidateProjectStatus.Completed && x.FinalScore.HasValue);
         var names = (await store.CompetenciesAsync(versions.SelectMany(x => x.Competencies)
             .Select(x => x.CompetencyId).Distinct().ToArray(), ct)).ToDictionary(x => x.Id);
         return versions.Where(version => !history.Any(x => x.InterviewVersionId == version.Id &&
@@ -62,12 +62,15 @@ public sealed class AcceleratorPhase5Service(IAcceleratorStore writes, IAccelera
                         q.Kind == AcceleratorInterviewQuestionKind.Static) >= s.QuestionCount)).ToArray());
     }
 
-    public Task<InterviewSessionResponse> StartAsync(Guid actor, StartInterviewRequest request, CancellationToken ct) => writes.WriteAsync(async () =>
+    public async Task<InterviewSessionResponse> StartAsync(Guid actor, StartInterviewRequest request, CancellationToken ct)
+    {
+        var resolved = await work.ResolveAsync(actor, request.GoalId, request.EnrollmentId, ct);
+        return await writes.WriteAsync(async () =>
     {
         await access.Candidate(actor, ct);
         if (request.RequestKey == Guid.Empty || request.VersionId == Guid.Empty) throw Invalid("Interview request key and version are required.");
-        var goal = await Goal(actor, request.GoalId, ct);
-        var hash = Hash(new { request.GoalId, request.VersionId, request.UseAiQuestions });
+        var scope = await work.OwnedAsync(actor, resolved.Context.Id, ct);
+        var hash = request.EnrollmentId.HasValue ? Hash(new { request.GoalId, request.VersionId, request.UseAiQuestions, request.EnrollmentId }) : Hash(new { request.GoalId, request.VersionId, request.UseAiQuestions });
         var prior = await store.SessionByKeyAsync(actor, request.RequestKey, ct);
         if (prior is not null)
         {
@@ -76,8 +79,8 @@ public sealed class AcceleratorPhase5Service(IAcceleratorStore writes, IAccelera
         }
         var version = await store.VersionAsync(request.VersionId, ct) ?? throw new NotFoundException("Interview not found.");
         if (version.Status != AcceleratorInterviewCatalogStatus.Published || !version.Definition.IsActive ||
-            version.Definition.TargetRoleId != goal.RoleId) throw new ConflictException("Interview is not available for this goal.");
-        var session = new AcceleratorInterviewSession { UserId = actor, GoalId = goal.Id,
+            !AcceleratorJourneyWorkService.Compatible(scope, version.Definition.TargetRoleId, version.Competencies.Select(x => x.CompetencyId))) throw new ConflictException("Interview is not available for this journey.");
+        var session = new AcceleratorInterviewSession { UserId = actor, GoalId = scope.Context.CareerGoalId, JourneyContextId = scope.Context.Id,
             InterviewVersionId = version.Id, RequestKey = request.RequestKey, RequestHash = hash,
             Status = AcceleratorInterviewSessionStatus.InProgress, StartedAtUtc = Now };
         foreach (var section in version.Sections.OrderBy(x => x.Sequence))
@@ -99,13 +102,25 @@ public sealed class AcceleratorPhase5Service(IAcceleratorStore writes, IAccelera
         await Audit(actor, AuditAction.Create, "AcceleratorInterviewSession", session.Id, ct);
         return Dto(session, [], []);
     }, ct);
+    }
 
-    public async Task<InterviewSessionResponse> SessionAsync(Guid actor, Guid sessionId, CancellationToken ct)
+    public async Task<IReadOnlyList<InterviewSessionResponse>> EnrollmentHistoryAsync(Guid actor, Guid enrollmentId, int page, int pageSize, CancellationToken ct)
     {
+        AcceleratorService.Page(page,pageSize);
+        var scope=await work.ResolveAsync(actor,Guid.Empty,enrollmentId,ct);
+        var sessions=await store.JourneySessionsAsync(actor,scope.Context.Id,(page-1)*pageSize,pageSize,ct);
+        var result=new List<InterviewSessionResponse>();
+        foreach (var session in sessions) result.Add(Dto(session,await store.AnswersAsync(actor,session.Id,ct),await store.EvaluationsAsync(actor,session.Id,ct)));
+        return result;
+    }
+    public Task<InterviewSessionResponse> SessionAsync(Guid actor, Guid sessionId, CancellationToken ct) => writes.WriteAsync(async () =>
+    {
+        // One short transactional snapshot behind the existing cross-instance gate: a read cannot mix
+        // an old session revision with answers/evaluations committed by a concurrent request.
         await access.Candidate(actor, ct);
         var session = await RequiredSession(actor, sessionId, ct);
         return Dto(session, await store.AnswersAsync(actor, sessionId, ct), await store.EvaluationsAsync(actor, sessionId, ct));
-    }
+    },ct);
 
     public async Task<InterviewSessionResponse> AdminSessionAsync(Guid adminId, Guid candidateId, Guid sessionId, CancellationToken ct)
     {
@@ -391,7 +406,7 @@ public sealed class AcceleratorPhase5Service(IAcceleratorStore writes, IAccelera
         session.Status = AcceleratorInterviewSessionStatus.Completed;
         session.SubmittedAtUtc = Now; session.CompletedAtUtc = Now; session.Revision = Guid.NewGuid();
         var newEvidence = await RecordEvidence(actor, session, answers, evaluations, version, ct);
-        var snapshot = await SnapshotAsync(actor, session.GoalId, session.Id, newEvidence, ct);
+        var snapshot = await SnapshotAsync(actor, session, newEvidence, ct);
         session.ReadinessImpact = snapshot.InterviewPerformance;
         await Audit(actor, AuditAction.Confirm, "AcceleratorInterviewSession", session.Id, ct);
         return await ReportCore(actor, session, ct, snapshot);
@@ -428,7 +443,7 @@ public sealed class AcceleratorPhase5Service(IAcceleratorStore writes, IAccelera
             .Select(x => Name(x.CompetencyId)).ToArray();
         var strong = competencies.Where(x => x.Score >= 70m).OrderByDescending(x => x.Score)
             .Select(x => Name(x.CompetencyId)).ToArray();
-        var previous = (await store.ReadinessHistoryAsync(actor, session.GoalId, 0, 20, ct))
+        var previous = (session.JourneyContextId.HasValue ? await store.JourneyReadinessHistoryAsync(actor, session.JourneyContextId.Value, 0, 20, ct) : await store.ReadinessHistoryAsync(actor, session.GoalId ?? throw new ConflictException("Interview journey is missing."), 0, 20, ct))
             .FirstOrDefault(x => x.TriggerInterviewSessionId != session.Id);
         var current = currentOverride ?? await store.ReadinessForSessionAsync(session.Id, ct);
         return new InterviewReportResponse(session.Id, session.OverallScore ?? 0m, sections, competencies,
@@ -441,8 +456,8 @@ public sealed class AcceleratorPhase5Service(IAcceleratorStore writes, IAccelera
         IReadOnlyList<AcceleratorInterviewAnswer> answers, IReadOnlyList<AcceleratorInterviewEvaluation> evaluations,
         AcceleratorInterviewVersion version, CancellationToken ct)
     {
-        var existing = await phase2.EvidenceAsync(actor, session.GoalId, ct);
-        var roadmap = await phase2.ActiveRoadmapAsync(actor, session.GoalId, ct);
+        var existing = session.JourneyContextId.HasValue ? await journeys.EvidenceAsync(actor, session.JourneyContextId.Value, ct) : await phase2.EvidenceAsync(actor, session.GoalId ?? throw new ConflictException("Interview journey is missing."), ct);
+        var roadmap = session.JourneyContextId.HasValue ? await journeys.ActiveRoadmapAsync(actor, session.JourneyContextId.Value, ct) : await phase2.ActiveRoadmapAsync(actor, session.GoalId!.Value, ct);
         var activities = roadmap is null ? [] : await phase2.ActivitiesAsync(actor, roadmap.Id, ct);
         var newEvidence = new List<AcceleratorSkillEvidence>();
         foreach (var evaluation in evaluations)
@@ -452,7 +467,7 @@ public sealed class AcceleratorPhase5Service(IAcceleratorStore writes, IAccelera
             if (!question.CompetencyId.HasValue) continue;
             var proficiency = evaluation.Score >= 90m ? AcceleratorProficiency.Intermediate :
                 evaluation.Score >= 70m ? AcceleratorProficiency.Developing : AcceleratorProficiency.Beginner;
-            var item = new AcceleratorSkillEvidence { UserId = actor, GoalId = session.GoalId,
+            var item = new AcceleratorSkillEvidence { UserId = actor, GoalId = session.GoalId, JourneyContextId = session.JourneyContextId,
                 CompetencyId = question.CompetencyId.Value, Source = AcceleratorEvidenceSource.MockInterview,
                 Proficiency = proficiency, Confidence = evaluation.Evaluator == AcceleratorInterviewEvaluationMode.Deterministic ? .55m : .4m,
                 ScoringVersion = "interview-rubric-v1", Score = evaluation.Score, EvaluatedAtUtc = evaluation.EvaluatedAtUtc,
@@ -481,21 +496,21 @@ public sealed class AcceleratorPhase5Service(IAcceleratorStore writes, IAccelera
         return newEvidence;
     }
 
-    private async Task<AcceleratorReadinessSnapshot> SnapshotAsync(Guid actor, Guid goalId, Guid sessionId,
+    private async Task<AcceleratorReadinessSnapshot> SnapshotAsync(Guid actor, AcceleratorInterviewSession session,
         IReadOnlyList<AcceleratorSkillEvidence> newEvidence, CancellationToken ct)
     {
-        var prior = await store.ReadinessForSessionAsync(sessionId, ct);
+        var prior = await store.ReadinessForSessionAsync(session.Id, ct);
         if (prior is not null) return prior;
-        var goal = await Goal(actor, goalId, ct);
-        var requirements = await phase2.RequirementsAsync(goal.RoleId, ct);
-        var evidence = (await phase2.EvidenceAsync(actor, goalId, ct)).Concat(newEvidence).ToArray();
+        var scope = await work.OwnedAsync(actor, session.JourneyContextId ?? throw new ConflictException("Interview journey is missing."), ct);
+        var requirements = scope.Requirements;
+        var evidence = scope.Evidence.Concat(newEvidence).ToArray();
         var covered = requirements.Count(x => evidence.Any(e => e.CompetencyId == x.CompetencyId &&
-            e.Proficiency >= (AcceleratorProficiency)x.ExpectedProficiency && e.Confidence >= .6m));
+            e.Proficiency >= (AcceleratorProficiency)x.TargetProficiency && e.Confidence >= .6m));
         var skill = requirements.Count == 0 ? 0m : decimal.Round(100m * covered / requirements.Count, 2);
-        var interview = (await store.SessionsAsync(actor, goalId, 0, 100, ct))
+        var interview = (await store.JourneySessionsAsync(actor, scope.Context.Id, 0, 100, ct))
             .Where(x => x.Status == AcceleratorInterviewSessionStatus.Completed && x.OverallScore.HasValue)
             .Select(x => x.OverallScore!.Value).DefaultIfEmpty(0m).Average();
-        var practiceSessions = (await practice.PracticeSessionsAsync(actor, 0, 100, ct)).Where(x => x.GoalId == goalId).ToArray();
+        var practiceSessions = await practice.PracticeSessionsAsync(actor, 0, 100, ct, scope.Context.Id);
         var practiceScores = new List<decimal>();
         foreach (var row in practiceSessions)
         {
@@ -504,10 +519,10 @@ public sealed class AcceleratorPhase5Service(IAcceleratorStore writes, IAccelera
         }
         var practicePerformance = practiceScores.Count == 0 ? 0m : decimal.Round(practiceScores.Average(), 2);
         var projectScores = (await projects.CandidateProjectsAsync(actor, 0, 100, ct))
-            .Where(x => x.GoalId == goalId && x.FinalScore.HasValue).Select(x => x.FinalScore!.Value).ToArray();
+            .Where(x => x.JourneyContextId == scope.Context.Id && x.Status == AcceleratorCandidateProjectStatus.Completed && x.FinalScore.HasValue).Select(x => x.FinalScore!.Value).ToArray();
         var projectPerformance = projectScores.Length == 0 ? 0m : decimal.Round(projectScores.Average(), 2);
-        var snapshot = new AcceleratorReadinessSnapshot { UserId = actor, GoalId = goalId,
-            TriggerInterviewSessionId = sessionId, SkillCoverage = skill, PracticePerformance = practicePerformance,
+        var snapshot = new AcceleratorReadinessSnapshot { UserId = actor, GoalId = scope.Context.CareerGoalId, JourneyContextId = scope.Context.Id,
+            TriggerInterviewSessionId = session.Id, SkillCoverage = skill, PracticePerformance = practicePerformance,
             ProjectPerformance = projectPerformance, InterviewPerformance = decimal.Round(interview, 2),
             CalculationVersion = CareerReadinessPolicy.Version,
             Total = CareerReadinessPolicy.Calculate(skill, practicePerformance, projectPerformance, interview),
@@ -539,13 +554,23 @@ public sealed class AcceleratorPhase5Service(IAcceleratorStore writes, IAccelera
     }
 
     private static InterviewSessionResponse Dto(AcceleratorInterviewSession session,
-        IReadOnlyList<AcceleratorInterviewAnswer> answers, IReadOnlyList<AcceleratorInterviewEvaluation> evaluations) =>
-        new(session.Id, session.InterviewVersionId, session.Status, session.Revision, session.OverallScore,
-            session.StartedAtUtc, session.CompletedAtUtc,
-            session.Questions.OrderBy(x => x.SectionId).ThenBy(x => x.Sequence).Select(q =>
-                new InterviewQuestionResponse(q.Id, q.SectionId, q.ParentQuestionId, q.Sequence, q.Type,
-                    q.PublicPrompt, answers.Any(a => a.SessionQuestionId == q.Id),
-                    answers.Any(a => a.SessionQuestionId == q.Id && evaluations.Any(e => e.AnswerId == a.Id)))).ToArray());
+        IReadOnlyList<AcceleratorInterviewAnswer> answers, IReadOnlyList<AcceleratorInterviewEvaluation> evaluations)
+    {
+        var byQuestion=answers.ToDictionary(x=>x.SessionQuestionId);
+        var byAnswer=evaluations.ToDictionary(x=>x.AnswerId);
+        var questions=session.Questions.OrderBy(x=>x.AssignedAtUtc).ThenBy(x=>x.SectionId).ThenBy(x=>x.Sequence).Select(question=>
+        {
+            byQuestion.TryGetValue(question.Id,out var answer);
+            var evaluation=answer is null ? null : byAnswer.GetValueOrDefault(answer.Id);
+            return new InterviewQuestionResponse(question.Id,question.SectionId,question.ParentQuestionId,question.Sequence,question.Type,question.PublicPrompt,
+                answer is not null,evaluation is not null,answer?.Id,answer?.SubmittedAtUtc,evaluation?.Id,
+                evaluation is not null ? InterviewAnswerRecoveryStatus.Evaluated : answer is not null ? InterviewAnswerRecoveryStatus.Submitted : InterviewAnswerRecoveryStatus.Unanswered);
+        }).ToArray();
+        var resumable=session.Status==AcceleratorInterviewSessionStatus.InProgress;
+        var current=resumable ? questions.FirstOrDefault(x=>!x.Answered) ?? questions.FirstOrDefault(x=>!x.Evaluated) : null;
+        return new(session.Id,session.InterviewVersionId,session.Status,session.Revision,session.OverallScore,session.StartedAtUtc,session.CompletedAtUtc,
+            questions,session.JourneyContextId,session.GoalId,current?.Id,current?.SectionId,resumable);
+    }
     private static InterviewAnswerResponse AnswerDto(AcceleratorInterviewAnswer row) =>
         new(row.Id, row.SessionQuestionId, row.SubmittedAtUtc);
     private static InterviewQuestionResponse QuestionDto(AcceleratorSessionQuestion row) =>

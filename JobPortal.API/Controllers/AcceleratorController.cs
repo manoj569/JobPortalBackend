@@ -89,6 +89,22 @@ public sealed class AcceleratorController(AcceleratorService service, Accelerato
     public async Task<ActionResult<ApiResponse<AssessmentAttemptResponse>>> StartAssessment(CreateAssessmentAttemptRequest request, CancellationToken ct) =>
         Ok(new ApiResponse<AssessmentAttemptResponse>(await phase2.StartAttemptAsync(User.GetRequiredUserId(), request, ct)));
 
+    [HttpGet("assessments/{attemptId:guid}")]
+    public async Task<ActionResult<ApiResponse<AssessmentAttemptResponse>>> Assessment(Guid attemptId,CancellationToken ct) =>
+        Ok(new ApiResponse<AssessmentAttemptResponse>(await phase2.AttemptAsync(User.GetRequiredUserId(),attemptId,ct)));
+
+    [HttpGet("journeys/{journeyContextId:guid}/assessments/current")]
+    public async Task<ActionResult<ApiResponse<AssessmentAttemptResponse?>>> CurrentAssessment(Guid journeyContextId,CancellationToken ct) =>
+        Ok(new ApiResponse<AssessmentAttemptResponse?>(await phase2.CurrentAttemptAsync(User.GetRequiredUserId(),journeyContextId,ct)));
+
+    [HttpPost("career-goals/{goalId:guid}/assessments")]
+    public async Task<ActionResult<ApiResponse<AssessmentAttemptResponse>>> StartGoalAssessment(Guid goalId,StartResolvedAssessmentRequest request,CancellationToken ct) =>
+        Ok(new ApiResponse<AssessmentAttemptResponse>(await phase2.StartGoalAssessmentAsync(User.GetRequiredUserId(),goalId,request.RequestKey,ct)));
+
+    [HttpPost("journeys/{journeyContextId:guid}/assessments")]
+    public async Task<ActionResult<ApiResponse<AssessmentAttemptResponse>>> StartJourneyAssessment(Guid journeyContextId,StartResolvedAssessmentRequest request,CancellationToken ct) =>
+        Ok(new ApiResponse<AssessmentAttemptResponse>(await phase2.StartJourneyAssessmentAsync(User.GetRequiredUserId(),journeyContextId,request.RequestKey,ct)));
+
     [HttpPut("assessments/{attemptId:guid}/answers")]
     public async Task<ActionResult<ApiResponse<AssessmentAttemptResponse>>> SubmitAnswer(Guid attemptId, SubmitAssessmentAnswerRequest request, CancellationToken ct) =>
         Ok(new ApiResponse<AssessmentAttemptResponse>(await phase2.SubmitAnswerAsync(User.GetRequiredUserId(), attemptId, request, ct)));
