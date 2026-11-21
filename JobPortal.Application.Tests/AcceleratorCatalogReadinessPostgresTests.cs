@@ -33,7 +33,7 @@ public sealed class AcceleratorCatalogReadinessPostgresTests
             var suffix=Guid.NewGuid().ToString("N"); var email=$"readiness-admin-{suffix}@example.invalid";
             var admin=new User { Email=email,NormalizedEmail=email.ToUpperInvariant(),RoleId=adminRole.Id,Status=UserStatus.Active }; db.Add(admin); await db.SaveChangesAsync(); adminId=admin.Id;
             var skills=new List<Skill>();
-            foreach(var name in AcceleratorCatalogReadinessTests.CoreSkills)
+            foreach(var name in AcceleratorCatalogReadinessTests.CoreSkills.Append("Data Structures"))
             {
                 var normalized=name.ToUpperInvariant(); var skill=await db.Skills.SingleOrDefaultAsync(x=>x.NormalizedName==normalized);
                 if(skill is null) { skill=new Skill { Name=name,NormalizedName=normalized }; db.Add(skill); } skills.Add(skill);
@@ -43,13 +43,15 @@ public sealed class AcceleratorCatalogReadinessPostgresTests
                 [new("full-stack-developer","Full Stack Developer","Core full stack baseline",skills.Select(s=>new RoleRequirementDefinition(s.Id,3)).ToArray())]),default);
             taxId=tax.Id; roleId=tax.Roles[0].Id;
             var market=new MarketRole { Name="Readiness full stack "+suffix,NormalizedName="READINESS FULL STACK "+suffix.ToUpperInvariant(),Slug="readiness-"+suffix,AcceleratorRoleId=roleId }; db.Add(market); await db.SaveChangesAsync(); marketId=market.Id;
-            var before=await Service(db).RoleAsync(adminId,roleId,default); Assert.Equal(0,before.CoveredCompetencyCount); Assert.Equal(10,before.RequiredCompetencyCount);
+            var before=await Service(db).RoleAsync(adminId,roleId,default); Assert.Equal(0,before.CoveredCompetencyCount); Assert.Equal(11,before.RequiredCompetencyCount);
         }
         var seeded=await Task.WhenAll(Enumerable.Range(0,3).Select(async _=>{ await using var db=Open(); return await Service(db).BootstrapAsync(adminId,new(taxId,true),default); }));
-        Assert.Equal(20,seeded.Sum(x=>x.AddedQuestions));
+        Assert.Equal(22,seeded.Sum(x=>x.AddedQuestions));
         await using var verify=Open();
         var after=await Service(verify).RoleAsync(adminId,roleId,default);
-        Assert.Equal(100,after.ObjectiveQuestionCoveragePercent); Assert.Equal(20,after.EligibleObjectiveQuestionCount); Assert.True(after.AssessmentReady);
+        Assert.Equal(100,after.ObjectiveQuestionCoveragePercent); Assert.Equal(22,after.EligibleObjectiveQuestionCount); Assert.True(after.AssessmentReady);
+        var dataStructuresId=await verify.AcceleratorCompetencies.Where(x=>x.TaxonomyId==taxId && x.SkillNameSnapshot=="Data Structures").Select(x=>x.Id).SingleAsync();
+        Assert.Equal(2,await verify.AcceleratorQuestions.CountAsync(x=>x.CompetencyId==dataStructuresId));
         Assert.Single((await Service(verify).RolesAsync(adminId,new(Code:"full-stack-developer",TaxonomyId:taxId),default)).Items);
         var candidateRole=await verify.Roles.SingleAsync(x=>x.Name=="Candidate"); var candidateEmail=$"readiness-candidate-{Guid.NewGuid():N}@example.invalid";
         var candidate=new User { Email=candidateEmail,NormalizedEmail=candidateEmail.ToUpperInvariant(),RoleId=candidateRole.Id,Status=UserStatus.Active };

@@ -204,4 +204,66 @@ public sealed class AcceleratorCatalogReadinessTests
         Assert.True(report.Role.BaselineAssessmentMapped); Assert.False(report.Role.BaselineAssessmentUsable);
         Assert.Equal("CuratedBaselineAssessmentInvalid",report.DiagnosticReason);
     }
+
+    [Theory]
+    [InlineData("Data Structures")]
+    [InlineData("DATA STRUCTURES")]
+    public async Task DataStructuresClosesEighteenRequirementCoverageGapWithoutReplacingExistingQuestions(string canonicalName)
+    {
+        using var f=new AcceleratorFixture();
+        var skills=new List<Skill> { f.CodeSkill };
+        foreach(var name in CoreSkills.Skip(1).Take(7).Append(canonicalName)
+            .Concat(Enumerable.Range(1,9).Select(i=>$"Unreviewed specialist competency {i}")))
+        {
+            var skill=new Skill { Name=name,NormalizedName=name.ToUpperInvariant() };
+            f.Db.Add(skill); skills.Add(skill);
+        }
+        var sharedSkill=new Skill { Name="Python",NormalizedName="PYTHON" };
+        f.Db.Add(sharedSkill); await f.Db.SaveChangesAsync();
+        var tax=await f.Service.PublishTaxonomyAsync(f.Admin.Id,new("eighteen-requirements-v1",
+            skills.Append(sharedSkill).Select(s=>new CompetencyDefinition(s.Id,"Existing canonical competency","Engineering",1,null,[],["mcq"],[])).ToArray(),
+            [new("full-stack-developer","Full Stack Developer","Existing eighteen-requirement profile",skills.Select(s=>new RoleRequirementDefinition(s.Id,3)).ToArray())]),default);
+        var competencies=await f.Db.AcceleratorCompetencies.Where(x=>x.TaxonomyId==tax.Id).ToArrayAsync();
+        // Thirteen eligible questions cover eight required competencies. Eleven other catalog
+        // questions belong to an unrequired competency and must not inflate role coverage.
+        foreach(var (skill,index) in skills.Take(8).Select((s,i)=>(s,i)))
+        {
+            var competency=competencies.Single(x=>x.SkillId==skill.Id);
+            foreach(var definition in AcceleratorBaselineQuestionCatalog.Questions
+                .Where(x=>x.CanonicalSkillNames.Contains(skill.Name.ToUpperInvariant())).Take(index<5 ? 2 : 1))
+                f.Db.Add(definition.Create(tax.Id,competency.Id));
+        }
+        var shared=competencies.Single(x=>x.SkillId==sharedSkill.Id);
+        for(var i=0;i<11;i++)
+        {
+            var curated=AcceleratorBaselineQuestionCatalog.Questions.Single(x=>x.Key=="python-dict").Create(tax.Id,shared.Id);
+            curated.Version=$"curated-python-{i}"; f.Db.Add(curated);
+        }
+        await f.Db.SaveChangesAsync();
+        var original=await f.Db.AcceleratorQuestions.AsNoTracking().ToArrayAsync();
+        Assert.Equal(24,original.Length);
+        var service=Service(f); var role=Assert.Single(tax.Roles);
+        var before=await service.RoleAsync(f.Admin.Id,role.Id,default);
+        Assert.Equal(18,before.RequiredCompetencyCount); Assert.Equal(8,before.CoveredCompetencyCount);
+        Assert.Equal(44.44m,before.ObjectiveQuestionCoveragePercent); Assert.Equal(13,before.EligibleObjectiveQuestionCount);
+        Assert.False(before.AssessmentReady);
+        var preview=await service.BootstrapAsync(f.Admin.Id,new(tax.Id),default);
+        var repeatPreview=await service.BootstrapAsync(f.Admin.Id,new(tax.Id),default);
+        Assert.Equal(2,preview.PlannedQuestions); Assert.Equal(preview.PlannedQuestions,repeatPreview.PlannedQuestions);
+        Assert.Equal(0,preview.AddedQuestions); Assert.Equal(24,await f.Db.AcceleratorQuestions.CountAsync());
+        Assert.Equal(2,(await service.BootstrapAsync(f.Admin.Id,new(tax.Id,true),default)).AddedQuestions);
+        var after=await service.RoleAsync(f.Admin.Id,role.Id,default);
+        Assert.Equal(18,after.RequiredCompetencyCount); Assert.Equal(9,after.CoveredCompetencyCount);
+        Assert.Equal(50m,after.ObjectiveQuestionCoveragePercent); Assert.Equal(15,after.EligibleObjectiveQuestionCount);
+        Assert.True(after.AssessmentReady);
+        var dataStructures=competencies.Single(x=>x.SkillId==skills[8].Id);
+        var added=await f.Db.AcceleratorQuestions.Where(x=>x.CompetencyId==dataStructures.Id).ToArrayAsync();
+        Assert.Equal(2,added.Length);
+        Assert.All(added,q=> { Assert.Equal(tax.Id,q.TaxonomyId); Assert.True(AcceleratorAssessmentReadinessPolicy.IsEligible(q)); });
+        Assert.Equal(0,(await service.BootstrapAsync(f.Admin.Id,new(tax.Id,true),default)).AddedQuestions);
+        Assert.Equal(0,(await service.BootstrapAsync(f.Admin.Id,new(tax.Id),default)).PlannedQuestions);
+        Assert.Equal(26,await f.Db.AcceleratorQuestions.CountAsync());
+        foreach(var question in original)
+            Assert.Equal(JsonSerializer.Serialize(question),JsonSerializer.Serialize(await f.Db.AcceleratorQuestions.AsNoTracking().SingleAsync(x=>x.Id==question.Id)));
+    }
 }
