@@ -63,6 +63,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<JobPortal.Application.Features.CareerAccelerator.IAcceleratorJourneyStore, AcceleratorJourneyStore>();
         services.AddScoped<JobPortal.Application.Features.CareerAccelerator.IAcceleratorJourneySummaryStore, AcceleratorJourneySummaryStore>();
         services.AddScoped<JobPortal.Application.Features.CareerAccelerator.IAcceleratorJourneyProvisioningStore, AcceleratorJourneyProvisioningStore>();
+        services.AddScoped<JobPortal.Application.Features.CareerAccelerator.IAcceleratorCatalogReadinessStore, AcceleratorCatalogReadinessStore>();
         services.AddOptions<JobPortal.Application.Features.CareerAccelerator.AcceleratorJourneySummaryOptions>()
             .Configure(x =>
             {

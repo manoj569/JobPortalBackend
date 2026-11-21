@@ -8,7 +8,8 @@ namespace JobPortal.Application.Features.CareerAccelerator;
 
 public sealed record ProvisionAcceleratorJourneyRequest(Guid RequestKey,Guid? MarketPathId=null,Guid? MarketSkillPathId=null);
 public sealed record ProvisionAcceleratorJourneyResponse(string State,string? DiagnosticReason,Guid? JourneyContextId,Guid? LearningPathId,Guid? EnrollmentId,
-    AcceleratorNextAction NextAction,int RequiredCompetencies,int CoveredCompetencies,IReadOnlyList<Guid> UncoveredCompetencyIds,string PolicyVersion)
+    AcceleratorNextAction NextAction,int RequiredCompetencies,int CoveredCompetencies,IReadOnlyList<Guid> UncoveredCompetencyIds,string PolicyVersion,Guid? CanonicalRoleId=null,
+    [property:System.Text.Json.Serialization.JsonIgnore] AcceleratorAssessmentCoverage? InternalCoverage=null)
 {
     public bool IsPartialBaseline => CoveredCompetencies<RequiredCompetencies;
     public decimal CompetencyCoveragePercent => RequiredCompetencies==0 ? 0 : decimal.Round(CoveredCompetencies*100m/RequiredCompetencies,2);
@@ -26,7 +27,7 @@ public static class AcceleratorJourneyProvisioningPolicy
     // Existing selection takes one question per competency. One valid objective question is the
     // floor; at least half the role must be represented, capped by the existing 100-question limit.
     // Unrepresented skills remain NotAssessed, with no fabricated evidence or inferred mastery.
-    public static bool SufficientCoverage(int required,int covered) => required>0 && covered>0 && covered<=required && covered*2>=required;
+    public static bool SufficientCoverage(int required,int covered) => AcceleratorAssessmentReadinessPolicy.SufficientCoverage(required,covered);
     public static bool ValidQuestion(AcceleratorQuestion question)
     {
         if(!question.IsActive || question.IsDeleted || question.Weight<=0 || question.Difficulty is <1 or >5 || string.IsNullOrWhiteSpace(question.Prompt) ||

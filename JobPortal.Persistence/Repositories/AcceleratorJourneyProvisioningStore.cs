@@ -75,7 +75,7 @@ public sealed class AcceleratorJourneyProvisioningStore(JobPortalDbContext db,IO
             requirements=createRole ? await DemandRequirements(marketRole.Id,taxonomyId,now,ct) :
                 await db.AcceleratorRoleRequirements.AsNoTracking().Where(x=>x.RoleId==role.Id && !x.IsDeleted)
                     .OrderBy(x=>x.CompetencyId).Select(x=>new Requirement(x.CompetencyId,x.ExpectedProficiency)).ToListAsync(ct);
-            if(requirements.Count==0) return Unavailable(createRole ? "InsufficientCanonicalRoleDemand" : "CanonicalRoleRequirementsMissing");
+            if(requirements.Count==0) return Unavailable(createRole ? "InsufficientCanonicalRoleDemand" : "CanonicalRoleRequirementsMissing") with { CanonicalRoleId=createRole ? null : role.Id };
         }
         else
         {
@@ -95,7 +95,7 @@ public sealed class AcceleratorJourneyProvisioningStore(JobPortalDbContext db,IO
         }
         var competencyIds=requirements.Select(x=>x.Id).ToArray();
         var validIds=await Competencies(now).Where(x=>x.TaxonomyId==taxonomyId && competencyIds.Contains(x.Id)).Select(x=>x.Id).ToArrayAsync(ct);
-        if(validIds.Length!=requirements.Count || requirements.Any(x=>x.Target is <1 or >5)) return Unavailable("IncompatibleCanonicalRequirements");
+        if(validIds.Length!=requirements.Count || requirements.Any(x=>x.Target is <1 or >5)) return Unavailable("IncompatibleCanonicalRequirements") with { CanonicalRoleId=createRole ? null : role?.Id };
 
         var isCareer=marketRole is not null; var roleId=role?.Id; var skillId=marketSkill?.SkillId;
         var paths=db.AcceleratorLearningPaths.Where(x=>!x.IsDeleted && x.Status==AcceleratorLearningCatalogStatus.Published &&
@@ -127,13 +127,13 @@ public sealed class AcceleratorJourneyProvisioningStore(JobPortalDbContext db,IO
         var compatible=template is not null && template.IsActive && template.TimeLimitMinutes is >=1 and <=240 && template.MaximumQuestions is >=1 and <=100 &&
             (template.TaxonomyId ?? template.Role?.TaxonomyId)==taxonomyId && (!template.RoleId.HasValue || template.RoleId==role?.Id);
         var selected=Select(questions,template?.SelectionStrategy,template?.MaximumQuestions ?? 100);
-        if(mapping is not null && (!compatible || selected.Any(x=>!AcceleratorJourneyProvisioningPolicy.ValidQuestion(x)))) return Unavailable("CuratedBaselineAssessmentInvalid");
+        if(mapping is not null && (!compatible || selected.Any(x=>!AcceleratorJourneyProvisioningPolicy.ValidQuestion(x)))) return Unavailable("CuratedBaselineAssessmentInvalid") with { CanonicalRoleId=createRole ? null : role?.Id };
         if(mapping is null && (!compatible || selected.Any(x=>!AcceleratorJourneyProvisioningPolicy.ValidQuestion(x)) ||
             !AcceleratorJourneyProvisioningPolicy.SufficientCoverage(requirements.Count,selected.Count(AcceleratorJourneyProvisioningPolicy.ValidQuestion))))
         {
             var version=$"auto-baseline-{(role?.Id ?? requirements[0].Id):N}";
             template=await db.AcceleratorAssessmentTemplates.SingleOrDefaultAsync(x=>x.TaxonomyId==taxonomyId && x.RoleId==(role==null ? null : role.Id) && x.Version==version && !x.IsDeleted,ct);
-            if(template is not null && !template.IsActive) return Unavailable("AutoBaselineRetired");
+            if(template is not null && !template.IsActive) return Unavailable("AutoBaselineRetired") with { CanonicalRoleId=createRole ? null : role?.Id };
             selected=Select(questions,AcceleratorJourneyProvisioningPolicy.ObjectiveSelection,100);
             template ??= new AcceleratorAssessmentTemplate { RoleId=role?.Id,TaxonomyId=taxonomyId,Version=version,IsActive=true,
                 MaximumQuestions=Math.Clamp(selected.Length,1,100),TimeLimitMinutes=Math.Clamp(selected.Length*2,5,120),SelectionStrategy=AcceleratorJourneyProvisioningPolicy.ObjectiveSelection };
@@ -141,13 +141,14 @@ public sealed class AcceleratorJourneyProvisioningStore(JobPortalDbContext db,IO
         if(template is null) return Unavailable("BaselineAssessmentUnavailable");
         selected=Select(questions,template.SelectionStrategy,template.MaximumQuestions);
         var covered=selected.Where(AcceleratorJourneyProvisioningPolicy.ValidQuestion).Select(x=>x.CompetencyId).Distinct().ToArray();
-        if(!AcceleratorJourneyProvisioningPolicy.SufficientCoverage(requirements.Count,covered.Length)) return Unavailable("InsufficientObjectiveQuestionCoverage");
+        var coverage=AcceleratorAssessmentReadinessPolicy.Evaluate(taxonomyId,competencyIds,questions,template.MaximumQuestions,template.SelectionStrategy);
+        if(!coverage.AssessmentReady) return Unavailable("InsufficientObjectiveQuestionCoverage") with { CanonicalRoleId=createRole ? null : role?.Id,InternalCoverage=coverage };
         if(!readOnly && await db.AcceleratorPathEnrollments.AnyAsync(x=>x.UserId==actor && x.RequestKey==request.RequestKey && x.LearningPathId!=path.Id,ct))
             throw new ConflictException("Request key belongs to another enrollment.");
 
         // No canonical/path mutations occur until all viability checks above pass.
         if(readOnly) return new("ProvisioningRequired",null,null,createPath ? null : path.Id,enrollment?.Id,AcceleratorNextAction.ProvisionJourney,
-            requirements.Count,covered.Length,competencyIds.Except(covered).Order().ToArray(),AcceleratorJourneyProvisioningPolicy.Version);
+            requirements.Count,covered.Length,competencyIds.Except(covered).Order().ToArray(),AcceleratorJourneyProvisioningPolicy.Version,createRole ? null : role?.Id,coverage);
         if(createRole)
         {
             db.Add(role!);
@@ -229,8 +230,7 @@ public sealed class AcceleratorJourneyProvisioningStore(JobPortalDbContext db,IO
             .OrderByDescending(x=>x.Jobs).ThenBy(x=>x.Id).Take(100).Select(x=>new Requirement(x.Id,3)).ToListAsync(ct);
     }
     private static AcceleratorQuestion[] Select(IEnumerable<AcceleratorQuestion> questions,string? strategy,int maximum) =>
-        questions.Where(x=>strategy!=AcceleratorJourneyProvisioningPolicy.ObjectiveSelection || AcceleratorJourneyProvisioningPolicy.ValidQuestion(x))
-            .GroupBy(x=>x.CompetencyId).Select(g=>g.OrderBy(x=>x.Difficulty).ThenBy(x=>x.Id).First()).OrderBy(x=>x.CompetencyId).Take(maximum).ToArray();
+        AcceleratorAssessmentReadinessPolicy.SelectQuestions(questions,strategy,maximum);
     private static ProvisionAcceleratorJourneyResponse Response(AcceleratorJourneyProvisioningReceipt row) => new("Ready",null,row.JourneyContextId,row.LearningPathId,row.EnrollmentId,
         AcceleratorNextAction.StartAssessment,row.RequiredCompetencies,row.AssessedCompetencies,JsonSerializer.Deserialize<Guid[]>(row.UnassessedCompetencyIdsJson)!,row.PolicyVersion);
     private static ProvisionAcceleratorJourneyResponse Unavailable(string reason) => new("ProvisioningUnavailable",reason,null,null,null,AcceleratorNextAction.Unavailable,0,0,[],AcceleratorJourneyProvisioningPolicy.Version);

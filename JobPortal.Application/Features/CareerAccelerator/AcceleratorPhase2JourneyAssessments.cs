@@ -100,7 +100,5 @@ public sealed partial class AcceleratorPhase2Service
     }
 
     private static AcceleratorQuestion[] SelectQuestions(IReadOnlyList<AcceleratorQuestion> eligible, int maximum,string? strategy=null) =>
-        eligible.Where(x=>strategy!=AcceleratorJourneyProvisioningPolicy.ObjectiveSelection || AcceleratorJourneyProvisioningPolicy.ValidQuestion(x))
-            .GroupBy(x => x.CompetencyId).Select(g => g.OrderBy(x => x.Difficulty).ThenBy(x => x.Id).First())
-            .OrderBy(x => x.CompetencyId).Take(maximum).ToArray();
+        AcceleratorAssessmentReadinessPolicy.SelectQuestions(eligible,strategy,maximum);
 }
