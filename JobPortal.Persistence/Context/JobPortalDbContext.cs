@@ -114,6 +114,7 @@ public sealed class JobPortalDbContext(DbContextOptions<JobPortalDbContext> opti
     public DbSet<TailoredResumeEdit> TailoredResumeEdits => Set<TailoredResumeEdit>();
     public DbSet<AIResumeCreditTransaction> AIResumeCreditTransactions => Set<AIResumeCreditTransaction>();
     public DbSet<AcceleratorTaxonomy> AcceleratorTaxonomies => Set<AcceleratorTaxonomy>();
+    public DbSet<AcceleratorJourneyProvisioningReceipt> AcceleratorJourneyProvisioningReceipts => Set<AcceleratorJourneyProvisioningReceipt>();
     public DbSet<AcceleratorCareerRole> AcceleratorCareerRoles => Set<AcceleratorCareerRole>();
     public DbSet<AcceleratorCompetency> AcceleratorCompetencies => Set<AcceleratorCompetency>();
     public DbSet<AcceleratorPrerequisite> AcceleratorPrerequisites => Set<AcceleratorPrerequisite>();

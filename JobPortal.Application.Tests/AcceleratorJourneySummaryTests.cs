@@ -70,7 +70,7 @@ public sealed class AcceleratorJourneySummaryTests
         await Assert.ThrowsAsync<BadRequestException>(()=>service.GetAsync(f.Candidate.Id,market.Id,summary.JourneyContextId,default));
         Assert.Empty(await f.Db.AcceleratorUsageReservations.ToArrayAsync());
     }
-    internal static AcceleratorJourneySummaryService Service(AcceleratorFixture f) => new(new AcceleratorJourneySummaryStore(f.Db),f.Work,f.Service,f.Clock,Options.Create(new AcceleratorJourneySummaryOptions()));
+    internal static AcceleratorJourneySummaryService Service(AcceleratorFixture f) => new(new AcceleratorJourneySummaryStore(f.Db),f.Work,f.Service,f.Clock,Options.Create(new AcceleratorJourneySummaryOptions()),new AcceleratorJourneyProvisioningStore(f.Db));
     internal static JourneySummaryData Data() => new(Title:"Path",LearningPathId:null,EnrollmentId:null,AssessmentConfigured:true,QuestionsAvailable:true,
         ActiveAssessmentId:null,CompletedAssessments:0,CompletedLessons:0,TotalLessons:0,CompletedActivities:0,TotalActivities:0,PracticeSessions:0,PracticeEvaluations:0,
         Projects:0,CompletedProjects:0,ActiveProjectId:null,EligibleProjects:0,Interviews:0,CompletedInterviews:0,ActiveInterviewId:null,LatestReportId:null,EligibleInterviews:0,

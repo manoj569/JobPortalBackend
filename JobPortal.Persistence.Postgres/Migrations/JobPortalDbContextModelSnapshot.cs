@@ -2767,6 +2767,9 @@ namespace JobPortal.Persistence.Postgres.Migrations
                         .HasMaxLength(80)
                         .HasColumnType("character varying(80)");
 
+                    b.Property<int>("ConfigurationSource")
+                        .HasColumnType("integer");
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -3637,6 +3640,84 @@ namespace JobPortal.Persistence.Postgres.Migrations
                         });
                 });
 
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorJourneyProvisioningReceipt", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("AssessedCompetencies")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("EnrollmentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("JourneyContextId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("LearningPathId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("MarketRoleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("MarketSkillId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("PolicyVersion")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<Guid>("RequestKey")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("RequiredCompetencies")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("UnassessedCompetencyIdsJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EnrollmentId");
+
+                    b.HasIndex("IsDeleted");
+
+                    b.HasIndex("JourneyContextId");
+
+                    b.HasIndex("LearningPathId");
+
+                    b.HasIndex("MarketRoleId");
+
+                    b.HasIndex("MarketSkillId");
+
+                    b.HasIndex("UserId", "RequestKey")
+                        .IsUnique();
+
+                    b.ToTable("AcceleratorJourneyProvisioningReceipts", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_JourneyProvisioning_Coverage", "\"RequiredCompetencies\" > 0 AND \"AssessedCompetencies\" > 0 AND \"AssessedCompetencies\" <= \"RequiredCompetencies\"");
+
+                            t.HasCheckConstraint("CK_JourneyProvisioning_Source", "(\"MarketRoleId\" IS NOT NULL AND \"MarketSkillId\" IS NULL) OR (\"MarketRoleId\" IS NULL AND \"MarketSkillId\" IS NOT NULL)");
+                        });
+                });
+
             modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorLearningActivity", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3824,6 +3905,9 @@ namespace JobPortal.Persistence.Postgres.Migrations
 
                     b.Property<Guid?>("CanonicalSkillId")
                         .HasColumnType("uuid");
+
+                    b.Property<int>("ConfigurationSource")
+                        .HasColumnType("integer");
 
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
@@ -14162,6 +14246,43 @@ namespace JobPortal.Persistence.Postgres.Migrations
                     b.HasOne("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorTaxonomy", null)
                         .WithMany()
                         .HasForeignKey("TaxonomyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorJourneyProvisioningReceipt", b =>
+                {
+                    b.HasOne("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorPathEnrollment", null)
+                        .WithMany()
+                        .HasForeignKey("EnrollmentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorJourneyContext", null)
+                        .WithMany()
+                        .HasForeignKey("JourneyContextId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JobPortal.Domain.Entities.CareerAccelerator.AcceleratorLearningPath", null)
+                        .WithMany()
+                        .HasForeignKey("LearningPathId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JobPortal.Domain.Entities.CareerAccelerator.MarketRole", null)
+                        .WithMany()
+                        .HasForeignKey("MarketRoleId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("JobPortal.Domain.Entities.CareerAccelerator.MarketSkill", null)
+                        .WithMany()
+                        .HasForeignKey("MarketSkillId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("JobPortal.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

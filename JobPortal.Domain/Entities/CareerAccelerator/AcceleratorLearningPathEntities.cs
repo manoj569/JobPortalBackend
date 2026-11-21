@@ -14,6 +14,7 @@ public enum AcceleratorEnrollmentProgressKind { LessonStarted = 1, LessonComplet
 /// <summary>Published, reusable learning content. It references canonical Career Accelerator data rather than copying it.</summary>
 public sealed class AcceleratorLearningPath : BaseEntity
 {
+    public AcceleratorConfigurationSource ConfigurationSource { get; set; }
     public AcceleratorLearningPathType Type { get; set; }
     public string Slug { get; set; } = string.Empty;
     public string Title { get; set; } = string.Empty;

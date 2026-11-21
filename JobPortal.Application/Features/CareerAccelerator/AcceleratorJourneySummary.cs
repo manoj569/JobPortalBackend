@@ -4,7 +4,7 @@ using Microsoft.Extensions.Options;
 
 namespace JobPortal.Application.Features.CareerAccelerator;
 
-public enum AcceleratorNextAction { Unavailable, EnrollLearningPath, StartAssessment, ResumeAssessment, GenerateRoadmap, ContinueLearning, StartPractice, StartProject, ContinueProject, StartInterview, ContinueInterview, ViewInterviewReport, ViewJobs, ViewApplications }
+public enum AcceleratorNextAction { Unavailable, EnrollLearningPath, StartAssessment, ResumeAssessment, GenerateRoadmap, ContinueLearning, StartPractice, StartProject, ContinueProject, StartInterview, ContinueInterview, ViewInterviewReport, ViewJobs, ViewApplications, ProvisionJourney }
 public sealed class AcceleratorJourneySummaryOptions
 {
     // Explicit aggregate policy; readiness component weights remain CareerReadinessPolicy's existing 40/10/20/30.
@@ -26,7 +26,7 @@ public sealed record AcceleratorJourneySummaryResponse(string State, string Poli
     string? Title, AcceleratorEntitlementResponse Entitlement, JourneySummaryData? Summary, Guid? RoadmapId, int? OverallProgressPercent,
     int? EstimatedMinutesRemaining, string? CurrentPhase, AcceleratorNextAction NextAction, Guid? NextResourceId,
     IReadOnlyList<JourneyChecklistItem> Checklist, IReadOnlyList<JourneyPhaseStatus> Phases, AcceleratorRoadmapStatus? RoadmapStatus = null, AcceleratorAssessmentStatus? AssessmentStatus = null,
-    JourneyAssessmentRecovery? Assessment = null, string PhaseProgressPolicyVersion = AcceleratorPhaseProgressPolicy.Version);
+    JourneyAssessmentRecovery? Assessment = null, string PhaseProgressPolicyVersion = AcceleratorPhaseProgressPolicy.Version,string? DiagnosticReason=null);
 public interface IAcceleratorJourneySummaryStore
 {
     Task<JourneyMarketResolution> ResolveMarketAsync(Guid actor, Guid marketPathId, CancellationToken ct);
@@ -74,7 +74,7 @@ public static class AcceleratorJourneyPhasePolicy
     }
 }
 public sealed class AcceleratorJourneySummaryService(IAcceleratorJourneySummaryStore store, AcceleratorJourneyWorkService work,
-    AcceleratorService access, TimeProvider clock, IOptions<AcceleratorJourneySummaryOptions> options)
+    AcceleratorService access, TimeProvider clock, IOptions<AcceleratorJourneySummaryOptions> options,IAcceleratorJourneyProvisioningStore provisioning)
 {
     public async Task<AcceleratorJourneySummaryResponse> GetAsync(Guid actor, Guid? marketPathId, Guid? contextId, CancellationToken ct, Guid? marketSkillPathId = null)
     {
@@ -88,10 +88,23 @@ public sealed class AcceleratorJourneySummaryService(IAcceleratorJourneySummaryS
         {
             var mapping=marketSkillPathId.HasValue ? await store.ResolveMarketSkillAsync(actor,marketSkillPathId.Value,ct)
                 : await store.ResolveMarketAsync(actor,marketPathId!.Value,ct);
-            if (mapping.State!="Ready") return new(mapping.State,AcceleratorJourneyPhasePolicy.Version,null,mapping.GoalId,mapping.LearningPathId,mapping.EnrollmentId,mapping.Title,entitlement,null,null,null,null,null,
-                mapping.State=="EnrollmentRequired" ? AcceleratorNextAction.EnrollLearningPath : AcceleratorNextAction.Unavailable,mapping.LearningPathId,[],[]);
+            if (mapping.State!="Ready")
+            {
+                var response=new AcceleratorJourneySummaryResponse(mapping.State,AcceleratorJourneyPhasePolicy.Version,null,mapping.GoalId,mapping.LearningPathId,mapping.EnrollmentId,mapping.Title,entitlement,null,null,null,null,null,
+                    mapping.State=="EnrollmentRequired" ? AcceleratorNextAction.EnrollLearningPath : AcceleratorNextAction.Unavailable,mapping.LearningPathId,[],[]);
+                return entitlement.Status=="Active" ? await ProvisioningState(actor,marketPathId,marketSkillPathId,response,ct) : response;
+            }
             scope=await work.ResolveAsync(actor,mapping.GoalId ?? Guid.Empty,mapping.EnrollmentId,ct);
         }
-        return AcceleratorJourneyPhasePolicy.Calculate(scope,await store.ReadAsync(actor,scope,clock.GetUtcNow().UtcDateTime,ct),entitlement,options.Value.MinimumJobReadyScore);
+        var result=AcceleratorJourneyPhasePolicy.Calculate(scope,await store.ReadAsync(actor,scope,clock.GetUtcNow().UtcDateTime,ct),entitlement,options.Value.MinimumJobReadyScore);
+        return entitlement.Status=="Active" && (marketPathId.HasValue || marketSkillPathId.HasValue) && result.State is "AssessmentNotConfigured" or "QuestionsUnavailable"
+            ? await ProvisioningState(actor,marketPathId,marketSkillPathId,result,ct) : result;
+    }
+    private async Task<AcceleratorJourneySummaryResponse> ProvisioningState(Guid actor,Guid? marketPathId,Guid? marketSkillPathId,AcceleratorJourneySummaryResponse response,CancellationToken ct)
+    {
+        ProvisionAcceleratorJourneyResponse eligibility;
+        try { eligibility=await provisioning.CheckEligibilityAsync(actor,marketPathId,marketSkillPathId,clock.GetUtcNow().UtcDateTime,ct); }
+        catch(NotFoundException) { return response with { State="ProvisioningUnavailable",NextAction=AcceleratorNextAction.Unavailable,NextResourceId=null,DiagnosticReason="MarketPathNotFound" }; }
+        return response with { State=eligibility.State,NextAction=eligibility.NextAction,NextResourceId=null,DiagnosticReason=eligibility.DiagnosticReason ?? response.State };
     }
 }

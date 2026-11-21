@@ -30,7 +30,7 @@ public sealed class AcceleratorPhase45PostgresTests
         var phase2=new AcceleratorPhase2Service(writes,phase2store,access,new AuditWriterTestDouble(),TimeProvider.System,contexts,journeys,learning);
         return (new(writes,phase2,new AcceleratorPhase4Store(db),access,new ProjectDeterministicEvaluator(),new AuditWriterTestDouble(),TimeProvider.System,work),
             new(writes,phase2store,new AcceleratorPhase5Store(db),new AcceleratorPhase3Store(db),new AcceleratorPhase4Store(db),access,new AuditWriterTestDouble(),TimeProvider.System,work,journeys),
-            new(new AcceleratorJourneySummaryStore(db),work,access,TimeProvider.System,Options.Create(new AcceleratorJourneySummaryOptions())));
+            new(new AcceleratorJourneySummaryStore(db),work,access,TimeProvider.System,Options.Create(new AcceleratorJourneySummaryOptions()),new AcceleratorJourneyProvisioningStore(db)));
     }
     [Phase45PostgresFact]
     public async Task LegacyRootsAndReadinessBackfillPreserveGoalAndHistoricalValues()

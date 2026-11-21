@@ -17,6 +17,7 @@ public sealed class AcceleratorTaxonomy : BaseEntity
 
 public sealed class AcceleratorCareerRole : BaseEntity
 {
+    public AcceleratorConfigurationSource ConfigurationSource { get; set; }
     public Guid TaxonomyId { get; set; }
     public AcceleratorTaxonomy Taxonomy { get; set; } = null!;
     public string Code { get; set; } = string.Empty;

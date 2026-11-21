@@ -34,8 +34,9 @@ public sealed partial class AcceleratorPhase2Service(IAcceleratorStore writes, I
         if (!template.IsActive || template.RoleId != goal.RoleId || template.Role?.TaxonomyId != goal.TaxonomyId || template.TaxonomyId.HasValue && template.TaxonomyId != goal.TaxonomyId) throw Invalid("Assessment template is not available for this goal.");
         var requirements = await RequireJourneyServices().ResolveAsync(actor, journey.Id, ct);
         var eligible = await store.QuestionsAsync(goal.TaxonomyId, requirements.Select(x => x.CompetencyId).ToArray(), ct);
-        var selected = SelectQuestions(eligible, template.MaximumQuestions);
-        if (selected.Length == 0) throw new ConflictException("No active deterministic questions are configured for this role.", "accelerator_questions_unavailable");
+        var selected = SelectQuestions(eligible, template.MaximumQuestions,template.SelectionStrategy);
+        if (selected.Length == 0 || template.SelectionStrategy==AcceleratorJourneyProvisioningPolicy.ObjectiveSelection && !AcceleratorJourneyProvisioningPolicy.SufficientCoverage(requirements.Count,selected.Length))
+            throw new ConflictException("Insufficient active deterministic questions are configured for this role.", "accelerator_questions_unavailable");
         var attempt = new AcceleratorAssessmentAttempt { UserId = actor, GoalId = goal.Id, Goal = goal, TemplateId = template.Id, TemplateVersion = template.Version, TaxonomyId = goal.TaxonomyId, RequestKey = request.RequestKey, RequestHash = Hash(request), Status = AcceleratorAssessmentStatus.InProgress, AttemptNumber = await store.AttemptCountAsync(actor, goal.Id, ct) + 1, StartedAtUtc = Now, ExpiresAtUtc = Now.AddMinutes(template.TimeLimitMinutes), SelectionStrategy = template.SelectionStrategy };
         foreach (var (question, index) in selected.Select((q, i) => (q, i + 1))) attempt.Answers.Add(new AcceleratorAssessmentAnswer { Attempt = attempt, AttemptId = attempt.Id, QuestionId = question.Id, QuestionVersion = question.Version, Sequence = index });
         attempt.JourneyContextId = journey.Id;

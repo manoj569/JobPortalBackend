@@ -84,8 +84,9 @@ public sealed partial class AcceleratorPhase2Service
                 throw Invalid("Assessment template is incompatible with this learning path.");
             var requirements = await journeyContexts.ResolveAsync(actor, context.Id, ct);
             var eligible = await store.QuestionsAsync(context.TaxonomyId, requirements.Select(x => x.CompetencyId).ToArray(), ct);
-            var selected = SelectQuestions(eligible, template.MaximumQuestions);
-            if (selected.Length == 0) throw new ConflictException("No active deterministic questions are configured.", "accelerator_questions_unavailable");
+            var selected = SelectQuestions(eligible, template.MaximumQuestions,template.SelectionStrategy);
+            if (selected.Length == 0 || template.SelectionStrategy==AcceleratorJourneyProvisioningPolicy.ObjectiveSelection && !AcceleratorJourneyProvisioningPolicy.SufficientCoverage(requirements.Count,selected.Length))
+                throw new ConflictException("Insufficient active deterministic questions are configured.", "accelerator_questions_unavailable");
             var attempt = new AcceleratorAssessmentAttempt { UserId = actor, JourneyContextId = context.Id, GoalId = null,
                 TemplateId = template.Id, TemplateVersion = template.Version, TaxonomyId = context.TaxonomyId, RequestKey = requestKey,
                 RequestHash = Hash(new { enrollmentId, purpose, requestKey }), Status = AcceleratorAssessmentStatus.InProgress,
@@ -98,7 +99,8 @@ public sealed partial class AcceleratorPhase2Service
         }, ct);
     }
 
-    private static AcceleratorQuestion[] SelectQuestions(IReadOnlyList<AcceleratorQuestion> eligible, int maximum) =>
-        eligible.GroupBy(x => x.CompetencyId).Select(g => g.OrderBy(x => x.Difficulty).ThenBy(x => x.Id).First())
+    private static AcceleratorQuestion[] SelectQuestions(IReadOnlyList<AcceleratorQuestion> eligible, int maximum,string? strategy=null) =>
+        eligible.Where(x=>strategy!=AcceleratorJourneyProvisioningPolicy.ObjectiveSelection || AcceleratorJourneyProvisioningPolicy.ValidQuestion(x))
+            .GroupBy(x => x.CompetencyId).Select(g => g.OrderBy(x => x.Difficulty).ThenBy(x => x.Id).First())
             .OrderBy(x => x.CompetencyId).Take(maximum).ToArray();
 }

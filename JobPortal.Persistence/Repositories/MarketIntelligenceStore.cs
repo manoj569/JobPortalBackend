@@ -69,7 +69,7 @@ public sealed partial class MarketIntelligenceStore(JobPortalDbContext db,
         foreach (var market in existingSkills)
         {
             var current = competencies.Single(x => x.SkillId == market.SkillId);
-            if (market.CompetencyId != current.Id)
+            if (!market.CompetencyId.HasValue)
             { market.CompetencyId = current.Id; market.Revision = Guid.NewGuid(); }
         }
         var proposedSkills = competencies.Where(x => !knownSkills.Contains(x.SkillId)).ToArray();
@@ -110,7 +110,7 @@ public sealed partial class MarketIntelligenceStore(JobPortalDbContext db,
             var normalizedName = MarketExtractionPolicy.Normalize(role.Name);
             if (rolesByName.TryGetValue(normalizedName, out var existing))
             {
-                if (existing.AcceleratorRoleId != role.Id)
+                if (!existing.AcceleratorRoleId.HasValue)
                 { existing.AcceleratorRoleId = role.Id; existing.Revision = Guid.NewGuid(); }
                 continue;
             }

@@ -4,7 +4,7 @@ namespace JobPortal.Application.Features.CareerAccelerator;
 
 public sealed record LearningPathCardResponse(Guid Id, string Slug, AcceleratorLearningPathType Type, string Title,
     string ShortDescription, int Difficulty, int EstimatedMinutes, int DisplayOrder, Guid? CanonicalCareerRoleId,
-    Guid? CanonicalSkillId);
+    Guid? CanonicalSkillId,AcceleratorConfigurationSource ConfigurationSource=AcceleratorConfigurationSource.Curated);
 public sealed record LearningPathDetailResponse(LearningPathCardResponse Path, IReadOnlyList<LearningModuleResponse> Modules);
 public sealed record LearningModuleResponse(Guid Id, string Title, string Description, int Sequence, int Difficulty,
     int EstimatedMinutes, bool IsRequired, AcceleratorLearningCatalogStatus Status, int ProgressPercent,

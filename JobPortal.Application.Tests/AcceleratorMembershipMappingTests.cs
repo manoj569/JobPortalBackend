@@ -103,25 +103,26 @@ public sealed class AcceleratorMembershipMappingTests
             Roles=[new("full-stack-developer","Full Stack Developer","Reviewed full stack role",[new(f.CodeSkill.Id,3)])]
         },default);
         var role=Assert.Single(taxonomy.Roles); var competency=taxonomy.Skills.Single(x=>x.SkillId==f.CodeSkill.Id);
+        await f.Phase2.UpsertQuestionAsync(f.Admin.Id,new(taxonomy.Id,competency.Id,"full-stack-v1",AcceleratorQuestionType.MultipleChoice,1,1,"Which HTTP method retrieves a resource?","[\"GET\",\"POST\"]","{\"answer\":\"GET\"}","{}","GET retrieves a resource.",true),default);
         var market=new MarketRole { Name="Full Stack Developer",NormalizedName="FULL STACK DEVELOPER",Slug="full-stack-test" };
         f.Db.Add(market); await f.Db.SaveChangesAsync();
         var summary=AcceleratorJourneySummaryTests.Service(f);
-        Assert.Equal("MarketRoleNotMapped",(await summary.GetAsync(f.Candidate.Id,market.Id,null,default)).State);
+        Assert.Equal("ProvisioningRequired",(await summary.GetAsync(f.Candidate.Id,market.Id,null,default)).State);
+        Assert.Equal(AcceleratorNextAction.ProvisionJourney,(await summary.GetAsync(f.Candidate.Id,market.Id,null,default)).NextAction);
         var service=new MarketIntelligenceService(new MarketIntelligenceStore(f.Db),f.Service,f.Audit,new UnitOfWork(f.Db),Options.Create(new MarketIntelligenceOptions()),f.Clock,NullLogger<MarketIntelligenceService>.Instance);
         var request=new MarketMapAcceleratorRoleRequest(role.Id,market.Revision,"Canonical role and taxonomy reviewed");
         await Assert.ThrowsAsync<AppException>(()=>service.MapAcceleratorRoleAsync(f.Candidate.Id,market.Id,request,default));
         await Assert.ThrowsAsync<ConflictException>(()=>service.MapAcceleratorRoleAsync(f.Admin.Id,market.Id,request with { ExpectedRevision=Guid.NewGuid() },default));
         var mapped=await service.MapAcceleratorRoleAsync(f.Admin.Id,market.Id,request,default);
         Assert.Equal(mapped.Revision,(await service.MapAcceleratorRoleAsync(f.Admin.Id,market.Id,request,default)).Revision);
-        Assert.Equal("LearningPathNotConfigured",(await summary.GetAsync(f.Candidate.Id,market.Id,null,default)).State);
+        Assert.Equal("ProvisioningRequired",(await summary.GetAsync(f.Candidate.Id,market.Id,null,default)).State);
         var templateId=await f.Phase2.UpsertTemplateAsync(f.Admin.Id,new(role.Id,"full-stack-v1",30,10,true),default);
-        await f.Phase2.UpsertQuestionAsync(f.Admin.Id,new(taxonomy.Id,competency.Id,"full-stack-v1",AcceleratorQuestionType.MultipleChoice,1,1,"Which HTTP method retrieves a resource?","[\"GET\",\"POST\"]","{\"answer\":\"GET\"}","{}","GET retrieves a resource.",true),default);
         var path=new AcceleratorLearningPath { Type=AcceleratorLearningPathType.Career,CanonicalCareerRoleId=role.Id,Slug="full-stack-test",Title="Full Stack Developer",Status=AcceleratorLearningCatalogStatus.Published,Difficulty=1 };
         var module=new AcceleratorLearningModule { LearningPathId=path.Id,Title="HTTP fundamentals",Sequence=1,Status=AcceleratorLearningCatalogStatus.Published,Difficulty=1,IsRequired=true,EstimatedMinutes=15 };
         f.Db.AddRange(path,module,new AcceleratorLesson { ModuleId=module.Id,Title="Resource retrieval",Content="HTTP GET retrieves a resource without changing it.",Type=AcceleratorLessonType.Article,IsRequired=true,Sequence=1,EstimatedMinutes=15,Status=AcceleratorLearningCatalogStatus.Published },
             new AcceleratorLearningPathAssessment { LearningPathId=path.Id,AssessmentTemplateId=templateId,Purpose=AcceleratorLearningPathAssessmentPurpose.Baseline });
         await f.Db.SaveChangesAsync();
-        Assert.Equal("EnrollmentRequired",(await summary.GetAsync(f.Candidate.Id,market.Id,null,default)).State);
+        Assert.Equal("ProvisioningRequired",(await summary.GetAsync(f.Candidate.Id,market.Id,null,default)).State);
         var learning=new AcceleratorLearningPathService(f.Store,new AcceleratorLearningPathStore(f.Db),f.Service,f.Clock,f.Audit);
         var enrollment=await learning.EnrollAsync(f.Candidate.Id,path.Id,new(Guid.NewGuid(),1,3,300,f.Clock.Utc.AddMonths(3)),default);
         var journey=await summary.GetAsync(f.Candidate.Id,market.Id,null,default);

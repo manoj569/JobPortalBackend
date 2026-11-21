@@ -181,7 +181,7 @@ public sealed class AcceleratorLearningPathService(IAcceleratorStore writes, IAc
 
     private static bool Published(AcceleratorLearningModule module) => !module.IsDeleted && module.Status == AcceleratorLearningCatalogStatus.Published;
     private static bool Published(AcceleratorLesson lesson) => !lesson.IsDeleted && lesson.Status == AcceleratorLearningCatalogStatus.Published;
-    private static LearningPathCardResponse PathCard(AcceleratorLearningPath path) => new(path.Id, path.Slug, path.Type, path.Title, path.ShortDescription, path.Difficulty, path.EstimatedMinutes, path.DisplayOrder, path.CanonicalCareerRoleId, path.CanonicalSkillId);
+    private static LearningPathCardResponse PathCard(AcceleratorLearningPath path) => new(path.Id, path.Slug, path.Type, path.Title, path.ShortDescription, path.Difficulty, path.EstimatedMinutes, path.DisplayOrder, path.CanonicalCareerRoleId, path.CanonicalSkillId,path.ConfigurationSource);
     private static LearningModuleResponse ModuleDto(AcceleratorLearningModule module, AcceleratorPathEnrollment? enrollment)
     {
         var required = module.Lessons.Where(x => Published(x) && x.IsRequired).ToArray();

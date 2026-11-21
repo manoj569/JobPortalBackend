@@ -348,7 +348,7 @@ public sealed class AcceleratorService(IAcceleratorStore store, IOptions<Acceler
             x.Description, x.Category, x.Difficulty, x.Parent?.SkillId, x.Prerequisites.Select(p => p.RequiredCompetency.SkillId).ToArray(),
             JsonSerializer.Deserialize<string[]>(x.AssessmentMethodsJson)!, JsonSerializer.Deserialize<string[]>(x.ResourcesJson)!)).ToArray(),
         t.Roles.OrderBy(x => x.Code).Select(x => new CareerRoleResponse(x.Id, x.Code, x.Name, x.Description,
-            x.Requirements.Select(r => new RoleRequirementDefinition(r.Competency.SkillId, r.ExpectedProficiency)).ToArray())).ToArray());
+            x.Requirements.Select(r => new RoleRequirementDefinition(r.Competency.SkillId, r.ExpectedProficiency)).ToArray(),x.ConfigurationSource)).ToArray());
 
     private static void ValidateTaxonomy(PublishTaxonomyRequest request)
     {

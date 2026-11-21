@@ -12,7 +12,8 @@ public sealed record TaxonomyResponse(Guid Id, string Version, DateTime Publishe
     IReadOnlyList<CompetencyResponse> Skills, IReadOnlyList<CareerRoleResponse> Roles);
 public sealed record CompetencyResponse(Guid Id, Guid SkillId, string Name, string Description, string Category,
     int Difficulty, Guid? ParentSkillId, Guid[] PrerequisiteSkillIds, string[] AssessmentMethods, string[] LearningResources);
-public sealed record CareerRoleResponse(Guid Id, string Code, string Name, string Description, RoleRequirementDefinition[] Requirements);
+public sealed record CareerRoleResponse(Guid Id, string Code, string Name, string Description, RoleRequirementDefinition[] Requirements,
+    AcceleratorConfigurationSource ConfigurationSource=AcceleratorConfigurationSource.Curated);
 public sealed record SelfReportedSkill(Guid SkillId, int Proficiency);
 public sealed record CanonicalAcceleratorSkill(Guid Id, string Name);
 public sealed record CreateCanonicalAcceleratorSkillRequest(string Name);

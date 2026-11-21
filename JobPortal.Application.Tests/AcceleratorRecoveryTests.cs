@@ -236,6 +236,6 @@ public sealed class AcceleratorRecoveryTests
         var store=new AcceleratorStore(db); var phase2=new AcceleratorPhase2Store(db); var journey=new AcceleratorJourneyStore(db); var learning=new AcceleratorLearningPathStore(db);
         var access=new AcceleratorService(store,Options.Create(f.Settings),f.Clock,f.Audit,f.Pricing);
         var work=new AcceleratorJourneyWorkService(new(store,journey,learning,phase2,access),journey,store,learning);
-        return new(new AcceleratorJourneySummaryStore(db),work,access,f.Clock,Options.Create(new AcceleratorJourneySummaryOptions()));
+        return new(new AcceleratorJourneySummaryStore(db),work,access,f.Clock,Options.Create(new AcceleratorJourneySummaryOptions()),new AcceleratorJourneyProvisioningStore(db));
     }
 }
