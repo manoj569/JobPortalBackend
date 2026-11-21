@@ -16,13 +16,13 @@ public sealed class AcceleratorJourneySummaryStore(JobPortalDbContext db) : IAcc
         var role = await db.AcceleratorCareerRoles.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==market.AcceleratorRoleId && !x.IsDeleted,ct);
         if (role is null) return new("MarketRoleNotMapped",market.Name,null,null,null,null);
         var enrollment = await db.AcceleratorPathEnrollments.AsNoTracking().Where(x=>x.UserId==actor && !x.IsDeleted && x.Status!=AcceleratorLearningEnrollmentStatus.Abandoned &&
-            !x.LearningPath.IsDeleted && x.LearningPath.Status==AcceleratorLearningCatalogStatus.Published && x.LearningPath.CanonicalCareerRoleId==role.Id)
+            !x.LearningPath.IsDeleted && x.LearningPath.Status==AcceleratorLearningCatalogStatus.Published && x.LearningPath.Type==AcceleratorLearningPathType.Career && x.LearningPath.CanonicalCareerRoleId==role.Id)
             .OrderByDescending(x=>x.LastActivityAtUtc).ThenBy(x=>x.Id).Select(x=>new {x.Id,x.LearningPathId}).FirstOrDefaultAsync(ct);
         if (enrollment is not null) return new("Ready",market.Name,role.Id,enrollment.LearningPathId,enrollment.Id,null);
         var goal = await db.AcceleratorCareerGoals.AsNoTracking().Where(x=>x.UserId==actor && x.RoleId==role.Id && !x.IsDeleted && x.Status==AcceleratorGoalStatus.Active)
             .OrderByDescending(x=>x.CreatedAtUtc).ThenBy(x=>x.Id).FirstOrDefaultAsync(ct);
         if (goal is not null) return new("Ready",market.Name,role.Id,null,null,goal.Id);
-        var path = await db.AcceleratorLearningPaths.AsNoTracking().Where(x=>!x.IsDeleted && x.Status==AcceleratorLearningCatalogStatus.Published && x.CanonicalCareerRoleId==role.Id)
+        var path = await db.AcceleratorLearningPaths.AsNoTracking().Where(x=>!x.IsDeleted && x.Status==AcceleratorLearningCatalogStatus.Published && x.Type==AcceleratorLearningPathType.Career && x.CanonicalCareerRoleId==role.Id)
             .OrderBy(x=>x.DisplayOrder).ThenBy(x=>x.Id).FirstOrDefaultAsync(ct);
         return new(path is null ? "LearningPathNotConfigured" : "EnrollmentRequired",market.Name,role.Id,path?.Id,null,null);
     }

@@ -223,7 +223,7 @@ public sealed class AcceleratorQuotaService(IAcceleratorStore store, Accelerator
     }
     private async Task<AcceleratorBillingCycle> RequiredCycle(Guid actor, DateTime now, CancellationToken ct)
     {
-        var cycle = await store.ActiveCycleAsync(actor, now, ct);
+        var cycle = await access.ResolveAccessCycleAsync(actor, ct);
         if (cycle is null || cycle.Payment.IsDeleted || cycle.Payment.Status != PaymentStatus.Paid)
             throw new AppException("An active Accelerator subscription is required.", 403, "accelerator_subscription_required");
         return cycle;

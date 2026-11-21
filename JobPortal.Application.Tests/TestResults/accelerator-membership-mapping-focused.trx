@@ -1,0 +1,76 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="1f541310-aeb6-4332-a5a9-691e59e44873" name="Ashish@LAPTOP-SH2NN93A 2026-11-21 22:51:06" runUser="LAPTOP-SH2NN93A\Ashish" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Times creation="2026-11-21T22:51:06.6693374+05:30" queuing="2026-11-21T22:51:06.6693379+05:30" start="2026-11-21T22:51:00.6690656+05:30" finish="2026-11-21T22:51:09.4138736+05:30" />
+  <TestSettings name="default" id="34692870-8c54-48e6-8355-e671764b6827">
+    <Deployment runDeploymentRoot="Ashish_LAPTOP-SH2NN93A_2026-11-21_22_51_06" />
+  </TestSettings>
+  <Results>
+    <UnitTestResult executionId="77f01c9d-d6cf-4b80-a50f-48bfa23af609" testId="b0fe2318-3b47-e8e3-16a0-f2ee5f71ca01" testName="JobPortal.Application.Tests.AcceleratorMembershipMappingPostgresTests.ConcurrentAccessAndQuotaRequestsRecoverOnePaymentBackedCycle" computerName="LAPTOP-SH2NN93A" duration="00:00:04.5300379" startTime="2026-11-21T22:51:08.4260525+05:30" endTime="2026-11-21T22:51:08.4260530+05:30" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="77f01c9d-d6cf-4b80-a50f-48bfa23af609" />
+    <UnitTestResult executionId="72fa0ae8-8893-408d-97a2-67150425c24f" testId="0623a44e-07f6-d70f-ea2e-975d71548dd3" testName="JobPortal.Application.Tests.AcceleratorMembershipMappingTests.MembershipAndAcceleratorApplySameUtcBoundaries(direction: 1, expected: &quot;Pending&quot;, membershipStatus: Pending)" computerName="LAPTOP-SH2NN93A" duration="00:00:00.0482736" startTime="2026-11-21T22:51:06.6833499+05:30" endTime="2026-11-21T22:51:06.6833501+05:30" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="72fa0ae8-8893-408d-97a2-67150425c24f" />
+    <UnitTestResult executionId="dbc69e1b-c44d-4d9d-9603-9b59cb2f8ca0" testId="6e076686-5b02-e20c-7ad1-8063a32a876e" testName="JobPortal.Application.Tests.AcceleratorMembershipMappingTests.SuspendedMembershipCannotUseAnOtherwiseActiveQuotaCycle" computerName="LAPTOP-SH2NN93A" duration="00:00:00.0196658" startTime="2026-11-21T22:51:07.1913870+05:30" endTime="2026-11-21T22:51:07.1913872+05:30" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="dbc69e1b-c44d-4d9d-9603-9b59cb2f8ca0" />
+    <UnitTestResult executionId="ab450af5-b35e-4d4a-b807-46b15db40a42" testId="ff2b4310-a743-738d-5c84-28b36e853e19" testName="JobPortal.Application.Tests.AcceleratorMembershipMappingTests.QuotaRepairsMissingProjectionWithoutDashboardRequest" computerName="LAPTOP-SH2NN93A" duration="00:00:00.3689353" startTime="2026-11-21T22:51:07.0527446+05:30" endTime="2026-11-21T22:51:07.0527448+05:30" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="ab450af5-b35e-4d4a-b807-46b15db40a42" />
+    <UnitTestResult executionId="8bfbe54a-fbc1-4fba-a3a6-aa2055193b04" testId="60122b63-4347-f71c-3b34-8e224f2daa80" testName="JobPortal.Application.Tests.AcceleratorMembershipMappingTests.FullStackCanonicalMappingLearningPathAssessmentAndRoadmapProduceUsableOwnedJourney" computerName="LAPTOP-SH2NN93A" duration="00:00:02.0792845" startTime="2026-11-21T22:51:09.2708928+05:30" endTime="2026-11-21T22:51:09.2708931+05:30" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="8bfbe54a-fbc1-4fba-a3a6-aa2055193b04" />
+    <UnitTestResult executionId="9b82c944-5442-4dbe-a961-10c0c84969ec" testId="bab7f554-73b3-ed25-eb69-6ef8e2029744" testName="JobPortal.Application.Tests.AcceleratorMembershipMappingTests.ActiveLabelAloneDoesNotInventVerifiedPaymentOrQuota" computerName="LAPTOP-SH2NN93A" duration="00:00:00.0347606" startTime="2026-11-21T22:51:07.0876291+05:30" endTime="2026-11-21T22:51:07.0876293+05:30" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="9b82c944-5442-4dbe-a961-10c0c84969ec" />
+    <UnitTestResult executionId="9341f74c-ada9-4a27-893e-d6cab1ccd3f5" testId="9c4d5cbf-0336-0743-2014-b70678352ec3" testName="JobPortal.Application.Tests.AcceleratorMembershipMappingTests.MembershipAndAcceleratorApplySameUtcBoundaries(direction: -1, expected: &quot;Expired&quot;, membershipStatus: Expired)" computerName="LAPTOP-SH2NN93A" duration="00:00:03.4042975" startTime="2026-11-21T22:51:06.6362472+05:30" endTime="2026-11-21T22:51:06.6362644+05:30" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="9341f74c-ada9-4a27-893e-d6cab1ccd3f5" />
+    <UnitTestResult executionId="8c5ed1ce-467f-4f1c-9ade-2d35ee2b5e2f" testId="698f62bd-080f-7143-797f-7dc73aefebb0" testName="JobPortal.Application.Tests.AcceleratorMembershipMappingTests.ActiveMembershipRepairsVerifiedPaymentProjectionAndPendingCheckoutDoesNotRevokeAccess" computerName="LAPTOP-SH2NN93A" duration="00:00:00.0838977" startTime="2026-11-21T22:51:07.1716471+05:30" endTime="2026-11-21T22:51:07.1716474+05:30" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="8c5ed1ce-467f-4f1c-9ade-2d35ee2b5e2f" />
+  </Results>
+  <TestDefinitions>
+    <UnitTest name="JobPortal.Application.Tests.AcceleratorMembershipMappingTests.ActiveMembershipRepairsVerifiedPaymentProjectionAndPendingCheckoutDoesNotRevokeAccess" storage="c:\users\ashish\source\repos\jobportalbackend\jobportal.application.tests\bin\debug\net9.0\jobportal.application.tests.dll" id="698f62bd-080f-7143-797f-7dc73aefebb0">
+      <Execution id="8c5ed1ce-467f-4f1c-9ade-2d35ee2b5e2f" />
+      <TestMethod codeBase="C:\Users\Ashish\source\repos\JobPortalBackend\JobPortal.Application.Tests\bin\Debug\net9.0\JobPortal.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="JobPortal.Application.Tests.AcceleratorMembershipMappingTests" name="ActiveMembershipRepairsVerifiedPaymentProjectionAndPendingCheckoutDoesNotRevokeAccess" />
+    </UnitTest>
+    <UnitTest name="JobPortal.Application.Tests.AcceleratorMembershipMappingTests.QuotaRepairsMissingProjectionWithoutDashboardRequest" storage="c:\users\ashish\source\repos\jobportalbackend\jobportal.application.tests\bin\debug\net9.0\jobportal.application.tests.dll" id="ff2b4310-a743-738d-5c84-28b36e853e19">
+      <Execution id="ab450af5-b35e-4d4a-b807-46b15db40a42" />
+      <TestMethod codeBase="C:\Users\Ashish\source\repos\JobPortalBackend\JobPortal.Application.Tests\bin\Debug\net9.0\JobPortal.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="JobPortal.Application.Tests.AcceleratorMembershipMappingTests" name="QuotaRepairsMissingProjectionWithoutDashboardRequest" />
+    </UnitTest>
+    <UnitTest name="JobPortal.Application.Tests.AcceleratorMembershipMappingTests.MembershipAndAcceleratorApplySameUtcBoundaries(direction: 1, expected: &quot;Pending&quot;, membershipStatus: Pending)" storage="c:\users\ashish\source\repos\jobportalbackend\jobportal.application.tests\bin\debug\net9.0\jobportal.application.tests.dll" id="0623a44e-07f6-d70f-ea2e-975d71548dd3">
+      <Execution id="72fa0ae8-8893-408d-97a2-67150425c24f" />
+      <TestMethod codeBase="C:\Users\Ashish\source\repos\JobPortalBackend\JobPortal.Application.Tests\bin\Debug\net9.0\JobPortal.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="JobPortal.Application.Tests.AcceleratorMembershipMappingTests" name="MembershipAndAcceleratorApplySameUtcBoundaries" />
+    </UnitTest>
+    <UnitTest name="JobPortal.Application.Tests.AcceleratorMembershipMappingTests.SuspendedMembershipCannotUseAnOtherwiseActiveQuotaCycle" storage="c:\users\ashish\source\repos\jobportalbackend\jobportal.application.tests\bin\debug\net9.0\jobportal.application.tests.dll" id="6e076686-5b02-e20c-7ad1-8063a32a876e">
+      <Execution id="dbc69e1b-c44d-4d9d-9603-9b59cb2f8ca0" />
+      <TestMethod codeBase="C:\Users\Ashish\source\repos\JobPortalBackend\JobPortal.Application.Tests\bin\Debug\net9.0\JobPortal.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="JobPortal.Application.Tests.AcceleratorMembershipMappingTests" name="SuspendedMembershipCannotUseAnOtherwiseActiveQuotaCycle" />
+    </UnitTest>
+    <UnitTest name="JobPortal.Application.Tests.AcceleratorMembershipMappingTests.FullStackCanonicalMappingLearningPathAssessmentAndRoadmapProduceUsableOwnedJourney" storage="c:\users\ashish\source\repos\jobportalbackend\jobportal.application.tests\bin\debug\net9.0\jobportal.application.tests.dll" id="60122b63-4347-f71c-3b34-8e224f2daa80">
+      <Execution id="8bfbe54a-fbc1-4fba-a3a6-aa2055193b04" />
+      <TestMethod codeBase="C:\Users\Ashish\source\repos\JobPortalBackend\JobPortal.Application.Tests\bin\Debug\net9.0\JobPortal.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="JobPortal.Application.Tests.AcceleratorMembershipMappingTests" name="FullStackCanonicalMappingLearningPathAssessmentAndRoadmapProduceUsableOwnedJourney" />
+    </UnitTest>
+    <UnitTest name="JobPortal.Application.Tests.AcceleratorMembershipMappingTests.MembershipAndAcceleratorApplySameUtcBoundaries(direction: -1, expected: &quot;Expired&quot;, membershipStatus: Expired)" storage="c:\users\ashish\source\repos\jobportalbackend\jobportal.application.tests\bin\debug\net9.0\jobportal.application.tests.dll" id="9c4d5cbf-0336-0743-2014-b70678352ec3">
+      <Execution id="9341f74c-ada9-4a27-893e-d6cab1ccd3f5" />
+      <TestMethod codeBase="C:\Users\Ashish\source\repos\JobPortalBackend\JobPortal.Application.Tests\bin\Debug\net9.0\JobPortal.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="JobPortal.Application.Tests.AcceleratorMembershipMappingTests" name="MembershipAndAcceleratorApplySameUtcBoundaries" />
+    </UnitTest>
+    <UnitTest name="JobPortal.Application.Tests.AcceleratorMembershipMappingPostgresTests.ConcurrentAccessAndQuotaRequestsRecoverOnePaymentBackedCycle" storage="c:\users\ashish\source\repos\jobportalbackend\jobportal.application.tests\bin\debug\net9.0\jobportal.application.tests.dll" id="b0fe2318-3b47-e8e3-16a0-f2ee5f71ca01">
+      <Execution id="77f01c9d-d6cf-4b80-a50f-48bfa23af609" />
+      <TestMethod codeBase="C:\Users\Ashish\source\repos\JobPortalBackend\JobPortal.Application.Tests\bin\Debug\net9.0\JobPortal.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="JobPortal.Application.Tests.AcceleratorMembershipMappingPostgresTests" name="ConcurrentAccessAndQuotaRequestsRecoverOnePaymentBackedCycle" />
+    </UnitTest>
+    <UnitTest name="JobPortal.Application.Tests.AcceleratorMembershipMappingTests.ActiveLabelAloneDoesNotInventVerifiedPaymentOrQuota" storage="c:\users\ashish\source\repos\jobportalbackend\jobportal.application.tests\bin\debug\net9.0\jobportal.application.tests.dll" id="bab7f554-73b3-ed25-eb69-6ef8e2029744">
+      <Execution id="9b82c944-5442-4dbe-a961-10c0c84969ec" />
+      <TestMethod codeBase="C:\Users\Ashish\source\repos\JobPortalBackend\JobPortal.Application.Tests\bin\Debug\net9.0\JobPortal.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="JobPortal.Application.Tests.AcceleratorMembershipMappingTests" name="ActiveLabelAloneDoesNotInventVerifiedPaymentOrQuota" />
+    </UnitTest>
+  </TestDefinitions>
+  <TestEntries>
+    <TestEntry testId="b0fe2318-3b47-e8e3-16a0-f2ee5f71ca01" executionId="77f01c9d-d6cf-4b80-a50f-48bfa23af609" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="0623a44e-07f6-d70f-ea2e-975d71548dd3" executionId="72fa0ae8-8893-408d-97a2-67150425c24f" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="6e076686-5b02-e20c-7ad1-8063a32a876e" executionId="dbc69e1b-c44d-4d9d-9603-9b59cb2f8ca0" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="ff2b4310-a743-738d-5c84-28b36e853e19" executionId="ab450af5-b35e-4d4a-b807-46b15db40a42" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="60122b63-4347-f71c-3b34-8e224f2daa80" executionId="8bfbe54a-fbc1-4fba-a3a6-aa2055193b04" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="bab7f554-73b3-ed25-eb69-6ef8e2029744" executionId="9b82c944-5442-4dbe-a961-10c0c84969ec" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="9c4d5cbf-0336-0743-2014-b70678352ec3" executionId="9341f74c-ada9-4a27-893e-d6cab1ccd3f5" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="698f62bd-080f-7143-797f-7dc73aefebb0" executionId="8c5ed1ce-467f-4f1c-9ade-2d35ee2b5e2f" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+  </TestEntries>
+  <TestLists>
+    <TestList name="Results Not in a List" id="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestList name="All Loaded Results" id="19431567-8539-422a-85d7-44ee4e166bda" />
+  </TestLists>
+  <ResultSummary outcome="Completed">
+    <Counters total="8" executed="8" passed="8" failed="0" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notRunnable="0" notExecuted="0" disconnected="0" warning="0" completed="0" inProgress="0" pending="0" />
+    <Output>
+      <StdOut>[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v2.8.2+699d445a1a (64-bit .NET 9.0.7)&#xD;
+[xUnit.net 00:00:01.18]   Discovering: JobPortal.Application.Tests&#xD;
+[xUnit.net 00:00:01.74]   Discovered:  JobPortal.Application.Tests&#xD;
+[xUnit.net 00:00:01.75]   Starting:    JobPortal.Application.Tests&#xD;
+[xUnit.net 00:00:07.84]   Finished:    JobPortal.Application.Tests&#xD;
+</StdOut>
+    </Output>
+  </ResultSummary>
+</TestRun>

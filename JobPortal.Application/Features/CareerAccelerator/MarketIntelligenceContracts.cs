@@ -45,6 +45,8 @@ public sealed record MarketApproveSkillRequest(string Category, string Descripti
 public sealed record MarketApproveRoleRequest(string Family, string Description, Guid? AcceleratorRoleId,
     string Reason);
 public sealed record MarketMergeRequest(Guid TargetId, string Reason);
+public sealed record MarketAcceleratorRoleMapping(Guid MarketRoleId,string Name,Guid Revision,Guid? AcceleratorRoleId);
+public sealed record MarketMapAcceleratorRoleRequest(Guid AcceleratorRoleId,Guid ExpectedRevision,string Reason);
 public sealed record MarketReviewRequest(string Reason);
 public sealed record MarketAliasRequest(string Text, string Reason);
 public sealed record MarketBackfillRequest(int BatchSize);
@@ -78,6 +80,8 @@ public interface IMarketIntelligenceStore
     Task<MarketDiscoveryItem?> DiscoveryAsync(bool role, Guid id, CancellationToken ct);
     Task ApproveSkillAsync(Guid id, MarketApproveSkillRequest request, DateTime nowUtc, CancellationToken ct);
     Task ApproveRoleAsync(Guid id, MarketApproveRoleRequest request, DateTime nowUtc, CancellationToken ct);
+    Task<MarketAcceleratorRoleMapping?> AcceleratorRoleMappingAsync(Guid id,CancellationToken ct);
+    Task<MarketAcceleratorRoleMapping> MapAcceleratorRoleAsync(Guid id,MarketMapAcceleratorRoleRequest request,DateTime nowUtc,CancellationToken ct);
     Task MergeSkillAsync(Guid id, MarketMergeRequest request, DateTime nowUtc, CancellationToken ct);
     Task MergeRoleAsync(Guid id, MarketMergeRequest request, DateTime nowUtc, CancellationToken ct);
     Task MergeCanonicalAsync(bool role, Guid sourceId, Guid targetId, DateTime nowUtc,

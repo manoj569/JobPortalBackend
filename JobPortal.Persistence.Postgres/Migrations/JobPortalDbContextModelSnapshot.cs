@@ -2332,7 +2332,7 @@ namespace JobPortal.Persistence.Postgres.Migrations
 
                     b.ToTable("AcceleratorAllowances", null, t =>
                         {
-                            t.HasCheckConstraint("CK_AcceleratorAllowance_Bounds", "\"Allocated\" BETWEEN 1 AND 10000 AND \"Feature\" BETWEEN 1 AND 5");
+                            t.HasCheckConstraint("CK_AcceleratorAllowance_Bounds", "\"Allocated\" BETWEEN 1 AND 10000 AND \"Feature\" BETWEEN 1 AND 6");
                         });
                 });
 
@@ -6576,7 +6576,7 @@ namespace JobPortal.Persistence.Postgres.Migrations
 
                             t.HasCheckConstraint("CK_AcceleratorUsage_Lease", "\"LeaseExpiresAtUtc\" > \"ReservedAtUtc\"");
 
-                            t.HasCheckConstraint("CK_AcceleratorUsage_State", "\"State\" BETWEEN 1 AND 5 AND \"Feature\" BETWEEN 1 AND 5");
+                            t.HasCheckConstraint("CK_AcceleratorUsage_State", "\"State\" BETWEEN 1 AND 5 AND \"Feature\" BETWEEN 1 AND 6");
 
                             t.HasCheckConstraint("CK_AcceleratorUsage_Tokens", "\"InputTokens\" >= 0 AND \"OutputTokens\" >= 0 AND \"ReservedInputTokens\" >= 0 AND \"ReservedOutputTokens\" >= 0");
                         });

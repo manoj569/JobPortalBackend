@@ -74,6 +74,9 @@ public interface IAcceleratorStore
     Task<AcceleratorCareerGoal?> GoalAsync(Guid userId, Guid id, CancellationToken ct);
     Task<IReadOnlyList<AcceleratorCareerGoal>> GoalsAsync(Guid userId, int skip, int take, CancellationToken ct);
     Task<Payment?> PaymentAsync(Guid id, CancellationToken ct);
+    Task<Membership?> AcceleratorMembershipAsync(Guid userId, CancellationToken ct);
+    Task<IReadOnlyList<Payment>> AcceleratorMembershipPaymentsAsync(Guid userId, Guid membershipId, CancellationToken ct);
+    Task SaveAsync(CancellationToken ct);
     Task<AcceleratorBillingCycle?> CycleForPaymentAsync(Guid paymentId, CancellationToken ct);
     Task<AcceleratorBillingCycle?> ActiveCycleAsync(Guid userId, DateTime now, CancellationToken ct);
     Task<AcceleratorBillingCycle?> LatestCycleAsync(Guid userId, CancellationToken ct);

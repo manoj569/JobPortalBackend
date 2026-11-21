@@ -139,7 +139,7 @@ public sealed class AcceleratorAllowanceConfiguration : IEntityTypeConfiguration
 {
     public void Configure(EntityTypeBuilder<AcceleratorAllowance> builder)
     {
-        builder.ToTable("AcceleratorAllowances", t => t.HasCheckConstraint("CK_AcceleratorAllowance_Bounds", "\"Allocated\" BETWEEN 1 AND 10000 AND \"Feature\" BETWEEN 1 AND 5"));
+        builder.ToTable("AcceleratorAllowances", t => t.HasCheckConstraint("CK_AcceleratorAllowance_Bounds", "\"Allocated\" BETWEEN 1 AND 10000 AND \"Feature\" BETWEEN 1 AND 6"));
         builder.ConfigureBaseEntity();
         builder.HasIndex(x => new { x.CycleId, x.Feature }).IsUnique();
         builder.HasOne(x => x.Cycle).WithMany(x => x.Allowances).HasForeignKey(x => x.CycleId).OnDelete(DeleteBehavior.Restrict);
@@ -151,7 +151,7 @@ public sealed class AcceleratorUsageReservationConfiguration : IEntityTypeConfig
     {
         builder.ToTable("AcceleratorUsageReservations", t =>
         {
-            t.HasCheckConstraint("CK_AcceleratorUsage_State", "\"State\" BETWEEN 1 AND 5 AND \"Feature\" BETWEEN 1 AND 5");
+            t.HasCheckConstraint("CK_AcceleratorUsage_State", "\"State\" BETWEEN 1 AND 5 AND \"Feature\" BETWEEN 1 AND 6");
             t.HasCheckConstraint("CK_AcceleratorUsage_Cost", "\"ReservedCostInr\" >= 0 AND (\"ActualCostInr\" IS NULL OR \"ActualCostInr\" >= 0)");
             t.HasCheckConstraint("CK_AcceleratorUsage_Tokens", "\"InputTokens\" >= 0 AND \"OutputTokens\" >= 0 AND \"ReservedInputTokens\" >= 0 AND \"ReservedOutputTokens\" >= 0");
             t.HasCheckConstraint("CK_AcceleratorUsage_Lease", "\"LeaseExpiresAtUtc\" > \"ReservedAtUtc\"");

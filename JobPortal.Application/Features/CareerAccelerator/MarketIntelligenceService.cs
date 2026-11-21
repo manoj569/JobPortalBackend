@@ -224,6 +224,19 @@ public sealed partial class MarketIntelligenceService(IMarketIntelligenceStore s
         await store.MergeCanonicalAsync(role, sourceId, request.TargetId, Now, ct);
     }
 
+    public async Task<MarketAcceleratorRoleMapping> AcceleratorRoleMappingAsync(Guid adminId,Guid id,CancellationToken ct)
+    {
+        await access.Administrator(adminId,ct);
+        return await store.AcceleratorRoleMappingAsync(id,ct) ?? throw new NotFoundException("Market role was not found.");
+    }
+    public async Task<MarketAcceleratorRoleMapping> MapAcceleratorRoleAsync(Guid adminId,Guid id,MarketMapAcceleratorRoleRequest request,CancellationToken ct)
+    {
+        await access.Administrator(adminId,ct); ValidateReview(request.Reason);
+        if(request.AcceleratorRoleId==Guid.Empty || request.ExpectedRevision==Guid.Empty) throw new BadRequestException("Canonical role and revision are required.");
+        await AuditAsync(adminId,AuditAction.Update,"MarketRole",id,request.Reason,ct);
+        return await store.MapAcceleratorRoleAsync(id,request,Now,ct);
+    }
+
     public async Task AddAliasAsync(Guid adminId, bool role, Guid id, MarketAliasRequest request,
         CancellationToken ct)
     {

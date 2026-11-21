@@ -228,11 +228,13 @@ public sealed class AcceleratorService(IAcceleratorStore store, IOptions<Acceler
 
     // Trusted internal seam only. Phase 6 must invoke it after the existing payment verifier commits.
     public Task<Guid> ActivateVerifiedPaymentAsync(Guid userId, Guid paymentId, CancellationToken ct) =>
-        store.WriteAsync(async () =>
+        store.WriteAsync(() => ActivatePaymentCoreAsync(userId,paymentId,ct),ct);
+
+    private async Task<Guid> ActivatePaymentCoreAsync(Guid userId,Guid paymentId,CancellationToken ct)
         {
             await Candidate(userId, ct);
             var payment = await store.PaymentAsync(paymentId, ct) ?? throw new NotFoundException("Verified payment not found.");
-            if (payment.UserId != userId || payment.Status != PaymentStatus.Paid || payment.Provider == PaymentProvider.Unknown ||
+            if (payment.IsDeleted || payment.UserId != userId || payment.Status != PaymentStatus.Paid || payment.Provider == PaymentProvider.Unknown ||
                 payment.PlanCode != AcceleratorOptions.PlanCode || payment.PaidAtUtc is null ||
                 payment.PaidAtUtc.Value.Kind != DateTimeKind.Utc || payment.PaidAtUtc > Now ||
                 string.IsNullOrWhiteSpace(payment.ProviderOrderId) || string.IsNullOrWhiteSpace(payment.ProviderPaymentId) ||
@@ -257,12 +259,45 @@ public sealed class AcceleratorService(IAcceleratorStore store, IOptions<Acceler
             store.Add(cycle);
             await Audit(userId, AuditAction.Confirm, "AcceleratorBillingCycle", cycle.Id, ct);
             return cycle.Id;
-        }, ct);
+        }
 
-    public async Task<AcceleratorEntitlementResponse> EntitlementAsync(Guid actor, CancellationToken ct)
+    // Membership owns access. Billing cycles are the payment-backed quota projection, not a second subscription.
+    // Call only within the existing Accelerator transaction/lock; no nested WriteAsync scopes.
+    internal async Task<AcceleratorBillingCycle?> ResolveAccessCycleAsync(Guid actor,CancellationToken ct)
+    {
+        var membership=await store.AcceleratorMembershipAsync(actor,ct);
+        if (membership is not null)
+        {
+            if (membership.IsDeleted || membership.Status!=MembershipStatus.Active || membership.StartsAtUtc>Now || membership.EndsAtUtc<=Now) return null;
+            var payments=await store.AcceleratorMembershipPaymentsAsync(actor,membership.Id,ct);
+            foreach(var payment in payments)
+                if (await store.CycleForPaymentAsync(payment.Id,ct) is null)
+                {
+                    await ActivatePaymentCoreAsync(actor,payment.Id,ct);
+                    // Flush inside the caller's transaction: subsequent renewals and quota queries
+                    // must see the preceding projection. A failure rolls back the complete transaction.
+                    await store.SaveAsync(ct);
+                }
+        }
+        // Retain verified pre-Membership cycles for historical compatibility.
+        return await store.ActiveCycleAsync(actor,Now,ct);
+    }
+
+    public Task<AcceleratorEntitlementResponse> EntitlementAsync(Guid actor, CancellationToken ct) => store.WriteAsync(async () =>
     {
         await Candidate(actor, ct);
-        var cycle = await store.ActiveCycleAsync(actor, Now, ct) ?? await store.LatestCycleAsync(actor, ct);
+        var membership=await store.AcceleratorMembershipAsync(actor,ct);
+        var activeCycle=await ResolveAccessCycleAsync(actor,ct);
+        var cycle = activeCycle ?? await store.LatestCycleAsync(actor, ct);
+        if (membership?.IsDeleted==true) return new AcceleratorEntitlementResponse("Revoked",membership.StartsAtUtc,membership.EndsAtUtc,[]);
+        // Creating an unpaid checkout also creates a Pending Membership row. It is not
+        // a subscription; preserve the existing pre-verification API contract.
+        if (membership?.Status==MembershipStatus.Pending && cycle is null)
+            return new AcceleratorEntitlementResponse("NotSubscribed",null,null,[]);
+        if (membership is not null && (membership.Status!=MembershipStatus.Active || membership.StartsAtUtc>Now || membership.EndsAtUtc<=Now))
+            return new AcceleratorEntitlementResponse(membership.Status==MembershipStatus.Active ? (membership.StartsAtUtc>Now ? "Pending" : "Expired") : membership.Status.ToString(),membership.StartsAtUtc,membership.EndsAtUtc,[]);
+        if (membership is not null && activeCycle is null)
+            return new AcceleratorEntitlementResponse("ProvisioningRequired",membership.StartsAtUtc,membership.EndsAtUtc,[]);
         if (cycle is null) return new("NotSubscribed", null, null, []);
         var rows = await store.CycleUsageAsync(cycle.Id, ct);
         var status = cycle.Payment.Status != PaymentStatus.Paid || cycle.Payment.IsDeleted ? "Revoked" :
@@ -273,7 +308,7 @@ public sealed class AcceleratorService(IAcceleratorStore store, IOptions<Acceler
             var held = rows.Count(x => x.Feature == a.Feature && x.State is AcceleratorUsageState.Reserved or AcceleratorUsageState.Dispatched);
             return new AcceleratorUsageSummary(a.Feature, a.Allocated, used, held, Math.Max(0, a.Allocated - used - held));
         }).ToArray());
-    }
+    },ct);
 
     internal async Task<User> Candidate(Guid actor, CancellationToken ct)
     {

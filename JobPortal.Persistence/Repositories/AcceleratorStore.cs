@@ -69,6 +69,12 @@ public sealed class AcceleratorStore(JobPortalDbContext context) : IAcceleratorS
         await Goals().Where(x => x.UserId == userId).OrderByDescending(x => x.CreatedAtUtc).ThenBy(x => x.Id).Skip(skip).Take(take).ToArrayAsync(ct);
     private IQueryable<AcceleratorCareerGoal> Goals() => context.Set<AcceleratorCareerGoal>().Include(x => x.Role).ThenInclude(x => x.Taxonomy);
     public Task<Payment?> PaymentAsync(Guid id, CancellationToken ct) => context.Payments.SingleOrDefaultAsync(x => x.Id == id, ct);
+    public async Task SaveAsync(CancellationToken ct) => await context.SaveChangesAsync(ct);
+    public Task<Membership?> AcceleratorMembershipAsync(Guid userId,CancellationToken ct) => context.Memberships.AsNoTracking()
+        .SingleOrDefaultAsync(x=>x.UserId==userId && x.PlanCode==AcceleratorOptions.PlanCode,ct);
+    public async Task<IReadOnlyList<Payment>> AcceleratorMembershipPaymentsAsync(Guid userId,Guid membershipId,CancellationToken ct) =>
+        await context.Payments.Where(x=>x.UserId==userId && x.MembershipId==membershipId && x.PlanCode==AcceleratorOptions.PlanCode &&
+            x.Status==JobPortal.Domain.Enums.PaymentStatus.Paid && !x.IsDeleted).OrderBy(x=>x.PaidAtUtc).ThenBy(x=>x.Id).ToArrayAsync(ct);
     private IQueryable<AcceleratorBillingCycle> Cycles() => context.Set<AcceleratorBillingCycle>().Include(x => x.Payment).Include(x => x.Allowances);
     public Task<AcceleratorBillingCycle?> CycleForPaymentAsync(Guid paymentId, CancellationToken ct) =>
         Cycles().SingleOrDefaultAsync(x => x.PaymentId == paymentId, ct);

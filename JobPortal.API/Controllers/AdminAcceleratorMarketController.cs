@@ -14,6 +14,13 @@ namespace JobPortal.API.Controllers;
 [EnableRateLimiting("CareerAccelerator")]
 public sealed class AdminAcceleratorMarketController(MarketIntelligenceService market) : ControllerBase
 {
+    [HttpGet("roles/{id:guid}/accelerator-mapping")]
+    public async Task<ActionResult<ApiResponse<MarketAcceleratorRoleMapping>>> AcceleratorMapping(Guid id,CancellationToken ct) =>
+        Ok(new ApiResponse<MarketAcceleratorRoleMapping>(await market.AcceleratorRoleMappingAsync(User.GetRequiredUserId(),id,ct)));
+    [HttpPut("roles/{id:guid}/accelerator-mapping")]
+    public async Task<ActionResult<ApiResponse<MarketAcceleratorRoleMapping>>> MapAcceleratorRole(Guid id,MarketMapAcceleratorRoleRequest request,CancellationToken ct) =>
+        Ok(new ApiResponse<MarketAcceleratorRoleMapping>(await market.MapAcceleratorRoleAsync(User.GetRequiredUserId(),id,request,ct)));
+
     [HttpGet("status")]
     public async Task<ActionResult<ApiResponse<MarketProcessingStatus>>> Status(CancellationToken ct) =>
         Ok(new ApiResponse<MarketProcessingStatus>(await market.StatusAsync(User.GetRequiredUserId(), ct)));

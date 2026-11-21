@@ -812,6 +812,8 @@ public sealed class AcceleratorMarketIntelligenceTests
         private int cursor;
         public void ResetCursor() { cursor = 0; Completed = false; }
         public Task BootstrapTaxonomyAsync(DateTime nowUtc, CancellationToken ct) => Task.CompletedTask;
+        public Task<MarketAcceleratorRoleMapping?> AcceleratorRoleMappingAsync(Guid id,CancellationToken ct) => throw new NotSupportedException();
+        public Task<MarketAcceleratorRoleMapping> MapAcceleratorRoleAsync(Guid id,MarketMapAcceleratorRoleRequest request,DateTime nowUtc,CancellationToken ct) => throw new NotSupportedException();
         public Task<MarketProcessingStatus> StatusAsync(CancellationToken ct) =>
             Task.FromResult(new MarketProcessingStatus(null, null, Applied.Count, Failures.Count));
         public Task<IReadOnlyList<MarketJobSnapshot>> NextJobsAsync(int take, CancellationToken ct)

@@ -8,6 +8,28 @@ namespace JobPortal.Persistence.Repositories;
 
 public sealed partial class MarketIntelligenceStore
 {
+    public Task<MarketAcceleratorRoleMapping?> AcceleratorRoleMappingAsync(Guid id,CancellationToken ct) => db.MarketRoles.AsNoTracking()
+        .Where(x=>x.Id==id && !x.IsDeleted && x.Status==MarketConceptStatus.Active)
+        .Select(x=>new MarketAcceleratorRoleMapping(x.Id,x.Name,x.Revision,x.AcceleratorRoleId)).SingleOrDefaultAsync(ct);
+
+    public async Task<MarketAcceleratorRoleMapping> MapAcceleratorRoleAsync(Guid id,MarketMapAcceleratorRoleRequest request,DateTime nowUtc,CancellationToken ct)
+    {
+        var market=await db.MarketRoles.SingleOrDefaultAsync(x=>x.Id==id && !x.IsDeleted && x.Status==MarketConceptStatus.Active,ct)
+            ?? throw new NotFoundException("Market role was not found.");
+        var role=await db.AcceleratorCareerRoles.SingleOrDefaultAsync(x=>x.Id==request.AcceleratorRoleId && !x.IsDeleted,ct)
+            ?? throw new NotFoundException("Canonical Accelerator role was not found.");
+        if(!await db.AcceleratorTaxonomies.AnyAsync(x=>x.Id==role.TaxonomyId && !x.IsDeleted,ct))
+            throw new ConflictException("Canonical role taxonomy is unavailable.");
+        // Exact replay is harmless; a different mapping requires the latest stored revision.
+        if(market.AcceleratorRoleId==role.Id) return new(market.Id,market.Name,market.Revision,market.AcceleratorRoleId);
+        if(market.Revision!=request.ExpectedRevision) throw new ConflictException("Market role changed; reload its mapping.");
+        market.AcceleratorRoleId=role.Id; market.Revision=Guid.NewGuid(); market.UpdatedAtUtc=nowUtc;
+        await BumpTaxonomyRevisionAsync(ct);
+        try { await db.SaveChangesAsync(ct); }
+        catch(DbUpdateConcurrencyException) { throw new ConflictException("Market role changed; reload its mapping."); }
+        return new(market.Id,market.Name,market.Revision,market.AcceleratorRoleId);
+    }
+
     public async Task<IReadOnlyList<MarketDiscoveryItem>> DiscoveriesAsync(bool roles, int skip,
         int take, CancellationToken ct)
     {

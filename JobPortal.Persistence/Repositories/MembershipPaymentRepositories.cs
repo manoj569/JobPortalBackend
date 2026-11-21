@@ -73,19 +73,22 @@ public sealed class MembershipRepository(
 
     public async Task<IReadOnlyCollection<MembershipResponse>> GetMembershipsForUserAsync(
         Guid userId,
-        CancellationToken cancellationToken = default) =>
-        await context.Memberships
+        CancellationToken cancellationToken = default)
+    {
+        var now=timeProvider.GetUtcNow().UtcDateTime;
+        return await context.Memberships
             .AsNoTracking()
-            .Where(x => x.UserId == userId)
+            .Where(x => x.UserId == userId && !x.IsDeleted)
             .OrderByDescending(x => x.CreatedAtUtc)
             .Select(x => new MembershipResponse(
                 x.Id,
                 x.PlanName,
-                x.Status,
+                x.Status==MembershipStatus.Active ? (x.StartsAtUtc>now ? MembershipStatus.Pending : x.EndsAtUtc<=now ? MembershipStatus.Expired : MembershipStatus.Active) : x.Status,
                 x.StartsAtUtc,
                 x.EndsAtUtc,
                 x.AutoRenew, x.PlanCode))
             .ToArrayAsync(cancellationToken);
+    }
 
     public async Task<(IReadOnlyCollection<MembershipHistoryResponse> Items, int TotalCount)> GetHistoryAsync(
         Guid userId,
