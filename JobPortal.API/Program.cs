@@ -114,6 +114,23 @@ if (externalSessions.GetValue("Enabled", false))
             certificatePath, certificatePassword, X509KeyStorageFlags.EphemeralKeySet));
 }
 builder.Services.AddScoped<IAuditContextAccessor, HttpAuditContextAccessor>();
+if (builder.Configuration.GetValue("HiringOutreach:Enabled", false))
+{
+    // Reuse the existing application key ring when ExternalSessions already configures it.
+    var existingRing = externalSessions.GetValue("Enabled", false) && !string.IsNullOrWhiteSpace(externalSessions["DataProtectionKeysPath"]);
+    var keySettings = existingRing ? externalSessions : builder.Configuration.GetSection("HiringOutreach:DataProtection");
+    var keyPath = keySettings["DataProtectionKeysPath"];
+    var certPath = keySettings["DataProtectionCertificatePath"];
+    var certPassword = keySettings["DataProtectionCertificatePassword"];
+    if (builder.Environment.IsProduction() && (string.IsNullOrWhiteSpace(keyPath) || string.IsNullOrWhiteSpace(certPath) || string.IsNullOrWhiteSpace(certPassword)))
+        throw new InvalidOperationException("Hiring outreach requires a durable, certificate-protected Data Protection key ring in production.");
+    if (!existingRing && !string.IsNullOrWhiteSpace(keyPath))
+    {
+        dataProtection.PersistKeysToFileSystem(Directory.CreateDirectory(keyPath));
+        if (!string.IsNullOrWhiteSpace(certPath) && !string.IsNullOrWhiteSpace(certPassword))
+            dataProtection.ProtectKeysWithCertificate(X509CertificateLoader.LoadPkcs12FromFile(certPath, certPassword, X509KeyStorageFlags.EphemeralKeySet));
+    }
+}
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
@@ -330,6 +347,9 @@ builder.Services.AddRateLimiter(options =>
     options.AddPolicy("AIResumeGeneration", context => RateLimitPartition.GetFixedWindowLimiter(
         context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "unknown",
         _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromHours(1), QueueLimit = 0, AutoReplenishment = true }));
+    options.AddPolicy("HiringOutreach", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 20, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true }));
     options.AddPolicy("CareerAccelerator", context => RateLimitPartition.GetFixedWindowLimiter(
         context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
         _ => new FixedWindowRateLimiterOptions { PermitLimit = 60, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true }));

@@ -201,6 +201,7 @@ public sealed class JobPortalDbContext(DbContextOptions<JobPortalDbContext> opti
     public DbSet<EmployerTalentPool> EmployerTalentPools => Set<EmployerTalentPool>();
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
+        HiringOutreachPersistencePolicy.Enforce(this);
         AcceleratorPersistencePolicy.Enforce(this);
         EnsureFinancialHistory();
         EnsureTrustHistory();
@@ -212,6 +213,7 @@ public sealed class JobPortalDbContext(DbContextOptions<JobPortalDbContext> opti
 
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
+        HiringOutreachPersistencePolicy.Enforce(this);
         AcceleratorPersistencePolicy.Enforce(this);
         EnsureFinancialHistory();
         EnsureTrustHistory();

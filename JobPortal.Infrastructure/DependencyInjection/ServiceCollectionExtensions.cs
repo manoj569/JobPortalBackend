@@ -69,6 +69,18 @@ public static class ServiceCollectionExtensions
             client.Timeout = TimeSpan.FromSeconds(10);
         });
         services.AddScoped<IEmailService, BrevoEmailService>();
+        services.AddOptions<JobPortal.Application.Features.HiringOutreach.HiringOutreachOptions>()
+            .Bind(configuration.GetSection(JobPortal.Application.Features.HiringOutreach.HiringOutreachOptions.SectionName))
+            .Validate(value=>value.IsValid(),"Invalid hiring outreach limits.").ValidateOnStart();
+        services.Configure<JobPortal.Infrastructure.HiringOutreach.HunterHiringOptions>(configuration.GetSection("HiringOutreach:Hunter"));
+        services.Configure<JobPortal.Infrastructure.HiringOutreach.GoogleHiringOptions>(configuration.GetSection("HiringOutreach:Google"));
+        services.AddHttpClient(JobPortal.Infrastructure.HiringOutreach.HunterEmployerContactProvider.ClientName,c=>c.Timeout=TimeSpan.FromSeconds(20))
+            .ConfigurePrimaryHttpMessageHandler(()=>new SocketsHttpHandler { AllowAutoRedirect=false,UseCookies=false }).RemoveAllLoggers();
+        services.AddHttpClient(JobPortal.Infrastructure.HiringOutreach.GoogleCandidateMailboxProvider.ClientName,c=>c.Timeout=TimeSpan.FromSeconds(30))
+            .ConfigurePrimaryHttpMessageHandler(()=>new SocketsHttpHandler { AllowAutoRedirect=false,UseCookies=false }).RemoveAllLoggers();
+        services.AddScoped<JobPortal.Application.Features.HiringOutreach.IHiringContactProvider,JobPortal.Infrastructure.HiringOutreach.HunterEmployerContactProvider>();
+        services.AddScoped<JobPortal.Application.Features.HiringOutreach.IHiringMailboxProvider,JobPortal.Infrastructure.HiringOutreach.GoogleCandidateMailboxProvider>();
+        services.AddSingleton<JobPortal.Application.Features.HiringOutreach.IHiringCredentialProtector,JobPortal.Infrastructure.HiringOutreach.HiringCredentialProtector>();
         services.AddOptions<JobPortal.Application.Features.Support.SupportSettings>()
             .Bind(configuration.GetSection(JobPortal.Application.Features.Support.SupportSettings.SectionName))
             .Validate(options => string.IsNullOrWhiteSpace(options.SupportEmail) ||

@@ -116,7 +116,6 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICandidateRepository, CandidateRepository>();
         services.AddScoped<ICandidateCompanyRepository, CandidateCompanyRepository>();
         services.AddScoped<IEmployerCompanyRepository, EmployerCompanyRepository>();
-        services.AddScoped<IJobRepository, JobRepository>();
         services.AddScoped<IEmployerJobRepository, EmployerJobRepository>();
         services.AddScoped<
     IEmployerApplicationRepository,
@@ -143,6 +142,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<PostgresResumeStorage>(provider => new PostgresResumeStorage(
             provider.GetRequiredService<IDbContextFactory<JobPortalDbContext>>(), configuration["ResumeStorage:RootPath"]));
         services.AddScoped<IResumeStorage>(provider => provider.GetRequiredService<PostgresResumeStorage>());
+        services.AddScoped<JobPortal.Application.Features.HiringOutreach.IHiringOutreachService, HiringOutreachService>();
         services.AddScoped<InterviewInsightRepository>();
         services.AddScoped<IInterviewInsightRepository>(provider => provider.GetRequiredService<InterviewInsightRepository>());
         services.AddScoped<IInterviewScheduleNotificationProcessor>(provider => provider.GetRequiredService<InterviewInsightRepository>());
