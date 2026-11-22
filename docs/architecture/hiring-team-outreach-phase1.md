@@ -103,13 +103,14 @@ configuration must be checked separately. Configuration uses standard .NET `__` 
 | `HiringOutreach__Google__ClientSecret` | Server-only OAuth secret | Both |
 | `HiringOutreach__Google__CallbackUri` | Exact API callback URL | Both |
 | `HiringOutreach__Google__FrontendReturnUri` | Fixed allow-listed frontend return URI | Both |
-| `HiringOutreach__DataProtection__DataProtectionKeysPath` | Durable shared key-ring directory with restricted filesystem permissions | Production mandatory |
-| `HiringOutreach__DataProtection__DataProtectionCertificatePath` | Certificate file that encrypts the key ring | Production mandatory |
-| `HiringOutreach__DataProtection__DataProtectionCertificatePassword` | Server-held certificate password from secret storage | Production mandatory |
+| `HiringOutreach__DataProtection__CertificateBase64` | Password-protected RSA PFX as Base64, loaded in memory | Production mandatory |
+| `HiringOutreach__DataProtection__CertificatePassword` | PFX password from secret storage | Production mandatory |
 
-If AIApply ExternalSessions already configures a durable certificate-protected key ring,
-that existing ring is reused instead. Do not rotate or replace it during this deployment.
-Production startup fails closed when outreach is enabled without durable protected keys.
+Keys persist through the existing PostgreSQL `DefaultConnection`, encrypted with the PFX.
+No persistent disk or certificate file is required. Production startup fails closed when
+outreach is enabled without this configuration. Existing explicit AIApply filesystem key
+rings require a planned migration before enabling the shared database repository; they
+are never silently replaced. See [Data Protection operations](hiring-data-protection.md).
 
 Register `https://<api-host>/api/candidate/outreach/mailbox/google/callback` as an exact
 authorized redirect URI in a Google Cloud **Web application** OAuth client. Enable Gmail

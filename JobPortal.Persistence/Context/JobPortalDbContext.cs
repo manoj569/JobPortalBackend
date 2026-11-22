@@ -4,11 +4,13 @@ using JobPortal.Domain.Entities.CareerAccelerator;
 using JobPortal.Application.Features.CandidateCompanies;
 using JobPortal.Application.Abstractions.Jobs;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 
 namespace JobPortal.Persistence.Context;
 
-public sealed class JobPortalDbContext(DbContextOptions<JobPortalDbContext> options) : DbContext(options)
+public sealed class JobPortalDbContext(DbContextOptions<JobPortalDbContext> options) : DbContext(options), IDataProtectionKeyContext
 {
+    public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
     public DbSet<TalentShareLink> TalentShareLinks => Set<TalentShareLink>();
     public DbSet<TalentSubmission> TalentSubmissions => Set<TalentSubmission>();
     public DbSet<TalentSubmissionEvent> TalentSubmissionEvents => Set<TalentSubmissionEvent>();

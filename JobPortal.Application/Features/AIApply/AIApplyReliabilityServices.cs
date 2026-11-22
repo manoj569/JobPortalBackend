@@ -64,7 +64,7 @@ public sealed class ApplicationExecutionCheckpoint(IAIApplyRepository repository
     public async Task MarkSubmissionConfirmedAsync(Guid applicationId, CancellationToken ct) { if (!await repository.MarkSubmissionConfirmedAsync(applicationId, clock.GetUtcNow().UtcDateTime, ct)) throw new InvalidOperationException("Application execution lease is no longer active."); }
 }
 
-public sealed class AIApplyOptionsValidator(bool isDevelopment) : IValidateOptions<AIApplyOptions>
+public sealed class AIApplyOptionsValidator(bool isDevelopment, bool usesProtectedDatabaseKeyRing = false) : IValidateOptions<AIApplyOptions>
 {
     public ValidateOptionsResult Validate(string? name, AIApplyOptions value)
     {
@@ -75,10 +75,10 @@ public sealed class AIApplyOptionsValidator(bool isDevelopment) : IValidateOptio
             failures.Add("AIApply:ExternalSessions:MaximumLifetimeDays must be between 1 and 30.");
         if (value.ExternalSessions.MaximumStorageStateBytes is < 4096 or > 1_048_576)
             failures.Add("AIApply:ExternalSessions:MaximumStorageStateBytes must be between 4096 and 1048576.");
-        if (value.ExternalSessions.Enabled && (!isDevelopment || value.ExternalSessions.RequirePersistentDataProtectionKeys) &&
+        if (!usesProtectedDatabaseKeyRing && value.ExternalSessions.Enabled && (!isDevelopment || value.ExternalSessions.RequirePersistentDataProtectionKeys) &&
             string.IsNullOrWhiteSpace(value.ExternalSessions.DataProtectionKeysPath))
             failures.Add("AIApply:ExternalSessions:DataProtectionKeysPath is required when persistent external sessions are enabled.");
-        else if (value.ExternalSessions.Enabled && !string.IsNullOrWhiteSpace(value.ExternalSessions.DataProtectionKeysPath) &&
+        else if (!usesProtectedDatabaseKeyRing && value.ExternalSessions.Enabled && !string.IsNullOrWhiteSpace(value.ExternalSessions.DataProtectionKeysPath) &&
             !Path.IsPathFullyQualified(value.ExternalSessions.DataProtectionKeysPath))
             failures.Add("AIApply:ExternalSessions:DataProtectionKeysPath must be an absolute path.");
         if (value.ExternalSessions.Enabled && !isDevelopment && !value.ExternalSessions.RequirePersistentDataProtectionKeys)

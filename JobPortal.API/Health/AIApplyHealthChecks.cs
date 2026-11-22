@@ -3,6 +3,9 @@ using JobPortal.Application.Features.AIApply;
 using JobPortal.Infrastructure.AIApply;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
+using Microsoft.AspNetCore.DataProtection;
+using JobPortal.Persistence;
+using System.Security.Cryptography;
 
 namespace JobPortal.API.Health;
 
@@ -36,13 +39,28 @@ public sealed class AIApplyBrowserHealthCheck(IOptions<AIApplyOptions> options, 
     }
 }
 
-public sealed class AIApplyExternalSessionHealthCheck(IOptions<AIApplyOptions> options) : IHealthCheck
+public sealed class AIApplyExternalSessionHealthCheck(IOptions<AIApplyOptions> options,
+    CareerHarborDataProtectionState? sharedKeyRing = null, IDataProtectionProvider? protection = null) : IHealthCheck
 {
     public Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
     {
         var settings = options.Value.ExternalSessions;
         if (!settings.Enabled)
             return Task.FromResult(HealthCheckResult.Healthy("Persistent external sessions are intentionally disabled."));
+        if (sharedKeyRing?.UsesProtectedDatabaseKeyRing == true)
+        {
+            if (protection is null) return Task.FromResult(HealthCheckResult.Unhealthy("Shared protected key storage is unavailable."));
+            try
+            {
+                var protector = protection.CreateProtector("CareerHarbor", "KeyRingReadiness", "v1");
+                var probe = protector.Protect("readiness");
+                return Task.FromResult(protector.Unprotect(probe) == "readiness"
+                    ? HealthCheckResult.Healthy("Shared protected database key storage is available.")
+                    : HealthCheckResult.Unhealthy("Shared protected key storage is unavailable."));
+            }
+            catch (Exception exception) when (exception is CryptographicException or InvalidOperationException)
+            { return Task.FromResult(HealthCheckResult.Unhealthy("Shared protected key storage is unavailable.")); }
+        }
         if (string.IsNullOrWhiteSpace(settings.DataProtectionKeysPath) || !Directory.Exists(settings.DataProtectionKeysPath))
             return Task.FromResult(HealthCheckResult.Unhealthy("Persistent external-session key storage is unavailable."));
         return Task.FromResult(HealthCheckResult.Healthy("Persistent external-session infrastructure is configured."));

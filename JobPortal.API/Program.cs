@@ -24,8 +24,6 @@ using JobPortal.Infrastructure;
 using JobPortal.Persistence;
 using JobPortal.Persistence.Postgres;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.AspNetCore.DataProtection;
-using System.Security.Cryptography.X509Certificates;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Authorization.Policy;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
@@ -100,37 +98,8 @@ builder.Services.Configure<ApiBehaviorOptions>(options =>
     };
 });
 builder.Services.AddHttpContextAccessor();
-var externalSessions = builder.Configuration.GetSection("AIApply:ExternalSessions");
-var dataProtection = builder.Services.AddDataProtection().SetApplicationName("CareerHarbor");
-if (externalSessions.GetValue("Enabled", false))
-{
-    var keysPath = externalSessions["DataProtectionKeysPath"];
-    if (!string.IsNullOrWhiteSpace(keysPath))
-        dataProtection.PersistKeysToFileSystem(Directory.CreateDirectory(keysPath));
-    var certificatePath = externalSessions["DataProtectionCertificatePath"];
-    var certificatePassword = externalSessions["DataProtectionCertificatePassword"];
-    if (!string.IsNullOrWhiteSpace(certificatePath) && !string.IsNullOrWhiteSpace(certificatePassword))
-        dataProtection.ProtectKeysWithCertificate(X509CertificateLoader.LoadPkcs12FromFile(
-            certificatePath, certificatePassword, X509KeyStorageFlags.EphemeralKeySet));
-}
+var sharedKeyRing = builder.Services.AddCareerHarborDataProtection(builder.Configuration, builder.Environment.IsProduction());
 builder.Services.AddScoped<IAuditContextAccessor, HttpAuditContextAccessor>();
-if (builder.Configuration.GetValue("HiringOutreach:Enabled", false))
-{
-    // Reuse the existing application key ring when ExternalSessions already configures it.
-    var existingRing = externalSessions.GetValue("Enabled", false) && !string.IsNullOrWhiteSpace(externalSessions["DataProtectionKeysPath"]);
-    var keySettings = existingRing ? externalSessions : builder.Configuration.GetSection("HiringOutreach:DataProtection");
-    var keyPath = keySettings["DataProtectionKeysPath"];
-    var certPath = keySettings["DataProtectionCertificatePath"];
-    var certPassword = keySettings["DataProtectionCertificatePassword"];
-    if (builder.Environment.IsProduction() && (string.IsNullOrWhiteSpace(keyPath) || string.IsNullOrWhiteSpace(certPath) || string.IsNullOrWhiteSpace(certPassword)))
-        throw new InvalidOperationException("Hiring outreach requires a durable, certificate-protected Data Protection key ring in production.");
-    if (!existingRing && !string.IsNullOrWhiteSpace(keyPath))
-    {
-        dataProtection.PersistKeysToFileSystem(Directory.CreateDirectory(keyPath));
-        if (!string.IsNullOrWhiteSpace(certPath) && !string.IsNullOrWhiteSpace(certPassword))
-            dataProtection.ProtectKeysWithCertificate(X509CertificateLoader.LoadPkcs12FromFile(certPath, certPassword, X509KeyStorageFlags.EphemeralKeySet));
-    }
-}
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
@@ -191,7 +160,7 @@ builder.Services.AddOptions<AIApplyOptions>()
     .Bind(builder.Configuration.GetSection(AIApplyOptions.SectionName))
     .ValidateOnStart();
 builder.Services.AddSingleton<IValidateOptions<AIApplyOptions>>(
-    new AIApplyOptionsValidator(builder.Environment.IsDevelopment()));
+    new AIApplyOptionsValidator(builder.Environment.IsDevelopment(), sharedKeyRing.UsesProtectedDatabaseKeyRing));
 builder.Services.AddHostedService<AIApplyHostedService>();
 builder.Services.AddHostedService<ExternalSessionCaptureCleanupHostedService>();
 
