@@ -1,5 +1,9 @@
 # Shared hiring-contact intelligence
 
+Current provider orchestration, India ranking and rollout are documented in
+[multi-provider intelligence](hiring-multi-provider-intelligence.md). The verification
+section below records the earlier shared-cache milestone, not the later Apollo rollout.
+
 This extends Hiring Outreach only. Candidate sessions, drafts, mailbox credentials and sends
 remain candidate-owned. The two previously applied Outreach/Data Protection migrations are
 unchanged. A separate additive migration supplies the intelligence and expiring claim tables.
@@ -85,10 +89,10 @@ An unknown job family does not justify reusing a known specialist. Common person
 domains are rejected as company discovery domains. Missing professional identity is rejected.
 
 Hunter uses the official fixed-host Domain Search API, personal addresses, valid verification,
-required name/position and limit 20. Searches proceed through recruiter/talent job titles,
+local identity/verification checks and the current Free-plan-compatible limit 10. Searches proceed through recruiter/talent job titles,
 HR, family department manager/lead, then the family department fallback. Stop after two
 strong contacts. `HiringOutreach__Hunter__MaximumRequests` defaults 4 and is bounded 1–4.
-At most 80 raw records are fetched. Each stage can consume provider credits independently;
+At most 40 raw records are fetched. Each stage can consume provider credits independently;
 one candidate discovery allowance does not mean one Hunter credit. No automatic paid retry,
 unbounded pagination, LinkedIn scraping, inferred local email patterns or live AI is used.
 Keys use the supported X-API-KEY header and existing provider HTTP clients disable logging,

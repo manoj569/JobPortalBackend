@@ -97,7 +97,7 @@ public sealed partial class HiringOutreachService(JobPortalDbContext db,IOptions
             {
                 s.State="Found"; s.Provider="CareerHarborCache";
                 s.AllowanceSource=await AllowanceSource(actor,ct);
-                AddContacts(s.Id,shared); s.UsageState="NotReserved";
+                AddContacts(s,shared); s.UsageState="NotReserved";
             }
             else if(!contacts.IsAvailable) { s.State="ProviderUnavailable"; s.FailureCode="ContactProviderUnavailable"; }
             else if(await Remaining(actor,ct)==0) { s.State="QuotaExceeded"; s.FailureCode="DiscoveryQuotaExceeded"; }
@@ -118,7 +118,16 @@ public sealed partial class HiringOutreachService(JobPortalDbContext db,IOptions
         if(plan.Item2)
         {
             var session=await Owned(actor,plan.Id,ct); IReadOnlyList<HiringProviderContact> found=[]; string? error=null;
-            try { found=await contacts.DiscoverAsync(Context(session),ct); }
+            var uncertain=false;
+            try
+            {
+                var result=await contacts.DiscoverResultAsync(Context(session),ct); found=result.Contacts;
+                uncertain=result.Uncertain || result.Failures?.Any(x=>!HiringProviderFailures.ConfirmedRejection(x))==true;
+                error=result.Failures is { Count:>0 } ? result.Failures[0] : null;
+                if(result.Failures is not null)
+                    foreach(var failure in result.Failures) if(!HiringProviderFailures.ConfirmedRejection(failure)) { error=failure; break; }
+                if(uncertain && error is null) error="DiscoveryOutcomeUnknown";
+            }
             catch(HiringProviderException ex) { error=ex.Code; }
             catch(Exception ex) when(ex is HttpRequestException or OperationCanceledException or JsonException) { error="DiscoveryOutcomeUnknown"; }
             var providerUsable=HiringContactPolicy.Select(found,Context(session),Limits);
@@ -130,11 +139,12 @@ public sealed partial class HiringOutreachService(JobPortalDbContext db,IOptions
                 var permittedEmails=permitted.Select(x=>x.Email).ToHashSet(StringComparer.OrdinalIgnoreCase);
                 providerUsable=providerUsable.Where(x=>permittedEmails.Contains(x.Email)).ToArray();
                 var ranked=HiringContactPolicy.Select(permitted,Context(current),Limits);
-                AddContacts(current.Id,ranked);
-                if(error is null) await StoreSharedContacts(current,providerUsable,CancellationToken.None);
-                current.State=error is null ? ranked.Count>0 ? "Found" : "NoContactsFound" : "ProviderUnavailable";
-                current.FailureCode=error; current.Revision=Guid.NewGuid(); await Audit(actor,current.Id,current.State,CancellationToken.None);
-                current.UsageState=error is null ? providerUsable.Count>0 ? "Consumed" : "Released" : error is "ContactProviderConfiguration" or "ContactProviderRateLimited" ? "Released" : "Uncertain";
+                AddContacts(current,ranked);
+                await StoreSharedContacts(current,providerUsable,CancellationToken.None);
+                current.State=ranked.Count>0 ? "Found" : error is null ? "NoContactsFound" : "ProviderUnavailable";
+                current.FailureCode=ranked.Count>0 && !uncertain && (error is null || HiringProviderFailures.ConfirmedRejection(error)) ? null : error;
+                current.Revision=Guid.NewGuid(); await Audit(actor,current.Id,current.State,CancellationToken.None);
+                current.UsageState=uncertain ? "Uncertain" : providerUsable.Count>0 ? "Consumed" : error is null || HiringProviderFailures.ConfirmedRejection(error) ? "Released" : "Uncertain";
                 await ReleaseSharedDiscovery(current,current.UsageState=="Uncertain",CancellationToken.None);
                 DiscoveryDiagnostics(logger,found.Count,ranked.Count,true);
                 if(logger.IsEnabled(LogLevel.Information))
@@ -158,7 +168,8 @@ public sealed partial class HiringOutreachService(JobPortalDbContext db,IOptions
         var found=await ContactDtos(sessionId,ct);
         var stale=s.State=="Searching" && s.DispatchedAtUtc<Now.AddMinutes(-2);
         var state=stale ? "ProviderUnavailable" : s.State=="Sending" && s.UpdatedAtUtc<Now.AddMinutes(-2) ? "SendingUnresolved" : s.State;
-        return new(s.Id,state,s.JobId,s.JobTitle,s.CompanyName,s.CompanyDomain,found,await MailboxAsync(actor,ct),new(s.DispatchedAtUtc.HasValue && s.UsageState!="Released",await Remaining(actor,ct)),stale ? "DiscoveryOutcomeUnknown" : s.FailureCode,s.Provider);
+        var attempts=await Sessions.IgnoreQueryFilters().CountAsync(x=>x.CandidateId==actor && x.DispatchedAtUtc>=Now.Date,ct);
+        return new(s.Id,state,s.JobId,s.JobTitle,s.CompanyName,s.CompanyDomain,found,await MailboxAsync(actor,ct),new(s.DispatchedAtUtc.HasValue && s.UsageState!="Released",await Remaining(actor,ct),Math.Max(0,Limits.DailyDiscoveries-attempts)),stale ? "DiscoveryOutcomeUnknown" : s.FailureCode,s.Provider);
     }
     public async Task<IReadOnlyList<HiringSession>> HistoryAsync(Guid actor,int page,int pageSize,CancellationToken ct)
     {
@@ -167,7 +178,10 @@ public sealed partial class HiringOutreachService(JobPortalDbContext db,IOptions
         var result=new List<HiringSession>(); foreach(var id in ids) result.Add(await GetAsync(actor,id,ct)); return result;
     }
     private async Task<HiringContact[]> ContactDtos(Guid id,CancellationToken ct)=>await db.Set<HiringOutreachContact>().AsNoTracking().Where(x=>x.SessionId==id).OrderBy(x=>x.Rank).ThenBy(x=>x.Id)
-        .Select(x=>new HiringContact(x.Id,x.FullName,x.Title,x.Department,x.Type,x.Email,x.Verification,x.Confidence,x.LinkedInUrl,x.Type=="Recruiter" || x.Type=="TalentAcquisition")).ToArrayAsync(ct);
+        .Select(x=>new HiringContact(x.Id,x.FullName,x.Title,x.Department,x.Type,x.Email,x.Verification,x.Confidence,x.LinkedInUrl,
+            x.Type!="TeamMember" && (x.MatchScore>=70 || x.Type=="Recruiter" || x.Type=="TalentAcquisition"),x.Location,x.Provider=="" ? "Legacy" : x.Provider+":"+x.Source,x.MatchScore,
+            x.Type=="TeamMember" || x.Type=="Other" ? "Relevant team contact; hiring responsibility is not established." :
+                x.Type=="HiringManager" ? "Relevant management or team-lead title; hiring ownership is not guaranteed." : "Professional hiring-role evidence matched to this job.",HiringContactPolicy.ContactRole(x.Title))).ToArrayAsync(ct);
     public async Task<IReadOnlyList<HiringResume>> ResumesAsync(Guid actor,CancellationToken ct)
     {
         var user=await Candidate(actor,ct);

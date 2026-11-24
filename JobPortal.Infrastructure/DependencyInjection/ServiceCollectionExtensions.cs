@@ -72,13 +72,23 @@ public static class ServiceCollectionExtensions
         services.AddOptions<JobPortal.Application.Features.HiringOutreach.HiringOutreachOptions>()
             .Bind(configuration.GetSection(JobPortal.Application.Features.HiringOutreach.HiringOutreachOptions.SectionName))
             .Validate(value=>value.IsValid(),"Invalid hiring outreach limits.").ValidateOnStart();
-        services.Configure<JobPortal.Infrastructure.HiringOutreach.HunterHiringOptions>(configuration.GetSection("HiringOutreach:Hunter"));
+        services.AddOptions<JobPortal.Infrastructure.HiringOutreach.HunterHiringOptions>().Bind(configuration.GetSection("HiringOutreach:Hunter"))
+            .Validate(value=>value.IsValid(),"Invalid Hunter provider budgets.").ValidateOnStart();
+        services.AddOptions<JobPortal.Infrastructure.HiringOutreach.ApolloHiringOptions>().Bind(configuration.GetSection("HiringOutreach:Apollo"))
+            .Validate(value=>value.IsValid(),"Invalid Apollo hiring configuration.").ValidateOnStart();
         services.Configure<JobPortal.Infrastructure.HiringOutreach.GoogleHiringOptions>(configuration.GetSection("HiringOutreach:Google"));
         services.AddHttpClient(JobPortal.Infrastructure.HiringOutreach.HunterEmployerContactProvider.ClientName,c=>c.Timeout=TimeSpan.FromSeconds(20))
             .ConfigurePrimaryHttpMessageHandler(()=>new SocketsHttpHandler { AllowAutoRedirect=false,UseCookies=false }).RemoveAllLoggers();
         services.AddHttpClient(JobPortal.Infrastructure.HiringOutreach.GoogleCandidateMailboxProvider.ClientName,c=>c.Timeout=TimeSpan.FromSeconds(30))
             .ConfigurePrimaryHttpMessageHandler(()=>new SocketsHttpHandler { AllowAutoRedirect=false,UseCookies=false }).RemoveAllLoggers();
-        services.AddScoped<JobPortal.Application.Features.HiringOutreach.IHiringContactProvider,JobPortal.Infrastructure.HiringOutreach.HunterEmployerContactProvider>();
+        services.AddHttpClient(JobPortal.Infrastructure.HiringOutreach.ApolloHiringProvider.ClientName,c=>c.Timeout=TimeSpan.FromSeconds(30))
+            .ConfigurePrimaryHttpMessageHandler(()=>new SocketsHttpHandler { AllowAutoRedirect=false,UseCookies=false }).RemoveAllLoggers();
+        services.AddScoped<JobPortal.Infrastructure.HiringOutreach.ApolloHiringProvider>();
+        services.AddScoped<JobPortal.Application.Features.HiringOutreach.IHiringPersonDiscoveryProvider>(sp=>sp.GetRequiredService<JobPortal.Infrastructure.HiringOutreach.ApolloHiringProvider>());
+        services.AddScoped<JobPortal.Application.Features.HiringOutreach.IHiringContactEnrichmentProvider>(sp=>sp.GetRequiredService<JobPortal.Infrastructure.HiringOutreach.ApolloHiringProvider>());
+        services.AddScoped<JobPortal.Application.Features.HiringOutreach.IHiringEmailVerificationProvider,JobPortal.Infrastructure.HiringOutreach.HunterHiringEmailVerifier>();
+        services.AddScoped<JobPortal.Application.Features.HiringOutreach.IHiringFallbackContactProvider,JobPortal.Infrastructure.HiringOutreach.HunterEmployerContactProvider>();
+        services.AddScoped<JobPortal.Application.Features.HiringOutreach.IHiringContactProvider,JobPortal.Infrastructure.HiringOutreach.HiringProviderOrchestrator>();
         services.AddScoped<JobPortal.Application.Features.HiringOutreach.IHiringMailboxProvider,JobPortal.Infrastructure.HiringOutreach.GoogleCandidateMailboxProvider>();
         services.AddSingleton<JobPortal.Application.Features.HiringOutreach.IHiringCredentialProtector,JobPortal.Infrastructure.HiringOutreach.HiringCredentialProtector>();
         services.AddSingleton<JobPortal.Application.Features.HiringOutreach.IHiringSharedContactProtector,JobPortal.Infrastructure.HiringOutreach.HiringSharedContactProtector>();

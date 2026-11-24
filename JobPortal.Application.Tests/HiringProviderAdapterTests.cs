@@ -28,16 +28,17 @@ public sealed partial class HiringProviderAdapterTests
         using var provider=services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes=true });
         using var scope=provider.CreateScope();
         Assert.IsType<HiringOutreachService>(scope.ServiceProvider.GetRequiredService<IHiringOutreachService>());
-        Assert.IsType<HunterEmployerContactProvider>(scope.ServiceProvider.GetRequiredService<IHiringContactProvider>());
+        Assert.IsType<HiringProviderOrchestrator>(scope.ServiceProvider.GetRequiredService<IHiringContactProvider>());
+        Assert.IsType<HunterEmployerContactProvider>(scope.ServiceProvider.GetRequiredService<IHiringFallbackContactProvider>());
         Assert.IsType<GoogleCandidateMailboxProvider>(scope.ServiceProvider.GetRequiredService<IHiringMailboxProvider>());
         Assert.False(scope.ServiceProvider.GetRequiredService<IHiringMailboxProvider>().IsAvailable);
         Assert.False(scope.ServiceProvider.GetRequiredService<IHiringContactProvider>().IsAvailable);
     }
     [Theory]
-    [InlineData(401,"ContactProviderConfiguration")]
-    [InlineData(400,"ContactProviderConfiguration")]
-    [InlineData(429,"ContactProviderRateLimited")]
-    [InlineData(503,"ContactProviderUnavailable")]
+    [InlineData(401,"HunterConfigurationRequired")]
+    [InlineData(400,"HunterInvalidRequest")]
+    [InlineData(429,"HunterRateLimited")]
+    [InlineData(503,"HunterProviderUnavailable")]
     public async Task HunterErrorsAreRedactedAndNeverAutomaticallyRetried(int status,string code)
     {
         using var handler=new Handler(_=>new((HttpStatusCode)status)); using var factory=new Clients(handler);

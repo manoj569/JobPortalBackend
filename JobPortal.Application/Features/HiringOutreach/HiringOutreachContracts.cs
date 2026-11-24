@@ -32,10 +32,11 @@ public sealed class HiringSharedContactOptions
     public bool IsValid()=>CacheDays is >=1 and <=90 && MinimumContacts is >=1 and <=4 && MinimumScore is >=50 and <=150;
 }
 public sealed record DiscoverHiringTeamRequest(Guid JobId,Guid RequestKey);
-public sealed record HiringContact(Guid Id,string Name,string Title,string Department,string Type,string WorkEmail,string VerificationStatus,int Confidence,string? LinkedInUrl,bool Recommended);
+public sealed record HiringContact(Guid Id,string Name,string Title,string Department,string Type,string WorkEmail,string VerificationStatus,int Confidence,string? LinkedInUrl,bool Recommended,
+    string Location="",string Source="",int MatchScore=0,string MatchReason="",string ContactType="");
 public sealed record HiringMailbox(bool Connected,string Provider,string? Email);
 public sealed record HiringResume(Guid Id,string FileName,bool IsDefault);
-public sealed record HiringUsage(bool Charged,int Remaining);
+public sealed record HiringUsage(bool Charged,int Remaining,int? ProviderAttemptsRemaining=null);
 public sealed record HiringSession(Guid SessionId,string State,Guid JobId,string JobTitle,string CompanyName,string CompanyDomain,
     IReadOnlyList<HiringContact> Contacts,HiringMailbox Mailbox,HiringUsage Usage,string? FailureCode,string Source="");
 public sealed record HiringDraftRequest(IReadOnlyList<Guid> RecipientIds,Guid ResumeId);
@@ -49,8 +50,8 @@ public sealed record HiringOAuthStart(string AuthorizationUrl,string BrowserBind
 public sealed record HiringOAuthGrant(string AccountId,string Email,string RefreshToken,string Scopes);
 public sealed record HiringOAuthChallenge(string Url,string Verifier);
 public sealed record HiringProviderContact(string FullName,string FirstName,string Email,string Title,string Department,
-    string Verification,int Confidence,string? LinkedInUrl,string Reference,string Location="",string Source="DomainSearch");
-public sealed record HiringDiscoveryContext(string Company,string Domain,string JobTitle,string Department,string Location="",string Description="");
+    string Verification,int Confidence,string? LinkedInUrl,string Reference,string Location="",string Source="DomainSearch",string Provider="Hunter");
+public sealed record HiringDiscoveryContext(string Company,string Domain,string JobTitle,string Department,string Location="",string Description="",int DesiredStrongContacts=2);
 // Rich job-context and attachment contracts are separate from the legacy Accelerator-only adapters.
 // They never activate the Accelerator feature or use the transactional email sender.
 public interface IHiringContactProvider
@@ -58,6 +59,31 @@ public interface IHiringContactProvider
     string Name { get; }
     bool IsAvailable { get; }
     Task<IReadOnlyList<HiringProviderContact>> DiscoverAsync(HiringDiscoveryContext context,CancellationToken ct);
+    async Task<HiringDiscoveryResult> DiscoverResultAsync(HiringDiscoveryContext context,CancellationToken ct)=>new(await DiscoverAsync(context,ct));
+}
+public sealed record HiringDiscoveryResult(IReadOnlyList<HiringProviderContact> Contacts,bool Uncertain=false,IReadOnlyList<string>? Failures=null);
+public interface IHiringFallbackContactProvider : IHiringContactProvider { }
+public sealed record HiringPersonIdentity(string Provider,string Reference,string FirstName,string FullName,string Title,string Department,string Domain,string Location,string Stage);
+public interface IHiringPersonDiscoveryProvider
+{
+    bool IsAvailable { get; }
+    IAsyncEnumerable<IReadOnlyList<HiringPersonIdentity>> SearchAsync(HiringDiscoveryContext context,CancellationToken ct);
+}
+public interface IHiringContactEnrichmentProvider
+{
+    Task<HiringProviderContact?> EnrichAsync(HiringPersonIdentity person,HiringDiscoveryContext context,CancellationToken ct);
+}
+public interface IHiringEmailVerificationProvider
+{
+    bool IsAvailable { get; }
+    int MaximumRequests=>2;
+    Task<HiringProviderContact?> VerifyAsync(HiringProviderContact contact,CancellationToken ct);
+}
+public static class HiringProviderFailures
+{
+    public static bool ConfirmedRejection(string code)=>code is "ContactProviderConfiguration" or "ContactProviderRateLimited" or
+        "ApolloConfigurationRequired" or "ApolloRateLimited" or "ApolloQuotaExceeded" or "ApolloInvalidRequest" or
+        "HunterConfigurationRequired" or "HunterRateLimited" or "HunterQuotaExceeded" or "HunterInvalidRequest";
 }
 public sealed record HiringMailMessage(string From,string To,string Subject,string Body,string FileName,string ContentType,byte[] Attachment,string MessageKey);
 public sealed record HiringMailResult(string State,string? MessageId=null,string? ThreadId=null,string? FailureCode=null);

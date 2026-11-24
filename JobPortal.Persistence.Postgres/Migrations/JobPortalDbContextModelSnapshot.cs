@@ -10426,6 +10426,19 @@ namespace JobPortal.Persistence.Postgres.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
 
+                    b.Property<string>("Location")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<int>("MatchScore")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
                     b.Property<string>("ProviderReference")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -10436,6 +10449,11 @@ namespace JobPortal.Persistence.Postgres.Migrations
 
                     b.Property<Guid>("SessionId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
 
                     b.Property<string>("Title")
                         .IsRequired()

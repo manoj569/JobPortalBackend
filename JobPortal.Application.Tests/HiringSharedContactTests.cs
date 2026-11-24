@@ -83,7 +83,7 @@ public sealed partial class HiringOutreachTests
         var global=local with { Email="global@example.org",Location="Global" };
         var other=local with { Email="other@example.org",Location="Mumbai" };
         var ranked=HiringContactPolicy.Select(new[] { other,global,local },context,new());
-        Assert.Equal(local.Email,ranked[0].Email); Assert.Equal(global.Email,ranked[1].Email);
+        Assert.Equal(local.Email,ranked[0].Email); Assert.Equal(other.Email,ranked[1].Email); Assert.Equal(global.Email,ranked[2].Email);
     }
     [Fact]
     public async Task ExpiredContactsRequireNewVerifiedObservationAndRefreshWithoutDuplicates()

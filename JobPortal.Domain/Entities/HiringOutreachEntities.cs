@@ -38,6 +38,10 @@ public sealed class HiringOutreachContact : BaseEntity
     public string? LinkedInUrl { get; set; }
     public string ProviderReference { get; set; } = "";
     public DateTime VerifiedAtUtc { get; set; }
+    public string Location { get; set; } = "";
+    public string Provider { get; set; } = "";
+    public string Source { get; set; } = "";
+    public int MatchScore { get; set; }
 }
 public sealed class HiringOutreachDiscoveryRequest : BaseEntity
 {

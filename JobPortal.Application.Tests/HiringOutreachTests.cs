@@ -308,10 +308,11 @@ public sealed partial class HiringOutreachTests
         public ResumeDocumentBlob Resume { get; }
         public HiringOutreachOptions Limits { get; }=new() { Enabled=true,DailySends=5 };
         public FakeContacts Hunter { get; }=new(); public FakeGoogle Google { get; }=new(); public FakeResume Storage { get; }=new(); public FakeAi Ai { get; }=new();
+        public IHiringContactProvider? DiscoveryOverride;
         private IHiringCredentialProtector Protector { get; }=new HiringCredentialProtector(new EphemeralDataProtectionProvider());
         private IHiringSharedContactProtector SharedProtector { get; }=new HiringSharedContactProtector(new EphemeralDataProtectionProvider());
         public HiringOutreachService Service=>For(Db);
-        public HiringOutreachService For(JobPortalDbContext db)=>new(db,Options.Create(Limits),Hunter,Google,Protector,Storage,new FakeExtractor(),new AuditWriterTestDouble(),Ai,TimeProvider.System,NullLogger<HiringOutreachService>.Instance,SharedProtector);
+        public HiringOutreachService For(JobPortalDbContext db)=>new(db,Options.Create(Limits),DiscoveryOverride ?? Hunter,Google,Protector,Storage,new FakeExtractor(),new AuditWriterTestDouble(),Ai,TimeProvider.System,NullLogger<HiringOutreachService>.Instance,SharedProtector);
         public Fixture(DbContextOptions<JobPortalDbContext>? dbOptions=null)
         {
             if(dbOptions is not null) DbOptions=dbOptions;

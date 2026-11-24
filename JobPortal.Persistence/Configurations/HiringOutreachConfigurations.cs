@@ -35,6 +35,8 @@ public sealed class HiringOutreachContactConfiguration : IEntityTypeConfiguratio
         builder.Property(x=>x.Department).HasMaxLength(200); builder.Property(x=>x.Type).HasMaxLength(40);
         builder.Property(x=>x.Verification).HasMaxLength(30); builder.Property(x=>x.LinkedInUrl).HasMaxLength(500);
         builder.Property(x=>x.ProviderReference).HasMaxLength(200);
+        builder.Property(x=>x.Location).HasMaxLength(200); builder.Property(x=>x.Provider).HasMaxLength(30);
+        builder.Property(x=>x.Source).HasMaxLength(40);
         builder.HasOne<HiringOutreachSession>().WithMany().HasForeignKey(x=>x.SessionId).OnDelete(DeleteBehavior.Restrict);
     }
 }

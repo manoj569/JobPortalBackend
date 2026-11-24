@@ -16,14 +16,15 @@ public sealed partial class HiringOutreachService
     [LoggerMessage(Level=LogLevel.Information,Message="Hiring provider raw {Raw} professional {Professional} verified {Verified} roleRelevant {RoleRelevant} returned {Returned}")]
     private static partial void ProviderDiagnostics(ILogger logger,int raw,int professional,int verified,int roleRelevant,int returned);
     private static HiringDiscoveryContext Context(HiringOutreachSession s)=>new(s.CompanyName,s.CompanyDomain,s.JobTitle,s.Department,s.Location,s.JobDescription);
-    private void AddContacts(Guid session,IReadOnlyList<HiringProviderContact> selected)
+    private void AddContacts(HiringOutreachSession session,IReadOnlyList<HiringProviderContact> selected)
     {
         for(var rank=0;rank<selected.Count;rank++)
         {
             var item=selected[rank];
-            db.Add(new HiringOutreachContact { SessionId=session,Rank=rank,FullName=item.FullName,FirstName=item.FirstName,Email=item.Email,
+            db.Add(new HiringOutreachContact { SessionId=session.Id,Rank=rank,FullName=item.FullName,FirstName=item.FirstName,Email=item.Email,
                 Title=item.Title,Department=item.Department,Type=HiringContactPolicy.Type(item.Title),Verification=item.Verification,Confidence=item.Confidence,
-                LinkedInUrl=item.LinkedInUrl,ProviderReference=item.Reference,VerifiedAtUtc=Now });
+                LinkedInUrl=item.LinkedInUrl,ProviderReference=item.Reference,VerifiedAtUtc=Now,Location=item.Location,
+                Provider=item.Provider,Source=item.Source,MatchScore=HiringContactPolicy.Score(item,Context(session)) });
         }
     }
     private async Task<string> AllowanceSource(Guid actor,CancellationToken ct)
@@ -97,7 +98,7 @@ public sealed partial class HiringOutreachService
             row.Title=HiringContactPolicy.Normalize(person.Title); row.Department=HiringContactPolicy.Normalize(person.Department);
             row.Location=HiringContactPolicy.Normalize(person.Location); row.JobFamily=HiringContactPolicy.Family(person.Title,person.Department);
             row.ContactType=HiringContactPolicy.Type(person.Title); row.Confidence=person.Confidence; row.Verification="valid";
-            row.Provider=Bound(contacts.Name,30); row.Source=person.Source=="EmailFinder" ? "EmailFinder" : "DomainSearch";
+            row.Provider=Bound(person.Provider,30); row.Source=person.Source is "PersonEnrichment" or "PeopleSearch" or "Verification" or "EmailFinder" ? person.Source : "DomainSearch";
             row.LastVerifiedAtUtc=Now; row.ExpiresAtUtc=Now.AddDays(Limits.SharedContacts.CacheDays); row.Revision=Guid.NewGuid();
         }
     }
@@ -110,7 +111,7 @@ public sealed partial class HiringOutreachService
             hashes.Contains(x.EmailHash) && (x.IsDeleted || !x.IsActive)).Select(x=>x.EmailHash).ToArrayAsync(ct);
         return bounded.Where(x=>!suppressed.Contains(Hash(x.Email.Trim().ToLowerInvariant()),StringComparer.Ordinal)).ToArray();
     }
-    private static string Scope(HiringOutreachSession session)=>Hash(session.CompanyDomain+"|"+HiringContactPolicy.Family(session.JobTitle,session.Department)+"|"+HiringContactPolicy.Normalize(session.Location));
+    private static string Scope(HiringOutreachSession session)=>Hash(session.CompanyDomain+"|"+HiringContactPolicy.Family(session.JobTitle,session.Department)+"|"+HiringLocationPolicy.Normalize(session.Location));
     private async Task ClaimSharedDiscovery(HiringOutreachSession session,CancellationToken ct)
     {
         if(!Limits.SharedContacts.Enabled) return;

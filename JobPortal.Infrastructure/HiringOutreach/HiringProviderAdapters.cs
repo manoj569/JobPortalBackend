@@ -16,6 +16,8 @@ public sealed class HunterHiringOptions
 {
     public string ApiKey { get; set; } = "";
     public int MaximumRequests { get; set; } = 4;
+    public int MaximumVerifications { get; set; } = 2;
+    public bool IsValid()=>MaximumRequests is >=1 and <=4 && MaximumVerifications is >=0 and <=2;
 }
 public sealed class GoogleHiringOptions
 {
@@ -39,12 +41,18 @@ public sealed class HiringSharedContactProtector(IDataProtectionProvider protect
     public string Protect(string domain,string value)=>Purpose(domain).Protect(value);
     public string Unprotect(string domain,string value)=>Purpose(domain).Unprotect(value);
 }
-public sealed class HunterEmployerContactProvider(IHttpClientFactory clients,IOptions<HunterHiringOptions> settings) : IHiringContactProvider
+public sealed class HunterEmployerContactProvider(IHttpClientFactory clients,IOptions<HunterHiringOptions> settings) : IHiringFallbackContactProvider
 {
     public const string ClientName="HiringHunter";
     public string Name=>"Hunter";
     public bool IsAvailable=>!string.IsNullOrWhiteSpace(settings.Value.ApiKey);
     public async Task<IReadOnlyList<HiringProviderContact>> DiscoverAsync(HiringDiscoveryContext context,CancellationToken ct)
+    {
+        var result=await DiscoverResultAsync(context,ct);
+        if(result.Contacts.Count==0 && result.Failures is { Count:>0 }) throw new HiringProviderException(result.Failures[0]);
+        return result.Contacts;
+    }
+    public async Task<HiringDiscoveryResult> DiscoverResultAsync(HiringDiscoveryContext context,CancellationToken ct)
     {
         if(!IsAvailable) throw new HiringProviderException("ContactProviderUnavailable");
         using var budget=CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -56,33 +64,33 @@ public sealed class HunterEmployerContactProvider(IHttpClientFactory clients,IOp
             "department=hr",
             "department="+department+"&job_titles=Manager,Lead",
             "department="+department };
-        var result=new List<HiringProviderContact>();
+        var result=new List<HiringProviderContact>(); var failures=new List<string>(); var uncertain=false;
         foreach(var stage in stages.Take(Math.Clamp(settings.Value.MaximumRequests,1,4)))
         {
             // No paid retry of the same search. Later stages target different official filters.
             try { result.AddRange(await Search(context.Domain,stage,budget.Token)); }
-            catch(HiringProviderException ex) when(result.Count>0 && ex.Code is "ContactProviderRateLimited" or "ContactProviderConfiguration")
-            { break; } // Confirmed rejection does not invalidate usable earlier observations.
+            catch(HiringProviderException ex) { failures.Add(ex.Code); uncertain=!HiringProviderFailures.ConfirmedRejection(ex.Code); break; }
+            catch(Exception ex) when(ex is HttpRequestException or OperationCanceledException or JsonException)
+            { failures.Add("HunterOutcomeUnknown"); uncertain=true; break; }
             var selected=HiringContactPolicy.Select(result,context,new HiringOutreachOptions());
-            if(selected.Count(x=>HiringContactPolicy.Score(x,context)>=70)>=2) break;
+            if(selected.Count(x=>HiringContactPolicy.Strong(x,context))>=Math.Clamp(context.DesiredStrongContacts,1,2)) break;
         }
-        return result.DistinctBy(x=>x.Email,StringComparer.OrdinalIgnoreCase).Take(100).ToArray();
+        return new(result.DistinctBy(x=>x.Email,StringComparer.OrdinalIgnoreCase).Take(100).ToArray(),uncertain,failures);
     }
     private async Task<IReadOnlyList<HiringProviderContact>> Search(string domain,string stage,CancellationToken ct)
     {
         // Official Domain Search filters, reviewed 2026-11-23. No guessed identities/email patterns.
-        var url="https://api.hunter.io/v2/domain-search?domain="+Uri.EscapeDataString(domain)+"&limit=10&type=personal&verification_status=valid&required_field=full_name,position&"+stage;
+        var url="https://api.hunter.io/v2/domain-search?domain="+Uri.EscapeDataString(domain)+"&limit=10&type=personal&"+stage;
         using var request=new HttpRequestMessage(HttpMethod.Get,url);
         request.Headers.Add("X-API-KEY",settings.Value.ApiKey);
         using var response=await clients.CreateClient(ClientName).SendAsync(request,HttpCompletionOption.ResponseHeadersRead,ct);
-        if(!response.IsSuccessStatusCode) throw new HiringProviderException(response.StatusCode switch {
-            HttpStatusCode.TooManyRequests=>"ContactProviderRateLimited",HttpStatusCode.BadRequest or HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden=>"ContactProviderConfiguration",_=>"ContactProviderUnavailable" });
-        if(response.Content.Headers.ContentLength>512*1024) throw new HiringProviderException("ContactProviderInvalidResponse");
+        if(!response.IsSuccessStatusCode) throw new HiringProviderException(await HiringProviderJson.FailureAsync(response,"Hunter",ct));
+        if(response.Content.Headers.ContentLength>512*1024) throw new HiringProviderException("HunterInvalidResponse");
         await using var stream=await response.Content.ReadAsStreamAsync(ct);
         using var bounded=new MemoryStream(); var chunk=new byte[8192]; int read;
-        while((read=await stream.ReadAsync(chunk,ct))>0) { if(bounded.Length+read>512*1024) throw new HiringProviderException("ContactProviderInvalidResponse"); await bounded.WriteAsync(chunk.AsMemory(0,read),ct); }
+        while((read=await stream.ReadAsync(chunk,ct))>0) { if(bounded.Length+read>512*1024) throw new HiringProviderException("HunterInvalidResponse"); await bounded.WriteAsync(chunk.AsMemory(0,read),ct); }
         using var document=JsonDocument.Parse(bounded.ToArray());
-        if(document.RootElement.ValueKind!=JsonValueKind.Object || !document.RootElement.TryGetProperty("data",out var data) || data.ValueKind!=JsonValueKind.Object || !data.TryGetProperty("emails",out var emails) || emails.ValueKind!=JsonValueKind.Array) throw new HiringProviderException("ContactProviderInvalidResponse");
+        if(document.RootElement.ValueKind!=JsonValueKind.Object || !document.RootElement.TryGetProperty("data",out var data) || data.ValueKind!=JsonValueKind.Object || !data.TryGetProperty("emails",out var emails) || emails.ValueKind!=JsonValueKind.Array) throw new HiringProviderException("HunterInvalidResponse");
         var result=new List<HiringProviderContact>();
         foreach(var email in emails.EnumerateArray().Take(10))
         {

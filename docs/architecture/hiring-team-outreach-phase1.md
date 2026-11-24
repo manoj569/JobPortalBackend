@@ -1,5 +1,9 @@
 # Phase 1: candidate-authorized hiring-team email
 
+The current discovery extension is documented in
+[multi-provider hiring intelligence](hiring-multi-provider-intelligence.md). Gmail review
+and explicit-send behavior below remain unchanged.
+
 This feature is independent of Accelerator activation and its paid plan. Registration,
 password-reset and other transactional email continue using their existing services.
 Nothing sends during job browsing, contact discovery, OAuth, or draft generation.
@@ -63,7 +67,7 @@ unresolved records; no manual-resolution API that assumes delivery exists in thi
 ## Provider behavior
 
 Hunter uses the fixed official domain-search API, trusted stored company domain/website,
-up to four targeted stages of twenty records, bounded responses and no automatic paid retries. Missing official domain fails closed;
+up to four targeted stages of ten records, bounded responses and no automatic paid retries. Missing official domain fails closed;
 no guessed domains or LinkedIn scraping. Results are normalized, ranked, deduplicated by
 email and limited to four (also respecting MaximumContacts); invalid and cross-domain emails are rejected. Unknown/catch-all
 contacts are disabled by default and require explicit configuration and high confidence.

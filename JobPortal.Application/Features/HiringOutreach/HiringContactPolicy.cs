@@ -7,7 +7,7 @@ public static class HiringContactPolicy
     private static readonly (string Name,string[] Hints)[] Families =
     [
         ("Operations",["TRUST","SAFETY","OPERATIONS","MODERATION"]), ("Data",["DATA","ANALYTICS"]),
-        ("Engineering",["ENGINEER","DEVELOP","TECHNICAL","SOFTWARE",".NET","JAVA","CLOUD","TECHNOLOGY"," IT "]),
+        ("Engineering",["ENGINEER","DEVELOP","TECHNICAL","SOFTWARE",".NET","JAVA","CLOUD","DEVOPS","TECHNOLOGY"," IT "]),
         ("Finance",["FINANC","ACCOUNTING"]), ("Product",["PRODUCT"]), ("Design",["DESIGN"]),
         ("Marketing",["MARKETING"]), ("Sales",["SALES","ACCOUNT EXECUTIVE"])
     ];
@@ -61,15 +61,19 @@ public static class HiringContactPolicy
         // Specialist recruiters cannot be reused as generic recruiters for another job family.
         if(family.Length>0 && family!=target) return 0;
         var relevant=family.Length>0 && family==target; var type=Type(role);
-        var score=role.Contains("RECRUIT",StringComparison.Ordinal) || role.Contains("TALENT",StringComparison.Ordinal) ? relevant ? 110 : 95 :
-            type=="HR" ? role.Contains("PARTNER",StringComparison.Ordinal) || role.Contains("HRBP",StringComparison.Ordinal) ? 85 : 65 :
-            relevant ? type=="HiringManager" ? 80 : 50 : 0;
+        var score=role.Contains("RECRUIT",StringComparison.Ordinal) || role.Contains("TALENT",StringComparison.Ordinal) ? relevant ? 120 : 115 :
+            type=="HR" ? role.Contains("PARTNER",StringComparison.Ordinal) || role.Contains("HRBP",StringComparison.Ordinal) ? 100 : 50 :
+            relevant ? type=="HiringManager" ? 90 : 15 : 0;
         if(score==0) return 0;
-        var location=Normalize(person.Location); var jobLocation=Normalize(context.Location);
-        if(location.Length>0 && jobLocation.Length>0)
-            score+=location is "INDIA" or "IN" or "GLOBAL" or "WORLDWIDE" ? 5 :
-                location==jobLocation || jobLocation.Contains(location,StringComparison.Ordinal) || location.Contains(jobLocation,StringComparison.Ordinal) ? 20 : -15;
+        score+=HiringLocationPolicy.Bonus(person.Location,context.Location);
         return score+Math.Clamp(person.Confidence,0,100)/10;
+    }
+    public static bool Strong(HiringProviderContact person,HiringDiscoveryContext context)=>Type(person.Title)!="TeamMember" && Score(person,context)>=70;
+    public static string ContactRole(string title)
+    {
+        var type=Type(title); var text=Normalize(title);
+        if(type!="HiringManager") return type;
+        return text.Contains("HIRING MANAGER",StringComparison.Ordinal) ? "HiringManager" : text.Contains("LEAD",StringComparison.Ordinal) ? "TeamLead" : "DepartmentManager";
     }
     private static string Clean(string value,int max)=>new(value.Where(x=>!char.IsControl(x)).Take(max).ToArray());
     private static string? LinkedIn(string? value)=>Uri.TryCreate(value,UriKind.Absolute,out var uri) && uri.Scheme=="https" &&

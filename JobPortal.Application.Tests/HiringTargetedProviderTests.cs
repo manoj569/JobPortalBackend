@@ -23,7 +23,7 @@ public sealed partial class HiringProviderAdapterTests
         Assert.Empty(await provider.DiscoverAsync(new("Example","example.org","Software Engineer","Engineering"),default));
         Assert.Equal(4,handler.Calls); Assert.Contains("job_titles=Recruiter,Talent Acquisition,Recruitment,Talent Partner",urls[0]);
         Assert.Contains("department=hr",urls[1]); Assert.Contains("department=it",urls[2]); Assert.Contains("job_titles=Manager,Lead",urls[2]);
-        Assert.All(urls,url=> { Assert.Contains("verification_status=valid",url); Assert.Contains("type=personal",url); Assert.Contains("limit=20",url); });
+        Assert.All(urls,url=> { Assert.DoesNotContain("verification_status=",url); Assert.DoesNotContain("required_field=",url); Assert.Contains("type=personal",url); Assert.Contains("limit=10",url); Assert.DoesNotContain("limit=20",url); });
     }
     [Fact]
     public async Task TwoStrongRecruitersStopFurtherPaidSearches()
@@ -37,6 +37,14 @@ public sealed partial class HiringProviderAdapterTests
         var provider=new HunterEmployerContactProvider(clients,Options.Create(new HunterHiringOptions { ApiKey="test-only" }));
         var result=await provider.DiscoverAsync(new("Example","example.org","Software Engineer","Engineering","Hyderabad"),default);
         Assert.Equal(2,result.Count); Assert.Equal(1,handler.Calls); Assert.Contains("Hyderabad",result[0].Location,StringComparison.Ordinal);
+    }
+    [Fact]
+    public async Task HunterStopsAtOneAdditionalStrongContactWhenEarlierProviderAlreadyContributed()
+    {
+        using var handler=new Handler(_=>Json("""{"data":{"emails":[{"value":"test@example.org","first_name":"Test","position":"Technical Recruiter","confidence":99,"verification":{"status":"valid"}}]}}"""));
+        using var clients=new Clients(handler); var provider=new HunterEmployerContactProvider(clients,Options.Create(new HunterHiringOptions { ApiKey="test-only" }));
+        Assert.Single(await provider.DiscoverAsync(new("Example","example.org","Engineer","",DesiredStrongContacts:1),default));
+        Assert.Equal(1,handler.Calls);
     }
     [Fact]
     public async Task LaterConfirmedRateLimitDoesNotDiscardAnEarlierVerifiedContact()
