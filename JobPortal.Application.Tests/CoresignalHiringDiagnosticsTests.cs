@@ -25,20 +25,23 @@ public sealed partial class CoresignalHiringProviderTests
         public bool IsAvailable=>false;
         public Task<IReadOnlyList<HiringProviderContact>> DiscoverAsync(HiringDiscoveryContext context,CancellationToken ct)=>throw new InvalidOperationException("Unexpected fallback");
     }
-    private static HiringProviderOrchestrator Coordinator(CoresignalHiringProvider provider)=>new(provider,provider,new NoVerification(),new NoFallback(),
-        Options.Create(new ApolloHiringOptions()),NullLogger<HiringProviderOrchestrator>.Instance,[provider]);
+    private static HiringProviderOrchestrator Coordinator(CoresignalHiringProvider provider,IHiringProfessionalEmailFinder? finder=null)=>new(provider,provider,new NoVerification(),new NoFallback(),
+        Options.Create(new ApolloHiringOptions()),NullLogger<HiringProviderOrchestrator>.Instance,[provider],finder);
     [Fact]
     public async Task AdminProbeWorksWithDisplayDisabledButDoesNotReturnOrAuditContactIdentities()
     {
         using var handler=new Handler((request,_)=>Task.FromResult(Json(request.Method==HttpMethod.Post ? Preview :
-            "{\"code\":0,\"data\":{\"email\":\"private@accenture.com\",\"email_status\":\"verified\"}}")));
-        using var clients=new Clients(handler); var provider=Provider(clients,Settings()); var coordinator=Coordinator(provider); var audit=new AuditWriterTestDouble();
+            request.RequestUri!.Host=="api.coresignal.com" ? Collection() :
+            "{\"data\":{\"first_name\":\"Example\",\"last_name\":\"Recruiter\",\"email\":\"private@accenture.com\",\"provenance\":\"found\",\"verification\":{\"status\":\"valid\"}}}")));
+        using var clients=new Clients(handler); var provider=Provider(clients,Settings());
+        var finder=new HunterHiringProfessionalEmailFinder(clients,Options.Create(new HunterHiringOptions { ApiKey="mock-only" }));
+        var coordinator=Coordinator(provider,finder); var audit=new AuditWriterTestDouble();
         Assert.False(provider.AllowCandidateDisplay); Assert.False(coordinator.IsAvailable);
         var normal=await coordinator.DiscoverResultAsync(Context(),default); Assert.Empty(normal.Contacts); Assert.Equal(0,handler.Calls);
         var service=new HiringProviderDiagnostics(provider,coordinator,audit);
         var result=await service.ProbeCoresignalAsync(Guid.NewGuid(),new("Accenture","accenture.com","Trust & Safety Associate","Hyderabad",true),default);
         Assert.Equal("Completed",result.State); Assert.Equal(1,result.IdentityCount); Assert.Equal(1,result.ContactCount);
-        Assert.True(Assert.Single(result.Matches).ContactAvailable); Assert.Empty(result.Failures); Assert.Equal(2,handler.Calls);
+        Assert.True(Assert.Single(result.Matches).ContactAvailable); Assert.Empty(result.Failures); Assert.Equal(3,handler.Calls);
         var diagnostic=JsonSerializer.Serialize(result)+JsonSerializer.Serialize(audit.Events);
         Assert.DoesNotContain("private@accenture.com",diagnostic,StringComparison.Ordinal); Assert.DoesNotContain("Example Recruiter",diagnostic,StringComparison.Ordinal);
         Assert.DoesNotContain("mock-only-secret",diagnostic,StringComparison.Ordinal); Assert.Equal(2,audit.Events.Count);
@@ -79,12 +82,26 @@ public sealed partial class CoresignalHiringProviderTests
             new { id=2,full_name="India Recruiter",active_experience_title="Talent Acquisition",company_website=domain,location_full="India" },
             new { id=3,full_name="Foreign Employee",active_experience_title="Software Engineer",company_website=domain,location_full="United States" },
             new { id=4,full_name="Relevant Manager",active_experience_title=manager,company_website=domain,location_full="India" } };
-        using var handler=new Handler((request,_)=>Task.FromResult(Json(request.Method==HttpMethod.Post ? JsonSerializer.Serialize(previews) :
-            "{\"code\":0,\"data\":{\"email\":\"person"+request.RequestUri!.Query.Split('=')[1]+"@"+domain+"\",\"email_status\":\"verified\"}}")));
+        using var handler=new Handler((request,_)=>
+        {
+            if(request.Method==HttpMethod.Post) return Task.FromResult(Json(JsonSerializer.Serialize(previews)));
+            if(request.RequestUri!.Host=="api.coresignal.com")
+            {
+                var id=long.Parse(request.RequestUri.Segments[^1],System.Globalization.CultureInfo.InvariantCulture);
+                var employee=previews.Single(x=>x.id==id);
+                return Task.FromResult(Json(Collection(domain,id,employee.full_name,employee.active_experience_title)));
+            }
+            var name=Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(request.RequestUri.Query)["full_name"].ToString();
+            var person=previews.Single(x=>x.full_name==name);
+            return Task.FromResult(Json(JsonSerializer.Serialize(new { data=new { first_name=name.Split(' ')[0],last_name="Recruiter",
+                email="person"+person.id+"@"+domain,provenance="found",verification=new { status="valid" } } })));
+        });
         using var clients=new Clients(handler); var settings=Settings(); settings.AllowCandidateDisplay=true;
-        var provider=Provider(clients,settings); var result=await Coordinator(provider).DiscoverResultAsync(new("Example",domain,job,"",city),default);
+        var provider=Provider(clients,settings);
+        var finder=new HunterHiringProfessionalEmailFinder(clients,Options.Create(new HunterHiringOptions { ApiKey="mock-only" }));
+        var result=await Coordinator(provider,finder).DiscoverResultAsync(new("Example",domain,job,"",city),default);
         Assert.Equal(2,result.Contacts.Count); Assert.Equal("Local Recruiter",result.Contacts[0].FullName);
-        Assert.Contains(result.Contacts,x=>x.FullName=="India Recruiter"); Assert.DoesNotContain(result.Contacts,x=>x.FullName=="Foreign Employee"); Assert.Equal(3,handler.Calls);
+        Assert.Contains(result.Contacts,x=>x.FullName=="India Recruiter"); Assert.DoesNotContain(result.Contacts,x=>x.FullName=="Foreign Employee"); Assert.Equal(5,handler.Calls);
     }
     [Theory]
     [InlineData("found","valid",true)]

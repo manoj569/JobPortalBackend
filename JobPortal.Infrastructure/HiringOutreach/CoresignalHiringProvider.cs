@@ -80,18 +80,31 @@ public sealed partial class CoresignalHiringProvider(IHttpClientFactory clients,
         if(person.Provider!=Name || person.Domain!=Domain(context.Domain) || !observed.TryGetValue(person.Reference,out var original) || original!=person)
             throw new HiringProviderException("CoresignalInvalidRequest");
         if(enriched.Count>=MaximumEnrichments || !enriched.Add(person.Reference)) return null;
-        using var request=new HttpRequestMessage(HttpMethod.Get,"https://api.coresignal.com/enrichment/contacts?member_id="+Uri.EscapeDataString(person.Reference));
+        // Preview.id is a Multi-source Employee ID. Collect accepts that ID; profile
+        // /enrich instead requires social_url. Do not reinterpret it as a member_id.
+        // Only documented core identity/employment fields are requested. Collect's
+        // published model has NO email/status fields: email finding remains Hunter's job.
+        const string fields="?bundle=core_employee_data&fields=id&fields=full_name&fields=is_deleted&fields=is_working&fields=active_experience_company_website&fields=active_experience_title";
+        using var request=new HttpRequestMessage(HttpMethod.Get,"https://api.coresignal.com/cdapi/v2/employee_multi_source/collect/"+Uri.EscapeDataString(person.Reference)+fields);
         using var body=await SendAsync(request,false,ct);
         var root=body.RootElement;
-        if(!root.TryGetProperty("code",out var code) || code.ValueKind!=JsonValueKind.Number || !code.TryGetInt32(out var value)) throw new HiringProviderException("CoresignalInvalidResponse");
-        if(value==2) throw new HiringProviderException("CoresignalPrivacyRestricted"); // Never attempt another lookup for this identity.
-        if(value==1) return null;
-        if(value!=0 || !root.TryGetProperty("data",out var data) || data.ValueKind!=JsonValueKind.Object) throw new HiringProviderException("CoresignalInvalidResponse");
-        var email=Text(data,"email");
-        if(!HiringContactPolicy.ProfessionalEmail(email,person.Domain)) return null;
-        var verified=Text(data,"email_status")=="verified";
-        return new(person.FullName,person.FirstName,email,person.Title,person.Department,verified ? "valid" : "unknown",verified ? 95 : 0,
-            null,person.Reference,person.Location,"EmployeeEnrichment",Name);
+        // Field selection may legitimately return an empty object for a record without
+        // stored fields. It supplies no authority to look up an unvalidated identity.
+        if(!root.EnumerateObject().Any()) throw new HiringProviderException("CoresignalEmployeeUnavailable");
+        if(!root.TryGetProperty("id",out var id) || id.ValueKind!=JsonValueKind.Number || !id.TryGetInt64(out var employeeId) ||
+            !root.TryGetProperty("is_deleted",out var deleted) || deleted.ValueKind!=JsonValueKind.Number || !deleted.TryGetInt32(out var isDeleted) ||
+            !root.TryGetProperty("is_working",out var working) || working.ValueKind!=JsonValueKind.Number || !working.TryGetInt32(out var isWorking))
+            throw new HiringProviderException("CoresignalInvalidResponse");
+        if(isDeleted!=0) throw new HiringProviderException("CoresignalPrivacyRestricted");
+        if(employeeId.ToString(CultureInfo.InvariantCulture)!=person.Reference || isWorking!=1 ||
+            Domain(Text(root,"active_experience_company_website"))!=person.Domain ||
+            HiringContactPolicy.Normalize(Text(root,"full_name"))!=HiringContactPolicy.Normalize(person.FullName) ||
+            HiringContactPolicy.Normalize(Text(root,"active_experience_title"))!=HiringContactPolicy.Normalize(person.Title))
+            throw new HiringProviderException("CoresignalIdentityMismatch");
+        // No documented professional email field exists in this response family.
+        // Returning no contact permits the existing bounded same-person Hunter finder,
+        // now only after fresh identity/current-employer validation has succeeded.
+        return null;
     }
 
     private async Task<JsonDocument> SendAsync(HttpRequestMessage request,bool allowArray,CancellationToken ct)
@@ -108,6 +121,7 @@ public sealed partial class CoresignalHiringProvider(IHttpClientFactory clients,
             if(!response.IsSuccessStatusCode) throw new HiringProviderException(response.StatusCode switch {
                 HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden=>"CoresignalConfigurationRequired",
                 HttpStatusCode.PaymentRequired=>"CoresignalQuotaExceeded",HttpStatusCode.TooManyRequests=>"CoresignalRateLimited",
+                HttpStatusCode.NotFound when request.Method==HttpMethod.Get=>"CoresignalEmployeeNotFound",
                 HttpStatusCode.BadRequest or HttpStatusCode.UnprocessableEntity=>"CoresignalInvalidRequest",_=>"CoresignalUnavailable" });
             return await HiringProviderJson.ReadAsync(response,"CoresignalInvalidResponse",deadline.Token,allowArray);
         }

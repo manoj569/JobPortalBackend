@@ -97,7 +97,8 @@ public static class HiringProviderFailures
     public static bool ConfirmedRejection(string code)=>code is "ContactProviderConfiguration" or "ContactProviderRateLimited" or
         "ApolloConfigurationRequired" or "ApolloRateLimited" or "ApolloQuotaExceeded" or "ApolloInvalidRequest" or
         "HunterConfigurationRequired" or "HunterRateLimited" or "HunterQuotaExceeded" or "HunterInvalidRequest" or
-        "CoresignalConfigurationRequired" or "CoresignalRateLimited" or "CoresignalQuotaExceeded" or "CoresignalInvalidRequest" or "CoresignalPrivacyRestricted";
+        "CoresignalConfigurationRequired" or "CoresignalRateLimited" or "CoresignalQuotaExceeded" or "CoresignalInvalidRequest" or "CoresignalPrivacyRestricted" or
+        "CoresignalEmployeeNotFound" or "CoresignalEmployeeUnavailable" or "CoresignalIdentityMismatch";
 }
 public sealed record HiringMailMessage(string From,string To,string Subject,string Body,string FileName,string ContentType,byte[] Attachment,string MessageKey);
 public sealed record HiringMailResult(string State,string? MessageId=null,string? ThreadId=null,string? FailureCode=null);

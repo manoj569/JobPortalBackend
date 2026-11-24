@@ -21,25 +21,43 @@ Reviewed 2026-11-24, without credentials or live search/contact calls:
 - [Pricing](https://docs.coresignal.com/pricing/pricing)
 
 Implemented POST `/cdapi/v2/employee_multi_source/search/es_dsl/preview?page=1` and GET
-`/enrichment/contacts?member_id={employeeId}` on the fixed `api.coresignal.com` host.
+`/cdapi/v2/employee_multi_source/collect/{employee_id}` on the fixed `api.coresignal.com` host.
 Both use the `apikey` header. Preview's documented object fields include `id`, `full_name`,
 `location_full`, `company_website`, `active_experience_title` and
 `active_experience_department`. Provider `_score` never determines CareerHarbor ranking.
 The documented `query` envelope is used; no invented `size` or other root parameters.
 
-Collect `/cdapi/v2/employee_multi_source/collect/{id}` returns fuller profile data;
-profile enrich endpoints resolve profile identities, rather than being substitutes for
-the dedicated business Contact Enrichment endpoint. Neither full collect nor profile
-enrich is called: preview supplies enough current-employer/role metadata for ranking.
-This avoids downloading work history, salaries, interests, personal profiles and other
-unnecessary data. No Base/Clean employee endpoints or Real-time API are activated.
+The numeric Preview `id` is the Employee ID for the matching Multi-source Collect family.
+`/employee_multi_source/enrich` resolves `social_url`, so it is not used for an existing ID.
+Collect requests only `bundle=core_employee_data` and repeated `fields` for `id`, `full_name`,
+`is_deleted`, `is_working`, `active_experience_company_website`, `active_experience_title`.
+No full profile, work history, phone, salary, interests or social profile URLs are requested.
+The returned employee ID/name, current role and employer domain must still match the preview
+identity and job company. Deleted/private, missing, non-working and mismatched employees
+cannot reach same-person Hunter lookup.
+
+**Collect has no published email or email-status fields.** The current public OpenAPI
+`MultiSourceEmployeeResponseModel`, core dictionary and sample contain none. Consequently
+we neither request nor parse guessed fields such as `email`, `emails` or `email_status`.
+After successful collection validation, the existing bounded Hunter finder resolves a
+professional email. This Collect-validation + Hunter-email path was explicitly approved
+by the owner. A usable contact therefore has `Coresignal+Hunter` provenance; collection
+alone does not create a verified contact or prove Coresignal-only email coverage.
+
+The separate `/enrichment/contacts?member_id=...` product remains in the public docs, but
+its cross-product identifier mapping is not established by the Multi-source contract.
+Sending Preview IDs there produced observed HTTP 400s; this does not prove that the
+separate endpoint itself is invalid or establish the precise account-side cause. It is
+no longer called. An account-specific contract or Coresignal support confirmation would
+be needed before adding a different contact-ID mapping; none is guessed here.
 
 Preview is **not free**. It returns up to 20 records per paid query. The configured
 candidate cap limits local processing; it does not reduce the provider's page price.
 No second page, pagination cursor, snapshot or x-total-results value triggers another
 request. Manual operators should verify trial access and current charges in the account.
-Official pricing currently lists 10 credits per contact enrichment, with account-dependent
-preview/record pricing. The trial rate limit is 5 requests/second. Requests in a workflow
+Core-only collection currently costs 10 credits; field selection alone does not reduce
+cost, so the core bundle is selected explicitly. Preview and Hunter costs remain
+account-dependent. The trial rate limit is 5 requests/second. Requests in a workflow
 are sequential with at least 250 ms spacing; this is not a distributed account-wide rate
 limiter. Multiple replicas/probes can still share an account limit. A 429 is not retried.
 
@@ -91,13 +109,16 @@ the ranking. Recruiters/TA/HR and relevant managers outrank ordinary employees. 
 employees are not enriched. Engineering includes embedded/software/.NET, Operations
 includes Trust & Safety/procurement, and remaining existing families stay intact.
 
-Only top ranked identities are enriched, once each, within the configured budget. Two
-strong verified contacts stop later providers/stages. Contact code 1 means not found;
-code 2 means privacy-restricted and never triggers an alternate email lookup for that
-identity. Only an exact employer-domain business email is accepted. `verified` means
-verified; `catch_all` and confidence alone do not. No phone/personal-email requests exist.
+Only top ranked identities are collected, once each, within the unchanged enrichment
+budget. Two strong verified contacts stop later providers/stages. Collect HTTP 404 maps
+to `CoresignalEmployeeNotFound`, without parsing its body or retrying. Empty selected
+records map to `CoresignalEmployeeUnavailable`; private/deleted records map to
+`CoresignalPrivacyRestricted`; identity/employer/role mismatches map to
+`CoresignalIdentityMismatch`. These verified unusable outcomes do not initiate same-person
+email finding and are distinct from ambiguous timeouts/transport failures. HTTP 400/422,
+401/403, 402 and 429 retain invalid-request, configuration, quota and rate-limit codes.
 
-When email is absent, at most two Hunter `/v2/email-finder/found` calls may resolve an exact
+After collection validation, at most two Hunter `/v2/email-finder/found` calls may resolve an exact
 name/domain identity, preserving Coresignal+Hunter provenance. Returned name and domain,
 found provenance and verification must match. No inferred-address patterns are generated.
 Unknown emails may use the existing bounded Hunter verifier. Insufficient contacts use
@@ -155,9 +176,10 @@ Keep candidate display and shared persistence false throughout evaluation. Obtai
 licensing approval before considering a later rollout. No trial-quality claim is possible
 from mocked tests alone.
 
-## Verification
+## Initial trial verification (before the Collect correction)
 
-Automated provider tests use mocked HTTP only. Current-source verification:
+Automated provider tests use mocked HTTP only. Historical results for the initial
+Contact Enrichment implementation, not certification of the subsequent Collect correction:
 
 | Check | Passed | Failed | Skipped |
 |---|---:|---:|---:|
@@ -187,3 +209,33 @@ container was stopped after verification, preserving its data. No live Coresigna
 calls, production mutations, frontend edits, commits, pushes or deployments are authorized
 or performed by this implementation. Mocked success does not verify real India coverage,
 account access or licensing, and skipped fixtures are not integration certification.
+
+## Collect correction verification
+
+The owner approved Collect identity/employer validation followed by Hunter email finding
+because the published Multi-source Collect model contains no email/status fields.
+Current compiled-source results for this correction:
+
+| Check | Passed | Failed | Skipped |
+|---|---:|---:|---:|
+| Coresignal (`hiring-coresignal-collect-focused.trx`) | 64 | 0 | 0 |
+| Hiring multi-provider/outreach/Data Protection (`hiring-coresignal-collect-hiring.trx`) | 222 | 0 | 0 |
+| Wider related regression (`hiring-coresignal-collect-regression.trx`) | 720 | 0 | 10 |
+
+The sequential solution build succeeded with zero warnings and zero errors. EF's compiled
+model check reported no changes. No migration was generated, modified or applied. The
+full application run above predates this correction and was not rerun for this narrow fix.
+The 10 skipped related integration fixtures require separate opt-in database setups.
+
+Added 22 collection/error/validation cases and updated existing provider/admin scenario
+mocks. Tests assert the exact Preview-ID Collect path, six selected fields/core bundle,
+404/402/error mappings, malformed responses, ID/name/role/current-domain/private-record
+guards, unchanged duplicate/budget limits, and verified employer-email acceptance through
+the actual mocked Hunter finder. Undocumented Collect email fields are ignored explicitly.
+
+All provider responses were mocked. Only the existing disposable localhost Hiring database
+was used for its opt-in regression fixtures. No live employee/provider data calls,
+production database commands, frontend changes, commits, pushes or deployment occurred.
+Real email availability remains unverified and can still be zero when Hunter has no
+verified business email for the validated identity. Licensing gates remain disabled by
+default and were not activated by this change.

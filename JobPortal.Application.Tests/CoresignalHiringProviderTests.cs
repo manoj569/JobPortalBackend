@@ -19,6 +19,8 @@ public sealed partial class CoresignalHiringProviderTests
     private static HiringDiscoveryContext Context()=>new("Accenture","accenture.com","Trust & Safety Associate","","Hyderabad");
     private static HttpResponseMessage Json(string value)=>new(HttpStatusCode.OK) { Content=new StringContent(value,Encoding.UTF8,"application/json") };
     private const string Preview="""[{"id":123,"full_name":"Example Recruiter","active_experience_title":"Recruiter","active_experience_department":"HR","company_website":"https://www.accenture.com","location_full":"Hyderabad, India"}]""";
+    private static string Collection(string domain="accenture.com",long id=123,string name="Example Recruiter",string title="Recruiter",int deleted=0,int working=1)=>
+        JsonSerializer.Serialize(new { id,full_name=name,is_deleted=deleted,is_working=working,active_experience_company_website="https://www."+domain,active_experience_title=title });
     private sealed class Handler(Func<HttpRequestMessage,CancellationToken,Task<HttpResponseMessage>> send) : HttpMessageHandler
     {
         public int Calls;
@@ -84,7 +86,7 @@ public sealed partial class CoresignalHiringProviderTests
     public async Task EnrichmentBudgetNeverCollectsEverySearchIdentity()
     {
         var preview=Preview.Replace("]",",{\"id\":124,\"full_name\":\"Second Recruiter\",\"active_experience_title\":\"Recruiter\",\"company_website\":\"accenture.com\"}]",StringComparison.Ordinal);
-        using var handler=new Handler((request,_)=>Task.FromResult(Json(request.Method==HttpMethod.Post ? preview : "{\"code\":1,\"data\":null}"))); using var clients=new Clients(handler);
+        using var handler=new Handler((request,_)=>Task.FromResult(Json(request.Method==HttpMethod.Post ? preview : Collection()))); using var clients=new Clients(handler);
         var settings=Settings(); settings.MaximumEnrichments=1; var provider=Provider(clients,settings); var people=await Search(provider); Assert.Equal(2,people.Length);
         Assert.Null(await provider.EnrichAsync(people[0],Context(),default)); Assert.Null(await provider.EnrichAsync(people[1],Context(),default)); Assert.Equal(2,handler.Calls);
     }
@@ -94,21 +96,23 @@ public sealed partial class CoresignalHiringProviderTests
         using var handler=new Handler((_,_)=>Task.FromResult(Json("""[{"id":1,"full_name":"Other Person","active_experience_title":"Recruiter","company_website":"other.com"},{"id":2,"full_name":"Test Person","headline":"Former Recruiter","company_website":"accenture.com"},{"id":3,"full_name":"T***","active_experience_title":"Recruiter","company_website":"accenture.com"},null]""")));
         using var clients=new Clients(handler); Assert.Empty(await Search(Provider(clients,Settings())));
     }
-    [Theory]
-    [InlineData("verified","valid")]
-    [InlineData("catch_all","unknown")]
-    public async Task ContactEndpointUsesEmployeeIdOnlyAndNeverTreatsCatchAllAsVerified(string status,string expected)
+    [Fact]
+    public async Task CollectUsesPreviewEmployeeIdAndMinimalDocumentedCoreFields()
     {
         using var handler=new Handler((request,_)=>
         {
             if(request.Method==HttpMethod.Post) return Task.FromResult(Json(Preview));
-            Assert.Equal("/enrichment/contacts",request.RequestUri!.AbsolutePath); Assert.Equal("?member_id=123",request.RequestUri.Query);
+            Assert.Equal(HttpMethod.Get,request.Method);
+            Assert.Equal("/cdapi/v2/employee_multi_source/collect/123",request.RequestUri!.AbsolutePath);
+            var query=Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(request.RequestUri.Query);
+            Assert.Equal("core_employee_data",query["bundle"]);
+            Assert.Equal("active_experience_company_website,active_experience_title,full_name,id,is_deleted,is_working",string.Join(',',query["fields"].Order(StringComparer.Ordinal)));
+            Assert.Equal(2,query.Count); Assert.False(query.ContainsKey("member_id")); Assert.True(request.Headers.Contains("apikey"));
             Assert.Null(request.Content); Assert.DoesNotContain("phone",request.RequestUri.ToString(),StringComparison.Ordinal);
-            return Task.FromResult(Json("{\"code\":0,\"data\":{\"email\":\"example@accenture.com\",\"email_status\":\""+status+"\",\"email_confidence\":100}}"));
+            return Task.FromResult(Json(Collection()));
         });
         using var clients=new Clients(handler); var provider=Provider(clients,Settings()); var person=Assert.Single(await Search(provider));
-        var contact=await provider.EnrichAsync(person,Context(),default); Assert.NotNull(contact); Assert.Equal(expected,contact.Verification);
-        Assert.Equal("Coresignal",contact.Provider); Assert.Equal("EmployeeEnrichment",contact.Source);
+        Assert.Null(await provider.EnrichAsync(person,Context(),default)); // The documented Collect model contains no email field.
         Assert.Null(await provider.EnrichAsync(person,Context(),default)); Assert.Equal(2,handler.Calls);
     }
     [Theory]
@@ -143,16 +147,18 @@ public sealed partial class CoresignalHiringProviderTests
     [Fact]
     public async Task PrivacyRestrictedIdentityCannotProceedToAnotherEnrichment()
     {
-        using var handler=new Handler((request,_)=>Task.FromResult(Json(request.Method==HttpMethod.Post ? Preview : "{\"code\":2,\"data\":null}")));
+        using var handler=new Handler((request,_)=>Task.FromResult(Json(request.Method==HttpMethod.Post ? Preview : Collection(deleted:1))));
         using var clients=new Clients(handler); var provider=Provider(clients,Settings()); var person=Assert.Single(await Search(provider));
         Assert.Equal("CoresignalPrivacyRestricted",(await Assert.ThrowsAsync<HiringProviderException>(()=>provider.EnrichAsync(person,Context(),default))).Code);
     }
     [Theory]
+    [InlineData("example@accenture.com")]
     [InlineData("personal@gmail.com")]
     [InlineData("person@other.com")]
-    public async Task ContactEmailMustBelongToCurrentEmployer(string email)
+    public async Task CollectDoesNotInventOrTrustUndocumentedEmailFields(string email)
     {
-        using var handler=new Handler((request,_)=>Task.FromResult(Json(request.Method==HttpMethod.Post ? Preview : "{\"code\":0,\"data\":{\"email\":\""+email+"\",\"email_status\":\"verified\"}}")));
+        var response=Collection()[..^1]+",\"email\":\""+email+"\",\"email_status\":\"verified\"}";
+        using var handler=new Handler((request,_)=>Task.FromResult(Json(request.Method==HttpMethod.Post ? Preview : response)));
         using var clients=new Clients(handler); var provider=Provider(clients,Settings()); var person=Assert.Single(await Search(provider)); Assert.Null(await provider.EnrichAsync(person,Context(),default));
     }
     [Fact]
