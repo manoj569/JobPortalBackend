@@ -83,9 +83,13 @@ public interface IHiringPersonProvider : IHiringPersonDiscoveryProvider,IHiringC
 }
 public interface IHiringProfessionalEmailFinder
 {
+    string Name=>"Hunter";
+    bool AllowCandidateDisplay=>true;
     bool IsAvailable { get; }
     Task<HiringProviderContact?> FindAsync(HiringPersonIdentity person,CancellationToken ct);
+    async Task<HiringEmailFindingResult> FindResultAsync(HiringPersonIdentity person,bool diagnostic,CancellationToken ct)=>new(await FindAsync(person,ct),false,[]);
 }
+public sealed record HiringEmailFindingResult(HiringProviderContact? Contact,bool Uncertain,IReadOnlyList<string> Failures);
 public interface IHiringEmailVerificationProvider
 {
     bool IsAvailable { get; }
@@ -98,7 +102,9 @@ public static class HiringProviderFailures
         "ApolloConfigurationRequired" or "ApolloRateLimited" or "ApolloQuotaExceeded" or "ApolloInvalidRequest" or
         "HunterConfigurationRequired" or "HunterRateLimited" or "HunterQuotaExceeded" or "HunterInvalidRequest" or
         "CoresignalConfigurationRequired" or "CoresignalRateLimited" or "CoresignalQuotaExceeded" or "CoresignalInvalidRequest" or "CoresignalPrivacyRestricted" or
-        "CoresignalEmployeeNotFound" or "CoresignalEmployeeUnavailable" or "CoresignalIdentityMismatch";
+        "CoresignalEmployeeNotFound" or "CoresignalEmployeeUnavailable" or "CoresignalIdentityMismatch" or
+        "ProspeoConfigurationRequired" or "ProspeoInvalidRequest" or "ProspeoRateLimited" or "ProspeoQuotaExceeded" or
+        "SnovConfigurationRequired" or "SnovInvalidRequest" or "SnovRateLimited" or "SnovQuotaExceeded";
 }
 public sealed record HiringMailMessage(string From,string To,string Subject,string Body,string FileName,string ContentType,byte[] Attachment,string MessageKey);
 public sealed record HiringMailResult(string State,string? MessageId=null,string? ThreadId=null,string? FailureCode=null);

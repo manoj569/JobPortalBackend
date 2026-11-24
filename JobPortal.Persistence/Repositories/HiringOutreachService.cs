@@ -22,13 +22,18 @@ namespace JobPortal.Persistence.Repositories;
 public sealed partial class HiringOutreachService(JobPortalDbContext db,IOptions<HiringOutreachOptions> options,
     IHiringContactProvider contacts,IHiringMailboxProvider google,IHiringCredentialProtector protector,
     IResumeStorage resumes,IResumeTextExtractor resumeText,IAuditWriter audit,IAIApplyLanguageModel ai,TimeProvider clock,ILogger<HiringOutreachService> logger,
-    IHiringSharedContactProtector? sharedProtection=null,IOptions<CoresignalHiringOptions>? coresignalOptions=null) : IHiringOutreachService
+    IHiringSharedContactProtector? sharedProtection=null,IOptions<CoresignalHiringOptions>? coresignalOptions=null,
+    IOptions<ProspeoHiringOptions>? prospeoOptions=null,IOptions<SnovHiringOptions>? snovOptions=null) : IHiringOutreachService
 {
     private static readonly SemaphoreSlim TestGate=new(1,1);
     private const long LockKey=0x484952494E474D41;
     private HiringOutreachOptions Limits=>options.Value;
     private CoresignalHiringOptions Coresignal=>coresignalOptions?.Value ?? DisabledCoresignal;
     private static readonly CoresignalHiringOptions DisabledCoresignal=new();
+    private static readonly ProspeoHiringOptions DisabledProspeo=new();
+    private static readonly SnovHiringOptions DisabledSnov=new();
+    private bool CanDisplay(string provider)=>Coresignal.CanDisplay(provider) && (prospeoOptions?.Value ?? DisabledProspeo).CanDisplay(provider,"Prospeo") && (snovOptions?.Value ?? DisabledSnov).CanDisplay(provider,"Snov");
+    private bool CanShare(string provider)=>Coresignal.CanShare(provider) && (prospeoOptions?.Value ?? DisabledProspeo).CanShare(provider,"Prospeo") && (snovOptions?.Value ?? DisabledSnov).CanShare(provider,"Snov");
     private DateTime Now=>clock.GetUtcNow().UtcDateTime;
     private IQueryable<HiringOutreachSession> Sessions=>db.Set<HiringOutreachSession>();
     private IQueryable<HiringOutreachSend> Sends=>db.Set<HiringOutreachSend>();
@@ -132,7 +137,7 @@ public sealed partial class HiringOutreachService(JobPortalDbContext db,IOptions
             }
             catch(HiringProviderException ex) { error=ex.Code; }
             catch(Exception ex) when(ex is HttpRequestException or OperationCanceledException or JsonException) { error="DiscoveryOutcomeUnknown"; }
-            var providerUsable=HiringContactPolicy.Select(found.Where(x=>Coresignal.CanDisplay(x.Provider)),Context(session),Limits);
+            var providerUsable=HiringContactPolicy.Select(found.Where(x=>CanDisplay(x.Provider)),Context(session),Limits);
             await Write(async ()=>
             {
                 var current=await Owned(actor,plan.Id,CancellationToken.None);
@@ -182,7 +187,7 @@ public sealed partial class HiringOutreachService(JobPortalDbContext db,IOptions
     private async Task<HiringContact[]> ContactDtos(Guid id,CancellationToken ct)
     {
         var rows=await db.Set<HiringOutreachContact>().AsNoTracking().Where(x=>x.SessionId==id).OrderBy(x=>x.Rank).ThenBy(x=>x.Id).ToArrayAsync(ct);
-        return rows.Where(x=>Coresignal.CanDisplay(x.Provider))
+        return rows.Where(x=>CanDisplay(x.Provider))
         .Select(x=>new HiringContact(x.Id,x.FullName,x.Title,x.Department,x.Type,x.Email,x.Verification,x.Confidence,x.LinkedInUrl,
             x.Type!="TeamMember" && (x.MatchScore>=70 || x.Type=="Recruiter" || x.Type=="TalentAcquisition"),x.Location,x.Provider=="" ? "Legacy" : x.Provider+":"+x.Source,x.MatchScore,
             x.Type=="TeamMember" || x.Type=="Other" ? "Relevant team contact; hiring responsibility is not established." :
@@ -337,7 +342,7 @@ public sealed partial class HiringOutreachService(JobPortalDbContext db,IOptions
             if(session.ExpiresAtUtc<=Now) throw new ConflictException("Discovery expired; refresh contacts before sending.");
             var allowed=JsonSerializer.Deserialize<Guid[]>(draft.RecipientIdsJson) ?? [];
             var recipients=await db.Set<HiringOutreachContact>().Where(x=>x.SessionId==sessionId && request.RecipientIds.Contains(x.Id)).ToArrayAsync(ct);
-            if(recipients.Length!=request.RecipientIds.Count || request.RecipientIds.Except(allowed).Any() || recipients.Any(x=>!Coresignal.CanDisplay(x.Provider) || !HiringContactPolicy.Verified(x.Verification,x.Confidence,Limits))) throw new BadRequestException("Recipient is not approved for this draft.");
+            if(recipients.Length!=request.RecipientIds.Count || request.RecipientIds.Except(allowed).Any() || recipients.Any(x=>!CanDisplay(x.Provider) || !HiringContactPolicy.Verified(x.Verification,x.Confidence,Limits))) throw new BadRequestException("Recipient is not approved for this draft.");
             var mailbox=await ActiveMailbox(actor,ct) ?? throw new AppException("Reconnect Gmail before sending.",409,"ReconnectGmailRequired");
             if(!google.IsAvailable) throw new AppException("Gmail sending is unavailable.",503,"gmail_unavailable");
             var emails=recipients.Select(x=>x.Email).ToArray();

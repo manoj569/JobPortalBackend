@@ -78,6 +78,10 @@ public static class ServiceCollectionExtensions
             .Validate(value=>value.IsValid(),"Invalid Apollo hiring configuration.").ValidateOnStart();
         services.AddOptions<JobPortal.Application.Features.HiringOutreach.CoresignalHiringOptions>().Bind(configuration.GetSection("HiringOutreach:Coresignal"))
             .Validate(value=>value.IsValid(),"Invalid Coresignal hiring configuration.").ValidateOnStart();
+        services.AddOptions<JobPortal.Application.Features.HiringOutreach.ProspeoHiringOptions>().Bind(configuration.GetSection("HiringOutreach:Prospeo"))
+            .Validate(value=>value.IsValid(),"Invalid Prospeo configuration.").ValidateOnStart();
+        services.AddOptions<JobPortal.Application.Features.HiringOutreach.SnovHiringOptions>().Bind(configuration.GetSection("HiringOutreach:Snov"))
+            .Validate(value=>value.IsValid(),"Invalid Snov configuration.").ValidateOnStart();
         services.Configure<JobPortal.Infrastructure.HiringOutreach.GoogleHiringOptions>(configuration.GetSection("HiringOutreach:Google"));
         services.AddHttpClient(JobPortal.Infrastructure.HiringOutreach.HunterEmployerContactProvider.ClientName,c=>c.Timeout=TimeSpan.FromSeconds(20))
             .ConfigurePrimaryHttpMessageHandler(()=>new SocketsHttpHandler { AllowAutoRedirect=false,UseCookies=false }).RemoveAllLoggers();
@@ -95,7 +99,14 @@ public static class ServiceCollectionExtensions
         services.AddScoped<JobPortal.Application.Features.HiringOutreach.IHiringContactEnrichmentProvider>(sp=>sp.GetRequiredService<JobPortal.Infrastructure.HiringOutreach.ApolloHiringProvider>());
         services.AddScoped<JobPortal.Application.Features.HiringOutreach.IHiringEmailVerificationProvider,JobPortal.Infrastructure.HiringOutreach.HunterHiringEmailVerifier>();
         services.AddScoped<JobPortal.Application.Features.HiringOutreach.IHiringFallbackContactProvider,JobPortal.Infrastructure.HiringOutreach.HunterEmployerContactProvider>();
-        services.AddScoped<JobPortal.Application.Features.HiringOutreach.IHiringProfessionalEmailFinder,JobPortal.Infrastructure.HiringOutreach.HunterHiringProfessionalEmailFinder>();
+        services.AddHttpClient(JobPortal.Infrastructure.HiringOutreach.ProspeoHiringProfessionalEmailFinder.ClientName,c=>c.Timeout=TimeSpan.FromSeconds(25))
+            .ConfigurePrimaryHttpMessageHandler(()=>new SocketsHttpHandler { AllowAutoRedirect=false,UseCookies=false }).RemoveAllLoggers();
+        services.AddHttpClient(JobPortal.Infrastructure.HiringOutreach.SnovHiringProfessionalEmailFinder.ClientName,c=>c.Timeout=TimeSpan.FromSeconds(25))
+            .ConfigurePrimaryHttpMessageHandler(()=>new SocketsHttpHandler { AllowAutoRedirect=false,UseCookies=false }).RemoveAllLoggers();
+        services.AddScoped<JobPortal.Infrastructure.HiringOutreach.ProspeoHiringProfessionalEmailFinder>();
+        services.AddScoped<JobPortal.Infrastructure.HiringOutreach.SnovHiringProfessionalEmailFinder>();
+        services.AddScoped<JobPortal.Infrastructure.HiringOutreach.HunterHiringProfessionalEmailFinder>();
+        services.AddScoped<JobPortal.Application.Features.HiringOutreach.IHiringProfessionalEmailFinder,JobPortal.Infrastructure.HiringOutreach.HiringProfessionalEmailWaterfall>();
         services.AddScoped<JobPortal.Infrastructure.HiringOutreach.HiringProviderOrchestrator>();
         services.AddScoped<JobPortal.Application.Features.HiringOutreach.IHiringContactProvider>(sp=>sp.GetRequiredService<JobPortal.Infrastructure.HiringOutreach.HiringProviderOrchestrator>());
         services.AddScoped<JobPortal.Application.Features.HiringOutreach.IHiringProviderDiagnostics,JobPortal.Infrastructure.HiringOutreach.HiringProviderDiagnostics>();

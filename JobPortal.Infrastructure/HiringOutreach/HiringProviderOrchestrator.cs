@@ -65,7 +65,10 @@ public sealed partial class HiringProviderOrchestrator(IHiringPersonDiscoveryPro
                         {
                             var contact=await source.Enrichment.EnrichAsync(candidate.Person,context,token);
                             if(contact is null && candidate.Person.Provider=="Coresignal" && finder is { IsAvailable:true } && finds<2)
-                            { finds++; contact=await finder.FindAsync(candidate.Person,token); }
+                            {
+                                finds++; var emailResult=await finder.FindResultAsync(candidate.Person,observe is not null,token);
+                                contact=emailResult.Contact; uncertain|=emailResult.Uncertain; failures.AddRange(emailResult.Failures);
+                            }
                             if(contact is null) continue;
                             if(contact.Verification!="valid" && verification.IsAvailable && verifications<Math.Clamp(verification.MaximumRequests,0,2))
                             { verifications++; contact=await verification.VerifyAsync(contact,token); }

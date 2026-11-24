@@ -44,11 +44,11 @@ public sealed partial class HiringOutreachService
         var usable=new List<(HiringContactIntelligence Row,HiringProviderContact Person,int Score)>();
         foreach(var row in rows)
         {
-            if(!Coresignal.CanShare(row.Provider)) continue;
+            if(!CanShare(row.Provider)) continue;
             try
             {
                 var person=JsonSerializer.Deserialize<HiringProviderContact>(sharedProtection.Unprotect(session.CompanyDomain,row.ProtectedContact));
-                if(person is null || !Coresignal.CanShare(person.Provider) || person.Verification!="valid" || Hash(person.Email.Trim().ToLowerInvariant())!=row.EmailHash || !HiringContactPolicy.ProfessionalEmail(person.Email,session.CompanyDomain)) continue;
+                if(person is null || !CanShare(person.Provider) || person.Verification!="valid" || Hash(person.Email.Trim().ToLowerInvariant())!=row.EmailHash || !HiringContactPolicy.ProfessionalEmail(person.Email,session.CompanyDomain)) continue;
                 var score=HiringContactPolicy.Score(person,Context(session));
                 if(score>=Limits.SharedContacts.MinimumScore) usable.Add((row,person,score));
             }
@@ -72,7 +72,7 @@ public sealed partial class HiringOutreachService
     private async Task StoreSharedContacts(HiringOutreachSession session,IReadOnlyList<HiringProviderContact> selected,CancellationToken ct)
     {
         if(!Limits.SharedContacts.Enabled || sharedProtection is null) return;
-        foreach(var person in selected.Where(x=>x.Verification=="valid" && Coresignal.CanShare(x.Provider)))
+        foreach(var person in selected.Where(x=>x.Verification=="valid" && CanShare(x.Provider)))
         {
             var hash=Hash(person.Email.Trim().ToLowerInvariant());
             var row=await db.Set<HiringContactIntelligence>().IgnoreQueryFilters().SingleOrDefaultAsync(x=>x.CompanyDomain==session.CompanyDomain && x.EmailHash==hash,ct);

@@ -19,7 +19,7 @@ public sealed class CoresignalHiringOptions
 
 public sealed record HiringProviderProbeRequest(string CompanyName,string CompanyDomain,string JobTitle,string Location,bool ConfirmProviderCreditUse=false);
 // Deliberately excludes names, IDs, profile URLs and email. Diagnostic data is not persisted.
-public sealed record HiringProviderProbeContact(string Title,string Location,string CompanyDomain,string ContactType,int MatchScore,bool ContactAvailable);
+public sealed record HiringProviderProbeContact(string Title,string Location,string CompanyDomain,string ContactType,int MatchScore,bool ContactAvailable,string EmailProvider="");
 public sealed record HiringProviderProbeResult(string Provider,string State,int IdentityCount,int RelevantCount,int ContactCount,
     IReadOnlyList<HiringProviderProbeContact> Matches,IReadOnlyList<string> Failures);
 public interface IHiringProviderDiagnostics

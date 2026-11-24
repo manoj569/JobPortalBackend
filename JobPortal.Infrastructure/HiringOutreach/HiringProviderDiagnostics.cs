@@ -24,7 +24,8 @@ public sealed class HiringProviderDiagnostics(CoresignalHiringProvider coresigna
             var result=await orchestrator.DiscoverForDiagnosticAsync(context,coresignal,identities.Add,ct);
             var relevant=identities.DistinctBy(x=>x.Reference).Select(x=>new HiringProviderProbeContact(x.Title,x.Location,x.Domain,HiringContactPolicy.ContactRole(x.Title),
                 HiringContactPolicy.Score(new(x.FullName,x.FirstName,"",x.Title,x.Department,"unknown",0,null,x.Reference,x.Location,"EmployeeSearch","Coresignal"),context),
-                result.Contacts.Any(c=>CoresignalHiringOptions.IsDerived(c.Provider) && c.Reference==x.Reference)))
+                result.Contacts.Any(c=>CoresignalHiringOptions.IsDerived(c.Provider) && c.Reference==x.Reference),
+                result.Contacts.FirstOrDefault(c=>CoresignalHiringOptions.IsDerived(c.Provider) && c.Reference==x.Reference)?.Provider.Split('+').LastOrDefault() ?? ""))
                 .Where(x=>x.MatchScore>0).OrderByDescending(x=>x.MatchScore).ToArray();
             await Audit(administrator,result.Uncertain ? "Uncertain" : "Completed",CancellationToken.None);
             return new("Coresignal",result.Uncertain ? "Uncertain" : "Completed",identities.Count,relevant.Length,result.Contacts.Count,relevant.Take(20).ToArray(),result.Failures ?? []);
