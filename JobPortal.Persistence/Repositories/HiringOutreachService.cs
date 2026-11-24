@@ -21,7 +21,8 @@ namespace JobPortal.Persistence.Repositories;
 
 public sealed partial class HiringOutreachService(JobPortalDbContext db,IOptions<HiringOutreachOptions> options,
     IHiringContactProvider contacts,IHiringMailboxProvider google,IHiringCredentialProtector protector,
-    IResumeStorage resumes,IResumeTextExtractor resumeText,IAuditWriter audit,IAIApplyLanguageModel ai,TimeProvider clock,ILogger<HiringOutreachService> logger) : IHiringOutreachService
+    IResumeStorage resumes,IResumeTextExtractor resumeText,IAuditWriter audit,IAIApplyLanguageModel ai,TimeProvider clock,ILogger<HiringOutreachService> logger,
+    IHiringSharedContactProtector? sharedProtection=null) : IHiringOutreachService
 {
     private static readonly SemaphoreSlim TestGate=new(1,1);
     private const long LockKey=0x484952494E474D41;
@@ -73,6 +74,7 @@ public sealed partial class HiringOutreachService(JobPortalDbContext db,IOptions
         var started=Stopwatch.GetTimestamp();
         await Candidate(actor,ct);
         if(request.RequestKey==Guid.Empty || request.JobId==Guid.Empty) throw new BadRequestException("Job and request key are required.");
+        IReadOnlyList<HiringProviderContact> cachedContacts=[];
         var plan=await Write(async ()=>
         {
             var replay=await db.Set<HiringOutreachDiscoveryRequest>().SingleOrDefaultAsync(x=>x.CandidateId==actor && x.RequestKey==request.RequestKey,ct);
@@ -88,14 +90,25 @@ public sealed partial class HiringOutreachService(JobPortalDbContext db,IOptions
             var s=new HiringOutreachSession { CandidateId=actor,JobId=job.Id,CompanyId=job.CompanyId,RequestKey=request.RequestKey,
                 CompanyName=Bound(job.Company.Name,300),CompanyDomain=domain,JobTitle=Bound(job.Title,300),JobDescription=Bound(string.Join('\n',new[]{job.Description,job.Requirements,job.Responsibilities}.Where(x=>!string.IsNullOrWhiteSpace(x))),20000),
                 Location=Bound(job.Location ?? "",500),Department=Bound(job.Department ?? "",200),Provider=contacts.Name,ExpiresAtUtc=Now.AddDays(Limits.CacheDays) };
+            var shared=domain.Length>0 ? await SharedContacts(s,ct) : [];
+            cachedContacts=shared;
             if(domain.Length==0) { s.State="NoContactsFound"; s.FailureCode="CompanyDomainUnresolved"; }
+            else if(shared.Count>=Math.Min(Limits.SharedContacts.MinimumContacts,Limits.MaximumContacts))
+            {
+                s.State="Found"; s.Provider="CareerHarborCache";
+                s.AllowanceSource=await AllowanceSource(actor,ct);
+                AddContacts(s.Id,shared); s.UsageState="NotReserved";
+            }
             else if(!contacts.IsAvailable) { s.State="ProviderUnavailable"; s.FailureCode="ContactProviderUnavailable"; }
             else if(await Remaining(actor,ct)==0) { s.State="QuotaExceeded"; s.FailureCode="DiscoveryQuotaExceeded"; }
+            // Released candidate credits must not create an unlimited provider-cost loop.
+            // Cache hits above bypass this independent attempt ceiling; soft deletes cannot reset it.
+            else if(await Sessions.IgnoreQueryFilters().CountAsync(x=>x.CandidateId==actor && x.DispatchedAtUtc>=Now.Date,ct)>=Limits.DailyDiscoveries)
+            { s.State="ProviderUnavailable"; s.FailureCode="DiscoveryProviderDailyLimit"; }
             else
             {
-                var previous=await db.Set<HiringOutreachSession>().IgnoreQueryFilters().CountAsync(x=>x.CandidateId==actor && x.DispatchedAtUtc!=null && x.UsageState!="Released",ct);
-                var plans=await db.Memberships.AsNoTracking().Where(x=>x.UserId==actor && x.Status==MembershipStatus.Active && x.StartsAtUtc<=Now && (x.EndsAtUtc==null || x.EndsAtUtc>Now)).Select(x=>x.PlanCode).ToArrayAsync(ct);
-                s.AllowanceSource=previous<Limits.PromotionalLifetimeDiscoveries ? "Promotion" : plans.OrderByDescending(x=>Limits.PlanMonthlyDiscoveries.GetValueOrDefault(x)).First(x=>Limits.PlanMonthlyDiscoveries.GetValueOrDefault(x)>0);
+                s.AllowanceSource=await AllowanceSource(actor,ct);
+                await ClaimSharedDiscovery(s,ct);
                 s.DispatchedAtUtc=Now; s.UsageState="Reserved";
             }
             db.Add(s); await Audit(actor,s.Id,s.DispatchedAtUtc.HasValue ? "DiscoveryReservedAndDispatched" : s.State,ct);
@@ -105,21 +118,32 @@ public sealed partial class HiringOutreachService(JobPortalDbContext db,IOptions
         if(plan.Item2)
         {
             var session=await Owned(actor,plan.Id,ct); IReadOnlyList<HiringProviderContact> found=[]; string? error=null;
-            try { found=await contacts.DiscoverAsync(new(session.CompanyName,session.CompanyDomain,session.JobTitle,session.Department),ct); }
+            try { found=await contacts.DiscoverAsync(Context(session),ct); }
             catch(HiringProviderException ex) { error=ex.Code; }
             catch(Exception ex) when(ex is HttpRequestException or OperationCanceledException or JsonException) { error="DiscoveryOutcomeUnknown"; }
-            var ranked=HiringContactPolicy.Select(found,session.CompanyDomain,session.JobTitle,session.Department,Limits);
+            var providerUsable=HiringContactPolicy.Select(found,Context(session),Limits);
             await Write(async ()=>
             {
                 var current=await Owned(actor,plan.Id,CancellationToken.None);
                 if(current.State!="Searching") return false;
-                var rank=0;
-                foreach(var item in ranked) db.Add(new HiringOutreachContact { SessionId=current.Id,Rank=rank++,FullName=item.FullName,FirstName=item.FirstName,Email=item.Email,
-                    Title=item.Title,Department=item.Department,Type=HiringContactPolicy.Type(item.Title),Verification=item.Verification,Confidence=item.Confidence,
-                    LinkedInUrl=item.LinkedInUrl,ProviderReference=item.Reference,VerifiedAtUtc=Now });
+                var permitted=await UnsuppressedContacts(current,providerUsable.Concat(cachedContacts),CancellationToken.None);
+                var permittedEmails=permitted.Select(x=>x.Email).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                providerUsable=providerUsable.Where(x=>permittedEmails.Contains(x.Email)).ToArray();
+                var ranked=HiringContactPolicy.Select(permitted,Context(current),Limits);
+                AddContacts(current.Id,ranked);
+                if(error is null) await StoreSharedContacts(current,providerUsable,CancellationToken.None);
                 current.State=error is null ? ranked.Count>0 ? "Found" : "NoContactsFound" : "ProviderUnavailable";
                 current.FailureCode=error; current.Revision=Guid.NewGuid(); await Audit(actor,current.Id,current.State,CancellationToken.None);
-                current.UsageState=error is null ? "Consumed" : error is "ContactProviderConfiguration" or "ContactProviderRateLimited" ? "Released" : "Uncertain";
+                current.UsageState=error is null ? providerUsable.Count>0 ? "Consumed" : "Released" : error is "ContactProviderConfiguration" or "ContactProviderRateLimited" ? "Released" : "Uncertain";
+                await ReleaseSharedDiscovery(current,current.UsageState=="Uncertain",CancellationToken.None);
+                DiscoveryDiagnostics(logger,found.Count,ranked.Count,true);
+                if(logger.IsEnabled(LogLevel.Information))
+                {
+                    var professional=found.Where(x=>HiringContactPolicy.ProfessionalEmail(x.Email,current.CompanyDomain)).ToArray();
+                    var verified=professional.Where(x=>HiringContactPolicy.Verified(x.Verification.ToLowerInvariant(),x.Confidence,Limits)).ToArray();
+                    var relevant=verified.Count(x=>HiringContactPolicy.Score(x,Context(current))>0);
+                    ProviderDiagnostics(logger,found.Count,professional.Length,verified.Length,relevant,ranked.Count);
+                }
                 await Audit(actor,current.Id,"DiscoveryUsage:"+current.UsageState,CancellationToken.None);
                 var elapsed=Stopwatch.GetElapsedTime(started).TotalMilliseconds;
                 Outcome(logger,"discovery",current.Id,actor,current.JobId,contacts.Name,current.State,ranked.Count,elapsed); return true;
@@ -134,7 +158,7 @@ public sealed partial class HiringOutreachService(JobPortalDbContext db,IOptions
         var found=await ContactDtos(sessionId,ct);
         var stale=s.State=="Searching" && s.DispatchedAtUtc<Now.AddMinutes(-2);
         var state=stale ? "ProviderUnavailable" : s.State=="Sending" && s.UpdatedAtUtc<Now.AddMinutes(-2) ? "SendingUnresolved" : s.State;
-        return new(s.Id,state,s.JobId,s.JobTitle,s.CompanyName,s.CompanyDomain,found,await MailboxAsync(actor,ct),new(s.DispatchedAtUtc.HasValue && s.UsageState!="Released",await Remaining(actor,ct)),stale ? "DiscoveryOutcomeUnknown" : s.FailureCode);
+        return new(s.Id,state,s.JobId,s.JobTitle,s.CompanyName,s.CompanyDomain,found,await MailboxAsync(actor,ct),new(s.DispatchedAtUtc.HasValue && s.UsageState!="Released",await Remaining(actor,ct)),stale ? "DiscoveryOutcomeUnknown" : s.FailureCode,s.Provider);
     }
     public async Task<IReadOnlyList<HiringSession>> HistoryAsync(Guid actor,int page,int pageSize,CancellationToken ct)
     {
@@ -379,6 +403,7 @@ public sealed partial class HiringOutreachService(JobPortalDbContext db,IOptions
     {
         if(string.IsNullOrWhiteSpace(value) || !Uri.TryCreate(value.Contains("://",StringComparison.Ordinal) ? value : "https://"+value,UriKind.Absolute,out var uri) ||
             uri.HostNameType!=UriHostNameType.Dns || !uri.Host.Contains('.') || uri.IsLoopback || uri.UserInfo.Length>0) return "";
-        var host=uri.IdnHost.ToLowerInvariant(); return host.StartsWith("www.",StringComparison.Ordinal) ? host[4..] : host;
+        var host=uri.IdnHost.ToLowerInvariant(); host=host.StartsWith("www.",StringComparison.Ordinal) ? host[4..] : host;
+        return HiringContactPolicy.ProfessionalDomain(host) ? host : "";
     }
 }

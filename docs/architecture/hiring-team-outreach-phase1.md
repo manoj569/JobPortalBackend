@@ -50,19 +50,22 @@ or Accelerator allowance is created. Discovery records are the feature's durable
 reservations; global counts include soft-deleted reservations to prevent quota resetting.
 
 Credits are reserved before external discovery. Verified 401/403/configuration or 429
-rejections release them. Completed searches consume them; timeouts/unknown outcomes retain
+rejections release them. Confirmed searches consume them only when usable provider contacts
+are returned; confirmed zero usable results release them. Timeouts/unknown outcomes retain
 an uncertain reservation. Same-candidate+job discoveries reuse successful results for the
 configured TTL (including after sending), without another provider call or charge. Cache
-reuse across candidates/companies is deliberately not enabled without licensed reuse policy.
+reuse across candidates is now available through the disabled-by-default shared intelligence
+license gate. It requires the same trusted company/domain and fresh verified relevance.
+See [shared intelligence operations](hiring-shared-contact-intelligence.md).
 Expired/crashed requests are not blindly redispatched. Support must investigate durable
 unresolved records; no manual-resolution API that assumes delivery exists in this release.
 
 ## Provider behavior
 
 Hunter uses the fixed official domain-search API, trusted stored company domain/website,
-at most ten fetched records per search, bounded responses and no automatic paid retries. Missing official domain fails closed;
+up to four targeted stages of twenty records, bounded responses and no automatic paid retries. Missing official domain fails closed;
 no guessed domains or LinkedIn scraping. Results are normalized, ranked, deduplicated by
-email and limited to five; invalid and cross-domain emails are rejected. Unknown/catch-all
+email and limited to four (also respecting MaximumContacts); invalid and cross-domain emails are rejected. Unknown/catch-all
 contacts are disabled by default and require explicit configuration and high confidence.
 LinkedIn URLs can only come from the licensed provider and must be HTTPS profile URLs.
 
@@ -125,7 +128,7 @@ cannot redirect to arbitrary hosts.
 Only the configured fixed return URI is used, never a request-supplied redirect URL.
 HTTPS is required outside loopback. Never reuse Google login client tokens as mailbox tokens.
 Reverse proxies/APM must redact callback query strings (code/state), Authorization headers,
-cookies, OAuth handshake tickets, token POST bodies and Hunter query API keys. Named provider HttpClients remove
+cookies, OAuth handshake tickets, token POST bodies and Hunter authentication headers. Named provider HttpClients remove
 their request loggers; existing API request logging logs paths, not callback query values.
 
 Limits are configuration-driven: `CacheDays` (7), `MaximumContacts` (5),

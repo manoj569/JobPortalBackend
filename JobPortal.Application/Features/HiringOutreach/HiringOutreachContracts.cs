@@ -15,11 +15,21 @@ public sealed class HiringOutreachOptions
     public bool AllowUnverifiedContacts { get; set; }
     public int MinimumUnverifiedConfidence { get; set; } = 90;
     public bool AiDraftingEnabled { get; set; }
+    public HiringSharedContactOptions SharedContacts { get; set; } = new();
     public bool IsValid() => CacheDays is >=1 and <=30 && MaximumContacts is >=1 and <=5 &&
         PromotionalLifetimeDiscoveries is >=0 and <=10 && DailyDiscoveries is >=1 and <=20 &&
         DailySends is >=1 and <=20 && MonthlySends is >=1 and <=100 &&
         MaximumAttachmentBytes is >=1024 and <=10*1024*1024 && MinimumUnverifiedConfidence is >=85 and <=100 &&
-        PlanMonthlyDiscoveries.All(x=>x.Key.Length is >0 and <=80 && x.Value is >=0 and <=100);
+        SharedContacts.IsValid() && PlanMonthlyDiscoveries.All(x=>x.Key.Length is >0 and <=80 && x.Value is >=0 and <=100);
+}
+public sealed class HiringSharedContactOptions
+{
+    // Enable only after confirming the provider contract permits persisted cross-candidate reuse.
+    public bool Enabled { get; set; }
+    public int CacheDays { get; set; } = 30;
+    public int MinimumContacts { get; set; } = 2;
+    public int MinimumScore { get; set; } = 70;
+    public bool IsValid()=>CacheDays is >=1 and <=90 && MinimumContacts is >=1 and <=4 && MinimumScore is >=50 and <=150;
 }
 public sealed record DiscoverHiringTeamRequest(Guid JobId,Guid RequestKey);
 public sealed record HiringContact(Guid Id,string Name,string Title,string Department,string Type,string WorkEmail,string VerificationStatus,int Confidence,string? LinkedInUrl,bool Recommended);
@@ -27,7 +37,7 @@ public sealed record HiringMailbox(bool Connected,string Provider,string? Email)
 public sealed record HiringResume(Guid Id,string FileName,bool IsDefault);
 public sealed record HiringUsage(bool Charged,int Remaining);
 public sealed record HiringSession(Guid SessionId,string State,Guid JobId,string JobTitle,string CompanyName,string CompanyDomain,
-    IReadOnlyList<HiringContact> Contacts,HiringMailbox Mailbox,HiringUsage Usage,string? FailureCode);
+    IReadOnlyList<HiringContact> Contacts,HiringMailbox Mailbox,HiringUsage Usage,string? FailureCode,string Source="");
 public sealed record HiringDraftRequest(IReadOnlyList<Guid> RecipientIds,Guid ResumeId);
 public sealed record HiringDraft(Guid Id,Guid SessionId,HiringMailbox From,IReadOnlyList<HiringContact> Recipients,string Subject,string Body,HiringResume Resume,bool Editable,string Source);
 public sealed record HiringSendRequest(Guid DraftId,IReadOnlyList<Guid> RecipientIds,string Subject,string Body,Guid ResumeId,Guid RequestKey);
@@ -39,8 +49,8 @@ public sealed record HiringOAuthStart(string AuthorizationUrl,string BrowserBind
 public sealed record HiringOAuthGrant(string AccountId,string Email,string RefreshToken,string Scopes);
 public sealed record HiringOAuthChallenge(string Url,string Verifier);
 public sealed record HiringProviderContact(string FullName,string FirstName,string Email,string Title,string Department,
-    string Verification,int Confidence,string? LinkedInUrl,string Reference);
-public sealed record HiringDiscoveryContext(string Company,string Domain,string JobTitle,string Department);
+    string Verification,int Confidence,string? LinkedInUrl,string Reference,string Location="",string Source="DomainSearch");
+public sealed record HiringDiscoveryContext(string Company,string Domain,string JobTitle,string Department,string Location="",string Description="");
 // Rich job-context and attachment contracts are separate from the legacy Accelerator-only adapters.
 // They never activate the Accelerator feature or use the transactional email sender.
 public interface IHiringContactProvider
@@ -63,6 +73,11 @@ public interface IHiringCredentialProtector
 {
     string Protect(Guid owner,string secret);
     string Unprotect(Guid owner,string secret);
+}
+public interface IHiringSharedContactProtector
+{
+    string Protect(string domain,string value);
+    string Unprotect(string domain,string value);
 }
 public interface IHiringOutreachService
 {

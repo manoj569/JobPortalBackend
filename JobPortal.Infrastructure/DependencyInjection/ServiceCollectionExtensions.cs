@@ -81,6 +81,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<JobPortal.Application.Features.HiringOutreach.IHiringContactProvider,JobPortal.Infrastructure.HiringOutreach.HunterEmployerContactProvider>();
         services.AddScoped<JobPortal.Application.Features.HiringOutreach.IHiringMailboxProvider,JobPortal.Infrastructure.HiringOutreach.GoogleCandidateMailboxProvider>();
         services.AddSingleton<JobPortal.Application.Features.HiringOutreach.IHiringCredentialProtector,JobPortal.Infrastructure.HiringOutreach.HiringCredentialProtector>();
+        services.AddSingleton<JobPortal.Application.Features.HiringOutreach.IHiringSharedContactProtector,JobPortal.Infrastructure.HiringOutreach.HiringSharedContactProtector>();
         services.AddOptions<JobPortal.Application.Features.Support.SupportSettings>()
             .Bind(configuration.GetSection(JobPortal.Application.Features.Support.SupportSettings.SectionName))
             .Validate(options => string.IsNullOrWhiteSpace(options.SupportEmail) ||

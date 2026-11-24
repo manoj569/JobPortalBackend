@@ -15,7 +15,7 @@ using Xunit;
 
 namespace JobPortal.Application.Tests;
 
-public sealed class HiringProviderAdapterTests
+public sealed partial class HiringProviderAdapterTests
 {
     [Fact]
     public void ProductionRegistrationsResolveOutreachWithoutOpeningAConnectionOrEnablingProviders()
@@ -35,6 +35,7 @@ public sealed class HiringProviderAdapterTests
     }
     [Theory]
     [InlineData(401,"ContactProviderConfiguration")]
+    [InlineData(400,"ContactProviderConfiguration")]
     [InlineData(429,"ContactProviderRateLimited")]
     [InlineData(503,"ContactProviderUnavailable")]
     public async Task HunterErrorsAreRedactedAndNeverAutomaticallyRetried(int status,string code)

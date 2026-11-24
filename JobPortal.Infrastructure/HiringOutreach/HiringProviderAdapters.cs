@@ -15,6 +15,7 @@ namespace JobPortal.Infrastructure.HiringOutreach;
 public sealed class HunterHiringOptions
 {
     public string ApiKey { get; set; } = "";
+    public int MaximumRequests { get; set; } = 4;
 }
 public sealed class GoogleHiringOptions
 {
@@ -32,6 +33,12 @@ public sealed class HiringCredentialProtector(IDataProtectionProvider protection
     public string Protect(Guid owner,string secret)=>Purpose(owner).Protect(secret);
     public string Unprotect(Guid owner,string secret)=>Purpose(owner).Unprotect(secret);
 }
+public sealed class HiringSharedContactProtector(IDataProtectionProvider protection) : IHiringSharedContactProtector
+{
+    private IDataProtector Purpose(string domain)=>protection.CreateProtector("CareerHarbor","HiringOutreach","SharedContacts","v1",domain);
+    public string Protect(string domain,string value)=>Purpose(domain).Protect(value);
+    public string Unprotect(string domain,string value)=>Purpose(domain).Unprotect(value);
+}
 public sealed class HunterEmployerContactProvider(IHttpClientFactory clients,IOptions<HunterHiringOptions> settings) : IHiringContactProvider
 {
     public const string ClientName="HiringHunter";
@@ -40,12 +47,36 @@ public sealed class HunterEmployerContactProvider(IHttpClientFactory clients,IOp
     public async Task<IReadOnlyList<HiringProviderContact>> DiscoverAsync(HiringDiscoveryContext context,CancellationToken ct)
     {
         if(!IsAvailable) throw new HiringProviderException("ContactProviderUnavailable");
-        // Fixed licensed API host. No scraped pages, arbitrary endpoint URLs, or automatic paid retries.
-        // Bounded over-fetch allows ranking/deduplication without purchasing a large contact list.
-        var url="https://api.hunter.io/v2/domain-search?domain="+Uri.EscapeDataString(context.Domain)+"&limit=10&api_key="+Uri.EscapeDataString(settings.Value.ApiKey);
-        using var response=await clients.CreateClient(ClientName).GetAsync(url,HttpCompletionOption.ResponseHeadersRead,ct);
+        using var budget=CancellationTokenSource.CreateLinkedTokenSource(ct);
+        budget.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(settings.Value.MaximumRequests,1,4)*20+10));
+        var family=HiringContactPolicy.Family(context.JobTitle,context.Department,context.Description);
+        var department=family switch { "Engineering"=>"it", "Data"=>"research,it", "Operations"=>"operations", "Finance"=>"finance", "Product"=>"product", "Design"=>"design", "Marketing"=>"marketing", "Sales"=>"sales", _=>"hr" };
+        var stages=new[] {
+            "job_titles=Recruiter,Talent%20Acquisition,Recruitment,Talent%20Partner",
+            "department=hr",
+            "department="+department+"&job_titles=Manager,Lead",
+            "department="+department };
+        var result=new List<HiringProviderContact>();
+        foreach(var stage in stages.Take(Math.Clamp(settings.Value.MaximumRequests,1,4)))
+        {
+            // No paid retry of the same search. Later stages target different official filters.
+            try { result.AddRange(await Search(context.Domain,stage,budget.Token)); }
+            catch(HiringProviderException ex) when(result.Count>0 && ex.Code is "ContactProviderRateLimited" or "ContactProviderConfiguration")
+            { break; } // Confirmed rejection does not invalidate usable earlier observations.
+            var selected=HiringContactPolicy.Select(result,context,new HiringOutreachOptions());
+            if(selected.Count(x=>HiringContactPolicy.Score(x,context)>=70)>=2) break;
+        }
+        return result.DistinctBy(x=>x.Email,StringComparer.OrdinalIgnoreCase).Take(100).ToArray();
+    }
+    private async Task<IReadOnlyList<HiringProviderContact>> Search(string domain,string stage,CancellationToken ct)
+    {
+        // Official Domain Search filters, reviewed 2026-11-23. No guessed identities/email patterns.
+        var url="https://api.hunter.io/v2/domain-search?domain="+Uri.EscapeDataString(domain)+"&limit=20&type=personal&verification_status=valid&required_field=full_name,position&"+stage;
+        using var request=new HttpRequestMessage(HttpMethod.Get,url);
+        request.Headers.Add("X-API-KEY",settings.Value.ApiKey);
+        using var response=await clients.CreateClient(ClientName).SendAsync(request,HttpCompletionOption.ResponseHeadersRead,ct);
         if(!response.IsSuccessStatusCode) throw new HiringProviderException(response.StatusCode switch {
-            HttpStatusCode.TooManyRequests=>"ContactProviderRateLimited",HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden=>"ContactProviderConfiguration",_=>"ContactProviderUnavailable" });
+            HttpStatusCode.TooManyRequests=>"ContactProviderRateLimited",HttpStatusCode.BadRequest or HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden=>"ContactProviderConfiguration",_=>"ContactProviderUnavailable" });
         if(response.Content.Headers.ContentLength>512*1024) throw new HiringProviderException("ContactProviderInvalidResponse");
         await using var stream=await response.Content.ReadAsStreamAsync(ct);
         using var bounded=new MemoryStream(); var chunk=new byte[8192]; int read;
@@ -53,19 +84,25 @@ public sealed class HunterEmployerContactProvider(IHttpClientFactory clients,IOp
         using var document=JsonDocument.Parse(bounded.ToArray());
         if(document.RootElement.ValueKind!=JsonValueKind.Object || !document.RootElement.TryGetProperty("data",out var data) || data.ValueKind!=JsonValueKind.Object || !data.TryGetProperty("emails",out var emails) || emails.ValueKind!=JsonValueKind.Array) throw new HiringProviderException("ContactProviderInvalidResponse");
         var result=new List<HiringProviderContact>();
-        foreach(var email in emails.EnumerateArray().Take(10))
+        foreach(var email in emails.EnumerateArray().Take(20))
         {
             if(email.ValueKind!=JsonValueKind.Object) continue;
             var first=Text(email,"first_name"); var last=Text(email,"last_name");
             var status=email.TryGetProperty("verification",out var verification) && verification.ValueKind==JsonValueKind.Object ? Text(verification,"status") : "unknown";
             var confidence=email.TryGetProperty("confidence",out var score) && score.ValueKind==JsonValueKind.Number && score.TryGetInt32(out var number) ? Math.Clamp(number,0,100) : 0;
             result.Add(new((first+" "+last).Trim(),first,Text(email,"value"),Text(email,"position"),Text(email,"department"),status,confidence,
-                NullText(email,"linkedin"),Text(email,"value")));
+                NullText(email,"linkedin"),Text(email,"value"),Location(email)));
         }
         return result;
     }
     private static string Text(JsonElement element,string property)=>element.TryGetProperty(property,out var value) && value.ValueKind==JsonValueKind.String ? value.GetString() ?? "" : "";
     private static string? NullText(JsonElement element,string property)=>Text(element,property) is { Length:>0 } text ? text : null;
+    private static string Location(JsonElement email)
+    {
+        if(!email.TryGetProperty("location",out var location)) return "";
+        return location.ValueKind==JsonValueKind.String ? location.GetString() ?? "" : location.ValueKind==JsonValueKind.Object ?
+            string.Join(", ",new[] { Text(location,"city"),Text(location,"country") }.Where(x=>x.Length>0)) : "";
+    }
 }
 public sealed class GoogleCandidateMailboxProvider(IHttpClientFactory clients,IOptions<GoogleHiringOptions> settings) : IHiringMailboxProvider
 {

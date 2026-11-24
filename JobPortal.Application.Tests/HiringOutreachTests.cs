@@ -23,7 +23,7 @@ using Xunit;
 
 namespace JobPortal.Application.Tests;
 
-public sealed class HiringOutreachTests
+public sealed partial class HiringOutreachTests
 {
     private static readonly string[] AnonymousOAuthActions=["AuthorizeGmail","Callback"];
     [Fact]
@@ -309,8 +309,9 @@ public sealed class HiringOutreachTests
         public HiringOutreachOptions Limits { get; }=new() { Enabled=true,DailySends=5 };
         public FakeContacts Hunter { get; }=new(); public FakeGoogle Google { get; }=new(); public FakeResume Storage { get; }=new(); public FakeAi Ai { get; }=new();
         private IHiringCredentialProtector Protector { get; }=new HiringCredentialProtector(new EphemeralDataProtectionProvider());
+        private IHiringSharedContactProtector SharedProtector { get; }=new HiringSharedContactProtector(new EphemeralDataProtectionProvider());
         public HiringOutreachService Service=>For(Db);
-        public HiringOutreachService For(JobPortalDbContext db)=>new(db,Options.Create(Limits),Hunter,Google,Protector,Storage,new FakeExtractor(),new AuditWriterTestDouble(),Ai,TimeProvider.System,NullLogger<HiringOutreachService>.Instance);
+        public HiringOutreachService For(JobPortalDbContext db)=>new(db,Options.Create(Limits),Hunter,Google,Protector,Storage,new FakeExtractor(),new AuditWriterTestDouble(),Ai,TimeProvider.System,NullLogger<HiringOutreachService>.Instance,SharedProtector);
         public Fixture(DbContextOptions<JobPortalDbContext>? dbOptions=null)
         {
             if(dbOptions is not null) DbOptions=dbOptions;
@@ -331,10 +332,11 @@ public sealed class HiringOutreachTests
     private sealed class FakeContacts : IHiringContactProvider
     {
         public int Calls; public bool Available=true; public string? Error; public bool Timeout;
+        public Func<Task>? BeforeReturn;
         public IReadOnlyList<HiringProviderContact> Results=[Contact("alex@example.org","Technical Recruiter"),Contact("blair@example.org","Recruiter") with { FullName="Blair Recruiter",FirstName="Blair" }];
         public string Name=>"FakeHunter"; public bool IsAvailable=>Available;
-        public Task<IReadOnlyList<HiringProviderContact>> DiscoverAsync(HiringDiscoveryContext context,CancellationToken ct)
-        { Interlocked.Increment(ref Calls); if(Timeout) throw new OperationCanceledException("Fake Hunter timeout"); if(Error is not null) throw new HiringProviderException(Error); return Task.FromResult(Results); }
+        public async Task<IReadOnlyList<HiringProviderContact>> DiscoverAsync(HiringDiscoveryContext context,CancellationToken ct)
+        { Interlocked.Increment(ref Calls); if(BeforeReturn is not null) await BeforeReturn(); if(Timeout) throw new OperationCanceledException("Fake Hunter timeout"); if(Error is not null) throw new HiringProviderException(Error); return Results; }
     }
     private sealed class FakeGoogle : IHiringMailboxProvider
     {
