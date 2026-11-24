@@ -71,7 +71,7 @@ public sealed class HunterEmployerContactProvider(IHttpClientFactory clients,IOp
     private async Task<IReadOnlyList<HiringProviderContact>> Search(string domain,string stage,CancellationToken ct)
     {
         // Official Domain Search filters, reviewed 2026-11-23. No guessed identities/email patterns.
-        var url="https://api.hunter.io/v2/domain-search?domain="+Uri.EscapeDataString(domain)+"&limit=20&type=personal&verification_status=valid&required_field=full_name,position&"+stage;
+        var url="https://api.hunter.io/v2/domain-search?domain="+Uri.EscapeDataString(domain)+"&limit=10&type=personal&verification_status=valid&required_field=full_name,position&"+stage;
         using var request=new HttpRequestMessage(HttpMethod.Get,url);
         request.Headers.Add("X-API-KEY",settings.Value.ApiKey);
         using var response=await clients.CreateClient(ClientName).SendAsync(request,HttpCompletionOption.ResponseHeadersRead,ct);
@@ -84,7 +84,7 @@ public sealed class HunterEmployerContactProvider(IHttpClientFactory clients,IOp
         using var document=JsonDocument.Parse(bounded.ToArray());
         if(document.RootElement.ValueKind!=JsonValueKind.Object || !document.RootElement.TryGetProperty("data",out var data) || data.ValueKind!=JsonValueKind.Object || !data.TryGetProperty("emails",out var emails) || emails.ValueKind!=JsonValueKind.Array) throw new HiringProviderException("ContactProviderInvalidResponse");
         var result=new List<HiringProviderContact>();
-        foreach(var email in emails.EnumerateArray().Take(20))
+        foreach(var email in emails.EnumerateArray().Take(10))
         {
             if(email.ValueKind!=JsonValueKind.Object) continue;
             var first=Text(email,"first_name"); var last=Text(email,"last_name");
