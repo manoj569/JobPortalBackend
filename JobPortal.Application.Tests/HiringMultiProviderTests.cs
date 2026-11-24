@@ -8,7 +8,7 @@ using Xunit;
 
 namespace JobPortal.Application.Tests;
 
-public sealed class HiringMultiProviderTests
+public sealed partial class HiringMultiProviderTests
 {
     private static readonly string[] RateLimited=["HunterRateLimited"];
     private static readonly string[] UnknownOutcome=["HunterOutcomeUnknown"];
@@ -17,8 +17,12 @@ public sealed class HiringMultiProviderTests
         new("Test Person "+id,"Test",id+"@example.org",title,"",verification,95,null,id,location,"PersonEnrichment","Apollo");
     private static HiringPersonIdentity Person(string id,string title="Technical Recruiter",string location="Hyderabad, India")=>
         new("Apollo",id,"Test","Test Person "+id,title,"","example.org",location,"LocalRecruiting");
-    private sealed class People : IHiringPersonDiscoveryProvider,IHiringContactEnrichmentProvider
+    private sealed class People : IHiringPersonProvider
     {
+        public string Name { get; set; }="Apollo";
+        public bool AllowCandidateDisplay { get; set; }=true;
+        public int MaximumSearchRequests=>5;
+        public int MaximumEnrichments=>3;
         public bool IsAvailable { get; set; }=true;
         public List<IReadOnlyList<HiringPersonIdentity>> Batches { get; }=[];
         public Dictionary<string,HiringProviderContact?> Results { get; }=new(StringComparer.Ordinal);

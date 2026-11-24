@@ -8,8 +8,12 @@ using Microsoft.Extensions.Logging;
 
 namespace JobPortal.Infrastructure.HiringOutreach;
 
-public sealed partial class ApolloHiringProvider(IHttpClientFactory clients,IOptions<ApolloHiringOptions> options,ILogger<ApolloHiringProvider>? logger=null) : IHiringPersonDiscoveryProvider,IHiringContactEnrichmentProvider
+public sealed partial class ApolloHiringProvider(IHttpClientFactory clients,IOptions<ApolloHiringOptions> options,ILogger<ApolloHiringProvider>? logger=null) : IHiringPersonProvider
 {
+    public string Name=>"Apollo";
+    public bool AllowCandidateDisplay=>true;
+    public int MaximumSearchRequests=>options.Value.MaximumSearchRequests;
+    public int MaximumEnrichments=>options.Value.MaximumEnrichments;
     public const string ClientName="HiringApollo";
     private static readonly string[] Recruiting=["Recruiter","Technical Recruiter","Talent Acquisition","Talent Partner","Recruitment"];
     private static readonly string[] People=["HR Business Partner","Human Resources","People Partner","People Operations"];
@@ -93,7 +97,7 @@ public sealed partial class ApolloHiringProvider(IHttpClientFactory clients,IOpt
 
 internal static class HiringProviderJson
 {
-    public static async Task<JsonDocument> ReadAsync(HttpResponseMessage response,string failure,CancellationToken ct)
+    public static async Task<JsonDocument> ReadAsync(HttpResponseMessage response,string failure,CancellationToken ct,bool allowArray=false)
     {
         if(response.Content.Headers.ContentLength>512*1024) throw new HiringProviderException(failure);
         await using var stream=await response.Content.ReadAsStreamAsync(ct);
@@ -103,7 +107,7 @@ internal static class HiringProviderJson
         try
         {
             var document=JsonDocument.Parse(bounded.ToArray());
-            if(document.RootElement.ValueKind==JsonValueKind.Object) return document;
+            if(document.RootElement.ValueKind==JsonValueKind.Object || allowArray && document.RootElement.ValueKind==JsonValueKind.Array) return document;
             document.Dispose(); throw new HiringProviderException(failure);
         }
         catch(JsonException) { throw new HiringProviderException(failure); }

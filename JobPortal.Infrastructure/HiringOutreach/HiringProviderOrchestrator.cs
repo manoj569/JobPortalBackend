@@ -17,31 +17,41 @@ public sealed class ApolloHiringOptions
 
 public sealed partial class HiringProviderOrchestrator(IHiringPersonDiscoveryProvider people,IHiringContactEnrichmentProvider enrichment,
     IHiringEmailVerificationProvider verification,IHiringFallbackContactProvider hunter,IOptions<ApolloHiringOptions> options,
-    ILogger<HiringProviderOrchestrator> logger) : IHiringContactProvider
+    ILogger<HiringProviderOrchestrator> logger,IEnumerable<IHiringPersonProvider>? providers=null,IHiringProfessionalEmailFinder? finder=null) : IHiringContactProvider
 {
-    public string Name=>"Apollo/Hunter";
-    public bool IsAvailable=>people.IsAvailable || hunter.IsAvailable;
+    public string Name=>"Coresignal/Apollo/Hunter";
+    public bool IsAvailable=>Sources().Any(x=>x.Discovery.IsAvailable) || hunter.IsAvailable;
+    private sealed record Source(string Name,IHiringPersonDiscoveryProvider Discovery,IHiringContactEnrichmentProvider Enrichment,int Searches,int Enrichments);
+    private Source[] Sources()=>providers is null ? [new("Apollo",people,enrichment,options.Value.MaximumSearchRequests,options.Value.MaximumEnrichments)] :
+        providers.Where(x=>x.AllowCandidateDisplay).Select(x=>new Source(x.Name,x,x,x.MaximumSearchRequests,x.MaximumEnrichments)).ToArray();
     [LoggerMessage(Level=LogLevel.Information,Message="Hiring provider phase {Phase} candidates {Candidates} usable {Usable} failure {Failure}")]
     private static partial void Diagnostic(ILogger logger,string phase,int candidates,int usable,string failure);
     public async Task<IReadOnlyList<HiringProviderContact>> DiscoverAsync(HiringDiscoveryContext context,CancellationToken ct)=>
         (await DiscoverResultAsync(context,ct)).Contacts;
     public async Task<HiringDiscoveryResult> DiscoverResultAsync(HiringDiscoveryContext context,CancellationToken ct)
+        =>await RunAsync(context,Sources(),null,ct);
+    internal Task<HiringDiscoveryResult> DiscoverForDiagnosticAsync(HiringDiscoveryContext context,IHiringPersonProvider provider,
+        Action<HiringPersonIdentity> observe,CancellationToken ct)=>RunAsync(context,[new(provider.Name,provider,provider,provider.MaximumSearchRequests,provider.MaximumEnrichments)],observe,ct);
+    private async Task<HiringDiscoveryResult> RunAsync(HiringDiscoveryContext context,Source[] sources,Action<HiringPersonIdentity>? observe,CancellationToken ct)
     {
         using var budget=CancellationTokenSource.CreateLinkedTokenSource(ct); budget.CancelAfter(TimeSpan.FromSeconds(150));
         var token=budget.Token; var contacts=new List<HiringProviderContact>(); var failures=new List<string>();
         var attempted=new HashSet<string>(StringComparer.Ordinal); var enrichments=0; var verifications=0; var uncertain=false;
-        var enrichmentLimit=Math.Clamp(options.Value.MaximumEnrichments,1,5);
+        var finds=0;
         var searches=0;
-        if(people.IsAvailable)
+        foreach(var source in sources)
         {
+            if(!source.Discovery.IsAvailable || Sufficient(contacts,context) || token.IsCancellationRequested) continue;
+            var enrichmentLimit=Math.Clamp(source.Enrichments,1,5); enrichments=0; searches=0;
             try
             {
-                await foreach(var batch in people.SearchAsync(context,token))
+                await foreach(var batch in source.Discovery.SearchAsync(context,token))
                 {
                     searches++;
+                    if(observe is not null) foreach(var person in batch.Take(20)) observe(person);
                     var ranked=batch.Take(20).Select(x=>(Person:x,Score:HiringContactPolicy.Score(ForScoring(x),context)))
                         .Where(x=>x.Score>0 && HiringContactPolicy.Type(x.Person.Title)!="TeamMember").OrderByDescending(x=>x.Score).ThenBy(x=>x.Person.Reference,StringComparer.Ordinal).ToArray();
-                    Diagnostic(logger,"ApolloSearch",batch.Count,ranked.Length,"");
+                    Diagnostic(logger,source.Name+"Search",batch.Count,ranked.Length,"");
                     foreach(var candidate in ranked)
                     {
                         if(enrichments>=enrichmentLimit) break;
@@ -53,26 +63,28 @@ public sealed partial class HiringProviderOrchestrator(IHiringPersonDiscoveryPro
                         enrichments++;
                         try
                         {
-                            var contact=await enrichment.EnrichAsync(candidate.Person,context,token);
+                            var contact=await source.Enrichment.EnrichAsync(candidate.Person,context,token);
+                            if(contact is null && candidate.Person.Provider=="Coresignal" && finder is { IsAvailable:true } && finds<2)
+                            { finds++; contact=await finder.FindAsync(candidate.Person,token); }
                             if(contact is null) continue;
                             if(contact.Verification!="valid" && verification.IsAvailable && verifications<Math.Clamp(verification.MaximumRequests,0,2))
                             { verifications++; contact=await verification.VerifyAsync(contact,token); }
                             if(contact is not null) contacts.AddRange(HiringContactPolicy.Select(new[] {contact},context,new()));
-                            Diagnostic(logger,"ApolloEnrichment",enrichments,contacts.Count,"");
+                            Diagnostic(logger,source.Name+"Enrichment",enrichments,contacts.Count,"");
                         }
                         catch(HiringProviderException ex)
-                        { failures.Add(ex.Code); uncertain|=!HiringProviderFailures.ConfirmedRejection(ex.Code); Diagnostic(logger,"ApolloEnrichment",enrichments,contacts.Count,ex.Code); }
+                        { failures.Add(ex.Code); uncertain|=!HiringProviderFailures.ConfirmedRejection(ex.Code); Diagnostic(logger,source.Name+"Enrichment",enrichments,contacts.Count,ex.Code); }
                         catch(Exception ex) when(ex is HttpRequestException or OperationCanceledException or System.Text.Json.JsonException)
-                        { failures.Add("ApolloOutcomeUnknown"); uncertain=true; Diagnostic(logger,"ApolloEnrichment",enrichments,contacts.Count,"ApolloOutcomeUnknown"); }
+                        { var code=source.Name+"OutcomeUnknown"; failures.Add(code); uncertain=true; Diagnostic(logger,source.Name+"Enrichment",enrichments,contacts.Count,code); }
                         if(Sufficient(contacts,context) || token.IsCancellationRequested) break;
                     }
-                    if(Sufficient(contacts,context) || enrichments>=enrichmentLimit || searches>=Math.Clamp(options.Value.MaximumSearchRequests,1,5) || token.IsCancellationRequested) break;
+                    if(Sufficient(contacts,context) || enrichments>=enrichmentLimit || searches>=Math.Clamp(source.Searches,1,5) || token.IsCancellationRequested) break;
                 }
             }
             catch(HiringProviderException ex)
-            { failures.Add(ex.Code); uncertain|=!HiringProviderFailures.ConfirmedRejection(ex.Code); Diagnostic(logger,"ApolloSearch",0,contacts.Count,ex.Code); }
+            { failures.Add(ex.Code); uncertain|=!HiringProviderFailures.ConfirmedRejection(ex.Code); Diagnostic(logger,source.Name+"Search",0,contacts.Count,ex.Code); }
             catch(Exception ex) when(ex is HttpRequestException or OperationCanceledException or System.Text.Json.JsonException)
-            { failures.Add("ApolloOutcomeUnknown"); uncertain=true; Diagnostic(logger,"ApolloSearch",searches,contacts.Count,"ApolloOutcomeUnknown"); }
+            { var code=source.Name+"OutcomeUnknown"; failures.Add(code); uncertain=true; Diagnostic(logger,source.Name+"Search",searches,contacts.Count,code); }
         }
         if(!Sufficient(contacts,context) && hunter.IsAvailable && !token.IsCancellationRequested)
         {
@@ -97,7 +109,7 @@ public sealed partial class HiringProviderOrchestrator(IHiringPersonDiscoveryPro
             catch(Exception ex) when(ex is HttpRequestException or OperationCanceledException or System.Text.Json.JsonException)
             { failures.Add("HunterOutcomeUnknown"); uncertain=true; Diagnostic(logger,"HunterFallback",0,contacts.Count,"HunterOutcomeUnknown"); }
         }
-        if(!IsAvailable) failures.Add("ContactProviderUnavailable");
+        if(!sources.Any(x=>x.Discovery.IsAvailable) && !hunter.IsAvailable) failures.Add("ContactProviderUnavailable");
         var selected=HiringContactPolicy.Select(contacts,context,new());
         // Ordinary employees cannot fill an already sufficient hiring-team result.
         if(selected.Count(x=>HiringContactPolicy.Strong(x,context))>=2)

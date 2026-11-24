@@ -73,6 +73,19 @@ public interface IHiringContactEnrichmentProvider
 {
     Task<HiringProviderContact?> EnrichAsync(HiringPersonIdentity person,HiringDiscoveryContext context,CancellationToken ct);
 }
+// One identity provider owns its search and enrichment budgets. Existing contracts remain reusable.
+public interface IHiringPersonProvider : IHiringPersonDiscoveryProvider,IHiringContactEnrichmentProvider
+{
+    string Name { get; }
+    bool AllowCandidateDisplay { get; }
+    int MaximumSearchRequests { get; }
+    int MaximumEnrichments { get; }
+}
+public interface IHiringProfessionalEmailFinder
+{
+    bool IsAvailable { get; }
+    Task<HiringProviderContact?> FindAsync(HiringPersonIdentity person,CancellationToken ct);
+}
 public interface IHiringEmailVerificationProvider
 {
     bool IsAvailable { get; }
@@ -83,7 +96,8 @@ public static class HiringProviderFailures
 {
     public static bool ConfirmedRejection(string code)=>code is "ContactProviderConfiguration" or "ContactProviderRateLimited" or
         "ApolloConfigurationRequired" or "ApolloRateLimited" or "ApolloQuotaExceeded" or "ApolloInvalidRequest" or
-        "HunterConfigurationRequired" or "HunterRateLimited" or "HunterQuotaExceeded" or "HunterInvalidRequest";
+        "HunterConfigurationRequired" or "HunterRateLimited" or "HunterQuotaExceeded" or "HunterInvalidRequest" or
+        "CoresignalConfigurationRequired" or "CoresignalRateLimited" or "CoresignalQuotaExceeded" or "CoresignalInvalidRequest" or "CoresignalPrivacyRestricted";
 }
 public sealed record HiringMailMessage(string From,string To,string Subject,string Body,string FileName,string ContentType,byte[] Attachment,string MessageKey);
 public sealed record HiringMailResult(string State,string? MessageId=null,string? ThreadId=null,string? FailureCode=null);

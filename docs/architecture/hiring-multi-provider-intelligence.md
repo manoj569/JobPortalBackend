@@ -1,5 +1,9 @@
 # Multi-provider hiring-team intelligence
 
+The optional [Coresignal trial](hiring-coresignal-trial.md) extends the same orchestrator.
+It is disabled by default, with independent candidate-display and shared-persistence gates.
+Its admin diagnostic route does not enable Coresignal for ordinary candidates.
+
 This extends the existing Hiring Outreach feature. No Accelerator, Gmail OAuth/send,
 resume, membership or frontend implementation is replaced. Sending remains an explicit
 candidate action after review. Existing routes/fields remain; contact location, source,

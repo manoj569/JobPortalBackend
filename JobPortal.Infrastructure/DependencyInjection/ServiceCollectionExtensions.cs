@@ -76,6 +76,8 @@ public static class ServiceCollectionExtensions
             .Validate(value=>value.IsValid(),"Invalid Hunter provider budgets.").ValidateOnStart();
         services.AddOptions<JobPortal.Infrastructure.HiringOutreach.ApolloHiringOptions>().Bind(configuration.GetSection("HiringOutreach:Apollo"))
             .Validate(value=>value.IsValid(),"Invalid Apollo hiring configuration.").ValidateOnStart();
+        services.AddOptions<JobPortal.Application.Features.HiringOutreach.CoresignalHiringOptions>().Bind(configuration.GetSection("HiringOutreach:Coresignal"))
+            .Validate(value=>value.IsValid(),"Invalid Coresignal hiring configuration.").ValidateOnStart();
         services.Configure<JobPortal.Infrastructure.HiringOutreach.GoogleHiringOptions>(configuration.GetSection("HiringOutreach:Google"));
         services.AddHttpClient(JobPortal.Infrastructure.HiringOutreach.HunterEmployerContactProvider.ClientName,c=>c.Timeout=TimeSpan.FromSeconds(20))
             .ConfigurePrimaryHttpMessageHandler(()=>new SocketsHttpHandler { AllowAutoRedirect=false,UseCookies=false }).RemoveAllLoggers();
@@ -84,11 +86,19 @@ public static class ServiceCollectionExtensions
         services.AddHttpClient(JobPortal.Infrastructure.HiringOutreach.ApolloHiringProvider.ClientName,c=>c.Timeout=TimeSpan.FromSeconds(30))
             .ConfigurePrimaryHttpMessageHandler(()=>new SocketsHttpHandler { AllowAutoRedirect=false,UseCookies=false }).RemoveAllLoggers();
         services.AddScoped<JobPortal.Infrastructure.HiringOutreach.ApolloHiringProvider>();
+        services.AddHttpClient(JobPortal.Infrastructure.HiringOutreach.CoresignalHiringProvider.ClientName,c=>c.Timeout=TimeSpan.FromSeconds(25))
+            .ConfigurePrimaryHttpMessageHandler(()=>new SocketsHttpHandler { AllowAutoRedirect=false,UseCookies=false }).RemoveAllLoggers();
+        services.AddScoped<JobPortal.Infrastructure.HiringOutreach.CoresignalHiringProvider>();
+        services.AddScoped<JobPortal.Application.Features.HiringOutreach.IHiringPersonProvider>(sp=>sp.GetRequiredService<JobPortal.Infrastructure.HiringOutreach.CoresignalHiringProvider>());
+        services.AddScoped<JobPortal.Application.Features.HiringOutreach.IHiringPersonProvider>(sp=>sp.GetRequiredService<JobPortal.Infrastructure.HiringOutreach.ApolloHiringProvider>());
         services.AddScoped<JobPortal.Application.Features.HiringOutreach.IHiringPersonDiscoveryProvider>(sp=>sp.GetRequiredService<JobPortal.Infrastructure.HiringOutreach.ApolloHiringProvider>());
         services.AddScoped<JobPortal.Application.Features.HiringOutreach.IHiringContactEnrichmentProvider>(sp=>sp.GetRequiredService<JobPortal.Infrastructure.HiringOutreach.ApolloHiringProvider>());
         services.AddScoped<JobPortal.Application.Features.HiringOutreach.IHiringEmailVerificationProvider,JobPortal.Infrastructure.HiringOutreach.HunterHiringEmailVerifier>();
         services.AddScoped<JobPortal.Application.Features.HiringOutreach.IHiringFallbackContactProvider,JobPortal.Infrastructure.HiringOutreach.HunterEmployerContactProvider>();
-        services.AddScoped<JobPortal.Application.Features.HiringOutreach.IHiringContactProvider,JobPortal.Infrastructure.HiringOutreach.HiringProviderOrchestrator>();
+        services.AddScoped<JobPortal.Application.Features.HiringOutreach.IHiringProfessionalEmailFinder,JobPortal.Infrastructure.HiringOutreach.HunterHiringProfessionalEmailFinder>();
+        services.AddScoped<JobPortal.Infrastructure.HiringOutreach.HiringProviderOrchestrator>();
+        services.AddScoped<JobPortal.Application.Features.HiringOutreach.IHiringContactProvider>(sp=>sp.GetRequiredService<JobPortal.Infrastructure.HiringOutreach.HiringProviderOrchestrator>());
+        services.AddScoped<JobPortal.Application.Features.HiringOutreach.IHiringProviderDiagnostics,JobPortal.Infrastructure.HiringOutreach.HiringProviderDiagnostics>();
         services.AddScoped<JobPortal.Application.Features.HiringOutreach.IHiringMailboxProvider,JobPortal.Infrastructure.HiringOutreach.GoogleCandidateMailboxProvider>();
         services.AddSingleton<JobPortal.Application.Features.HiringOutreach.IHiringCredentialProtector,JobPortal.Infrastructure.HiringOutreach.HiringCredentialProtector>();
         services.AddSingleton<JobPortal.Application.Features.HiringOutreach.IHiringSharedContactProtector,JobPortal.Infrastructure.HiringOutreach.HiringSharedContactProtector>();

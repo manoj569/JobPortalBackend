@@ -44,10 +44,11 @@ public sealed partial class HiringOutreachService
         var usable=new List<(HiringContactIntelligence Row,HiringProviderContact Person,int Score)>();
         foreach(var row in rows)
         {
+            if(!Coresignal.CanShare(row.Provider)) continue;
             try
             {
                 var person=JsonSerializer.Deserialize<HiringProviderContact>(sharedProtection.Unprotect(session.CompanyDomain,row.ProtectedContact));
-                if(person is null || person.Verification!="valid" || Hash(person.Email.Trim().ToLowerInvariant())!=row.EmailHash || !HiringContactPolicy.ProfessionalEmail(person.Email,session.CompanyDomain)) continue;
+                if(person is null || !Coresignal.CanShare(person.Provider) || person.Verification!="valid" || Hash(person.Email.Trim().ToLowerInvariant())!=row.EmailHash || !HiringContactPolicy.ProfessionalEmail(person.Email,session.CompanyDomain)) continue;
                 var score=HiringContactPolicy.Score(person,Context(session));
                 if(score>=Limits.SharedContacts.MinimumScore) usable.Add((row,person,score));
             }
@@ -71,7 +72,7 @@ public sealed partial class HiringOutreachService
     private async Task StoreSharedContacts(HiringOutreachSession session,IReadOnlyList<HiringProviderContact> selected,CancellationToken ct)
     {
         if(!Limits.SharedContacts.Enabled || sharedProtection is null) return;
-        foreach(var person in selected.Where(x=>x.Verification=="valid"))
+        foreach(var person in selected.Where(x=>x.Verification=="valid" && Coresignal.CanShare(x.Provider)))
         {
             var hash=Hash(person.Email.Trim().ToLowerInvariant());
             var row=await db.Set<HiringContactIntelligence>().IgnoreQueryFilters().SingleOrDefaultAsync(x=>x.CompanyDomain==session.CompanyDomain && x.EmailHash==hash,ct);
@@ -98,7 +99,7 @@ public sealed partial class HiringOutreachService
             row.Title=HiringContactPolicy.Normalize(person.Title); row.Department=HiringContactPolicy.Normalize(person.Department);
             row.Location=HiringContactPolicy.Normalize(person.Location); row.JobFamily=HiringContactPolicy.Family(person.Title,person.Department);
             row.ContactType=HiringContactPolicy.Type(person.Title); row.Confidence=person.Confidence; row.Verification="valid";
-            row.Provider=Bound(person.Provider,30); row.Source=person.Source is "PersonEnrichment" or "PeopleSearch" or "Verification" or "EmailFinder" ? person.Source : "DomainSearch";
+            row.Provider=Bound(person.Provider,30); row.Source=person.Source is "PersonEnrichment" or "PeopleSearch" or "Verification" or "EmailFinder" or "EmployeeSearch" or "EmployeeEnrichment" ? person.Source : "DomainSearch";
             row.LastVerifiedAtUtc=Now; row.ExpiresAtUtc=Now.AddDays(Limits.SharedContacts.CacheDays); row.Revision=Guid.NewGuid();
         }
     }
